@@ -1,4 +1,6 @@
-import './advanced-checks.js';
+import {executeRegisteredCheck,assert,waitFor} from './advanced-checks.js';
+// Test-only gallery hook shares the exact versioned module registry used below.
+globalThis.elyGalleryAudit=Object.freeze({executeRegisteredCheck,assert,waitFor});
 import './advanced-foundation-checks.js';
 import './advanced-interaction-checks.js';
 import './advanced-data-checks.js';

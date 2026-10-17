@@ -1,0 +1,16 @@
+import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
+import vm from 'node:vm';
+let source=await readFile(new URL('../internal/gallery/assets/advanced-checks.js',import.meta.url),'utf8');
+source=source.replace(/^import .*;\n/gm,'').replace(/export /g,'');
+const context=vm.createContext({document:{querySelector:()=>null}});
+vm.runInContext(source+'\nglobalThis.harness={registerChecks,executeRegisteredCheck,assert};',context);
+const h=context.harness;
+h.registerChecks('test',{'test/real':()=>h.assert(true)});
+assert.throws(()=>h.registerChecks('test',{'test/real':()=>{}}),/Duplicate behavioral check/);
+assert.throws(()=>h.registerChecks('test',{'test/invalid':null}),/Invalid behavioral check/);
+h.registerChecks('test',{'test/noop':()=>{}});
+await assert.rejects(h.executeRegisteredCheck('test/noop',{}),/No component-specific assertions/);
+await assert.rejects(h.executeRegisteredCheck('test/missing',{}),/No behavior check/);
+assert.equal((await h.executeRegisteredCheck('test/real',{})).assertions,1);
+console.log('Registry rejects duplicate, invalid, missing and no-op checks.');
