@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import {currentRevision,expectedInventory} from './gallery-inventory.mjs';
+import {validateGalleryEvidence,mutations} from './gallery-evidence.mjs';
 import {writeFile} from 'node:fs/promises';
 import {resolve} from 'node:path';
 
@@ -10,7 +12,7 @@ export async function checkEveryGalleryPage({browser, origin, base, staticMode, 
   const auditURL = (family, aliases) => staticMode
     ? `${origin}${base}components/audit/${family ? family + '/' : ''}${aliases ? 'aliases/' : ''}`
     : `${origin}/components/audit?${new URLSearchParams({...family && {family}, ...aliases && {aliases: '1'}})}`;
-  const reports = {mode, scope: 'All gallery pages and synthetic component/alias behavior; no external services or native platform execution.', limitations: ['Host services use synthetic fixtures; callbacks do not prove authentication, payment, device, AI, or persistence integrations.', 'Aliases reuse their resolved canonical behavior checks. Passing every name does not prove every possible prop combination, control path, or alias-specific semantic variation.', ...(staticMode ? ['Markdown preview checks the explicit source-only static fallback; full Go Markdown rendering is tested only in live mode.'] : [])], pages: [], behaviors: []};
+  const reports = {schemaVersion:2,evidenceKind:'browser-execution',fullContractVerified:false,revision:currentRevision(),negativeControls:[],mode, scope: 'All gallery pages and synthetic component/alias behavior; no external services or native platform execution.', limitations: ['Host services use synthetic fixtures; callbacks do not prove authentication, payment, device, AI, or persistence integrations.', 'Aliases reuse their resolved canonical behavior checks. Passing every name does not prove every possible prop combination, control path, or alias-specific semantic variation.', ...(staticMode ? ['Markdown preview checks the explicit source-only static fallback; full Go Markdown rendering is tested only in live mode.'] : [])], pages: [], behaviors: []};
   const normalizeURL = url => new URL(url).pathname.replace(/\/index\.html$/, '/').replace(/\/$/, '');
   const stories = new Set(storyURLs.map(normalizeURL));
   assert.equal(stories.size, 624, 'unique story inventory');
@@ -94,10 +96,35 @@ export async function checkEveryGalleryPage({browser, origin, base, staticMode, 
       console.log(`[gallery ${mode}] ${family} behavior: ${result.status}`);
       await persist();
     }
+    // Fresh real pages execute the exact registered assertions before each deliberate
+    // defect. A broken feature must fail for its intended reason, never a setup error.
+    for (const mutation of mutations) {
+      await session(auditURL('foundation', false), async page => {
+        const control = await page.evaluate(async mutation => {
+          const harness = globalThis.elyGalleryAudit;
+          if(!harness) throw Error('Gallery check registry did not initialize');
+          const record = [...document.querySelectorAll('[data-audit-case]')].find(node => node.dataset.auditKey === mutation.key);
+          if (!record) throw Error(`Missing mutation fixture ${mutation.key}`);
+          const root = record.querySelector('[data-audit-main] > [data-ely-family]');
+          const context = {root,twin:record.querySelector('[data-audit-twin] > [data-ely-family]'),actions:[],assert:harness.assert,waitFor:harness.waitFor};
+          const baseline = await harness.executeRegisteredCheck(mutation.key,context);
+          if(mutation.id==='icon-bundled-asset-removed') root.querySelectorAll('[data-foundation-icon]').forEach(node=>node.style.removeProperty('--foundation-icon-url'));
+          if(mutation.id==='icon-size-specimen-removed') root.querySelectorAll('[data-foundation-icon-size="32"]').forEach(node=>node.removeAttribute('data-foundation-icon-size'));
+          if(mutation.id==='portal-click-suppressed') root.addEventListener('click',event=>event.stopImmediatePropagation(),true);
+          let observedError='';
+          try { await harness.executeRegisteredCheck(mutation.key,context); } catch(error) { observedError=error.message; }
+          if(observedError!==mutation.error) throw Error(`Mutation ${mutation.id}: expected ${mutation.error}, observed ${observedError||'SURVIVED'}`);
+          return {id:mutation.id,claimId:baseline.claimId,status:'detected',baselineAssertions:baseline.assertions,observedError};
+        },mutation);
+        reports.negativeControls.push(control);
+        console.log(`[gallery ${mode}] mutation ${control.id}: ${control.status} (${control.baselineAssertions} baseline assertions)`);
+      });
+    }
     const names = reports.behaviors.flatMap(report => report.results.map(result => result.name));
     assert.equal(new Set(names).size, 1313, 'every resolved component name has a behavior result');
     assert.equal(names.length, 1313, 'no duplicated behavior coverage');
     assert.deepEqual(failures, [], 'complete gallery browser failures; see complete-report.json');
+    validateGalleryEvidence(reports,{mode,inventory:expectedInventory(mode)});
   } finally {
     await persist();
   }

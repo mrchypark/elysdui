@@ -158,7 +158,9 @@ func advancedFormsCases() []AdvancedCase {
 				props["Presets"] = []map[string]any{{"Label": "Hourly", "Value": "0 * * * *"}, {"Label": "Daily at 9:00", "Value": "0 9 * * *"}, {"Label": "Weekdays at 9:00", "Value": "0 9 * * 1-5"}, {"Label": "Mondays at 9:00", "Value": "0 9 * * 1"}, {"Label": "Monthly", "Value": "0 0 1 * *"}}
 				props["PreviewExamples"] = []map[string]any{{"Label": "", "Value": "", "Placeholder": "*/15 9-17 * * 1-5", "Caption": "CronRule::parse(\"0 9 * * 1-5\")?.next(now, 3)"}}
 			case "ColorPicker":
-				props["Label"], props["Value"], props["Options"] = "", "#3772bb", nil
+				props["Label"], props["Value"] = "", "#3772bb"
+				props["Options"] = []map[string]any{{"Label": "Caller green", "Value": "#228855"}, {"Label": "Caller coral", "Value": "#ef8a62"}}
+				props["PreviewExamples"] = []map[string]any{{"Options": nil}}
 			case "ColorSwatch":
 				props["Label"], props["Value"], props["Options"] = "Color", "#335cff", []map[string]any{{"Label": "Blue", "Value": "#335cff"}, {"Label": "Green", "Value": "#228855"}, {"Label": "Coral", "Value": "#ef8a62"}, {"Label": "Gold", "Value": "#f3c969"}}
 				palette := []map[string]any{{"Label": "Blue", "Value": "#5182c1"}, {"Label": "Teal", "Value": "#009589"}, {"Label": "Ochre", "Value": "#aa732b"}, {"Label": "Rose", "Value": "#b8636b"}, {"Label": "Violet", "Value": "#8572bb"}, {"Label": "Green", "Value": "#539156"}, {"Label": "Clay", "Value": "#b66946"}, {"Label": "Cyan", "Value": "#138db1"}}
