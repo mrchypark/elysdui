@@ -63,6 +63,20 @@ const unbind = mount(document.querySelector('#order-entry'), {
 
 `Name`, `Value`, `Required`, `Disabled`는 네이티브 폼 동작을 보존한다. `input`·`textarea`·`button`·`select`의 `Class`는 배치용 클래스를 추가한다. `Role`과 `TabIndex`도 전달할 수 있다. 선택 옵션은 `ui.Option` 또는 `Value`·`Label`이 있는 `dict`이다. 여러 선택값은 옵션의 `Selected`, 개별 비활성 옵션은 `Disabled`로 지정한다. `button`에 `Href`를 주면 같은 스타일의 링크를 만든다.
 
+Button links with `Disabled` or `AriaDisabled` omit `href`, so they expose no
+native or context-menu navigation. `AriaDisabled` retains `role="link"` and
+`tabindex="0"`; `Disabled` uses `tabindex="-1"`. Re-render with both flags false
+to restore the URL. Changing only the DOM `aria-disabled` attribute does not
+restore an omitted URL. Existing labels and ARIA descriptions remain available.
+
+Include `ui-component-assets` for readonly checkbox/switch activation guards,
+focusable aria-disabled button guards, and checkbox `Indeterminate` initialization.
+Readonly choices remain focusable and participate in form submission; disabled
+controls follow native exclusion rules. Mixed-state initialization runs once per
+inserted checkbox, including HTMX replacements, without overwriting user changes
+on repeated swap notifications.
+
+
 `Attrs`는 코드에서 정한 `data-*`·`aria-*`·`hx-*` 속성이다. 속성 이름을 검증하고 값은 이스케이프한다. 이벤트 실행 속성과 임의의 HTML을 이 경로로 전달하지 않는다.
 
 ## 복합 폼

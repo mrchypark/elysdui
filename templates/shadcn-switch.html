@@ -27,7 +27,7 @@
          {{- if .Checked}} checked{{end}}
          {{- if .Required}} required{{end}}
          {{- if .Disabled}} disabled{{end}}
-         {{- if .Readonly}} readonly{{end}}
+         {{- if .Readonly}} readonly aria-readonly="true" data-ui-readonly="true"{{end}}
          {{/* autofocus: global attr valid on input — MDN input reference */}}
          {{- if .Autofocus}} autofocus{{end}}
          {{- if .Form}} form="{{.Form}}"{{end}}

@@ -4,6 +4,7 @@
 
   const initialized = new WeakSet();
   const dialogOpeners = new WeakMap();
+  const initializedNative = new WeakSet();
   const root = (target) => target instanceof Element ? target.closest('[data-ui-component]') : null;
   const hiddenValue = (component) => component.querySelector('input[type="hidden"]');
   const text = (value) => String(value || '').trim();
@@ -253,10 +254,29 @@
       case 'dialog': component.addEventListener('close', () => dialogOpeners.get(component)?.focus()); break;
     }
   };
+  const initNative = (input) => {
+    if (initializedNative.has(input)) return;
+    initializedNative.add(input);
+    input.indeterminate = true;
+  };
   const init = (scope = document) => {
+    if (scope instanceof Element && scope.matches('[data-initial-indeterminate="true"]')) initNative(scope);
+    scope.querySelectorAll?.('[data-initial-indeterminate="true"]').forEach(initNative);
     if (scope instanceof Element && scope.matches('[data-ui-component]')) initComponent(scope);
     scope.querySelectorAll?.('[data-ui-component]').forEach(initComponent);
   };
+
+  // ARIA disabled and readonly checkboxes need activation suppression: neither
+  // aria-disabled nor the HTML readonly attribute disables native activation.
+  // Capture prevents native submission/navigation and descendant HTMX handlers.
+  const preventUnavailableActivation = (event) => {
+    const blocked = event.target.closest?.('[data-slot="button"][aria-disabled="true"], input[data-ui-readonly="true"]');
+    if (!blocked) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+  };
+  document.addEventListener('click', preventUnavailableActivation, true);
+  document.addEventListener('auxclick', preventUnavailableActivation, true);
 
   document.addEventListener('click', (event) => {
     document.querySelectorAll('[data-ui-component=combobox]').forEach(combo=>{if(!combo.contains(event.target)){combo.querySelector('[data-ui-combobox-list]').hidden=true;combo.querySelector('[data-ui-combobox-input]').setAttribute('aria-expanded','false');}});
