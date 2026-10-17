@@ -456,6 +456,19 @@ const bindLoadingFamily = root => {
   return {click, destroy(){ timers.forEach(clearTimeout); for(const node of motions.keys())cancelMotion(node); cleanups.forEach(fn=>fn()); }};
 };
 
+// Match the source Result-view contract: log only the rendered error chain,
+// once per changed error for this DOM instance, including repeated mounts.
+// A new replacement node is a new instance. Recovery does not erase its last error.
+const feedbackBoundaryErrors = new WeakMap();
+const feedbackBoundaryLog = (boundary, id, report = (...args) => console.error(...args)) => {
+  const fallback = boundary.querySelector('[data-feedback-boundary-error]');
+  if (!fallback || fallback.hidden) return;
+  const chain = fallback.querySelector('code')?.textContent || fallback.querySelector('p')?.textContent || '';
+  if (!chain || feedbackBoundaryErrors.get(boundary) === chain) return;
+  feedbackBoundaryErrors.set(boundary, chain);
+  report('ErrorBoundary', id, chain.slice(0, 4096));
+};
+
 register('interaction', root => {
   const timers = new Set();
   const lottieCleanups = [];
@@ -628,6 +641,9 @@ register('interaction', root => {
   root.querySelectorAll('[data-interaction-upload]').forEach(paintUpload);
   const toaster = toastStack ? feedbackToaster(toastStack, detail => change(root, detail)) : null;
   if (toaster) lottieCleanups.push(() => toaster.destroy());
+  root.querySelectorAll('[data-feedback-boundary]').forEach(boundary => {
+    if (boundary.closest('[data-ely-family]') === root) feedbackBoundaryLog(boundary, root.id);
+  });
   const notificationHost = root.querySelector('.ely-interaction__notification');
   const notificationRows = notificationHost?.querySelector('ol').cloneNode(true);
   if (notificationHost) feedbackNotifications(notificationHost);
@@ -795,6 +811,7 @@ register('interaction', root => {
       const failed = target.closest('[data-feedback-boundary-toggle]') ? error.hidden : false;
       error.hidden = !failed; content.hidden = failed; demo.textContent = failed ? 'Fix it' : 'Break it';
       if (failed) { error.querySelector('p')?.remove(); const body = document.createElement('p'); body.textContent = demo.dataset.feedbackError; error.querySelector('h2').parentElement.append(body); const detail = error.querySelector('code'); if (detail) detail.textContent = demo.dataset.feedbackDetail; }
+      feedbackBoundaryLog(boundary, root.id);
       change(root, {name: 'boundary', failed}); return;
     }
     const replay = target?.closest('[data-feedback-result-replay]');

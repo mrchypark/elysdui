@@ -1,0 +1,24 @@
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+import {runInNewContext} from 'node:vm';
+const source = readFileSync(new URL('./assets/ely-api-interaction.js', import.meta.url), 'utf8');
+const start = source.indexOf('const feedbackBoundaryErrors =');
+assert.ok(start >= 0, 'production boundary logging must exist');
+const log = runInNewContext(`${source.slice(start, source.indexOf("register('interaction'", start))}\nfeedbackBoundaryLog`);
+const fixture = text => {
+  const code = {textContent: text};
+  const fallback = {hidden: false, querySelector: selector => selector === 'code' ? code : null};
+  return {code, fallback, querySelector: () => fallback};
+};
+const first = fixture('service: unavailable'), second = fixture('service: unavailable'), calls = [];
+const report = (...args) => calls.push(args);
+log(first, 'first', report); log(first, 'first', report);
+assert.equal(calls.length, 1, 'repeat render/mount does not log twice');
+first.fallback.hidden = true; log(first, 'first', report); first.fallback.hidden = false; log(first, 'first', report);
+assert.equal(calls.length, 1, 'recovery preserves last logged error, matching source keyed state');
+log(second, 'second', report); assert.equal(calls.length, 2, 'instances are independent');
+first.code.textContent = 'new failure'; log(first, 'first', report); assert.equal(calls.length, 3);
+first.code.textContent = 'service: unavailable'; log(first, 'first', report); assert.equal(calls.length, 4, 'changed-back error is new, not a lifetime blacklist');
+first.code.textContent = 'x'.repeat(5000); log(first, 'first', report); assert.equal(calls.at(-1)[2].length, 4096, 'only bounded visible text is logged');
+first.code.textContent = ''; log(first, 'first', report); assert.equal(calls.length, 5, 'empty error does not log');
+console.log('ErrorBoundary changed-error logging, recovery, instance isolation and bounded text passed');
