@@ -164,9 +164,21 @@ reload proving the original values persisted in Go. These tests opt into a
 DEBUG-only transport wrapper using both `--selection-ui-test` and the whitelisted
 `ELY_SELECTION_UI_SCENARIO` value (`disabled` or `interrupted-save`). The wrapper
 uses real HTTP with isolated ephemeral cookie storage; it either marks selection
-controls disabled on responses or drops the first completed save response after
-15 seconds. Retry still goes through the real Go authentication, CSRF, and replay
-checks. No fixture response is embedded, and Release omits the wrapper entirely.
+controls disabled on responses or holds the first matching committed save response
+behind an app-owned, one-shot release gate. The interrupted-save test waits for a
+request-bound held marker plus the actual model's sending phase and pending ID,
+checks those again around both native edits, then explicitly releases that request
+to inject the retryable fault. Failed prerequisites abort before release. Retry
+still goes through the real Go authentication, CSRF, and replay checks. Cancellation,
+screen teardown, or the 120-second cleanup watchdog latches a nonretryable protocol
+failure; the watchdog never releases a successful or retryable result. No fixture
+response is embedded, and Release omits the wrapper and its controls entirely.
+
+The package tests compile the same DEBUG gate/transport source used by the app in
+a separate, non-product `SelectionUITestSupport` target. Deterministic controls cover
+start/release ordering, wrong/duplicate release, cancellation/teardown, watchdog
+failure, exact retry snapshots, and retention of newer selection drafts. These
+portable controls complement rather than replace the actual simulator scenario.
 
 ### CI simulator bootstrap
 
