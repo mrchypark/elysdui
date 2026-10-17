@@ -79,10 +79,16 @@ try {
   await page.locator('#aria-link').focus();
   assert.equal(await page.evaluate(()=>document.activeElement.id),'aria-link');
   await page.keyboard.press('Enter');
-  await page.locator('#aria-link').click();
+  // locator.click intentionally refuses aria-disabled targets. A real mouse
+  // probe must still reach the unavailable link to verify our capture guard.
+  const linkBox = await page.locator('#aria-link').boundingBox();
+  assert(linkBox && linkBox.width > 0 && linkBox.height > 0);
+  const linkPoint = {x:linkBox.x+linkBox.width/2,y:linkBox.y+linkBox.height/2};
+  assert.equal(await page.evaluate(({x,y})=>document.elementFromPoint(x,y)?.closest('a')?.id,linkPoint),'aria-link');
+  await page.mouse.click(linkPoint.x,linkPoint.y);
   assert.equal(page.url(),`${origin}/`);
   const popups = []; page.on('popup',popup=>popups.push(popup));
-  await page.locator('#aria-link').click({button:'middle'});
+  await page.mouse.click(linkPoint.x,linkPoint.y,{button:'middle'});
   await page.evaluate(() => new Promise(resolve=>setTimeout(resolve,100)));
   assert.equal(popups.length,0,'aria-disabled link blocks auxiliary navigation');
   assert.equal(submissions.length,0,'unavailable link must not invoke its HTMX action');
