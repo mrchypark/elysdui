@@ -5,12 +5,12 @@ import {mkdir,writeFile} from 'node:fs/promises';
 import {setTimeout as delay} from 'node:timers/promises';
 import {chromium} from 'playwright';
 const reserve=createServer();await new Promise(r=>reserve.listen(0,'127.0.0.1',r));const port=reserve.address().port;await new Promise(r=>reserve.close(r));
-const base=`http://127.0.0.1:${port}`,child=spawn('go',['run','./examples/project-charts','-addr',`127.0.0.1:${port}`],{detached:true,stdio:['ignore','pipe','pipe']});let output='',browser;child.stdout.on('data',x=>output+=x);child.stderr.on('data',x=>output+=x);
+const base=`http://127.0.0.1:${port}`,child=spawn('go',['run','./examples/project-charts','-addr',`127.0.0.1:${port}`],{detached:true,stdio:['ignore','pipe','pipe']});let output='',browser,page;const errors=[];child.stdout.on('data',x=>output+=x);child.stderr.on('data',x=>output+=x);
 await mkdir('test-results/gallery',{recursive:true});
 const report={checks:[],negativeControls:[],status:'running'};const pass=name=>report.checks.push(name);
 try{
  let ready=false;for(let i=0;i<600;i++){try{if((await fetch(base)).ok){ready=true;break;}}catch{}if(child.exitCode!==null)throw Error(output);await delay(100);}assert.ok(ready,output);
- browser=await chromium.launch({headless:true,...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH?{executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH}:{})});const page=await browser.newPage({viewport:{width:1100,height:900}}),errors=[];page.on('pageerror',e=>errors.push(e.message));await page.goto(base);await page.waitForFunction(()=>document.querySelectorAll('[data-chart-ready="true"]').length===4);
+ browser=await chromium.launch({headless:true,...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH?{executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH}:{})});page=await browser.newPage({viewport:{width:1100,height:900}});page.on('pageerror',e=>errors.push(e.message));await page.goto(base);await page.waitForFunction(()=>document.querySelectorAll('[data-chart-ready="true"]').length===4);
  await page.evaluate(()=>{window.actions=[];document.addEventListener('ely:action',e=>window.actions.push(e.detail));});
  const gantt=page.locator('#schedule-a'),burn=page.locator('#burn-a');
  const checkGeometry=async()=>{const bars=await gantt.locator('[data-chart-bar]').evaluateAll(ns=>ns.map(n=>({x:+n.getAttribute('x'),w:+n.getAttribute('width')})));assert.equal(bars.length,3,'gantt: expected three dated task bars');assert.ok(bars[1].x>bars[0].x,'gantt: bars follow task dates');assert.ok(Math.abs(bars[0].w/bars[2].w-3)<1e-8);assert.equal(await gantt.locator('[data-chart-dependency]').count(),2);const progress=+(await gantt.locator('[data-chart-progress="0"]').getAttribute('width'));assert.ok(Math.abs(progress/bars[0].w-.5)<1e-8);};
@@ -44,4 +44,6 @@ try{
  await sb.locator('[data-chart-index="0"]').focus();await page.keyboard.press('ArrowRight');result=await selection(()=>page.keyboard.press('Enter'),'sdui-burn');assert.deepEqual(result,{chartID:'sdui-burn',index:1,value:'2026-10-13',date:'2026-10-13',remaining:45.25});
  pass('production SDUI event mapping and HTTP host action receive exact click/keyboard id, index, date and numeric values');
  assert.deepEqual(errors,[]);report.status='passed';console.log(JSON.stringify(report));
-}catch(error){report.status='failed';report.error=String(error);throw error;}finally{await mkdir('test-results/gallery',{recursive:true});await writeFile('test-results/gallery/project-charts.json',JSON.stringify(report,null,2));await browser?.close();try{process.kill(-child.pid,'SIGTERM');}catch{}}
+}catch(error){report.status='failed';report.error=String(error);report.pageErrors=errors;report.serverOutput=output;
+ if(page){try{report.diagnostics=await page.evaluate(()=>({url:location.href,scripts:[...document.scripts].map(s=>s.src),charts:[...document.querySelectorAll('[data-project-chart]')].map(c=>({id:c.closest('[id]')?.id,ready:c.dataset.chartReady,status:c.querySelector('[data-project-chart-status]')?.textContent}))}));await page.screenshot({path:'test-results/gallery/project-charts-failure.png',fullPage:true});}catch(diagnosticError){report.diagnosticError=String(diagnosticError);}}
+ throw error;}finally{await mkdir('test-results/gallery',{recursive:true});await writeFile('test-results/gallery/project-charts.json',JSON.stringify(report,null,2));await browser?.close();try{process.kill(-child.pid,'SIGTERM');}catch{}}

@@ -48,3 +48,20 @@ func TestProjectChartSDUIHTTP(t *testing.T) {
 		})
 	}
 }
+
+func TestProjectChartCallerAssets(t *testing.T) {
+	h, err := handler()
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest("GET", "/", nil))
+	if w.Code != 200 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	for _, asset := range []string{"/assets/ely-api-communication-entry.js", "/assets/ely-api-communication.css", "/assets/ely-api.css"} {
+		if !strings.Contains(w.Body.String(), `"`+asset+`"`) {
+			t.Errorf("caller is missing required chart asset %s", asset)
+		}
+	}
+}

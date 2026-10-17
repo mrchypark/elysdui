@@ -31,6 +31,10 @@ func handler() (http.Handler, error) {
 			http.Error(w, err.Error(), 500)
 			return
 		}
+		if err := tpl.ExecuteTemplate(&out, "ui-advanced-family-assets", "communication"); err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
 		out.WriteString(`<main style="max-width:900px;margin:auto"><h1>Caller-owned project charts</h1>`)
 		for _, id := range []string{"schedule-a", "schedule-b"} {
 			props := map[string]any{"Title": "Caller <schedule>", "Today": "2026-10-15", "Items": []map[string]any{{"Value": "alpha", "Label": "First <task>", "Start": "2026-10-12", "End": "2026-10-14", "Progress": 50.0}, {"Value": "beta", "Label": "Second task", "Start": "2026-10-15", "End": "2026-10-17", "Progress": 25.0, "After": []int{0}}, {"Value": "gamma", "Label": "One day", "Start": "2026-10-18", "End": "2026-10-18", "Progress": 0.0, "After": []int{1, 99}}}}
