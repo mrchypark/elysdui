@@ -4,7 +4,14 @@ import {checkRuntime} from './advanced-runtime-checks.js';
 const checks = new Map();
 let assertionCount=0;
 export function assert(condition,message='Component assertion failed'){assertionCount++;if(!condition)throw new Error(message);}
-export function registerChecks(family,definitions){for(const [key,check] of Object.entries(definitions)){if(checks.has(key))throw new Error(`Duplicate behavioral check: ${key}`);checks.set(key,{family,check});}}
+export function registerChecks(family,definitions){for(const [key,check] of Object.entries(definitions)){if(checks.has(key))throw new Error(`Duplicate behavioral check: ${key}`);if(typeof check!=='function')throw new Error(`Invalid behavioral check: ${key}`);checks.set(key,{family,check});}}
+// A named check executes only its scoped assertions; registration is never evidence.
+export async function executeRegisteredCheck(key, context){
+ const test=checks.get(key);if(!test)throw new Error(`No behavior check for ${key}`);
+ assertionCount=0;await test.check(context);
+ if(assertionCount===0)throw new Error(`No component-specific assertions for ${key}`);
+ return {claimId:`gallery-check:${key}`,assertions:assertionCount};
+}
 export async function waitFor(predicate,timeout=3000){const deadline=performance.now()+timeout;while(!predicate()){if(performance.now()>deadline)throw new Error('Timed out waiting for observable component state.');await new Promise(resolve=>setTimeout(resolve,10));}}
 function state(root){return JSON.stringify([...root.querySelectorAll('input,textarea,select,[aria-selected],[aria-pressed],dialog')].map(node=>[node.tagName,node.type,node.value,node.checked,node.open,node.getAttribute('aria-selected'),node.getAttribute('aria-pressed')]));}
 function identifiers(root){return [root.id,...Array.from(root.querySelectorAll('[id]'),node=>node.id)];}
@@ -47,15 +54,15 @@ document.querySelector('[data-audit-run]')?.addEventListener('click',async event
       assert(state(twin)===before,'An action changed the other instance.');
       assert(!errors.length,errors.join('; '));
       assert(!expectedErrors.length,'Expected host error was not emitted');
-      result={name:record.dataset.auditName,key:record.dataset.auditKey,status:'passed',assertions:assertionCount,componentAssertions,actions:actions.map(action=>({action:action.action,value:action.value,values:action.values?.map(([name,value])=>[name,value instanceof File?value.name:String(value).slice(0,200)])})),milliseconds:Math.round(performance.now()-started)};passed++;
-    }catch(error){result={name:record.dataset.auditName,key:record.dataset.auditKey,status:'failed',error:error.message,milliseconds:Math.round(performance.now()-started)};failed++;}
+      result={caseId:`gallery:${record.dataset.auditName}`,claimId:`gallery-check:${record.dataset.auditKey}`,coverageLevel:['shell/SystemNotification','shell/QuickLauncher','shell/NativeMenu','shell/WindowResizeBorder'].includes(record.dataset.auditKey)?'source-note-only':'scoped-fixture-assertions',fullContractVerified:false,name:record.dataset.auditName,key:record.dataset.auditKey,status:'passed',assertions:assertionCount,componentAssertions,actions:actions.map(action=>({action:action.action,value:action.value,values:action.values?.map(([name,value])=>[name,value instanceof File?value.name:String(value).slice(0,200)])})),milliseconds:Math.round(performance.now()-started)};passed++;
+    }catch(error){result={caseId:`gallery:${record.dataset.auditName}`,claimId:`gallery-check:${record.dataset.auditKey}`,fullContractVerified:false,name:record.dataset.auditName,key:record.dataset.auditKey,status:'failed',error:error.message,milliseconds:Math.round(performance.now()-started)};failed++;}
     finally{hostCleanup?.();root?.removeEventListener('ely:action',capture);root?.removeEventListener('ely:error',captureError);window.removeEventListener('error',captureRuntimeError);window.removeEventListener('unhandledrejection',captureRuntimeError);}
-    results.push(result);record.dataset.auditState=result.status;record.querySelector('[data-audit-result]').value=result.status==='passed'?'Passed':`Failed: ${result.error}`;
+    results.push(result);record.dataset.auditState=result.status;record.querySelector('[data-audit-result]').value=result.status==='passed'?'Scoped assertions passed':`Failed: ${result.error}`;
     document.querySelector('[data-audit-status]').value=`${results.length} checks · ${passed} passed · ${failed} failed`;
     await new Promise(resolve=>setTimeout(resolve,0));
   }
   let runtime;try{runtime=await checkRuntime();}catch(error){runtime={name:'runtime/HostCallbacks',status:'failed',error:error.message};}
-  document.querySelector('[data-audit-results]').textContent=JSON.stringify({date:new Date().toISOString(),passed,failed,runtime,results},null,2);
+  document.querySelector('[data-audit-results]').textContent=JSON.stringify({schemaVersion:2,evidenceKind:'executed-scoped-fixture-checks',fullContractVerified:false,limitations:['Passing a fixture does not establish every property, state, event or alias contract.','Source-note fixtures verify only the displayed limitation, not alternate UI or OS integration.'],date:new Date().toISOString(),passed,failed,runtime,results},null,2);
   document.querySelector('[data-audit-status]').value+=` · Host API ${runtime.status==='passed'?'passed':'failed'}`;
   document.querySelector('[data-audit-run]').disabled=false;
 });
