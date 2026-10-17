@@ -3,33 +3,50 @@ import ElyNativeCore
 import ElyNativeUI
 
 @main
+@MainActor
 struct ElyProfileApp: App {
-    private let transport: Result<any ProfileTransport, Error> = Result {
-        var origin = Bundle.main.object(forInfoDictionaryKey: "ElyAPIBaseURL") as? String ?? ""
+    private let transport: Result<any ProfileTransport, Error>
+    #if DEBUG
+    private let selectionControl: SelectionUITestControl?
+    #endif
+
+    init() {
         #if DEBUG
-        if let override = ProcessInfo.processInfo.environment["ELY_API_BASE_URL"] { origin = override }
-        let allowLocalHTTP = true
-        #else
-        let allowLocalHTTP = false
+        let scenario = SelectionUITestTransport.Scenario.optedIn(
+            arguments: ProcessInfo.processInfo.arguments, environment: ProcessInfo.processInfo.environment)
+        let control = scenario == .interruptedSave ? SelectionUITestControl() : nil
+        selectionControl = control
         #endif
-        guard let url = URL(string: origin), !origin.isEmpty else {
-            throw ProtocolFailure("Set ELY_API_BASE_URL to your HTTPS API origin in the Release build configuration.")
+        transport = Result {
+            var origin = Bundle.main.object(forInfoDictionaryKey: "ElyAPIBaseURL") as? String ?? ""
+            #if DEBUG
+            if let override = ProcessInfo.processInfo.environment["ELY_API_BASE_URL"] { origin = override }
+            let allowLocalHTTP = true
+            #else
+            let allowLocalHTTP = false
+            #endif
+            guard let url = URL(string: origin), !origin.isEmpty else {
+                throw ProtocolFailure("Set ELY_API_BASE_URL to your HTTPS API origin in the Release build configuration.")
+            }
+            #if DEBUG
+            // UI tests opt in explicitly; never bundle fixtures or replace the Go backend.
+            if let scenario {
+                let live = try HTTPProfileTransport(baseURL: url, allowLocalHTTP: allowLocalHTTP, configuration: .ephemeral)
+                return SelectionUITestTransport(live: live, scenario: scenario, gate: control?.gate)
+            }
+            #endif
+            return try HTTPProfileTransport(baseURL: url, allowLocalHTTP: allowLocalHTTP)
         }
-        #if DEBUG
-        // UI tests opt in explicitly; never bundle fixtures or replace the Go backend.
-        if ProcessInfo.processInfo.arguments.contains("--selection-ui-test"),
-           let scenario = SelectionUITestTransport.Scenario(rawValue: ProcessInfo.processInfo.environment["ELY_SELECTION_UI_SCENARIO"] ?? "") {
-            let live = try HTTPProfileTransport(baseURL: url, allowLocalHTTP: allowLocalHTTP, configuration: .ephemeral)
-            return SelectionUITestTransport(live: live, scenario: scenario)
-        }
-        #endif
-        return try HTTPProfileTransport(baseURL: url, allowLocalHTTP: allowLocalHTTP)
     }
 
     var body: some Scene {
         WindowGroup {
             switch transport {
+            #if DEBUG
+            case .success(let transport): ProfileAppContent(transport: transport, selectionControl: selectionControl)
+            #else
             case .success(let transport): ProfileAppContent(transport: transport)
+            #endif
             case .failure(let error):
                 ContentUnavailableView("API configuration required", systemImage: "network", description: Text(error.localizedDescription))
             }
@@ -37,51 +54,83 @@ struct ElyProfileApp: App {
     }
 }
 
+@MainActor
 private struct ProfileAppContent: View {
     @StateObject private var model: ProfileViewModel
+    #if DEBUG
+    private let selectionControl: SelectionUITestControl?
+    init(transport: any ProfileTransport, selectionControl: SelectionUITestControl?) {
+        _model = StateObject(wrappedValue: ProfileViewModel(transport: transport))
+        self.selectionControl = selectionControl
+    }
+    #else
     init(transport: any ProfileTransport) {
         _model = StateObject(wrappedValue: ProfileViewModel(transport: transport))
     }
-    var body: some View { NativeProfileView(model: model) }
+    #endif
+
+    var body: some View {
+        #if DEBUG
+        if let selectionControl {
+            NativeProfileView(model: model)
+                .safeAreaInset(edge: .bottom) {
+                    SelectionUITestPanel(control: selectionControl, model: model)
+                }
+                .onDisappear { selectionControl.gate.tearDown() }
+        } else {
+            NativeProfileView(model: model)
+        }
+        #else
+        NativeProfileView(model: model)
+        #endif
+    }
 }
 
 #if DEBUG
-/// Test-only fault injection around actual Go requests. Release contains no hooks.
-private actor SelectionUITestTransport: ProfileTransport {
-    enum Scenario: String, Sendable { case disabled, interruptedSave = "interrupted-save" }
-    let live: HTTPProfileTransport
-    let scenario: Scenario
-    private var interruptedRequest: PendingRequest?
-    private var didInterrupt = false
+@MainActor
+private final class SelectionUITestControl: ObservableObject {
+    let gate = SelectionSaveGate()
+    @Published private(set) var state: SelectionSaveGate.State = .idle
 
-    init(live: HTTPProfileTransport, scenario: Scenario) {
-        self.live = live; self.scenario = scenario
+    init() {
+        gate.stateChanged = { [weak self] state in self?.state = state }
+    }
+}
+
+@MainActor
+private struct SelectionUITestPanel: View {
+    @ObservedObject var control: SelectionUITestControl
+    @ObservedObject var model: ProfileViewModel
+
+    private var marker: String {
+        // Phase and pending ID are the actual model, never inferred from the gate or Save button.
+        let phase: String
+        switch model.state.phase {
+        case .idle: phase = "idle"
+        case .sending: phase = "sending"
+        case .retryable: phase = "retryable"
+        case .blocked: phase = "blocked"
+        }
+        var value = "gate=\(control.state.name);request=\(control.state.requestID ?? "none");phase=\(phase);pending=\(model.state.pending?.requestID ?? "none")"
+        if case .failed(_, let reason) = control.state { value += ";failure=\(reason)" }
+        return value
     }
 
-    func send(_ request: PendingRequest) async throws -> ProfileEnvelope {
-        if let interruptedRequest, case .save = request.kind {
-            guard request == interruptedRequest else {
-                throw ProtocolFailure("The UI test retry changed the original request snapshot.")
+    var body: some View {
+        VStack(spacing: 4) {
+            Text(marker).font(.caption2)
+                .accessibilityIdentifier("selection-save-state")
+            if case .held(let requestID) = control.state {
+                Button("Release interrupted save") {
+                    control.gate.release(requestID: requestID, phase: model.state.phase,
+                                         pendingRequestID: model.state.pending?.requestID)
+                }
+                .accessibilityIdentifier("selection-save-release-\(requestID)")
             }
         }
-        var response = try await live.send(request)
-        if scenario == .disabled {
-            func disableSelections(_ node: inout NativeNode) {
-                if ["checkbox", "select"].contains(node.type) { node.props.disabled = true }
-                for index in node.children.indices { disableSelections(&node.children[index]) }
-            }
-            disableSelections(&response.region)
-        }
-        if scenario == .interruptedSave, !didInterrupt, case .save = request.kind {
-            didInterrupt = true
-            interruptedRequest = request
-            // The server has committed, but the app sees an uncertain network result.
-            // Leave enough time for actual native controls to create newer local edits.
-            try await Task.sleep(nanoseconds: 15_000_000_000)
-            throw TransportFailure("UI test interrupted a completed save. Retry the same request.", retryable: true)
-        }
-        if request == interruptedRequest { interruptedRequest = nil }
-        return response
+        .padding(6)
+        .frame(maxWidth: .infinity)
+        .background(.regularMaterial)
     }
 }
 #endif
