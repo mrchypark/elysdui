@@ -214,6 +214,9 @@ shown in upstream story 519. That distinction remains open in the audit.
 Go example: `go run ./examples/project-charts`; `/sdui` demonstrates real event
 mappings to host HTTP actions and server-rendered selection results. The loopback
 example uses a fixed demo principal/CSRF token and is not production authentication.
+Action detail `id` is the rendered component control ID. In SDUI this differs
+from the logical wrapper node ID; the example validates IDs from the actual
+rendered plan rather than assuming or duplicating the internal ID algorithm.
 SDUI properties use lower camel
 case (`remaining`, `items[].after`, `scope`); the generated catalogue is the
 contract authority. Focused browser checks: `node scripts/project-charts-browser-test.mjs`.

@@ -39,9 +39,10 @@ try{
  await assert.rejects(checkOneAction,e=>e.code==='ERR_ASSERTION'&&e.message.startsWith('gantt: selection emits exactly one action'));report.negativeControls.push('removed SVG handler fails exactly-one-action assertion after passing baseline');
  await page.goto(base+'/sdui');await page.waitForFunction(()=>document.querySelectorAll('[data-chart-ready="true"]').length===2);
  const sd=page.locator('#sdui-gantt'),sb=page.locator('#sdui-burn');
- const selection=async (trigger,id)=>{const response=page.waitForResponse(r=>r.url()===base+'/sdui'&&r.request().method()==='POST');await trigger();assert.equal((await response).status(),200);await page.waitForFunction(id=>document.querySelector('#selection-text')?.textContent.includes(id),id);return JSON.parse(await page.locator('#selection-text').textContent());};
- let result=await selection(()=>sd.locator('[data-chart-index="1"]').click(),'sdui-gantt');assert.deepEqual(result,{chartID:'sdui-gantt',index:1,value:'build',progress:25.25});
- await sb.locator('[data-chart-index="0"]').focus();await page.keyboard.press('ArrowRight');result=await selection(()=>page.keyboard.press('Enter'),'sdui-burn');assert.deepEqual(result,{chartID:'sdui-burn',index:1,value:'2026-10-13',date:'2026-10-13',remaining:45.25});
+ const taskControlID=await sd.locator('[data-ely-component]').getAttribute('id'),dayControlID=await sb.locator('[data-ely-component]').getAttribute('id');assert.ok(taskControlID&&dayControlID&&taskControlID!==dayControlID);
+ const selection=async (trigger,id)=>{const response=page.waitForResponse(r=>r.url()===base+'/sdui'&&r.request().method()==='POST');await trigger();const result=await response;assert.equal(result.status(),200,await result.text());await page.waitForFunction(id=>document.querySelector('#selection-text')?.textContent.includes(id),id);return JSON.parse(await page.locator('#selection-text').textContent());};
+ let result=await selection(()=>sd.locator('[data-chart-index="1"]').click(),taskControlID);assert.deepEqual(result,{chartID:taskControlID,index:1,value:'build',progress:25.25});
+ await sb.locator('[data-chart-index="0"]').focus();await page.keyboard.press('ArrowRight');result=await selection(()=>page.keyboard.press('Enter'),dayControlID);assert.deepEqual(result,{chartID:dayControlID,index:1,value:'2026-10-13',date:'2026-10-13',remaining:45.25});
  pass('production SDUI event mapping and HTTP host action receive exact click/keyboard id, index, date and numeric values');
  assert.deepEqual(errors,[]);report.status='passed';console.log(JSON.stringify(report));
 }catch(error){report.status='failed';report.error=String(error);report.pageErrors=errors;report.serverOutput=output;
