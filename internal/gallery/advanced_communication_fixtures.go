@@ -30,6 +30,15 @@ func advancedCommunicationCases() []AdvancedCase {
 			"Due":   "2026-10-14", "Priority": "High", "Date": "2026-10-12", "Day": "12", "Until": "2026-10-12T13:00", "SendAt": "2026-10-12T14:00", "Events": []map[string]any{{"Value": id + "-event", "Label": "Caller event", "Start": "09:00", "End": "10:00"}},
 		}
 		switch definition.Name {
+		case "GanttChart":
+			props["Title"], props["Today"], props["Disabled"] = "Project schedule", "2026-10-17", false
+			props["Content"] = "Dated tasks with predecessor dependencies. Inspect a row for its dates and completion."
+			props["Items"] = []map[string]any{{"Value": "design", "Label": "Design", "Start": "2026-10-12", "End": "2026-10-16", "Progress": 100.0}, {"Value": "build", "Label": "Build", "Start": "2026-10-17", "End": "2026-10-23", "Progress": 35.5, "After": []int{0}}, {"Value": "review", "Label": "Review", "Start": "2026-10-24", "End": "2026-10-24", "Progress": 0.0, "After": []int{1}}}
+		case "Burndown Chart":
+			props["Title"], props["Start"], props["End"], props["Today"], props["Scope"], props["Disabled"] = "Sprint remaining work", "2026-10-11", "2026-10-24", "2026-10-17", 40.0, false
+			props["Remaining"] = []float64{40, 38, 38, 33, 34, 29, 24}
+			props["Content"], props["Value"] = "Ideal work and recorded daily remaining work. Future days are unreported.", "24"
+
 		case "ChatContainer":
 			props["Title"], props["Label"], props["DateLabel"], props["TypingLabel"] = "Color and lift", "Color and lift conversation", "Friday, September 26", "Assistant is thinking…"
 			props["Items"] = []map[string]any{{"Value": "m1", "Role": "user", "Avatar": "AP", "Author": "Ada", "Time": "09:28", "Content": "What does a lift do to a color?"}, {"Value": "m2", "Role": "assistant", "Avatar": "AI", "Author": "Assistant", "Time": "09:30", "Content": "A lift blends a color toward white. Half a lift sits midway between the color and white.", "Points": []string{"Caller structured point"}}, {"Value": "m3", "Role": "assistant", "Author": "Assistant", "Time": "09:31", "Content": "Dark themes use a smaller lift because saturated color reads louder there.", "Grouped": true}, {"Value": "m4", "Role": "user", "Avatar": "AP", "Author": "Ada", "Time": "09:32", "Content": "And a shade?"}}
