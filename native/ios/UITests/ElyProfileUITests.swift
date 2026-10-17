@@ -19,6 +19,8 @@ final class ElyProfileUITests: XCTestCase {
         app.launch()
         let input = app.textFields["input-displayName"]
         XCTAssertTrue(input.waitForExistence(timeout: 15))
+        XCTAssertFalse(app.staticTexts["selection-save-state"].exists)
+        XCTAssertEqual(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "selection-save-release-")).count, 0)
         XCTAssertEqual(app.webViews.count, 0)
         assertVisible(input, in: app)
         assertVisible(app.buttons["save-profile"], in: app)
@@ -128,6 +130,8 @@ final class ElyProfileUITests: XCTestCase {
 
     @MainActor
     func testNewerNativeSelectionsSurviveInterruptedSaveAndExactRetry() throws {
+        // A failed prerequisite must abort before the test-only release can run.
+        continueAfterFailure = false
         let app = selectionTestApp(scenario: "interrupted-save")
         app.launch()
         XCTAssertTrue(app.textFields["input-company"].waitForExistence(timeout: 15))
@@ -142,19 +146,37 @@ final class ElyProfileUITests: XCTestCase {
         scrollTo(save, in: app); save.tap()
         XCTAssertFalse(save.isEnabled)
 
-        // These edits must happen while the original real HTTP save is in flight
-        // from the app's perspective, not after a reducer-only simulated response.
+        // The real Go response must be held for this exact still-sending model request.
+        // There is no timer-based normal release, so each edit is inside this window.
+        let requestID = try waitForHeldSave(in: app)
         scrollTo(checkbox, in: app)
+        try requireHeldSave(requestID, in: app)
         XCTAssertTrue(checkbox.isEnabled)
         checkbox.tap()
         XCTAssertEqual(checkbox.value as? String, "0")
+        try requireHeldSave(requestID, in: app)
         XCTAssertTrue(picker.isEnabled)
+        try requireHeldSave(requestID, in: app)
         chooseTheme("Light", picker: picker, app: app)
+        try requireHeldSave(requestID, in: app)
         XCTAssertFalse(save.isEnabled)
         XCTAssertFalse(app.buttons["retry-request"].exists)
 
+        let release = app.buttons["selection-save-release-\(requestID)"]
+        try require(release.exists && release.isHittable, "The matching release control must be available.")
+        XCTAssertEqual(checkbox.value as? String, "0")
+        assertSelection(picker, equals: "Light")
+        try requireHeldSave(requestID, in: app)
+        release.tap()
+
         let retry = app.buttons["retry-request"]
         XCTAssertTrue(retry.waitForExistence(timeout: 30))
+        let released = "gate=released;request=\(requestID);phase=retryable;pending=\(requestID)"
+        try require(app.staticTexts["selection-save-state"].label == released,
+                    "Only explicit release of the same request may expose Retry.")
+        try require(app.staticTexts["transport-error"].label ==
+                    "UI test interrupted a completed save. Retry the same request.",
+                    "Retry must come from the deliberate released-save fault.")
         scrollTo(retry, in: app, upwards: false); retry.tap()
         expectation(for: NSPredicate(format: "label CONTAINS[c] %@", "saved"), evaluatedWith: app.staticTexts["profile-status"])
         waitForExpectations(timeout: 30)
@@ -177,6 +199,47 @@ final class ElyProfileUITests: XCTestCase {
         assertSelection(picker, equals: "Dark")
         XCTAssertFalse(app.staticTexts["unsaved-changes"].exists)
         XCTAssertEqual(app.webViews.count, 0)
+    }
+
+    @MainActor
+    private func waitForHeldSave(in app: XCUIApplication) throws -> String {
+        let marker = app.staticTexts["selection-save-state"]
+        try require(marker.waitForExistence(timeout: 15), "The opted-in save marker must exist.")
+        let held = XCTNSPredicateExpectation(predicate: NSPredicate(
+            format: "label MATCHES %@",
+            #"gate=held;request=([A-Fa-f0-9-]+);phase=sending;pending=\1"#), object: marker)
+        try require(XCTWaiter.wait(for: [held], timeout: 30) == .completed,
+                    "Expected a committed Go save held for the actual sending model request; got \(marker.label).")
+        let requestID = try XCTUnwrap(selectionMarkerValues(marker.label)["request"])
+        try requireHeldSave(requestID, in: app)
+        return requestID
+    }
+
+    @MainActor
+    private func requireHeldSave(_ requestID: String, in app: XCUIApplication,
+                                 file: StaticString = #filePath, line: UInt = #line) throws {
+        let marker = app.staticTexts["selection-save-state"]
+        let expected = "gate=held;request=\(requestID);phase=sending;pending=\(requestID)"
+        try require(marker.exists && marker.label == expected,
+                    "The original save must still be held and sending; got \(marker.label).", file: file, line: line)
+        try require(!app.buttons["retry-request"].exists,
+                    "Retry must remain absent until explicit release.", file: file, line: line)
+    }
+
+    private func selectionMarkerValues(_ label: String) -> [String: String] {
+        label.split(separator: ";").reduce(into: [:]) { values, pair in
+            let parts = pair.split(separator: "=", maxSplits: 1)
+            if parts.count == 2 { values[String(parts[0])] = String(parts[1]) }
+        }
+    }
+
+    private func require(_ condition: Bool, _ message: String,
+                         file: StaticString = #filePath, line: UInt = #line) throws {
+        guard condition else {
+            XCTFail(message, file: file, line: line)
+            throw NSError(domain: "SelectionUIHandshake", code: 1,
+                          userInfo: [NSLocalizedDescriptionKey: message])
+        }
     }
 
     @MainActor

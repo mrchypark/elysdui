@@ -174,10 +174,11 @@ explicit matcher. Missing focus at the deadline also fails. A missing-focus
 failure alone does not establish that an overlay exists.
 
 Before activity teardown, failures retain read-only window/activity/ANR and
-active-window diagnostics plus the existing failure screenshot. Each diagnostic
-read has a two-second budget and an output-size bound; diagnostic errors cannot
-replace the original test error. Diagnostic collection and the existing screenshot
-capture are separate from the ten-second readiness budget.
+active-window diagnostics plus the existing failure screenshot. Each of the four
+diagnostic result waits has its own two-second timeout. The three shell reads are
+capped at 128 KiB each; active-window root text has no explicit size cap. Diagnostic
+errors cannot replace the original test error. Diagnostic collection and the
+existing screenshot capture are separate from the ten-second readiness budget.
 
 The shared test-only policy has JVM controls for transient recovery, persistent
 loss, late focus, ANR detection and sticky ANR failure. Instrumentation adds real
