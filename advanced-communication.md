@@ -134,7 +134,7 @@ Time-grid `Now` optionally supplies a civil `YYYY-MM-DDTHH:mm` current-time mark
 
 ### Source stories 511–518 and 521–525
 
-Compared against upstream `49ed1f84056fa13347d68801b479a4a5a8e03b53`, `examples/gallery/pages/project`, `src/project`, and saved images 511–518 and 521–525. Story 511 is calendar EventCard/EventChip. Charts 519 (GanttChart) and 520 (Burndown Chart) remain deferred; this work does not alter their templates, fixtures, or chart-specific CSS. DatabaseView's own Timeline remains in scope for 525.
+Compared against upstream `49ed1f84056fa13347d68801b479a4a5a8e03b53`, `examples/gallery/pages/project`, `src/project`, and saved images 511–518 and 521–525. Story 511 is calendar EventCard/EventChip. The original project-control batch deferred charts 519 and 520; the later chart implementation below replaces their placeholders without claiming separate Roadmap parity. DatabaseView's own Timeline remains in scope for 525.
 
 Existing flat props and aliases remain supported. Empty/missing subtask `Items` and lane `Cards` render safely. The gallery uses upstream's six studio tasks, four milestones, four workload rows, three time entries, and source default Pomodoro cycle. Dates are frozen to October 13, 2026 for reference comparison.
 
@@ -178,3 +178,45 @@ Month/year day clicks and agenda clicks select locally; Enter/double-click open 
 The additional EventEditor correction only changes recurrence layout: `Every [number] unit` uses a 96px, 24px-high number field (source `w_24`, small control); end-date fields use a compact 150px width. Recurrence labels use explicit inline flex layout and input inline sizes. Existing all-day, date grouping, 14px checkbox/radio, color, and reminder behavior remains intact.
 
 Checks: `calendar_controls_test.mjs`, `calendar_visual_contract_test.mjs`, `calendar_visual_parity_test.go`, and `internal/gallery/calendar_visual_parity_test.go`. In-page assertions now distinguish select/open actions and verify popover focus and compact recurrence controls. Browser/pixel verification remains with the parent; DOM/SVG font metrics and native date-picker appearance are not claimed to match GPUI exactly.
+
+## Project chart data and inspection
+
+The project Gantt and Burndown render dated chart geometry instead of the former
+progress/meter placeholders. Source: `src/charts/schedule.rs` and
+`src/charts/burndown.rs` at upstream `da3fdcaf39f2fa85ce1dd9cad07c3c81cf1dd721`.
+This is chart functionality, not parity with the separate Roadmap lanes/months
+shown in upstream story 519. That distinction remains open in the audit.
+
+- `project/GanttChart`: `Items` contain `Value`, `Label` (or `Title`), `Start`,
+  `End`, `Progress` (0–100), and optional `After` (zero-based earlier task indexes).
+  End dates are inclusive. Invalid/self/forward dependencies are dropped, as in
+  upstream. `Today` is optional. The date range is inferred from the tasks.
+- `project/Burndown Chart`: `Start`, `End`, `Scope` (positive number), `Remaining`
+  (daily numbers from the first day), and optional `Today`. `Max` is a deprecated
+  fallback for `Scope`; `Value` remains visible as a legacy summary, never an
+  invented daily series. Legacy callers must supply dates and `Remaining` to get
+  a plot. Empty observations display only the ideal line. Future days are
+  explicitly unreported. Scope growth raises the scale.
+- Dates are strict `YYYY-MM-DD`, interpreted in UTC. Invalid data clears the plot
+  and displays an error. Limits: 1,000 tasks, 36,600-day Gantt span, 3,660-day
+  sprint, finite work values at most 1e12. No network data is fetched.
+- Hover/focus inspects exact values. Arrow keys, Home/End navigate; Enter/Space
+  emit `ely:action` with `select-task` (`value`, `index`, `start`, `end`,
+  `progress`) or `select-day` (`value`, `index`, `date`, `ideal`, optional
+  `remaining`). Escape clears inspection. Disabled roots suppress actions.
+- HTML data tables remain available without JavaScript. Charts horizontally
+  scroll inside their container on narrow screens. No scheduling mutations,
+  persistence, rescheduling, or host backend are implied.
+- Replace components through the normal HTMX lifecycle. For a caller-owned DOM
+  data update, dispatch `ely:chart-refresh` on the component root after changing
+  its data rows/attributes. Component removal aborts listeners.
+
+Go example: `go run ./examples/project-charts`; `/sdui` demonstrates real event
+mappings to host HTTP actions and server-rendered selection results. The loopback
+example uses a fixed demo principal/CSRF token and is not production authentication.
+Action detail `id` is the rendered component control ID. In SDUI this differs
+from the logical wrapper node ID; the example validates IDs from the actual
+rendered plan rather than assuming or duplicating the internal ID algorithm.
+SDUI properties use lower camel
+case (`remaining`, `items[].after`, `scope`); the generated catalogue is the
+contract authority. Focused browser checks: `node scripts/project-charts-browser-test.mjs`.

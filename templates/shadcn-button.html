@@ -12,7 +12,10 @@
           Type     string // button | submit | reset
           Disabled bool
           // AriaDisabled keeps the button focusable while its action is
-          // unavailable (unlike Disabled, which drops it from the a11y tree).
+          // unavailable (unlike Disabled, which removes it from the tab order).
+          // Link mode omits href while Disabled or AriaDisabled. AriaDisabled
+          // remains focusable with role=link and tabindex=0; Disabled uses -1.
+          // Re-render with both flags false to restore the navigation URL.
           AriaDisabled bool
           // Pressed is the aria-pressed toggle state. Use a *bool for true/false,
           // or set PressedMixed=true for the tri-state "mixed" value.
@@ -83,7 +86,7 @@
 {{- $size := or .Size "default" -}}
 {{- $type := or .Type "button" -}}
 {{- $base := "inline-flex shrink-0 items-center justify-center gap-2 rounded-md text-sm font-medium whitespace-nowrap transition-all outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 [&.htmx-request]:pointer-events-none [&.htmx-request]:opacity-70" -}}
-{{if .Href}}<a href="{{.Href}}" class="{{$base}} {{index $variants $variant}} {{index $sizes $size}}{{if .Class}} {{.Class}}{{end}}" data-slot="button"{{if .Role}} role="{{.Role}}"{{end}}{{if .TabIndex}} tabindex="{{.TabIndex}}"{{end}} data-variant="{{$variant}}" data-size="{{$size}}"{{if .AriaLabel}} aria-label="{{.AriaLabel}}"{{end}}{{range $k, $v := .Attrs}} {{attrName $k}}="{{$v}}"{{end}}>{{.Label}}</a>{{else}}
+{{if .Href}}<a{{if or .Disabled .AriaDisabled}} role="link" tabindex="{{if .Disabled}}-1{{else}}0{{end}}"{{else}} href="{{.Href}}"{{end}}{{if .ID}} id="{{.ID}}"{{end}}{{if or .Disabled .AriaDisabled}} aria-disabled="true"{{end}}{{if .AriaLabelledby}} aria-labelledby="{{.AriaLabelledby}}"{{end}}{{if .AriaDescribedby}} aria-describedby="{{.AriaDescribedby}}"{{end}}{{if .AriaExpanded}} aria-expanded="{{if deref .AriaExpanded}}true{{else}}false{{end}}"{{end}}{{if .AriaHaspopup}} aria-haspopup="{{.AriaHaspopup}}"{{end}}{{if .AriaControls}} aria-controls="{{.AriaControls}}"{{end}}{{if .PressedMixed}} aria-pressed="mixed"{{else if .Pressed}} aria-pressed="{{if deref .Pressed}}true{{else}}false{{end}}"{{end}} class="{{$base}} {{index $variants $variant}} {{index $sizes $size}}{{if .Class}} {{.Class}}{{end}}" data-slot="button"{{if and .Role (not (or .Disabled .AriaDisabled))}} role="{{.Role}}"{{end}}{{if and .TabIndex (not (or .Disabled .AriaDisabled))}} tabindex="{{.TabIndex}}"{{end}} data-variant="{{$variant}}" data-size="{{$size}}"{{if .AriaLabel}} aria-label="{{.AriaLabel}}"{{end}}{{range $k, $v := .Attrs}} {{attrName $k}}="{{$v}}"{{end}}>{{.Label}}</a>{{else}}
 <button type="{{$type}}"
         class="{{$base}} {{index $variants $variant}} {{index $sizes $size}}{{if .Class}} {{.Class}}{{end}}"
         {{- if .ID}} id="{{.ID}}"{{end}}

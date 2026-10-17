@@ -253,6 +253,18 @@ func schemaFor(full Property, a *analysis, allowHTML bool) (map[string]Property,
 	for _, path := range a.paths() {
 		full = ensure(full, strings.Split(path, "."), hintType(a.refs[path]))
 	}
+	// Chart work values are continuous even when the story uses whole points.
+	if a.fixed["Chapter"] == "project" && a.fixed["Kind"] == "Burndown Chart" {
+		for _, key := range []string{"Scope", "Max"} {
+			p := full.Properties[key]
+			p.Type = "number"
+			full.Properties[key] = p
+		}
+		p := full.Properties["Remaining"]
+		p.Type = "array"
+		p.Items = &Property{Type: "number"}
+		full.Properties["Remaining"] = p
+	}
 	excluded := []Exclusion{}
 	var walk func(Property, string, bool) (Property, error)
 	walk = func(p Property, path string, root bool) (Property, error) {

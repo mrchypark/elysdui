@@ -11,7 +11,7 @@ const expected = {
   interaction: [common, 'ely-api-interaction.js'],
   data: [common, 'ely-api-data.js', 'ely-patterns.js'],
   workspace: [common, 'ely-api-workspace.js', 'ely-api-workspace-source.js', 'ely-api-workspace-devtools.js', 'ely-api-workspace-canvas.js', 'ely-api-workspace-files.js', 'ely-api-forms.js', 'ely-code.js', 'ely-expressions.js'],
-  communication: [common, 'ely-api-communication.js', 'ely-math.js'],
+  communication: [common, 'ely-api-communication.js', 'ely-math.js', 'ely-project-charts.js'],
   native: [common, 'ely-api-native.js', 'ely-api-native-tooling.js', 'ely-api-native-shell.js', 'ely-api-native-media.js', 'ely-api-native-theme.js', 'ely-api-native-devices.js', 'ely-api-native-generative.js', 'ely-api-native-generative-tools.js', 'ely-api-native-misc.js', 'ely-expressions.js'],
   forms: [common, 'ely-api-forms.js', 'ely-code.js', 'ely-expressions.js'],
 };

@@ -1,0 +1,12 @@
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+import {runInNewContext} from 'node:vm';
+const source=readFileSync(new URL('./assets/ely-project-charts.js',import.meta.url),'utf8').replace(/^import .*\n/,'').replaceAll('export ','');
+const {ganttModel,burndownModel,chartDay,chartTicks}=runInNewContext(source+'\n({ganttModel,burndownModel,chartDay,chartTicks})',{Date});
+const m=ganttModel([{start:'2026-10-12',end:'2026-10-14',progress:25},{start:'2026-10-15',end:'2026-10-15',after:[0,0,1,-1,9]}],'2026-10-15');
+assert.equal(m.count,4);assert.equal(m.rows[1].after.join(','),'0');assert.equal(m.rows[0].progress,25);
+assert.throws(()=>chartDay('2026-02-30'));assert.throws(()=>ganttModel([{start:'2026-01-02',end:'2026-01-01'}]));assert.throws(()=>ganttModel([{start:'2026-01-01',end:'2026-01-01',progress:101}]));
+const b=burndownModel('2026-10-12','2026-10-18',40,[40,45,20]);assert.equal(b.top,50);assert.equal(b.count,7);assert.equal(b.left[1],45);const tiny=burndownModel('2026-10-12','2026-10-13',Number.MIN_VALUE,[Number.MIN_VALUE]);assert.ok(Number.isFinite(tiny.top)&&tiny.top>0);assert.ok(Number.isFinite(tiny.left[0]/tiny.top));assert.throws(()=>burndownModel('2026-10-12','2026-10-13',40,[' ']));assert.throws(()=>burndownModel('2026-10-12','2026-10-13',40,[Infinity]));
+for(const args of [['2026-10-12','2026-10-12',40,[]],['2026-10-12','2026-10-13',0,[]],['2026-10-12','2026-10-13',40,[1,2,3]],['2026-10-12','2026-10-13',40,[-1]]])assert.throws(()=>burndownModel(...args));
+assert.equal(chartTicks(chartDay('2026-03-01'),14).map(t=>t.offset).join(','),'1,8');assert.equal(chartTicks(chartDay('2026-01-15'),90).length,3);
+console.log('Project chart data models: dates, inclusive spans, dependencies, scope growth, bounds and ticks passed');

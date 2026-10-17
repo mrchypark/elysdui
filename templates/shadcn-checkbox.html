@@ -30,7 +30,7 @@
          {{- if .Indeterminate}} data-initial-indeterminate="true"{{end}}
          {{- if .Required}} required{{end}}
          {{- if .Disabled}} disabled{{end}}
-         {{- if .Readonly}} readonly{{end}}
+         {{- if .Readonly}} readonly aria-readonly="true" data-ui-readonly="true"{{end}}
          {{- if .Form}} form="{{.Form}}"{{end}}
          {{- if .AriaLabel}} aria-label="{{.AriaLabel}}"{{end}}
          {{- if .AriaLabelledby}} aria-labelledby="{{.AriaLabelledby}}"{{end}}

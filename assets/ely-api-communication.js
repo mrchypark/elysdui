@@ -1,4 +1,5 @@
 import {register,emit} from './ely-api.js';
+import {mountProjectCharts} from './ely-project-charts.js';
 import {mountMathML} from './ely-math.js';
 
 const status=(root,message)=>{const out=root.querySelector('[data-ely-status]');if(out)out.textContent=message};
@@ -310,7 +311,7 @@ register('communication',root=>{
   mountTrace(root,lifecycle);
   if(root.dataset.elyComponent?.startsWith('mail/'))mountMail(root,lifecycle);
   if(root.dataset.elyComponent?.startsWith('calendar/'))mountCalendar(root,lifecycle);
-  if(root.dataset.elyComponent?.startsWith('project/'))mountProject(root,lifecycle);
+  if(root.dataset.elyComponent?.startsWith('project/')){mountProject(root,lifecycle);mountProjectCharts(root,lifecycle);}
   const mathCleanups=[...root.querySelectorAll('math[data-ely-math]')].map(mountMathML);
   root.querySelectorAll('[data-ely-media-picker]').forEach(filterMessagingMedia);
   root.querySelectorAll('[data-ely-ratio]').forEach(node=>{const ratio=Number(node.dataset.elyRatio);if(Number.isFinite(ratio)&&ratio>0)node.style.setProperty('--ely-media-ratio',String(ratio));});
