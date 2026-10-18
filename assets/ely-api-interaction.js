@@ -526,16 +526,40 @@ register('interaction', root => {
   lottieCleanups.push(() => loadingFamily.destroy());
   lottieCleanups.push(() => sourceFamily.destroy());
   const dialogOpeners = new Map();
-  const restoreDialogFocus = dialog => {
+  const dialogFocusFrames = new Map();
+  const restoreDialogFocus = (dialog, ownedFocus = false) => {
+    // close events are queued: an earlier close must not consume a new opener.
+    if (dialog.open) return;
     const opener = dialogOpeners.get(dialog);
     dialogOpeners.delete(dialog);
-    if (opener?.isConnected) requestAnimationFrame(() => { if (opener.isConnected) opener.focus({preventScroll: true}); });
+    if (opener) {
+      const previous = dialogFocusFrames.get(dialog);
+      if (previous != null) cancelAnimationFrame(previous);
+      dialogFocusFrames.delete(dialog);
+    }
+    const focused = document.activeElement;
+    // Native close() normally restores focus immediately. A delayed fallback
+    // must neither repeat that work nor override the user's next focus target.
+    if (!root.isConnected || !opener?.isConnected || opener.disabled || focused === opener ||
+        !ownedFocus && focused && focused !== document.body && !dialog.contains(focused)) return;
+    const frame = requestAnimationFrame(() => {
+      if (dialogFocusFrames.get(dialog) !== frame) return;
+      dialogFocusFrames.delete(dialog);
+      if (root.isConnected && !dialog.open && opener.isConnected && !opener.disabled &&
+          document.activeElement === focused) opener.focus({preventScroll: true});
+    });
+    dialogFocusFrames.set(dialog, frame);
   };
+  lottieCleanups.push(() => {
+    dialogFocusFrames.forEach(cancelAnimationFrame);
+    dialogFocusFrames.clear(); dialogOpeners.clear();
+  });
   const closeDialog = dialog => {
     if (!dialog) return;
+    const ownedFocus = dialog.contains(document.activeElement);
     if (dialog.open) dialog.close();
     else dialog.hidden = true;
-    restoreDialogFocus(dialog);
+    restoreDialogFocus(dialog, ownedFocus);
   };
   const showTourStep = (dialog, index, notify = true) => {
     const steps = [...dialog.querySelectorAll('[data-interaction-tour-step]')];
@@ -965,12 +989,15 @@ register('interaction', root => {
       const group = toggle.closest('[data-interaction-toggle-group="single"]');
       if (group && pressed) group.querySelectorAll('[data-interaction-toggle]').forEach(item => item.setAttribute('aria-pressed', String(item === toggle)));
       toggle.setAttribute('aria-pressed', String(pressed));
-      change(root, {name: toggle.name || '', value: toggle.value, pressed});
+      const selection = toggle.closest('[data-interaction-toggle-group]');
+      const values = selection ? [...selection.querySelectorAll('[data-interaction-toggle]')].filter(item => item.getAttribute('aria-pressed') === 'true').map(item => item.value) : undefined;
+      change(root, {name: toggle.name || '', value: toggle.value, pressed, ...(selection ? {values} : {})});
       return;
     }
     const choice = target?.closest('[data-interaction-choice]');
     if (choice) {
-      choice.closest('[role="radiogroup"]')?.querySelectorAll('[data-interaction-choice]').forEach(item => item.setAttribute('aria-checked', String(item === choice)));
+      if (choice.getAttribute('aria-checked') === 'true') return;
+      choice.closest('[role="radiogroup"]')?.querySelectorAll('[data-interaction-choice]').forEach(item => { item.setAttribute('aria-checked', String(item === choice)); item.tabIndex = item === choice ? 0 : -1; });
       change(root, {name: choice.name || '', value: choice.value, selected: true});
       return;
     }
@@ -999,16 +1026,17 @@ register('interaction', root => {
     }
     const tab = target?.closest('[data-interaction-tab]');
     if (tab) {
-      const tabs = [...(tab.closest('[data-interaction-tabs]')?.querySelectorAll('[data-interaction-tab]:not(:disabled)') || [])];
-      tabs.forEach((item, index) => {
+      const tabs = [...(tab.closest('[data-interaction-tabs]')?.querySelectorAll('[data-interaction-tab]') || [])];
+      if (tab.getAttribute('aria-selected') === 'true' && tabs.filter(item => item.getAttribute('aria-selected') === 'true').length === 1) return;
+      tabs.forEach(item => {
         const selected = item === tab;
         item.setAttribute('aria-selected', String(selected));
         item.tabIndex = selected ? 0 : -1;
         const panelID = item.getAttribute('aria-controls');
         const panel = panelID ? root.querySelector(`#${CSS.escape(panelID)}`) : null;
         if (panel) panel.hidden = !selected;
-        if (selected) change(root, {name: 'tab', value: item.value || String(index), selected: true});
       });
+      change(root, {name: 'tab', value: tab.value || String(tabs.indexOf(tab)), selected: true});
       return;
     }
     const page = target?.closest('[data-interaction-page]');
@@ -1296,15 +1324,23 @@ register('interaction', root => {
       if (button) button.click(); else change(root, {name: 'page', value, selected: true});
       return;
     }
+    const choice = closest(root, event.target, '[data-interaction-choice]');
+    if (choice && !choice.disabled && root.dataset.elyDisabled !== 'true' && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) {
+      event.preventDefault();
+      const choices = [...choice.closest('[role="radiogroup"]').querySelectorAll('[data-interaction-choice]:not(:disabled)')];
+      const index = choices.indexOf(choice);
+      const next = event.key === 'Home' ? 0 : event.key === 'End' ? choices.length - 1 : (index + (['ArrowRight', 'ArrowDown'].includes(event.key) ? 1 : choices.length - 1)) % choices.length;
+      choices[next]?.click(); choices[next]?.focus(); return;
+    }
     const orientation = tab?.closest('[role="tablist"]')?.getAttribute('aria-orientation');
     const previous = orientation === 'vertical' ? 'ArrowUp' : 'ArrowLeft';
     const nextKey = orientation === 'vertical' ? 'ArrowDown' : 'ArrowRight';
-    if (tab && [previous, nextKey, 'Home', 'End'].includes(event.key)) {
+    if (tab && !tab.disabled && [previous, nextKey, 'Home', 'End'].includes(event.key)) {
       event.preventDefault();
       const tabs = [...tab.closest('[data-interaction-tabs]').querySelectorAll('[data-interaction-tab]:not(:disabled)')];
       const index = tabs.indexOf(tab);
       const next = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : (index + (event.key === nextKey ? 1 : tabs.length - 1)) % tabs.length;
-      tabs[next].click(); tabs[next].focus(); return;
+      tabs[next]?.click(); tabs[next]?.focus(); return;
     }
     const hotkeys = closest(root, event.target, '[data-interaction-hotkeys]');
     if (hotkeys && hotkeys.getAttribute('aria-disabled') !== 'true') { const key = [event.ctrlKey && 'Ctrl', event.metaKey && 'Meta', event.altKey && 'Alt', event.shiftKey && 'Shift', event.key].filter(Boolean).join('+'); hotkeys.nextElementSibling.textContent = key; emit(root, hotkeys.dataset.interactionAction || 'hotkey', {key}); return; }
@@ -1571,6 +1607,12 @@ register('interaction', root => {
     lottieCleanups.push(() => { destroyed = true; controller.abort(); host.removeEventListener('click', clickLottie); host.removeEventListener('input', seekLottie); animation?.destroy(); });
   });
   const contextmenu = event => {
+    const tab = closest(root, event.target, '[data-interaction-tab-context]');
+    if (tab && !tab.disabled && root.dataset.elyDisabled !== 'true') {
+      event.preventDefault();
+      emit(root, tab.dataset.interactionTabContext, {value: tab.value, x: event.clientX, y: event.clientY});
+      return;
+    }
     const surface = closest(root, event.target, '[data-interaction-context]');
     if (!surface) return;
     event.preventDefault();

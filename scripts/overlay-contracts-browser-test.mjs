@@ -13,7 +13,47 @@ try{
  const origin=`http://127.0.0.1:${server.address().port}`,page=await browser.newPage({viewport:{width:1100,height:900}}),errors=[];page.on('pageerror',e=>errors.push(String(e)));await page.goto(origin);await page.waitForFunction(()=>document.querySelectorAll('[data-ely-ready="true"]').length===11);
  const check=async(id,fn)=>{await fn();report.assertions.push(id);console.log(id);};
  const trigger=id=>page.locator(`#${id} [data-interaction-dialog], #${id} [data-interaction-menu], #${id} [data-foundation-dialog-open]`).first(),dialog=id=>page.locator(`#${id} dialog`);
- const focused=async selector=>assert.equal(await page.locator(selector).first().evaluate(n=>n===document.activeElement),true,`${selector} receives focus`);
+ const focused=async (selector,p=page)=>{
+  const state=await p.locator(selector).first().evaluate(node=>({matches:node===document.activeElement,active:document.activeElement?.outerHTML.slice(0,350)}));
+  assert.equal(state.matches,true,`${selector} receives focus; active element: ${state.active}`);
+ };
+ // Complete a close and the next focus handoff in one browser task. Force
+ // either the next trigger (before Enter) or switch (before Space) to own focus
+ // before any queued restoration frame. Await real lifecycle signals, no sleep.
+ const dismissToPopover=async (p,phase)=>{
+  const selector=phase==='trigger'?'#popover [data-interaction-menu]':'#popover [role="switch"]';
+  const state=await p.evaluate(phase=>{
+   const opener=document.querySelector('#dialog [data-interaction-dialog]'),dialog=document.querySelector('#dialog dialog');
+   const popover=document.querySelector('#popover [data-interaction-menu]'),toggle=document.querySelector('#popover [role="switch"]');
+   window.handoffClosed=false;
+   dialog.addEventListener('close',()=>window.handoffClosed=true,{once:true});
+   window.handoffActions=[];
+   document.addEventListener('ely:action',event=>window.handoffActions.push({id:event.detail.id,action:event.detail.action}));
+   opener.focus();opener.click();
+   const dialogFocused=document.activeElement===dialog.querySelector('input');
+   dialog.querySelector('[data-interaction-close]').click();
+   const restored=document.activeElement===opener;
+   popover.focus();if(phase==='switch')popover.click();
+   return {dialogFocused,restored,handoffFocused:document.activeElement===(phase==='trigger'?popover:toggle)};
+  },phase);
+  assert.equal(state.dialogFocused,true,'dialog input initially receives focus');
+  assert.equal(state.restored,true,'native close immediately restores the dialog opener');
+  assert.equal(state.handoffFocused,true,`next popover initially focuses its ${phase}`);
+  await p.waitForFunction(()=>window.handoffClosed);
+  await p.evaluate(()=>new Promise(resolve=>requestAnimationFrame(resolve)));
+  const settled=await p.locator(selector).evaluate(node=>({retained:document.activeElement===node,active:document.activeElement?.outerHTML.slice(0,350)}));
+  assert.equal(settled.retained,true,`dialog close must retain the next popover ${phase} focus; active element: ${settled.active}`);
+  if(phase==='trigger'){
+   assert.equal(await p.locator(selector).getAttribute('aria-expanded'),'false');
+   await focused(selector,p);await p.keyboard.press('Enter');
+   assert.equal(await p.locator(selector).getAttribute('aria-expanded'),'true','Enter activates the still-focused popover trigger');
+  }
+  await focused('#popover [role="switch"]',p);
+  await p.keyboard.down('Space');await focused('#popover [role="switch"]',p);
+  await p.keyboard.up('Space');await focused('#popover [role="switch"]',p);
+  assert.equal(await p.locator('#popover [role="switch"]').getAttribute('aria-checked'),'true','Space activates the still-focused popover switch');
+  assert.deepEqual(await p.evaluate(()=>window.handoffActions),[{id:'popover',action:'toggle'}],'the keyboard handoff emits exactly one popover action');
+ };
  // Tailwind resets dialog margins; a fixed (2,2) may be inside the card.
  // Prove both geometry and native top-layer hit testing before dismissal.
  const backdrop=async id=>{
@@ -38,7 +78,12 @@ try{
  await check('dialog.alert-nondismissible',async()=>{await trigger('alert').click();assert.equal(await page.getByRole('alertdialog',{name:'Confirm deletion'}).count(),1);await page.keyboard.press('Escape');assert.equal(await dialog('alert').evaluate(n=>n.open),true);await backdrop('alert');assert.equal(await dialog('alert').evaluate(n=>n.open),true);await page.locator('#alert [data-interaction-dialog-action]').click();await closed('alert');});
  await check('dialog.generic-dismissible-false',async()=>{await trigger('held').click();assert.equal(await page.locator('#held [data-interaction-close]').count(),0);await page.keyboard.press('Escape');assert.equal(await dialog('held').evaluate(n=>n.open),true);await backdrop('held');assert.equal(await dialog('held').evaluate(n=>n.open),true);await page.locator('#held button[type=submit]').click();await closed('held');});
  await check('dialog.backdrop-dismisses',async()=>{await trigger('dialog').click();await backdrop('dialog');await closed('dialog');});
- await check('popover.keyboard-focus-toggle-event-isolation',async()=>{await trigger('popover').focus();await page.keyboard.press('Enter');assert.equal(await trigger('popover').getAttribute('aria-expanded'),'true');await focused('#popover [role="switch"]');const before=await page.evaluate(()=>window.actions.length);await page.keyboard.press('Space');assert.equal(await page.locator('#popover [role="switch"]').getAttribute('aria-checked'),'true');assert.equal(await page.evaluate(()=>window.actions.length),before+1);assert.equal(await trigger('peer').getAttribute('aria-expanded'),'false');await page.locator('#popover [data-interaction-close]').focus();await page.keyboard.press('Tab');await focused('#popover [role="switch"]');await page.keyboard.press('Shift+Tab');await focused('#popover [data-interaction-close]');await page.keyboard.press('Escape');await focused('#popover [data-interaction-menu]');assert.equal(await trigger('popover').getAttribute('aria-expanded'),'false');});
+ for(const phase of ['trigger','switch'])await check(`dialog.dismiss-to-popover-retains-${phase}-focus`,async()=>{
+  const p=await browser.newPage();p.on('pageerror',e=>errors.push(String(e)));
+  try {await p.goto(origin);await p.waitForFunction(()=>document.querySelector('#popover').dataset.elyReady==='true');await dismissToPopover(p,phase);}
+  finally {await p.close();}
+ });
+ await check('popover.keyboard-focus-toggle-event-isolation',async()=>{await trigger('popover').focus();await focused('#popover [data-interaction-menu]');await page.keyboard.press('Enter');assert.equal(await trigger('popover').getAttribute('aria-expanded'),'true');await focused('#popover [role="switch"]');const before=await page.evaluate(()=>window.actions.length);await page.keyboard.press('Space');await focused('#popover [role="switch"]');assert.equal(await page.locator('#popover [role="switch"]').getAttribute('aria-checked'),'true');assert.equal(await page.evaluate(()=>window.actions.length),before+1);assert.equal(await trigger('peer').getAttribute('aria-expanded'),'false');await page.locator('#popover [data-interaction-close]').focus();await page.keyboard.press('Tab');await focused('#popover [role="switch"]');await page.keyboard.press('Shift+Tab');await focused('#popover [data-interaction-close]');await page.keyboard.press('Escape');await focused('#popover [data-interaction-menu]');assert.equal(await trigger('popover').getAttribute('aria-expanded'),'false');});
  await check('popover.outside-dismissal-repeat',async()=>{for(let i=0;i<3;i++){await trigger('popover').click();await page.locator('#outside').click();assert.equal(await trigger('popover').getAttribute('aria-expanded'),'false');}await trigger('peer').click();await page.locator('#peer [data-interaction-close]').click();await focused('#peer [data-interaction-menu]');});
  await check('disabled-overlays-cannot-open',async()=>{for(const id of ['disabled-dialog','disabled-popover','disabled-drawer']){assert.equal(await trigger(id).isDisabled(),true);await trigger(id).dispatchEvent('click');assert.equal(await page.locator(`#${id} dialog[open], #${id} [data-interaction-popover]:not([hidden])`).count(),0);}});
  await check('drawer.name-dismissal-focus-repeat',async()=>{for(let i=0;i<3;i++){await trigger('drawer').click();assert.equal(await page.getByRole('dialog',{name:'Drawer title'}).count(),1);await page.keyboard.press('Escape');await closed('drawer');await focused('#drawer [data-foundation-dialog-open]');}await trigger('hidden-drawer').click();assert.equal(await page.getByRole('dialog',{name:'Untitled drawer'}).count(),1);assert.equal(await page.locator('#hidden-drawer [data-foundation-dialog-close]').count(),0);await page.keyboard.press('Escape');await closed('hidden-drawer');});
@@ -48,6 +93,25 @@ try{
  ['popover-focus-trap',"document.querySelector('#popover [data-interaction-close]').addEventListener('keydown',e=>e.stopImmediatePropagation())",async p=>{await p.locator('#popover [data-interaction-menu]').click();await p.locator('#popover [data-interaction-close]').focus();await p.keyboard.press('Tab');assert.equal(await p.locator('#popover [role=switch]').evaluate(n=>n===document.activeElement),true);}],
  ['dialog-accessible-name',"document.querySelector('#dialog dialog').removeAttribute('aria-labelledby')",async p=>{await p.locator('#dialog [data-interaction-dialog]').click();assert.equal(await p.getByRole('dialog',{name:'Edit account'}).count(),1);}]
  ]){const p=await browser.newPage();await p.goto(origin);await p.waitForFunction(()=>document.querySelector('#popover').dataset.elyReady==='true');await p.evaluate(mutation);let caught=false;try{await oracle(p);}catch(error){if(error.code!=='ERR_ASSERTION')throw error;caught=true;}assert.equal(caught,true,`Negative control ${name} must be detected`);report.negativeControls.push(name);await p.close();}
+ // Reintroduce exactly the old unguarded deferred refocus. The handoff oracle
+ // must reject it at focus retention, before the subsequent Enter/Space action.
+ for(const phase of ['trigger','switch']){
+  const p=await browser.newPage();
+  try {
+   await p.goto(origin);await p.waitForFunction(()=>document.querySelector('#popover').dataset.elyReady==='true');
+   await p.evaluate(()=>{
+    const root=document.querySelector('#dialog'),opener=root.querySelector('[data-interaction-dialog]');
+    root.addEventListener('click',event=>{if(event.target.closest('[data-interaction-close]'))requestAnimationFrame(()=>opener.focus({preventScroll:true}));});
+   });
+   let caught=false;
+   try {await dismissToPopover(p,phase);} catch(error) {
+    if(error.code!=='ERR_ASSERTION'||!error.message.includes(`dialog close must retain the next popover ${phase} focus`))throw error;
+    caught=true;
+   }
+   assert.equal(caught,true,`Negative control dialog-stale-focus-${phase} must fail the focus-retention oracle`);
+   report.negativeControls.push(`dialog-stale-focus-${phase}`);
+  } finally {await p.close();}
+ }
  assert.deepEqual(errors,[]);report.status='passed';console.log(`Overlay browser contracts: ${report.assertions.length} groups; ${report.negativeControls.length} causal negative controls passed`);
 }catch(error){report.status='failed';report.error=String(error.stack||error);throw error;}
 finally{await mkdir('test-results/contracts',{recursive:true});await writeFile('test-results/contracts/overlay.json',JSON.stringify(report,null,2));await browser?.close();await new Promise(resolve=>server.close(resolve));}
