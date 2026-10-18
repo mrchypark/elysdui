@@ -1,0 +1,43 @@
+name: SearchableMenu confirmation baseline
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  searchable-menu:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        surface: [qualified, chapter, sdui]
+        group: [desired, controls, lifecycle]
+    env:
+      SEARCHABLE_MENU_SURFACE: ${{ matrix.surface }}
+      SEARCHABLE_MENU_GROUP: ${{ matrix.group }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: node scripts/searchable-menu-confirmation-oracles-test.mjs
+      - run: node scripts/searchable-menu-confirmation-evidence-test.mjs
+      - run: go test ./ui/gohtmx/tests/fixtures/searchablefixture ./ui/gohtmx/tests/fixtures/searchable-menu-confirmation ./adapters/gohtmx/tests/fixtures/searchable-menu-confirmation -count=1
+      - run: npx playwright install --with-deps chromium
+      # Independent controls still run when the unchanged runtime fails desired
+      # keyphase/modifier assertions. No expected-red success conversion.
+      - run: node scripts/searchable-menu-confirmation-run.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: searchable-menu-${{ matrix.surface }}-${{ matrix.group }}
+          path: |
+            test-results/contracts/searchable-menu-confirmation-*.json
+            test-results/contracts/searchable-menu-fixtures/
+          if-no-files-found: error
