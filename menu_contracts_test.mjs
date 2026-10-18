@@ -141,6 +141,27 @@ check('repeated context opening preserves the original focus owner',()=>{
  const handler=runInNewContext('(event)=>{'+slice(source,"    const surface = closest(root, event.target, '[data-interaction-context]');",'  const pointerover = event => {'),{root:f.root,closest:()=>f.surface,CSS:{escape:s=>s},window:{innerWidth:320,innerHeight:200},menu:f.menu,menuReturnFocus:f.returns,close:()=>f.menu(f.root,'menu',false)});
  handler({target:{closest:()=>null},clientX:300,clientY:180,preventDefault(){}});f.menu(f.root,'menu',false,true);assert.equal(document.activeElement,f.prior,'repeat context open must preserve its original focus owner');
 });
+check('stationary menu boundaries preserve keyboard confirmation and child selection',()=>{
+ let active,checked=true;
+ const root={},calls=[],menuHost={};
+ const parentRow={parentElement:{querySelectorAll:()=>[parent]},contains:node=>node===parent,closest:()=>menuHost};
+ const leafRow={parentElement:parentRow.parentElement,contains:()=>false,closest:()=>menuHost};
+ const parent={row:parentRow,disabled:false,dataset:{interactionMenu:'sub'},expanded:'false',getAttribute(){return this.expanded;}};
+ const child={disabled:false,closest:()=>null,click(){}},ruler={row:leafRow,disabled:false,closest:()=>null,click(){checked=!checked;}},label={row:parentRow,trigger:parent};
+ const closest=(_root,target,selector)=>selector==='[data-interaction-quickaction]'?null:selector==='.ely-interaction__menu-row'?target.row:selector==='.ely-interaction__menu-row > [data-interaction-menu]'?(target===parent?parent:target.trigger):selector==='.ely-interaction--menus .ely-interaction__menu-row'&&target.row?.closest()?target.row:null;
+ const hover=runInNewContext(slice(source,'  const pointerover = event => {',"  root.querySelectorAll('[data-interaction-search-menu] [data-interaction-filter]')")+'\n({pointerover,move:typeof menuPointerMove==="function"?menuPointerMove:null})',{root,closest,menu:(_root,_id,open)=>{calls.push(open);parent.expanded=String(open);if(open)active=child;},close(){}});
+ const start=slice(source,'  let menuConfirmKey','    if (sourceFamily.keydown(event)) return;'),end=slice(source,'  const keyup = event => {',"  root.addEventListener('pointerdown', holdStart)");
+ const keys=runInNewContext(start+'};\n'+end+'\n({keydown,keyup})',{root:{isConnected:true,contains:()=>true},closest:(_root,target)=>target,holdEnd(){}});
+ const key=()=>({target:active,key:' ',preventDefault(){},stopPropagation(){}});
+ active=ruler;keys.keydown(key());hover.pointerover({type:'pointerover',target:label,clientX:831.32,clientY:189,movementX:0,movementY:0});keys.keyup(key());
+ assert.equal(checked,false,'stationary pointer must not steal checkbox keyboard confirmation');assert.equal(active,ruler);assert.deepEqual(calls,[]);
+ hover.move({type:'pointermove',target:label,clientX:831.5,clientY:189,movementX:0,movementY:0});assert.equal(active,child,'actual pointermove must open enabled nested rows, including fractional movement');assert.equal(parent.expanded,'true');
+ hover.pointerover({type:'pointerover',target:ruler});assert.equal(parent.expanded,'true','stationary sibling boundary must not close the keyboard-owned child');
+ hover.move({type:'pointermove',target:ruler});assert.equal(parent.expanded,'false','pointer movement to sibling must close the old child');
+ parent.disabled=true;const count=calls.length;hover.move({type:'pointermove',target:parent});assert.equal(calls.length,count,'disabled submenu must not open on movement');
+ parent.disabled=false;parentRow.closest=()=>null;hover.pointerover({type:'pointerover',target:parent});assert.equal(parent.expanded,'true','other families retain their existing pointerover path');
+ assert(source.includes("root.addEventListener('pointermove', menuPointerMove);"));assert(source.includes("root.removeEventListener('pointermove', menuPointerMove);"));
+});
 check('synthetic context fixture delivers a coordinate-bearing MouseEvent',()=>{
  class MouseEvent extends Event {constructor(type,init){super(type,init);this.clientX=init.clientX;this.clientY=init.clientY;}}
  const callback=runInNewContext(slice(harness,'const dispatchContextPointer =','const report =')+'\ndispatchContextPointer',{MouseEvent,Event,window:{}});

@@ -7,6 +7,7 @@ import {chromium} from 'playwright';
 
 const mutation = process.env.MENU_NEGATIVE_CONTROL || '';
 const mutations = {
+  'stationary-hover': {asset:'/assets/ely-api-interaction.js', from:"if (row?.closest('.ely-interaction--menus') && event.type !== 'pointermove') return;", to:'// restored boundary-event submenu selection', oracle:'stationary pointer must not steal checkbox keyboard confirmation'},
   'radio-scope': {asset:'/assets/ely-api-interaction.js', from:`item.closest('[role="menu"]') === panel && item.dataset.interactionMenuRadio`, to:'item.dataset.interactionMenuRadio', oracle:'parent selection must preserve nested radio group'},
   'action-order': {asset:'/assets/ely-api.js', from:"if (button.dataset.interactionMenuAction !== undefined) return;", to:'// restored premature generic menu dispatch', oracle:'host action must observe committed checkbox and dismissed menu'},
   'context-focus': {asset:'/assets/ely-api-interaction.js', from:'(previous?.isConnected ? previous : context || trigger).focus();', to:'trigger.focus();', oracle:'context dismissal must restore original focus'},
@@ -181,7 +182,7 @@ try {
         await reset();await page.keyboard.press('Enter');assert.deepEqual((await logs()).actions.map(({value})=>value),['child']);assert.equal((await logs()).changes.length,0);assert.equal(await hidden('checks'),true);
         await open('checks');await row('checks','ruler').focus();
         if(mode==='instant')await page.keyboard.press('Space');else await page.keyboard.press('Space',{delay:80});
-        assert.equal(await row('checks','ruler').getAttribute('aria-checked'),'false');
+        assert.equal(await row('checks','ruler').getAttribute('aria-checked'),'false','stationary pointer must not steal checkbox keyboard confirmation');
         report.checkboxKeyboardTrials.push({mode,trial,status:'passed'});
       }
       report.checkboxModeTraces[mode]=await page.evaluate(()=>readMenuCheckTrace());
@@ -295,14 +296,14 @@ try {
   });
   await check('menu.real-htmx-inner-and-outer-swap-disposal-and-remount',async()=>{
     for(const style of ['innerHTML','outerHTML']) {
-      await open('menu-a');await page.evaluate(()=>{window.oldRoot=document.querySelector('#menu-a');window.oldPanel=oldRoot.querySelector('[role="menu"]');window.oldTrigger=oldRoot.querySelector('[data-interaction-menu]');window.oldCheck=oldRoot.querySelector('[value="sidebar"]');window.oldChecked=oldCheck.getAttribute('aria-checked');window.menuCleanups=0;oldRoot.addEventListener('ely:cleanup',()=>window.menuCleanups++,{once:true});});
+      await open('menu-a');await page.evaluate(()=>{window.oldRoot=document.querySelector('#menu-a');window.oldPanel=oldRoot.querySelector('[role="menu"]');window.oldTrigger=oldRoot.querySelector('[data-interaction-menu]');window.oldSub=oldRoot.querySelector('[value="recent"]');window.oldCheck=oldRoot.querySelector('[value="sidebar"]');window.oldChecked=oldCheck.getAttribute('aria-checked');window.menuCleanups=0;oldRoot.addEventListener('ely:cleanup',()=>window.menuCleanups++,{once:true});});
       // #before has no hx-swap, so this truly exercises the default innerHTML.
       await page.evaluate(style=>htmx.ajax('GET','/fragment',style==='innerHTML'?{source:'#before',target:'#menu-a',select:'#menu-a > *'}:{source:'#replace',target:'#menu-a',swap:style}),style);
       await page.waitForFunction(()=>document.querySelector('#menu-a')?.dataset.elyReady==='true');
       assert.equal(await page.evaluate(()=>oldPanel.hidden),true,'teardown must close the old open menu');assert.equal(await page.evaluate(()=>oldTrigger.getAttribute('aria-expanded')),'false');assert.equal(await page.evaluate(()=>menuCleanups),1);
       assert.equal(await page.evaluate(()=>document.querySelector('#menu-a')===oldRoot),style==='innerHTML');
       if(style==='outerHTML')await page.evaluate(()=>bindMenu(document.querySelector('#menu-a')));
-      await reset();await page.evaluate(()=>{oldTrigger.click();oldCheck.click();});assert.equal(await page.evaluate(()=>oldCheck.getAttribute('aria-checked')===oldChecked),true);assert.equal((await logs()).actions.length,0);
+      await reset();await page.evaluate(()=>{oldTrigger.click();oldCheck.click();oldSub.dispatchEvent(new PointerEvent('pointermove',{bubbles:true,clientX:100,clientY:100}));});assert.equal(await page.evaluate(()=>oldCheck.getAttribute('aria-checked')===oldChecked),true);assert.equal((await logs()).actions.length,0);assert.equal(await page.evaluate(()=>oldSub.getAttribute('aria-expanded')),'false','disposed menu movement listener must stay inert');
       await open('menu-a');await row('menu-a','sidebar').focus();await page.keyboard.press('Space');assert.equal((await logs()).actions.length,1,'fresh menu must notify exactly once after HTMX');assert.equal((await logs()).changes.length,1);assert.equal(await row('menu-b','sidebar').getAttribute('aria-checked'),'false');
     }
     assert.deepEqual(report.requests,[{method:'GET',path:'/fragment'},{method:'GET',path:'/fragment'}]);
