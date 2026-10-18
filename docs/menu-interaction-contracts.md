@@ -78,8 +78,8 @@ HTMX. The [browser suite](../scripts/menu-contracts-browser-test.mjs) observes:
 JSON evidence is always written to `test-results/contracts/menu*.json`, including
 failures. It records the exact commit, dirty state, fixture and served-source
 hashes, both source pins, requests, passed requirements, and the failing assertion.
-The seven source-level causal mutants are `radio-scope`, `action-order`,
-`context-focus`, `placement`, `cleanup`, `native-focus`, and `outside-focus`. A mutant counts as killed only when
+The eight source-level causal mutants are `radio-scope`, `action-order`,
+`context-focus`, `placement`, `cleanup`, `native-focus`, `outside-focus`, and `stationary-hover`. A mutant counts as killed only when
 its designated assertion fails; an unrelated exception or timeout is a failed
 run. The coordinator runs actual browser proof in CI. Local VM/Go success does
 not imply browser success.
@@ -98,10 +98,42 @@ disconnect, or teardown.
 ```sh
 node menu_contracts_test.mjs
 node scripts/menu-contracts-browser-test.mjs
-for mutant in radio-scope action-order context-focus placement cleanup native-focus outside-focus; do
+for mutant in radio-scope action-order context-focus placement cleanup native-focus outside-focus stationary-hover; do
   MENU_NEGATIVE_CONTROL="$mutant" node scripts/menu-contracts-browser-test.mjs
 done
 ```
+
+## Stationary-pointer keyboard recovery
+
+Both source pins select submenu rows on mouse movement (`src/menus/draw.rs`,
+line 122 at `49ed1f8`, line 223 at `da3fdca`). A boundary event caused by showing
+new content beneath a stationary pointer must not take keyboard selection.
+Only menu rows now use `pointermove`; quick-action, menubar-host and navigation
+pointer-over paths remain unchanged. This does not implement delayed hover/aim.
+
+The post-merge main test at `ffd821872611bea858336e3b683bb980d5562063`
+(run `39131907308`, artifact `12138705427`) failed before the context-focus
+mutant's intended oracle. That report remains a failed run, not a mutant kill.
+Diagnostic run `39132730679` at test merge
+`0d30595f095c24ade4dea8fe611c8f3670457f95` reproduced the same failure on positive
+trial 7. Its untruncated trace records native Space keydown on Ruler, a trusted
+zero-movement `pointerover`, submenu-child focus, then Space keyup on that child.
+The checkbox stayed checked. The artifact SHA-256 is
+`35dcaa20d54d384abc530760d2c8182f122d34020f152f9af185aa71ae3386e8`.
+Run `39133061769` (artifact `12138611749`, tree
+`797de680d8c1b5b49718af1a24f1b806d8e7a2e1`) independently repeated the positive
+failure on instant trial 3; artifact SHA-256 is
+`ca416148d8a7e6533e7f5b792a76624f3c229ed6db5a670a6e600ad9a8ae390d`.
+
+The VM replays that event order against extracted production handlers, and checks
+that boundary events neither open a child nor close a keyboard-owned sibling.
+Actual movement still opens enabled children and closes an old sibling; disabled
+rows stay inert. The browser keeps twenty instant and twenty 80 ms held-Space
+trials, with unchanged state assertions, bounded per-check/per-mode traces and
+failure retention. The `stationary-hover` mutant removes only the menu-row
+boundary guard and must fail the named checkbox-confirmation oracle. Actual
+fixed-head browser success and this eighth kill require CI evidence; VM success
+alone is not proof of native scheduling.
 
 ## Explicitly remaining contracts
 
@@ -112,7 +144,7 @@ These are implementation requirements, not evidence supplied by this increment:
 2. The newer `Menu::buttons` horizontal icon-button row and `across` traversal in
    `src/menus/model.rs` have no web row representation in this increment.
 3. Newer delayed hover/aim behavior in `src/menus/aim.rs`, `draw.rs`, and `menu.rs`
-   is not implemented by immediate web pointerover opening.
+   is not implemented by immediate web pointer-movement opening.
 4. Native `settle` preserves row identity during live owner updates. This suite
    verifies complete HTMX replacement, not in-place row mutation while open.
 5. Root menus remain host-relative and recheck collisions on scroll/resize.

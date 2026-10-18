@@ -1705,6 +1705,9 @@ register('interaction', root => {
     const quick = closest(root, event.target, '[data-interaction-quickaction]');
     if (quick && !quick.disabled) quick.closest('.ely-interaction__quick').querySelectorAll('[data-interaction-quickaction]').forEach(action => { action.tabIndex = action === quick ? 0 : -1; });
     const row = closest(root, event.target, '.ely-interaction__menu-row');
+    // Layout can reveal a row beneath a stationary pointer. Only movement,
+    // as in upstream on_mouse_move, may take selection back from the keyboard.
+    if (row?.closest('.ely-interaction--menus') && event.type !== 'pointermove') return;
     if (row) row.parentElement.querySelectorAll(':scope > .ely-interaction__menu-row > [data-interaction-menu]').forEach(trigger => {
       if (!row.contains(trigger)) menu(root, trigger.dataset.interactionMenu, false);
     });
@@ -1716,6 +1719,9 @@ register('interaction', root => {
     if (!trigger || trigger.disabled || trigger.getAttribute('aria-expanded') === 'true') return;
     const navigation = trigger.closest('.ely-interaction__navigation-menu');
     if (navigation?.querySelector('[data-interaction-menu][aria-expanded="true"]')) { close(); menu(root, trigger.dataset.interactionMenu, true); }
+  };
+  const menuPointerMove = event => {
+    if (closest(root, event.target, '.ely-interaction--menus .ely-interaction__menu-row')) pointerover(event);
   };
   root.querySelectorAll('[data-interaction-search-menu] [data-interaction-filter]').forEach(field => input({target: field}));
   root.querySelectorAll('.ely-interaction__pie').forEach(pie => {
@@ -1738,7 +1744,7 @@ register('interaction', root => {
   const revealLazy = list => { const bounds=list.getBoundingClientRect(); let count=0; list.querySelectorAll('[data-interaction-lazy-row]:not([data-interaction-lazy-loaded])').forEach(row=>{ const box=row.getBoundingClientRect(); if(box.bottom<=bounds.top || box.top>=bounds.bottom)return; row.setAttribute('data-interaction-lazy-loaded',''); row.querySelector('.ely-interaction__skeleton')?.setAttribute('hidden',''); row.querySelector('p').hidden=false; count++; }); if(count)change(root,{name:'lazy',value:'loaded',count}); };
   const scroll = event => { const list=closest(root,event.target,'[data-interaction-lazy]'); if(list)revealLazy(list); };
   root.querySelectorAll('[data-interaction-lazy]').forEach(list=>{ revealLazy(list); if(typeof ResizeObserver==='function'){const observer=new ResizeObserver(()=>revealLazy(list));observer.observe(list);lottieCleanups.push(()=>observer.disconnect());} });
-  root.addEventListener('click', click); root.addEventListener('scroll', scroll, true); root.addEventListener('input', input); root.addEventListener('submit', submit); root.addEventListener('keydown', keydown); root.addEventListener('ely:result', result); root.addEventListener('ely:error', error); root.addEventListener('contextmenu', contextmenu); root.addEventListener('pointerover', pointerover);
+  root.addEventListener('click', click); root.addEventListener('scroll', scroll, true); root.addEventListener('input', input); root.addEventListener('submit', submit); root.addEventListener('keydown', keydown); root.addEventListener('ely:result', result); root.addEventListener('ely:error', error); root.addEventListener('contextmenu', contextmenu); root.addEventListener('pointerover', pointerover); root.addEventListener('pointermove', menuPointerMove);
   root.addEventListener('dragend', dragend); root.addEventListener('dragstart', dragstart); root.addEventListener('dragover', dragover); root.addEventListener('drop', drop);
   const keyup = event => {
     if (menuConfirmKey === event.key) {
@@ -1790,5 +1796,5 @@ register('interaction', root => {
     if (!root.contains(event.target)) close();
   };
   document.addEventListener('pointerdown', outside);
-  return () => { close(); clearReorderPreview(); timers.forEach(clearTimeout); lottieCleanups.forEach(cleanup => cleanup()); root.removeEventListener('click', click); root.removeEventListener('scroll', scroll, true); root.removeEventListener('input', input); root.removeEventListener('keydown', keydown); root.removeEventListener('ely:result', result); root.removeEventListener('ely:error', error); root.removeEventListener('contextmenu', contextmenu); root.removeEventListener('pointerover', pointerover); root.removeEventListener('dragend', dragend); root.removeEventListener('dragstart', dragstart); root.removeEventListener('dragover', dragover); root.removeEventListener('drop', drop); root.removeEventListener('pointerdown', lightboxPointerDownHandler); root.removeEventListener('pointerup', lightboxPointerUpHandler); root.removeEventListener('pointerdown', holdStart); root.removeEventListener('pointerup', holdEnd); root.removeEventListener('pointercancel', holdEnd); root.removeEventListener('keyup', keyup); document.removeEventListener('pointerdown', outside); };
+  return () => { close(); clearReorderPreview(); timers.forEach(clearTimeout); lottieCleanups.forEach(cleanup => cleanup()); root.removeEventListener('click', click); root.removeEventListener('scroll', scroll, true); root.removeEventListener('input', input); root.removeEventListener('keydown', keydown); root.removeEventListener('ely:result', result); root.removeEventListener('ely:error', error); root.removeEventListener('contextmenu', contextmenu); root.removeEventListener('pointerover', pointerover); root.removeEventListener('pointermove', menuPointerMove); root.removeEventListener('dragend', dragend); root.removeEventListener('dragstart', dragstart); root.removeEventListener('dragover', dragover); root.removeEventListener('drop', drop); root.removeEventListener('pointerdown', lightboxPointerDownHandler); root.removeEventListener('pointerup', lightboxPointerUpHandler); root.removeEventListener('pointerdown', holdStart); root.removeEventListener('pointerup', holdEnd); root.removeEventListener('pointercancel', holdEnd); root.removeEventListener('keyup', keyup); document.removeEventListener('pointerdown', outside); };
 });

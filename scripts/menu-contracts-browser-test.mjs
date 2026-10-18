@@ -7,6 +7,7 @@ import {chromium} from 'playwright';
 
 const mutation = process.env.MENU_NEGATIVE_CONTROL || '';
 const mutations = {
+  'stationary-hover': {asset:'/assets/ely-api-interaction.js', from:"if (row?.closest('.ely-interaction--menus') && event.type !== 'pointermove') return;", to:'// restored boundary-event submenu selection', oracle:'stationary pointer must not steal checkbox keyboard confirmation'},
   'radio-scope': {asset:'/assets/ely-api-interaction.js', from:`item.closest('[role="menu"]') === panel && item.dataset.interactionMenuRadio`, to:'item.dataset.interactionMenuRadio', oracle:'parent selection must preserve nested radio group'},
   'action-order': {asset:'/assets/ely-api.js', from:"if (button.dataset.interactionMenuAction !== undefined) return;", to:'// restored premature generic menu dispatch', oracle:'host action must observe committed checkbox and dismissed menu'},
   'context-focus': {asset:'/assets/ely-api-interaction.js', from:'(previous?.isConnected ? previous : context || trigger).focus();', to:'trigger.focus();', oracle:'context dismissal must restore original focus'},
@@ -14,6 +15,21 @@ const mutations = {
   'cleanup': {asset:'/assets/ely-api-interaction.js', from:'return () => { close(); clearReorderPreview();', to:'return () => { clearReorderPreview();', oracle:'teardown must close the old open menu'},
   'native-focus': {asset:'/assets/ely-api-interaction.js', from:'if (panel.contains(event.relatedTarget)) return;', to:'// restored transient-activeElement focusout dismissal', oracle:'clicking a hover-open submenu keeps it open'},
   'outside-focus': {asset:'/assets/ely-api-interaction.js', from:'document.activeElement === document.body) opener.focus({preventScroll: true});', to:'document.activeElement === document.body) { /* removed gesture-owned focus return */ }', oracle:'blank pointer dismissal must return focus after native default'},
+};
+// Observe the current requirement without changing focus, pointer position or
+// production handlers. Always retain the final (including failing) check trace.
+const traceMenuCheck = name => {
+  const describe = node => node ? {tag:node.tagName,id:node.id,value:node.value,role:node.getAttribute?.('role'),checked:node.getAttribute?.('aria-checked'),expanded:node.getAttribute?.('aria-expanded'),menu:node.closest?.('[role="menu"]')?.id,root:node.closest?.('[data-ely-family]')?.id} : null;
+  const snapshot = () => ({active:describe(document.activeElement),openMenus:[...document.querySelectorAll('[role="menu"]:not([hidden])')].map(panel=>panel.id),pointer:window.menuTracePointer,pointerTarget:window.menuTracePointer?describe(document.elementFromPoint(window.menuTracePointer.x,window.menuTracePointer.y)):null});
+  const trace={name,before:snapshot(),events:[],truncated:false},listeners=[];
+  const record=(event,phase)=>{if(trace.events.length>=300){trace.truncated=true;return;}trace.events.push({type:event.type,phase,key:event.key,code:event.code,button:event.button,buttons:event.buttons,clientX:event.clientX,clientY:event.clientY,movementX:event.movementX,movementY:event.movementY,isTrusted:event.isTrusted,defaultPrevented:event.defaultPrevented,target:describe(event.target),relatedTarget:describe(event.relatedTarget),...snapshot()});};
+  for(const type of ['pointermove','pointerover','pointerout','pointerdown','pointerup','pointercancel','mousedown','mouseup','click','contextmenu','blur','focusout','focus','focusin','keydown','keyup']) {
+    const listener=event=>{if(type.startsWith('pointer'))window.menuTracePointer={x:event.clientX,y:event.clientY};record(event,'capture');queueMicrotask(()=>record(event,'microtask'));};
+    document.addEventListener(type,listener,true);listeners.push([type,listener]);
+  }
+  window.resetMenuCheckTrace=trial=>{trace.trial=trial;trace.before=snapshot();trace.events=[];trace.truncated=false;};
+  window.readMenuCheckTrace=()=>({...trace,after:snapshot(),log:window.menuLog});
+  window.stopMenuCheckTrace=()=>{for(const [type,listener] of listeners)document.removeEventListener(type,listener,true);const result=window.readMenuCheckTrace();delete window.resetMenuCheckTrace;delete window.readMenuCheckTrace;delete window.stopMenuCheckTrace;return result;};
 };
 // Playwright 1.57's dispatchEvent map omits contextmenu and otherwise creates a
 // plain Event, which discards clientX/clientY. Keep this browser callback explicit
@@ -77,7 +93,11 @@ try {
     document.addEventListener('ely:result',e=>menuLog.results.push({id:e.detail.id,action:e.detail.action,result:e.detail.result}));
     document.addEventListener('ely:error',e=>menuLog.errors.push({id:e.detail.id,action:e.detail.action,message:e.detail.error?.message}));
   });
-  const check=async(name,fn)=>{await fn();report.checks.push(name);console.log(name);};
+  const check=async(name,fn)=>{
+    await page.evaluate(traceMenuCheck,name);
+    try {await fn();report.checks.push(name);console.log(name);}
+    finally {report.lastCheckTrace=await page.evaluate(()=>stopMenuCheckTrace());(report.checkTraces ||= {})[name]=report.lastCheckTrace;}
+  };
   const root=id=>page.locator(`#${id}`);
   const trigger=id=>root(id).locator('[data-interaction-menu]').first();
   const panel=id=>root(id).locator('[role="menu"]').first();
@@ -150,9 +170,23 @@ try {
     await page.keyboard.press('Escape');
   });
   await check('checkbox-menu.submenu-is-a-trigger-not-an-inherited-check',async()=>{
-    await open('checks');await row('checks','parent').click();assert.equal(await row('checks','parent').getAttribute('aria-expanded'),'true');await focused('#checks [value="child"]');
-    await reset();await page.keyboard.press('Enter');assert.deepEqual((await logs()).actions.map(({value})=>value),['child']);assert.equal((await logs()).changes.length,0);assert.equal(await hidden('checks'),true);
-    await open('checks');await row('checks','ruler').focus();await page.keyboard.press('Space');assert.equal(await row('checks','ruler').getAttribute('aria-checked'),'false');
+    report.checkboxKeyboardTrials=[];report.checkboxModeTraces={};
+    for(const mode of ['instant','held-space']) {
+      for(let trial=1;trial<=20;trial++) {
+        // Restore the caller's initial checked input between diagnostic trials;
+        // do not move the pointer. Preserve instant presses and separately allow
+        // a normal held key to span rendering/native boundary-event delivery.
+        await row('checks','ruler').evaluate(node=>node.setAttribute('aria-checked','true'));
+        await page.evaluate(checkpoint=>resetMenuCheckTrace(checkpoint),{mode,trial});
+        await open('checks');await row('checks','parent').click();assert.equal(await row('checks','parent').getAttribute('aria-expanded'),'true');await focused('#checks [value="child"]');
+        await reset();await page.keyboard.press('Enter');assert.deepEqual((await logs()).actions.map(({value})=>value),['child']);assert.equal((await logs()).changes.length,0);assert.equal(await hidden('checks'),true);
+        await open('checks');await row('checks','ruler').focus();
+        if(mode==='instant')await page.keyboard.press('Space');else await page.keyboard.press('Space',{delay:80});
+        assert.equal(await row('checks','ruler').getAttribute('aria-checked'),'false','stationary pointer must not steal checkbox keyboard confirmation');
+        report.checkboxKeyboardTrials.push({mode,trial,status:'passed'});
+      }
+      report.checkboxModeTraces[mode]=await page.evaluate(()=>readMenuCheckTrace());
+    }
   });
   await check('dropdown.hosts-primary-closes-before-host-empty-focus',async()=>{
     for(const id of ['dropdown','overflow']) {await trigger(id).click();await focused(`#${id} [value="open"]`);await reset();await page.keyboard.press('Enter');assert.deepEqual((await logs()).actions.map(({action})=>action),['open-file']);assert.equal(await hidden(id),true);}
@@ -262,14 +296,14 @@ try {
   });
   await check('menu.real-htmx-inner-and-outer-swap-disposal-and-remount',async()=>{
     for(const style of ['innerHTML','outerHTML']) {
-      await open('menu-a');await page.evaluate(()=>{window.oldRoot=document.querySelector('#menu-a');window.oldPanel=oldRoot.querySelector('[role="menu"]');window.oldTrigger=oldRoot.querySelector('[data-interaction-menu]');window.oldCheck=oldRoot.querySelector('[value="sidebar"]');window.oldChecked=oldCheck.getAttribute('aria-checked');window.menuCleanups=0;oldRoot.addEventListener('ely:cleanup',()=>window.menuCleanups++,{once:true});});
+      await open('menu-a');await page.evaluate(()=>{window.oldRoot=document.querySelector('#menu-a');window.oldPanel=oldRoot.querySelector('[role="menu"]');window.oldTrigger=oldRoot.querySelector('[data-interaction-menu]');window.oldSub=oldRoot.querySelector('[value="recent"]');window.oldCheck=oldRoot.querySelector('[value="sidebar"]');window.oldChecked=oldCheck.getAttribute('aria-checked');window.menuCleanups=0;oldRoot.addEventListener('ely:cleanup',()=>window.menuCleanups++,{once:true});});
       // #before has no hx-swap, so this truly exercises the default innerHTML.
       await page.evaluate(style=>htmx.ajax('GET','/fragment',style==='innerHTML'?{source:'#before',target:'#menu-a',select:'#menu-a > *'}:{source:'#replace',target:'#menu-a',swap:style}),style);
       await page.waitForFunction(()=>document.querySelector('#menu-a')?.dataset.elyReady==='true');
       assert.equal(await page.evaluate(()=>oldPanel.hidden),true,'teardown must close the old open menu');assert.equal(await page.evaluate(()=>oldTrigger.getAttribute('aria-expanded')),'false');assert.equal(await page.evaluate(()=>menuCleanups),1);
       assert.equal(await page.evaluate(()=>document.querySelector('#menu-a')===oldRoot),style==='innerHTML');
       if(style==='outerHTML')await page.evaluate(()=>bindMenu(document.querySelector('#menu-a')));
-      await reset();await page.evaluate(()=>{oldTrigger.click();oldCheck.click();});assert.equal(await page.evaluate(()=>oldCheck.getAttribute('aria-checked')===oldChecked),true);assert.equal((await logs()).actions.length,0);
+      await reset();await page.evaluate(()=>{oldTrigger.click();oldCheck.click();oldSub.dispatchEvent(new PointerEvent('pointermove',{bubbles:true,clientX:100,clientY:100}));});assert.equal(await page.evaluate(()=>oldCheck.getAttribute('aria-checked')===oldChecked),true);assert.equal((await logs()).actions.length,0);assert.equal(await page.evaluate(()=>oldSub.getAttribute('aria-expanded')),'false','disposed menu movement listener must stay inert');
       await open('menu-a');await row('menu-a','sidebar').focus();await page.keyboard.press('Space');assert.equal((await logs()).actions.length,1,'fresh menu must notify exactly once after HTMX');assert.equal((await logs()).changes.length,1);assert.equal(await row('menu-b','sidebar').getAttribute('aria-checked'),'false');
     }
     assert.deepEqual(report.requests,[{method:'GET',path:'/fragment'},{method:'GET',path:'/fragment'}]);
