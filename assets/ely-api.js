@@ -1,6 +1,26 @@
 const families = new Map();
 const mounted = new Map();
-const hostBindings = new WeakMap();
+// Track host-only bindings too: a family may be loaded after mount().
+const hostBindings = new Map();
+const swapContexts = new WeakMap();
+const pendingSwaps = new Map();
+
+// Stop before HTMX mutates descendants: family cleanup may need the old DOM.
+// Retained roots keep their host handlers, but never an in-flight old result.
+function stop(root) {
+  hostBindings.get(root)?.invalidate();
+  const cleanups = mounted.get(root);
+  if (!cleanups) return;
+  mounted.delete(root);
+  root.dispatchEvent(new CustomEvent('ely:cleanup'));
+  cleanups.forEach(cleanup => cleanup());
+  delete root.dataset.elyReady;
+}
+
+function prune() {
+  for (const root of mounted.keys()) if (!root.isConnected) stop(root);
+  for (const [root, cleanup] of hostBindings) if (!root.isConnected) cleanup();
+}
 
 export function emit(root, action, detail = {}) {
   if (root.dataset.elyDisabled === 'true') return false;
@@ -18,7 +38,7 @@ function start(scope = document) {
   const roots = [...scope.querySelectorAll('[data-ely-family]')];
   if (scope instanceof Element && scope.matches('[data-ely-family]')) roots.unshift(scope);
   roots.forEach(root => {
-    if (mounted.has(root)) return;
+    if (mounted.has(root) || pendingSwaps.has(root)) return;
     const initialize = families.get(root.dataset.elyFamily);
     if (!initialize) return;
     const cleanups = [];
@@ -90,7 +110,7 @@ export function mount(root, handlers = {}) {
     const callback = handlers.actions?.[event.detail.action] || handlers.onAction;
     if (!callback) return;
     const operation = event.detail.action;
-    const revision = (pending.get(operation) || 0) + 1;
+    const revision = Symbol(operation);
     pending.set(operation, revision);
     try {
       const result = await callback(event.detail, root);
@@ -105,19 +125,60 @@ export function mount(root, handlers = {}) {
   root.addEventListener('ely:action', action);
   root.addEventListener('ely:change', change);
   const cleanup = () => { pending.clear(); root.removeEventListener('ely:action', action); root.removeEventListener('ely:change', change); if (hostBindings.get(root) === cleanup) hostBindings.delete(root); };
+  cleanup.invalidate = () => pending.clear();
   hostBindings.set(root, cleanup);
   start(root);
   return cleanup;
 }
 
 document.addEventListener('DOMContentLoaded', () => start());
-document.addEventListener('htmx:after:swap', () => start());
-new MutationObserver(() => {
-  for (const [root, cleanups] of mounted) {
-    if (root.isConnected) continue;
-    root.dispatchEvent(new CustomEvent('ely:cleanup'));
-    cleanups.forEach(cleanup => cleanup());
-    hostBindings.get(root)?.();
-    mounted.delete(root);
+document.addEventListener('htmx:before:swap', event => {
+  // Bundled HTMX exposes the actual main and OOB targets in tasks. The event
+  // target is the request source, which need not be the swapped element.
+  const affected = new Set();
+  for (const task of event.detail?.tasks || []) {
+    const target = typeof task.target === 'string' ? document.querySelector(task.target) : task.target;
+    const style = typeof task.swapSpec === 'string' ? task.swapSpec.split(/\s+/)[0] : task.swapSpec?.style;
+    if (!(target instanceof Element) || !['innerHTML', 'outerHTML', 'outerSync', 'textContent', 'delete'].includes(style)) continue;
+    const owner = target.closest('[data-ely-family]');
+    if (owner) affected.add(owner);
+    target.querySelectorAll('[data-ely-family]').forEach(root => affected.add(root));
   }
-}).observe(document.documentElement, { childList: true, subtree: true });
+  // A swap can be delayed or await a view transition. Unrelated startup/swap
+  // notifications must not rebuild cached references until this swap completes.
+  const context = event?.detail?.ctx;
+  if (context) {
+    const roots = swapContexts.get(context) || new Set();
+    affected.forEach(root => {
+      roots.add(root);
+      if (!pendingSwaps.has(root)) pendingSwaps.set(root, new Set());
+      pendingSwaps.get(root).add(context);
+    });
+    swapContexts.set(context, roots);
+  }
+  // Children first even when OOB tasks list a nested target before its parent.
+  const depth = element => {
+    let value = 0;
+    for (let parent = element.parentElement; parent; parent = parent.parentElement) value++;
+    return value;
+  };
+  const ordered = [...affected].sort((a, b) => depth(b) - depth(a));
+  ordered.forEach(stop);
+});
+const restart = event => {
+  const context = event?.detail?.ctx;
+  if (context) {
+    for (const root of swapContexts.get(context) || []) {
+      const pending = pendingSwaps.get(root);
+      pending?.delete(context);
+      if (!pending?.size) pendingSwaps.delete(root);
+    }
+    swapContexts.delete(context);
+  }
+  prune();
+  start();
+};
+document.addEventListener('htmx:after:swap', restart);
+// Also restore a controller if a later listener cancelled a prepared swap.
+document.addEventListener('htmx:finally:swap', restart);
+new MutationObserver(prune).observe(document.documentElement, { childList: true, subtree: true });
