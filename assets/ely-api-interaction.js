@@ -469,9 +469,58 @@ const feedbackBoundaryLog = (boundary, id, report = (...args) => console.error(.
   report('ErrorBoundary', id, chain.slice(0, 4096));
 };
 
+// Clipboard completion is local UI state, not a host action until the write succeeds.
+// Ignore promises after teardown and cancel the transient confirmation on remount.
+const copyFeedback = (root, notify, action) => {
+  let active = true, latest = 0;
+  const pending = new Set(), resets = new Map(), touched = new Set();
+  const copy = button => {
+    if (!active || pending.has(button) || button.disabled) return;
+    const ticket = ++latest, value = button.value || '';
+    const status = root.querySelector('[data-interaction-copy-status]');
+    clearTimeout(resets.get(button)); resets.delete(button);
+    delete button.dataset.interactionCopied;
+    if (status) status.textContent = '';
+    touched.add(button); pending.add(button); button.setAttribute('aria-busy', 'true');
+    const finish = success => {
+      if (!active) return;
+      pending.delete(button);
+      button.removeAttribute('aria-busy');
+      if (!active || !root.isConnected || !button.isConnected) return;
+      if (!success) {
+        if (status && latest === ticket) status.textContent = 'Copy failed';
+        notify({name: 'copy', value, copied: false, error: 'clipboard-unavailable'});
+        return;
+      }
+      button.dataset.interactionCopied = 'true';
+      if (status && latest === ticket) status.textContent = 'Copied';
+      resets.set(button, setTimeout(() => {
+        resets.delete(button); delete button.dataset.interactionCopied;
+        if (active && status && latest === ticket) status.textContent = '';
+      }, 1400));
+      action(button.dataset.elyAction || 'copy', {value});
+      if (active && root.isConnected && button.isConnected) notify({name: 'copy', value, copied: true});
+    };
+    try {
+      if (!navigator.clipboard?.writeText) { finish(false); return; }
+      Promise.resolve(navigator.clipboard.writeText(value)).then(() => finish(true), () => finish(false));
+    } catch { finish(false); }
+  };
+  return {copy, destroy() {
+    active = false;
+    resets.forEach(clearTimeout); resets.clear();
+    touched.forEach(button => { button.removeAttribute('aria-busy'); delete button.dataset.interactionCopied; });
+    const status = root.querySelector('[data-interaction-copy-status]');
+    if (status) status.textContent = '';
+    touched.clear(); pending.clear();
+  }};
+};
+
 register('interaction', root => {
   const timers = new Set();
   const lottieCleanups = [];
+  const clipboard = copyFeedback(root, detail => change(root, detail), (action, detail) => emit(root, action, detail));
+  lottieCleanups.push(() => clipboard.destroy());
   const sourceFamily = bindSourceFamily(root);
   const loadingFamily = bindLoadingFamily(root);
   lottieCleanups.push(() => loadingFamily.destroy());
@@ -758,7 +807,7 @@ register('interaction', root => {
     const confirmTwice = target?.closest('[data-interaction-confirm-mode="twice"]');
     if (confirmTwice) { const armed = confirmTwice.dataset.interactionConfirmArmed === 'true'; if (armed) { delete confirmTwice.dataset.interactionConfirmArmed; confirmTwice.textContent = confirmTwice.dataset.interactionConfirmLabel || confirmTwice.textContent; emit(root, confirmTwice.dataset.interactionHold || 'confirm', {value: confirmTwice.value || ''}); root.querySelector('[data-interaction-status]')?.replaceChildren(document.createTextNode('confirmed')); } else { confirmTwice.dataset.interactionConfirmArmed = 'true'; confirmTwice.dataset.interactionConfirmLabel = confirmTwice.textContent; confirmTwice.textContent = 'Click again to confirm'; later(() => { if (confirmTwice.dataset.interactionConfirmArmed === 'true') { delete confirmTwice.dataset.interactionConfirmArmed; confirmTwice.textContent = confirmTwice.dataset.interactionConfirmLabel || 'Confirm'; } }, 3000); } change(root, {name: 'confirm', value: confirmTwice.value || '', armed: !armed}); return; }
     const copy = target?.closest('[data-interaction-copy]');
-    if (copy) { const value = copy.value || ''; const status = root.querySelector('[data-interaction-copy-status]'); const copied = () => { if (status) status.textContent = 'Copied'; copy.dataset.interactionCopied = 'true'; emit(root, copy.dataset.elyAction || 'copy', {value}); change(root, {name: 'copy', value, copied: true}); }; if (navigator.clipboard?.writeText) navigator.clipboard.writeText(value).then(copied, copied); else copied(); return; }
+    if (copy) { clipboard.copy(copy); return; }
     const bulkAdd = target?.closest('[data-interaction-bulk-add]');
     if (bulkAdd) { const host = bulkAdd.closest('[data-interaction-bulk]'); const next = Number(host?.dataset.interactionBulkCount || 0) + 1; if (host) { host.dataset.interactionBulkCount = String(next); host.querySelector('[data-interaction-bulk-count]').textContent = String(next); host.querySelector('[data-interaction-bulk-summary]').textContent = `${next} selected`; host.querySelector('.ely-interaction__bar.is-bulk').hidden = false; } change(root, {name: 'bulk', value: String(next), selected: true}); return; }
     const bulkClear = target?.closest('[data-interaction-bulk-clear]');

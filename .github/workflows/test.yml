@@ -40,7 +40,9 @@ jobs:
         if: always()
         with:
           name: gallery-browser-evidence
-          path: test-results/gallery/
+          path: |
+            test-results/gallery/
+            test-results/contracts/
           if-no-files-found: error
   static-pages:
     runs-on: ubuntu-latest
@@ -65,7 +67,9 @@ jobs:
         if: always()
         with:
           name: gallery-static-evidence
-          path: test-results/gallery/
+          path: |
+            test-results/gallery/
+            test-results/contracts/
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
         if: always()

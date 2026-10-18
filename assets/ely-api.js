@@ -34,6 +34,8 @@ function start(scope = document) {
       if (!belongs(root, event.target)) return;
       const button = event.target.closest('[data-ely-action]');
       if (!button || button.disabled || button.getAttribute('aria-disabled') === 'true') return;
+      // Clipboard controls emit once, only after the browser confirms the write.
+      if (button.dataset.interactionCopy !== undefined) return;
       if (button.type === 'submit' && button.form?.matches('[data-ely-submit]')) return;
       const formData = button.form ? new FormData(button.form) : null;
       const accepted = emit(root, button.dataset.elyAction, { value: button.value || button.dataset.value || '', formData, values: formData ? [...formData] : [] });
