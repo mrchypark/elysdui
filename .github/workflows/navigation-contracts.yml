@@ -1,0 +1,33 @@
+name: Navigation selection contracts
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  navigation-contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: go test ./... -run 'NavigationSelection|Segmented'
+      - run: node navigation_selection_test.mjs
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: node scripts/navigation-contracts-browser-test.mjs
+      - run: NAVIGATION_NEGATIVE_CONTROL=aria-controls node scripts/navigation-contracts-browser-test.mjs
+      - run: NAVIGATION_NEGATIVE_CONTROL=aria-labelledby node scripts/navigation-contracts-browser-test.mjs
+      - run: NAVIGATION_NEGATIVE_CONTROL=disabled-panel node scripts/navigation-contracts-browser-test.mjs
+      - run: NAVIGATION_NEGATIVE_CONTROL=repeat-radio node scripts/navigation-contracts-browser-test.mjs
+      - run: NAVIGATION_NEGATIVE_CONTROL=selection-payload node scripts/navigation-contracts-browser-test.mjs
+      - run: NAVIGATION_NEGATIVE_CONTROL=radio-keyboard node scripts/navigation-contracts-browser-test.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: navigation-contract-evidence
+          path: test-results/contracts/navigation*.json
+          if-no-files-found: error
