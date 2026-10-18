@@ -18,12 +18,16 @@ import org.junit.Assert.assertTrue
 @RunWith(AndroidJUnit4::class)
 class LiveProfileAppTest {
     @get:Rule val compose = createAndroidComposeRule<MainActivity>()
+    private val focusedWindow by lazy {
+        FocusedWindowGate(compose.activity, InstrumentationRegistry.getInstrumentation().uiAutomation, ::screenshotDirectory)
+    }
 
     @Test fun realAppLoadsValidatesAndSavesThroughGo() {
         try {
             runLifecycle()
         } catch (failure: Throwable) {
             // Capture before ActivityScenario tears down the failing real app.
+            runCatching { focusedWindow.recordDiagnostics("99-failure", failure) }
             runCatching { compose.onRoot(useUnmergedTree = true).printToLog("ElyNativeFailure") }
             runCatching { screenshot("99-failure.png", requireFocusedWindow = false) }
             throw failure
@@ -111,6 +115,7 @@ class LiveProfileAppTest {
     private fun screenshot(name: String, requireFocusedWindow: Boolean = true) {
         compose.waitForIdle()
         if (requireFocusedWindow) {
+            focusedWindow.await(name)
             val activity = compose.activity
             compose.runOnIdle {
                 assertTrue("Cannot capture a successful state while another window obscures the app", activity.hasWindowFocus())

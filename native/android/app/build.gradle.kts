@@ -26,6 +26,7 @@ android {
         }
     }
     sourceSets.getByName("androidTest").assets.srcDir("../../fixtures")
+    sourceSets.getByName("androidTest").java.srcDir("../test-support")
     buildFeatures { compose = true; buildConfig = true }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_21; targetCompatibility = JavaVersion.VERSION_21 }
     kotlinOptions { jvmTarget = "21" }

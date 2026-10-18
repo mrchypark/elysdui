@@ -10,3 +10,6 @@ tasks.test {
     inputs.property("controlsServer", providers.environmentVariable("ELY_NATIVE_CONTROLS_BASE_URL").orElse(""))
     inputs.property("liveServer", providers.environmentVariable("ELY_NATIVE_TEST_BASE_URL").orElse(""))
 }
+
+// Shared only with Android instrumentation tests, never shipped in the app.
+kotlin.sourceSets.named("test") { kotlin.srcDir("../test-support") }

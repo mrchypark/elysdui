@@ -157,3 +157,40 @@ JVM decoder/reducer tests do not establish on-device behavior.
 row widths and alignment) and verifies merged notice text with polite/assertive
 live-region semantics across replacement. It runs with the existing instrumented
 suite; actual TalkBack announcement delivery still requires manual validation.
+
+### Window-focus readiness evidence
+
+The real launcher lifecycle still requires the enabled, visible controls and each
+Go-backed ready/validation/save state. Before each successful screenshot, the
+test waits at most 10 seconds for window focus, then repeats the original
+immediate focus assertion before capture. The observer runs off the main thread,
+uses a monotonic deadline, and never dismisses dialogs, forces focus, restarts
+the app, or repeats a host action.
+
+An explicitly observed system-owned app/System UI ANR dialog fails the gate and
+remains a failure if focus later returns. The sentinel currently recognizes the
+English ANR messages used by this CI emulator; a different locale needs its own
+explicit matcher. Missing focus at the deadline also fails. A missing-focus
+failure alone does not establish that an overlay exists.
+
+Before activity teardown, failures retain read-only window/activity/ANR and
+active-window diagnostics plus the existing failure screenshot. Each of the four
+diagnostic result waits has its own two-second timeout. The three shell reads are
+capped at 128 KiB each; active-window root text has no explicit size cap. Diagnostic
+errors cannot replace the original test error. Diagnostic collection and the
+existing screenshot capture are separate from the ten-second readiness budget.
+
+The shared test-only policy has JVM controls for transient recovery, persistent
+loss, late focus, ANR detection and sticky ANR failure. Instrumentation adds real
+test-owned native-dialog counterexamples: a persistent dialog must prevent
+readiness, while a scheduled fixture transition may restore focus within the
+deadline. Fixture cleanup occurs after verification; production/system windows
+are never dismissed by the readiness helper.
+
+Run the helper controls with:
+
+    ./gradlew -PprotocolOnly :protocol:test --tests '*FocusReadinessTest'
+
+Run both real dialog counterexamples and the unchanged real Go lifecycle with the
+normal connected Android instrumentation workflow. JVM success alone does not
+establish the device behavior.
