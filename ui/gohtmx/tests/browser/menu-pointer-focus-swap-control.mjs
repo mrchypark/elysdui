@@ -40,6 +40,6 @@ export function evaluateFocusSwapControl(report, expectedError) {
     same(prefix, control.prior) && designated?.pass === false &&
     same(designated.observed, [expectedError]) && same(designated.expected, []) &&
     same(report.pageErrors, [expectedError]) &&
-    report.checks.every(check => check.oracles.every(oracle => oracle === designated || oracle.pass));
+    report.checks.every(check => check.oracles.every(oracle => oracle.pass === same(oracle.observed, oracle.expected) && (oracle === designated || oracle.pass)));
   return {kill, designated, observedPrefix: prefix, requiredPrefix: control.prior, expectedError};
 }

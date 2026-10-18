@@ -488,7 +488,7 @@ try {
   if (control) {
     const trial = report.checks[0], failures = trial.oracles.filter(oracle => !oracle.pass), designated = failures[0];
     const prefix = trial.oracles.slice(trial.controlPrefixStart, trial.oracles.indexOf(designated)).map(oracle => oracle.id);
-    const kill = !incidental && !trial.error && !trial.traceError && designated?.id === control.oracle && same(designated.observed, control.observed) && same(designated.expected, control.expected) && same(prefix, control.prior) && trial.oracles.slice(0, trial.oracles.indexOf(designated)).every(oracle => oracle.pass);
+    const kill = !incidental && !trial.error && !trial.traceError && designated?.id === control.oracle && same(designated.observed, control.observed) && same(designated.expected, control.expected) && same(prefix, control.prior) && trial.oracles.slice(0, trial.oracles.indexOf(designated)).every(oracle => oracle.pass) && trial.oracles.every(oracle => oracle.pass === same(oracle.observed, oracle.expected));
     report.status = kill ? 'mutation-killed' : 'failed';
     report.causalControl = {kill, designated, observedPrefix: prefix, requiredPrefix: control.prior};
   } else report.status = !incidental && report.checks.every(check => check.status === 'passed') ? 'passed' : 'failed';

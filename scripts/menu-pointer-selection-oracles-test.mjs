@@ -9,7 +9,17 @@ import {focusSwapControl, focusSwapExpectedError, evaluateFocusSwapControl} from
 const runtime = readFileSync('ui/gohtmx/assets/ely-api-interaction.js', 'utf8');
 const path = 'ui/gohtmx/tests/browser/menu-pointer-selection-browser-test.mjs';
 const harness = readFileSync(path, 'utf8');
-parse(harness, {ecmaVersion: 'latest', sourceType: 'module'});
+const harnessAST = parse(harness, {ecmaVersion: 'latest', sourceType: 'module'});
+const killExpressions = [];
+const inspect = node => {
+  if (!node || typeof node !== 'object') return;
+  if (node.type === 'VariableDeclarator' && node.id.name === 'kill') killExpressions.push(harness.slice(node.init.start, node.init.end));
+  for (const value of Object.values(node)) if (Array.isArray(value)) value.forEach(inspect); else if (value && typeof value === 'object') inspect(value);
+};
+inspect(harnessAST);
+assert.equal(killExpressions.length, 1, 'audit the exact movement-control expression without importing or launching the browser runner');
+const same = (a, b) => { try { assert.deepEqual(a, b); return true; } catch { return false; } };
+const evaluateMovementControl = new Function('trial', 'control', 'incidental', 'same', `const designated = trial.oracles.filter(oracle => !oracle.pass)[0]; const prefix = trial.oracles.slice(trial.controlPrefixStart, trial.oracles.indexOf(designated)).map(oracle => oracle.id); return ${killExpressions[0]};`);
 for (const [name, control] of Object.entries(menuPointerControls)) {
   const result = mutateMenuPointerSource(runtime, control, name);
   parse(result, {ecmaVersion: 'latest', sourceType: 'module'});
@@ -18,6 +28,12 @@ for (const [name, control] of Object.entries(menuPointerControls)) {
   for (const id of control.prior) assert(harness.includes(`'${id}'`), `${name}: prerequisite oracle must exist`);
   assert.throws(() => mutateMenuPointerSource(runtime + '\n' + control.from, control, name), /exactly one/);
   assert.throws(() => mutateMenuPointerSource(runtime.replace(control.from, ''), control, name), /exactly one/);
+  const fixture = {controlPrefixStart: 0, oracles: [...control.prior.map(id => ({id, observed: true, expected: true, pass: true})), {id: control.oracle, observed: control.observed, expected: control.expected, pass: false}, {id: 'validator.postcondition', observed: true, expected: true, pass: true}]};
+  assert(evaluateMovementControl(fixture, control, false, same), `${name}: exact synthetic validator fixture; not browser evidence`);
+  for (const index of [0, fixture.oracles.length - 1]) {
+    const inconsistent = structuredClone(fixture); inconsistent.oracles[index].observed = false;
+    assert(!evaluateMovementControl(inconsistent, control, false, same), `${name}: inconsistent cached pass cannot grant kill credit`);
+  }
   console.log(`${name}: one parseable production mutation → ${control.oracle} (browser kill unverified)`);
 }
 for (const oracle of ['move.enabled-leaf-owns-keyboard-selection', 'confirm.keyup-dispatches-moved-leaf-once', 'disabled.movement-preserves-valid-child', 'disabled.movement-preserves-valid-selection', 'child.visible-sibling-owns-keyboard', 'fractional.real-movement-retakes-selection', 'ownership.ancestor-state-unchanged', 'lifecycle.disposed-movement-keeps-branch-closed']) assert(harness.includes(`'${oracle}'`), `missing explicit intended behavior: ${oracle}`);
@@ -63,11 +79,13 @@ for (const corrupt of [
   report => { report.pageErrors.push({...report.pageErrors[0]}); },
   report => { report.runtimeErrors.push({message: 'cleanup failed'}); },
   report => { report.checks[1].oracles[0].pass = false; },
+  report => { report.checks[1].oracles[0].observed = false; },
   report => { report.checks[1].oracles[0].id = 'wrong prerequisite'; },
   report => { report.checks[1].oracles.at(-1).pass = false; },
+  report => { report.checks[1].oracles.at(-1).observed = []; },
   report => { report.checks[0].status = 'failed'; },
 ]) { const report = structuredClone(validatorFixture); corrupt(report); assert(!evaluateFocusSwapControl(report, expectedError).kill, 'unrelated or incomplete failure must not count as a guard-removal kill'); }
-console.log('continuation-guard: exact error/prefix/postcondition validator rejects 8 corrupt records; browser kill unverified');
+console.log('continuation-guard: exact error/prefix/postcondition validator rejects 10 corrupt records; browser kill unverified');
 for (const name of Object.keys(menuPointerControls)) assert(workflow.includes(`MENU_POINTER_MUTATION=${name} node ui/gohtmx/tests/browser/menu-pointer-selection-browser-test.mjs`), `${name}: focused CI must run the exact control`);
 assert(workflow.includes('fail-fast: false') && workflow.includes('surface: [qualified, chapter, sdui]'));
 assert(!/^\s*continue-on-error:/.test(workflow), 'baseline workflow may not suppress failure');
