@@ -8,7 +8,7 @@ import (
 	"os"
 	"path/filepath"
 
-	ui "github.com/mrchypark/ely-htmx"
+	ui "github.com/mrchypark/elysdui/ui/gohtmx"
 )
 
 func main() {

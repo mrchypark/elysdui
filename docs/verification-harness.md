@@ -50,7 +50,7 @@ registered keys and nonfunctions. Registration remains discovery only.
 
 Commit source changes first: browser evidence refuses a dirty source tree to avoid
 labelling uncommitted tests with a different HEAD. Run `npm run test:browser` for live browser tests. After building Pages, run
-`GALLERY_STATIC=1 node scripts/gallery-browser-test.mjs` followed by
+`GALLERY_STATIC=1 node ui/gohtmx/tests/browser/gallery-browser-test.mjs` followed by
 `node scripts/verify-gallery-evidence.mjs static`.
 
 Each complete report records its Git revision, `evidenceKind: browser-execution`,

@@ -45,8 +45,8 @@ configured base path. Advanced API and behavior checks remain available under
 Developer tools in the footer.
 
 Gallery regression checks run against the live Go server with
-`node scripts/gallery-browser-test.mjs` and the static export with
-`GALLERY_STATIC=1 node scripts/gallery-browser-test.mjs`. CI uploads gallery
+`node ui/gohtmx/tests/browser/gallery-browser-test.mjs` and the static export with
+`GALLERY_STATIC=1 node ui/gohtmx/tests/browser/gallery-browser-test.mjs`. CI uploads gallery
 screenshots at desktop, 390px and 320px widths, alongside editor evidence.
 
 ## Architecture and limits

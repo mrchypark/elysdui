@@ -43,9 +43,9 @@ func TestPropertyNormalization(t *testing.T) {
 		{"exact integer bound", Property{Type: Integer, Max: &largeMax}, json.Number("9007199254740993"), nil, true},
 		{"enum", Property{Type: String, Enum: []string{"sm", "md"}}, "md", "md", false},
 		{"enum rejected", Property{Type: String, Enum: []string{"sm", "md"}}, "<style>", nil, true},
-		{"name reserved", Property{Type: String, Target: "Name"}, "_csrf", nil, true},
-		{"name invalid", Property{Type: String, Target: "Name"}, "a[b]", nil, true},
-		{"name allowed", Property{Type: String, Target: "Name"}, "profile.name", "profile.name", false},
+		{"name reserved", Property{Type: String, Format: "field-name"}, "_csrf", nil, true},
+		{"name invalid", Property{Type: String, Format: "field-name"}, "a[b]", nil, true},
+		{"name allowed", Property{Type: String, Format: "field-name"}, "profile.name", "profile.name", false},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
@@ -60,54 +60,5 @@ func TestPropertyNormalization(t *testing.T) {
 				t.Fatalf("got %#v, %v; want %#v", got, err, test.want)
 			}
 		})
-	}
-}
-
-func TestRegistryValidationAndSnapshot(t *testing.T) {
-	tpl := template.Must(template.New("leaf").Parse(`{{.Text}}`))
-	valid := func() Definition {
-		return Definition{Name: "custom", Template: "leaf", Properties: map[string]Property{"text": {Type: String, Target: "Text", Default: "safe"}}}
-	}
-	tests := map[string]func(*Definition){
-		"unknown template": func(d *Definition) { d.Template = "missing" }, "multiple renderers": func(d *Definition) { d.Container = Stack },
-		"missing renderer": func(d *Definition) { d.Template = "" }, "unknown container": func(d *Definition) { d.Template = ""; d.Container = "iframe" },
-		"unknown family": func(d *Definition) { d.Family = "evil" }, "invalid name": func(d *Definition) { d.Name = "<bad>" },
-		"unknown component": func(d *Definition) { d.Template = ""; d.Component = "Missing" },
-		"wrong family":      func(d *Definition) { d.Template = ""; d.Component = "Switch"; d.Chapter = "forms"; d.Family = "data" },
-		"reserved prop":     func(d *Definition) { d.Properties["href"] = Property{Type: String} },
-		"reserved target":   func(d *Definition) { d.Properties["safe"] = Property{Type: String, Target: "Attrs"} },
-		"unknown type":      func(d *Definition) { d.Properties["safe"] = Property{Type: "html"} },
-		"duplicate target":  func(d *Definition) { d.Properties["safe"] = Property{Type: String, Target: "Text"} },
-		"invalid default":   func(d *Definition) { d.Properties["safe"] = Property{Type: Boolean, Default: "false"} },
-		"wrong enum":        func(d *Definition) { d.Properties["safe"] = Property{Type: Boolean, Enum: []string{"false"}} },
-		"unsupported event": func(d *Definition) { d.Events = []string{"onclick"} }, "submit on leaf": func(d *Definition) { d.Events = []string{"submit"} },
-	}
-	for name, mutate := range tests {
-		t.Run(name, func(t *testing.T) {
-			d := valid()
-			mutate(&d)
-			if err := NewRegistry(tpl).Register(d); err == nil {
-				t.Fatal("invalid definition accepted")
-			}
-		})
-	}
-	r := NewRegistry(tpl)
-	d := valid()
-	if err := r.Register(d); err != nil {
-		t.Fatal(err)
-	}
-	if err := r.Register(d); err == nil {
-		t.Fatal("duplicate accepted")
-	}
-	d.Properties["text"] = Property{Type: Boolean}
-	plan, err := Compile(Screen{Version: Version, ID: "screen", Root: Node{ID: "root", Type: "custom"}}, r)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if plan.root.props["text"] != "safe" {
-		t.Fatal("registered definition mutated")
-	}
-	if err := NewRegistry(nil).Register(valid()); err == nil {
-		t.Fatal("nil templates accepted")
 	}
 }

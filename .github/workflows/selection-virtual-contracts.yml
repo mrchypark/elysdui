@@ -14,16 +14,16 @@ jobs:
         with:
           node-version: '24'
           cache: npm
-      - run: node form_selection_test.mjs && node scripts/form-selection-negative-test.mjs && node virtual_table_test.mjs
+      - run: node ui/gohtmx/tests/unit/form_selection_test.mjs && node scripts/form-selection-negative-test.mjs && node ui/gohtmx/tests/unit/virtual_table_test.mjs
       - run: npm ci
       - run: npx playwright install --with-deps chromium
-      - run: node scripts/controls-swap-browser-test.mjs
-      - run: node scripts/form-selection-browser-test.mjs
-      - run: node scripts/virtual-table-browser-test.mjs
-      - run: VIRTUAL_TABLE_NEGATIVE_CONTROL=sticky-heading node scripts/virtual-table-browser-test.mjs
-      - run: VIRTUAL_TABLE_NEGATIVE_CONTROL=unbounded node scripts/virtual-table-browser-test.mjs
-      - run: VIRTUAL_TABLE_NEGATIVE_CONTROL=spacer node scripts/virtual-table-browser-test.mjs
-      - run: VIRTUAL_TABLE_NEGATIVE_CONTROL=cleanup node scripts/virtual-table-browser-test.mjs
+      - run: node ui/gohtmx/tests/browser/controls-swap-browser-test.mjs
+      - run: node ui/gohtmx/tests/browser/form-selection-browser-test.mjs
+      - run: node ui/gohtmx/tests/browser/virtual-table-browser-test.mjs
+      - run: VIRTUAL_TABLE_NEGATIVE_CONTROL=sticky-heading node ui/gohtmx/tests/browser/virtual-table-browser-test.mjs
+      - run: VIRTUAL_TABLE_NEGATIVE_CONTROL=unbounded node ui/gohtmx/tests/browser/virtual-table-browser-test.mjs
+      - run: VIRTUAL_TABLE_NEGATIVE_CONTROL=spacer node ui/gohtmx/tests/browser/virtual-table-browser-test.mjs
+      - run: VIRTUAL_TABLE_NEGATIVE_CONTROL=cleanup node ui/gohtmx/tests/browser/virtual-table-browser-test.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:

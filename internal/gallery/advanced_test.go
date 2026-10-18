@@ -3,7 +3,7 @@ package uiexamples
 import (
 	"bytes"
 	"fmt"
-	"github.com/mrchypark/ely-htmx"
+	"github.com/mrchypark/elysdui/ui/gohtmx"
 	"net/http"
 	"net/http/httptest"
 	"regexp"

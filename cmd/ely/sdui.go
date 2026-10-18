@@ -8,7 +8,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/mrchypark/ely-htmx/sdui"
+	sdui "github.com/mrchypark/elysdui/adapters/gohtmx"
 )
 
 const sduiUsage = `usage:

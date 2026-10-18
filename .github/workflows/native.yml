@@ -1,10 +1,10 @@
 name: Native profile
 on:
   pull_request:
-    paths: ['native/**', 'sdui/**', 'examples/native-sdui/**', 'go.mod', 'go.sum', '.github/workflows/native.yml']
+    paths: ['adapters/ios/**', 'adapters/android/**', 'adapters/gohtmx/**', 'ui/gohtmx/**', 'contracts/native/**', 'scripts/ci/native/**', 'sdui/**', 'examples/native-profile/**', 'go.mod', 'go.sum', '.github/workflows/native.yml']
   push:
     branches: [main]
-    paths: ['native/**', 'sdui/**', 'examples/native-sdui/**', 'go.mod', 'go.sum', '.github/workflows/native.yml']
+    paths: ['adapters/ios/**', 'adapters/android/**', 'adapters/gohtmx/**', 'ui/gohtmx/**', 'contracts/native/**', 'scripts/ci/native/**', 'sdui/**', 'examples/native-profile/**', 'go.mod', 'go.sum', '.github/workflows/native.yml']
 permissions:
   contents: read
 concurrency:
@@ -19,14 +19,14 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.26.x'
-      - run: go test -race ./sdui ./examples/native-sdui
-      - run: go vet ./sdui ./examples/native-sdui
+      - run: go test -race ./sdui ./examples/native-profile
+      - run: go vet ./sdui ./examples/native-profile
       - name: Test simulator readiness gate
-        run: python3 native/ci/test-ios-simulator.py
+        run: python3 scripts/ci/native/test-ios-simulator.py
       - name: Verify shared fixture wire schema
         run: |
           python -m pip install jsonschema==4.25.1
-          python native/ci/validate-schema.py
+          python scripts/ci/native/validate-schema.py
 
   ios:
     runs-on: macos-latest
@@ -37,23 +37,23 @@ jobs:
         with:
           go-version: '1.26.x'
       - name: Swift protocol, state and transport tests
-        run: swift test --package-path native/ios
+        run: swift test --package-path adapters/ios
       - name: Generate native iOS app project
         run: |
           command -v xcodegen || brew install xcodegen
-          cd native/ios && xcodegen generate
+          cd adapters/ios && xcodegen generate
       - name: Build iOS Simulator app
-        run: xcodebuild -project native/ios/ElyProfile.xcodeproj -scheme ElyProfile -configuration Debug -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build
+        run: xcodebuild -project adapters/ios/ElyProfile.xcodeproj -scheme ElyProfile -configuration Debug -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build
       - name: Prepare iOS simulator
         id: ios-simulator
         # Internal boot limit is 300s; leave time for bounded diagnostics/cleanup.
         timeout-minutes: 10
-        run: bash native/ci/prepare-ios-simulator.sh
+        run: bash scripts/ci/native/prepare-ios-simulator.sh
       - name: Native simulator profile lifecycle against Go
         env:
           DEVICE_ID: ${{ steps.ios-simulator.outputs.device_id }}
         run: |
-          go build -o /tmp/ely-native-profile ./examples/native-sdui
+          go build -o /tmp/ely-native-profile ./examples/native-profile
           /tmp/ely-native-profile > /tmp/ely-native-profile.log 2>&1 &
           SERVER_PID=$!
           /tmp/ely-native-profile -controls -port 8095 > /tmp/ely-native-controls.log 2>&1 &
@@ -62,12 +62,12 @@ jobs:
           for attempt in $(seq 1 30); do curl --fail --silent http://127.0.0.1:8094/ > /dev/null && curl --fail --silent http://127.0.0.1:8095/ > /dev/null && break; sleep 1; done
           curl --fail --silent http://127.0.0.1:8094/ > /dev/null
           curl --fail --silent http://127.0.0.1:8095/ > /dev/null
-          ELY_NATIVE_CONTROLS_BASE_URL=http://127.0.0.1:8095 ELY_NATIVE_TEST_BASE_URL=http://127.0.0.1:8094 swift test --package-path native/ios
-          xcodebuild -project native/ios/ElyProfile.xcodeproj -scheme ElyProfile -configuration Debug -destination "platform=iOS Simulator,id=$DEVICE_ID" -resultBundlePath /tmp/ElyProfile.xcresult CODE_SIGNING_ALLOWED=NO test
+          ELY_NATIVE_CONTROLS_BASE_URL=http://127.0.0.1:8095 ELY_NATIVE_TEST_BASE_URL=http://127.0.0.1:8094 swift test --package-path adapters/ios
+          xcodebuild -project adapters/ios/ElyProfile.xcodeproj -scheme ElyProfile -configuration Debug -destination "platform=iOS Simulator,id=$DEVICE_ID" -resultBundlePath /tmp/ElyProfile.xcresult CODE_SIGNING_ALLOWED=NO test
       - name: Clean up owned iOS simulator
         if: always()
         timeout-minutes: 2
-        run: python3 native/ci/ios-simulator.py cleanup
+        run: python3 scripts/ci/native/ios-simulator.py cleanup
       - name: Export iOS launch diagnostics
         if: always()
         timeout-minutes: 3
@@ -126,7 +126,7 @@ jobs:
       # user SDK license acceptance or private computer access is performed here.
       - name: Compile Compose app and test real Go transport
         run: |
-          go build -o /tmp/ely-native-profile ./examples/native-sdui
+          go build -o /tmp/ely-native-profile ./examples/native-profile
           /tmp/ely-native-profile > /tmp/ely-native-profile.log 2>&1 &
           SERVER_PID=$!
           /tmp/ely-native-profile -controls -port 8095 > /tmp/ely-native-controls.log 2>&1 &
@@ -135,21 +135,21 @@ jobs:
           for attempt in $(seq 1 30); do curl --fail --silent http://127.0.0.1:8094/ > /dev/null && curl --fail --silent http://127.0.0.1:8095/ > /dev/null && break; sleep 1; done
           curl --fail --silent http://127.0.0.1:8094/ > /dev/null
           curl --fail --silent http://127.0.0.1:8095/ > /dev/null
-          cd native/android
+          cd adapters/android
           ELY_NATIVE_CONTROLS_BASE_URL=http://127.0.0.1:8095 ELY_NATIVE_TEST_BASE_URL=http://127.0.0.1:8094 ./gradlew --no-daemon :protocol:test :app:assembleDebug :app:testDebugUnitTest :app:assembleDebugAndroidTest
       - name: Native Android emulator lifecycle against Go
-        run: bash native/ci/android-emulator.sh
+        run: bash scripts/ci/native/android-emulator.sh
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: android-native-profile-results
           path: |
-            native/android/protocol/build/reports/tests/
-            native/android/app/build/reports/tests/
-            native/android/app/build/reports/androidTests/
-            native/android/app/build/outputs/androidTest-results/
-            native/android/app/build/outputs/connected_android_test_additional_output/
-            native/android/app/build/outputs/apk/debug/*.apk
-            native/android/app/build/outputs/apk/androidTest/debug/*.apk
+            adapters/android/protocol/build/reports/tests/
+            adapters/android/app/build/reports/tests/
+            adapters/android/app/build/reports/androidTests/
+            adapters/android/app/build/outputs/androidTest-results/
+            adapters/android/app/build/outputs/connected_android_test_additional_output/
+            adapters/android/app/build/outputs/apk/debug/*.apk
+            adapters/android/app/build/outputs/apk/androidTest/debug/*.apk
             test-results/android-native/
           if-no-files-found: ignore

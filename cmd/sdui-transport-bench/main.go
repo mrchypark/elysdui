@@ -18,7 +18,7 @@ import (
 
 	"github.com/andybalholm/brotli"
 	"github.com/klauspost/compress/zstd"
-	"github.com/mrchypark/ely-htmx/internal/httpencoding"
+	"github.com/mrchypark/elysdui/internal/httpencoding"
 )
 
 //go:embed fixtures/*

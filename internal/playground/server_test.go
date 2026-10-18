@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mrchypark/ely-htmx/internal/httpencoding"
-	"github.com/mrchypark/ely-htmx/sdui"
+	sdui "github.com/mrchypark/elysdui/adapters/gohtmx"
+	"github.com/mrchypark/elysdui/internal/httpencoding"
 )
 
 func setup(t *testing.T) *server {

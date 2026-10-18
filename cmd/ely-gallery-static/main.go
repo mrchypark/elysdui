@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"log"
 
-	gallery "github.com/mrchypark/ely-htmx/internal/gallery"
+	gallery "github.com/mrchypark/elysdui/internal/gallery"
 )
 
 func main() {

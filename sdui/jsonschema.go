@@ -6,14 +6,20 @@ import (
 
 // JSONSchema exports a Draft 2020-12 editor schema from the same registered
 // contracts used by Compile. It is an authoring aid, not an authorization or
-// runtime-data validator: Compile and rendering remain authoritative for scoped
+// runtime-data validator: Compile and resolution remain authoritative for scoped
 // references, cycles, ID uniqueness, host URL policies and aggregate budgets.
 func JSONSchema(registry *Registry) (map[string]any, error) {
-	if registry == nil || registry.templates == nil {
-		return nil, fmt.Errorf("sdui: JSON Schema requires a registry with templates")
+	if registry == nil {
+		return nil, fmt.Errorf("sdui: JSON Schema requires a registry")
 	}
 	definitions := registry.Definitions()
-	defs := schemaGrammar()
+	formats := []string{"text", "field-name", "url", "image-url", "media-url", "action", "identifier", "data-token", "numeric-token"}
+	registry.mu.RLock()
+	for _, name := range sortedKeys(registry.formats) {
+		formats = append(formats, name)
+	}
+	registry.mu.RUnlock()
+	defs := schemaGrammar(formats)
 	choices := []any{schemaRef("use")}
 	for index, definition := range definitions {
 		name := fmt.Sprintf("component%d", index)
@@ -28,9 +34,9 @@ func JSONSchema(registry *Registry) (map[string]any, error) {
 	}, "version", "id", "root")
 	schema["$schema"] = "https://json-schema.org/draft/2020-12/schema"
 	schema["title"] = "Ely SDUI version " + Version
-	schema["description"] = "Editor assistance for this host registry. Compile and Render remain authoritative; host capabilities, references, IDs, URL policies, byte/depth/expanded-node limits and request data require runtime validation."
+	schema["description"] = "Editor assistance for this host registry. Compile and Resolve remain authoritative; host capabilities, references, IDs, URL policies, byte/depth/expanded-node limits and request data require runtime validation."
 	schema["$defs"] = defs
-	schema["x-ely-limits"] = map[string]any{"schemaBytes": MaxSchemaBytes, "renderBytes": MaxRenderBytes, "nodes": MaxNodes, "depth": MaxDepth, "normalizedValues": MaxValues, "normalizedBytes": MaxNormalizationBytes}
+	schema["x-ely-limits"] = map[string]any{"schemaBytes": MaxSchemaBytes, "nodes": MaxNodes, "depth": MaxDepth, "normalizedValues": MaxValues, "normalizedBytes": MaxNormalizationBytes}
 	return schema, nil
 }
 
@@ -52,7 +58,7 @@ func nodeArraySchema(limit int) map[string]any {
 	return map[string]any{"type": "array", "items": schemaRef("node"), "maxItems": limit}
 }
 
-func schemaGrammar() map[string]any {
+func schemaGrammar(formats []string) map[string]any {
 	defs := map[string]any{}
 	defs["id"] = map[string]any{"type": "string", "pattern": schemaID.String(), "not": map[string]any{"pattern": "^sdui-internal-"}}
 	defs["registryKey"] = map[string]any{"type": "string", "pattern": registryKey.String()}
@@ -75,7 +81,7 @@ func schemaGrammar() map[string]any {
 	}, "on", "action", "target")
 	event["allOf"] = []any{map[string]any{"if": map[string]any{"required": []string{"sourceAction"}, "properties": map[string]any{"sourceAction": map[string]any{"minLength": 1}}}, "then": map[string]any{"properties": map[string]any{"on": map[string]any{"const": "ely:action"}}}}}
 	defs["event"] = event
-	defs["parameter"] = parameterContractSchema()
+	defs["parameter"] = parameterContractSchema(formats)
 	defs["template"] = closedSchema(map[string]any{"params": map[string]any{"type": "object", "maxProperties": 64, "propertyNames": schemaRef("propertyName"), "additionalProperties": schemaRef("parameter")}, "root": schemaRef("node")}, "root")
 	use := closedSchema(map[string]any{
 		"id": schemaRef("id"), "type": map[string]any{"const": ""}, "use": schemaRef("registryKey"), "params": map[string]any{"type": "object", "maxProperties": 64, "propertyNames": schemaRef("propertyName")},
@@ -87,7 +93,7 @@ func schemaGrammar() map[string]any {
 	return defs
 }
 
-func parameterContractSchema() map[string]any {
+func parameterContractSchema(formats []string) map[string]any {
 	properties := map[string]any{
 		"type":     map[string]any{"enum": []string{"string", "boolean", "integer", "number", "object", "array"}},
 		"required": map[string]any{"type": "boolean"}, "default": map[string]any{},
@@ -96,14 +102,14 @@ func parameterContractSchema() map[string]any {
 		"items": schemaRef("parameter"), "properties": map[string]any{"type": "object", "propertyNames": schemaRef("propertyName"), "maxProperties": HardMaxObjectProperties, "additionalProperties": schemaRef("parameter")},
 		"additionalProperties": schemaRef("parameter"), "oneOf": map[string]any{"type": "array", "items": schemaRef("parameter"), "minItems": 2, "maxItems": 8},
 		"nullable":      map[string]any{"type": "boolean"},
-		"format":        map[string]any{"enum": []string{"text", "url", "image-url", "media-url", "action", "identifier", "data-token", "color", "numeric-token", "font-family", "markdown-source", "lottie-json", "css-token"}},
+		"format":        map[string]any{"enum": formats},
 		"maxLength":     map[string]any{"type": "integer", "minimum": 0, "maximum": HardMaxStringBytes},
 		"maxItems":      map[string]any{"type": "integer", "minimum": 0, "maximum": HardMaxArrayItems},
 		"maxProperties": map[string]any{"type": "integer", "minimum": 0, "maximum": HardMaxObjectProperties},
 	}
 	schema := closedSchema(properties)
 	schema["oneOf"] = []any{map[string]any{"required": []string{"type"}, "not": map[string]any{"required": []string{"oneOf"}}}, map[string]any{"required": []string{"oneOf"}, "not": map[string]any{"required": []string{"type"}}}}
-	schema["description"] = "Bounded typed parameter contract. Targets and host-only capabilities cannot be supplied. Compile validates type-specific constraints and defaults."
+	schema["description"] = "Bounded typed parameter contract. Renderer targets cannot be supplied. Formats require explicit host policy; Compile validates type-specific constraints and defaults."
 	return schema
 }
 
@@ -167,9 +173,6 @@ func componentSchema(definition Definition) map[string]any {
 	schema := closedSchema(properties, "id", "type")
 	schema["title"] = definition.Name
 	schema["allOf"] = allOf
-	if definition.Family != "" {
-		schema["x-ely-family"] = definition.Family
-	}
 	if definition.ContainsForm || definition.Container == Form {
 		schema["x-ely-contains-form"] = true
 	}
@@ -212,16 +215,13 @@ func propertySchema(property Property) map[string]any {
 				schema["pattern"] = registryKey.String()
 			case "data-token":
 				schema["pattern"] = dataToken.String()
-			case "color":
-				schema["pattern"] = colorValue.String()
 			case "numeric-token":
 				schema["pattern"] = numericToken.String()
-			case "font-family":
-				schema["pattern"] = fontFamilyValue.String()
-			case "css-token":
-				schema["pattern"] = "^$|" + cssToken.String()
 			}
-			if property.Format == "" && property.Target == "Name" {
+			if property.formatRule != nil && property.formatRule.Pattern != "" {
+				schema["pattern"] = property.formatRule.Pattern
+			}
+			if property.Format == "field-name" {
 				schema["pattern"] = registryKey.String()
 			}
 		case Integer, Number:
@@ -297,10 +297,7 @@ func wireDefault(property Property, value any) (any, bool) {
 		result := map[string]any{}
 		used := map[string]bool{}
 		for key, child := range property.Properties {
-			target := child.Target
-			if target == "" {
-				target = key
-			}
+			target := key
 			if v, exists := values[target]; exists {
 				converted, ok := wireDefault(child, v)
 				if !ok {

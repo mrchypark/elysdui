@@ -21,8 +21,10 @@ const root = path.resolve(__dirname, '..');
   const result = await WebAssembly.instantiate(bytes, go.importObject);
   go.run(result.instance).catch(error => { console.error(error); process.exit(1); });
   const styles = {};
-  for (const name of fs.readdirSync(path.join(root, 'assets'))) {
-    if (name.endsWith('.css')) styles['assets/' + name] = fs.readFileSync(path.join(root, 'assets', name), 'utf8');
+  for (const directory of ['ui/gohtmx/assets', 'adapters/gohtmx/assets']) {
+    for (const name of fs.readdirSync(path.join(root, directory))) {
+      if (name.endsWith('.css')) styles['assets/' + name] = fs.readFileSync(path.join(root, directory, name), 'utf8');
+    }
   }
   assert.deepEqual(JSON.parse(elyPlaygroundInit(JSON.stringify(styles))), { ok: true });
   const initialized = performance.now();

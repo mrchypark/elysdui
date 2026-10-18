@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/mrchypark/ely-htmx"
+	"github.com/mrchypark/elysdui/ui/gohtmx"
 )
 
 // advancedFoundationCases gives the gallery one caller-owned case for every Foundation primary.

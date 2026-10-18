@@ -20,9 +20,8 @@ import (
 	"net/url"
 	"strings"
 
-	ui "github.com/mrchypark/ely-htmx"
-	"github.com/mrchypark/ely-htmx/internal/httpencoding"
-	"github.com/mrchypark/ely-htmx/sdui"
+	sdui "github.com/mrchypark/elysdui/adapters/gohtmx"
+	"github.com/mrchypark/elysdui/internal/httpencoding"
 	"golang.org/x/net/html"
 )
 
@@ -81,7 +80,7 @@ func NewHandler() (http.Handler, error) {
 		})
 	}
 	// Serve the same chrome, typography and theme behavior as the gallery.
-	s.mux.Handle("GET /assets/", http.FileServer(http.FS(ui.Files)))
+	s.mux.Handle("GET /assets/", http.FileServer(http.FS(sdui.Files)))
 	s.mux.HandleFunc("GET /api/catalogue", s.catalogue)
 	s.mux.HandleFunc("GET /api/component", s.component)
 	s.mux.HandleFunc("GET /api/examples", func(w http.ResponseWriter, r *http.Request) { respond(w, 200, examples()) })
@@ -273,7 +272,7 @@ func (s *server) preview(w http.ResponseWriter, r *http.Request) {
 	}
 	readAsset := s.readAsset
 	if readAsset == nil {
-		readAsset = ui.Files.ReadFile
+		readAsset = sdui.Files.ReadFile
 	}
 	safe, e := previewDocumentWithTheme(rendered.String(), assets.String(), readAsset, input.Theme)
 	if e != nil {
@@ -326,7 +325,7 @@ func stylesheetPaths(source string) []string {
 // Defense in depth: the opaque sandbox has no scripts/forms/popups/navigation.
 // Strip all markup capable of navigation or resource loads, including local URLs.
 func previewDocument(source, assets string) (string, error) {
-	return previewDocumentWithAssets(source, assets, ui.Files.ReadFile)
+	return previewDocumentWithAssets(source, assets, sdui.Files.ReadFile)
 }
 
 func previewDocumentWithAssets(source, assets string, readAsset func(string) ([]byte, error)) (string, error) {

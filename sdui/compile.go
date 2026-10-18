@@ -19,13 +19,11 @@ type compiler struct {
 	definitions map[string]Definition
 	templates   map[string]TemplateDefinition
 	seen        map[string]bool
-	families    map[string]bool
-	assets      map[string]bool
 	count       int
 	values      *valueBudget
 }
 
-// Compile validates every branch before any data is read or template executes.
+// Compile validates every branch before any runtime data is read or resolved.
 // Local reusable trees are expanded once; repetitions remain bounded render-time
 // directives. Plans contain only immutable snapshots of host and schema values.
 func Compile(screen Screen, r *Registry) (*Plan, error) {
@@ -38,18 +36,18 @@ func Compile(screen Screen, r *Registry) (*Plan, error) {
 	if screen.Loader != "" && !registryKey.MatchString(screen.Loader) {
 		return nil, fmt.Errorf("sdui: invalid loader key %q", screen.Loader)
 	}
-	if r == nil || r.templates == nil {
-		return nil, fmt.Errorf("sdui: registry requires templates")
+	if r == nil {
+		return nil, fmt.Errorf("sdui: registry is required")
 	}
 	r.mu.RLock()
 	definitions := make(map[string]Definition, len(r.definitions))
 	for name, d := range r.definitions {
 		definitions[name] = d
 	}
-	tpl := r.templates
+	formats := r.formats
 	r.mu.RUnlock()
-	plan := &Plan{id: screen.ID, loader: screen.Loader, regions: map[string]*compiledNode{}, templates: tpl}
-	c := &compiler{plan: plan, definitions: definitions, templates: map[string]TemplateDefinition{}, seen: map[string]bool{screen.ID: true}, families: map[string]bool{}, assets: map[string]bool{}, values: newValueBudget()}
+	plan := &Plan{id: screen.ID, loader: screen.Loader, regions: map[string]*compiledNode{}, definitions: map[string]Definition{}}
+	c := &compiler{plan: plan, definitions: definitions, templates: map[string]TemplateDefinition{}, seen: map[string]bool{screen.ID: true}, values: newValueBudget()}
 	if len(screen.Templates) > 128 {
 		return nil, fmt.Errorf("sdui: too many reusable templates")
 	}
@@ -67,11 +65,7 @@ func Compile(screen Screen, r *Registry) (*Plan, error) {
 				return nil, fmt.Errorf("sdui: invalid parameter name %q", key)
 			}
 			property := definition.Params[key]
-			// Parameter metadata cannot inject host template destinations or capabilities.
-			if err := validateParameterTargets(property, 1); err != nil {
-				return nil, fmt.Errorf("sdui: template parameter %s: %w", key, err)
-			}
-			validated, err := validateProperty(property)
+			validated, err := validatePropertyContext(property, nil, formats)
 			if err != nil {
 				return nil, fmt.Errorf("sdui: template %s parameter %s: %w", name, key, err)
 			}
@@ -97,20 +91,12 @@ func Compile(screen Screen, r *Registry) (*Plan, error) {
 	// the context of actual uses; unused definitions cannot create target regions.
 	for _, name := range sortedKeys(c.templates) {
 		definition := c.templates[name]
-		checkPlan := &Plan{id: screen.ID, regions: map[string]*compiledNode{}}
-		check := &compiler{plan: checkPlan, definitions: c.definitions, templates: c.templates, seen: map[string]bool{}, families: c.families, assets: c.assets, values: newValueBudget()}
+		checkPlan := &Plan{id: screen.ID, regions: map[string]*compiledNode{}, definitions: plan.definitions}
+		check := &compiler{plan: checkPlan, definitions: c.definitions, templates: c.templates, seen: map[string]bool{}, values: newValueBudget()}
 		if _, err := check.node(definition.Root, compileState{depth: 1, scope: bindingScope{params: definition.Params}}); err != nil {
 			return nil, fmt.Errorf("sdui: template %s: %w", name, err)
 		}
 	}
-	for family := range c.families {
-		plan.families = append(plan.families, family)
-	}
-	for asset := range c.assets {
-		plan.assets = append(plan.assets, asset)
-	}
-	sort.Strings(plan.assets)
-	sort.Strings(plan.families)
 	return plan, nil
 }
 
@@ -271,6 +257,7 @@ func (c *compiler) node(node Node, state compileState) (*compiledNode, error) {
 		return nil, fmt.Errorf("sdui: node %s has unknown type %q", id, node.Type)
 	}
 	result.definition = definition
+	c.plan.definitions[definition.Name] = definition
 	if definition.Container == "" && len(node.Children) > 0 {
 		return nil, fmt.Errorf("sdui: leaf %s cannot contain children", id)
 	}
@@ -346,12 +333,6 @@ func (c *compiler) node(node Node, state compileState) (*compiledNode, error) {
 
 	if definition.Container == Region {
 		c.plan.regions[id] = result
-	}
-	for _, asset := range definition.Assets {
-		c.assets[asset] = true
-	}
-	if definition.Family != "" {
-		c.families[definition.Family] = true
 	}
 	inner := state
 	inner.depth++
@@ -544,37 +525,6 @@ func (c *compiler) validateReferences() error {
 	}
 	for _, name := range sortedKeys(c.templates) {
 		if err := visit(name); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// Schema-defined parameters cannot remap names or request trusted template sinks.
-func validateParameterTargets(property Property, depth int) error {
-	if depth > MaxValueDepth {
-		return fmt.Errorf("parameter schema exceeds depth limit")
-	}
-	if property.Target != "" {
-		return fmt.Errorf("parameter cannot select a target")
-	}
-	if property.Items != nil {
-		if err := validateParameterTargets(*property.Items, depth+1); err != nil {
-			return err
-		}
-	}
-	if property.AdditionalProperties != nil {
-		if err := validateParameterTargets(*property.AdditionalProperties, depth+1); err != nil {
-			return err
-		}
-	}
-	for _, child := range property.Properties {
-		if err := validateParameterTargets(child, depth+1); err != nil {
-			return err
-		}
-	}
-	for _, child := range property.OneOf {
-		if err := validateParameterTargets(child, depth+1); err != nil {
 			return err
 		}
 	}

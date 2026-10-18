@@ -14,18 +14,18 @@ jobs:
         with:
           node-version: '24'
           cache: npm
-      - run: node menu_contracts_test.mjs
+      - run: node ui/gohtmx/tests/unit/menu_contracts_test.mjs
       - run: npm ci
       - run: npx playwright install --with-deps chromium
-      - run: node scripts/menu-contracts-browser-test.mjs
-      - run: MENU_NEGATIVE_CONTROL=native-focus node scripts/menu-contracts-browser-test.mjs
-      - run: MENU_NEGATIVE_CONTROL=outside-focus node scripts/menu-contracts-browser-test.mjs
-      - run: MENU_NEGATIVE_CONTROL=stationary-hover node scripts/menu-contracts-browser-test.mjs
-      - run: MENU_NEGATIVE_CONTROL=radio-scope node scripts/menu-contracts-browser-test.mjs
-      - run: MENU_NEGATIVE_CONTROL=action-order node scripts/menu-contracts-browser-test.mjs
-      - run: MENU_NEGATIVE_CONTROL=context-focus node scripts/menu-contracts-browser-test.mjs
-      - run: MENU_NEGATIVE_CONTROL=placement node scripts/menu-contracts-browser-test.mjs
-      - run: MENU_NEGATIVE_CONTROL=cleanup node scripts/menu-contracts-browser-test.mjs
+      - run: node ui/gohtmx/tests/browser/menu-contracts-browser-test.mjs
+      - run: MENU_NEGATIVE_CONTROL=native-focus node ui/gohtmx/tests/browser/menu-contracts-browser-test.mjs
+      - run: MENU_NEGATIVE_CONTROL=outside-focus node ui/gohtmx/tests/browser/menu-contracts-browser-test.mjs
+      - run: MENU_NEGATIVE_CONTROL=stationary-hover node ui/gohtmx/tests/browser/menu-contracts-browser-test.mjs
+      - run: MENU_NEGATIVE_CONTROL=radio-scope node ui/gohtmx/tests/browser/menu-contracts-browser-test.mjs
+      - run: MENU_NEGATIVE_CONTROL=action-order node ui/gohtmx/tests/browser/menu-contracts-browser-test.mjs
+      - run: MENU_NEGATIVE_CONTROL=context-focus node ui/gohtmx/tests/browser/menu-contracts-browser-test.mjs
+      - run: MENU_NEGATIVE_CONTROL=placement node ui/gohtmx/tests/browser/menu-contracts-browser-test.mjs
+      - run: MENU_NEGATIVE_CONTROL=cleanup node ui/gohtmx/tests/browser/menu-contracts-browser-test.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:

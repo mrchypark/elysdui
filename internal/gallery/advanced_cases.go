@@ -1,6 +1,6 @@
 package uiexamples
 
-import "github.com/mrchypark/ely-htmx"
+import "github.com/mrchypark/elysdui/ui/gohtmx"
 
 type AdvancedCase struct {
 	Component ui.Component

@@ -2,14 +2,13 @@ package playground
 
 import (
 	"encoding/json"
+	sdui "github.com/mrchypark/elysdui/adapters/gohtmx"
 	"strings"
 	"testing"
-
-	ui "github.com/mrchypark/ely-htmx"
 )
 
 func TestBrowserPreviewMatchesNative(t *testing.T) {
-	browser, err := NewBrowserRenderer(ui.Files.ReadFile)
+	browser, err := NewBrowserRenderer(sdui.Files.ReadFile)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -36,7 +35,7 @@ func TestBrowserPreviewMatchesNative(t *testing.T) {
 }
 
 func TestBrowserRequestBoundsAndNumbers(t *testing.T) {
-	browser, err := NewBrowserRenderer(ui.Files.ReadFile)
+	browser, err := NewBrowserRenderer(sdui.Files.ReadFile)
 	if err != nil {
 		t.Fatal(err)
 	}

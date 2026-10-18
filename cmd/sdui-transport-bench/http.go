@@ -10,8 +10,8 @@ import (
 	"runtime"
 	"time"
 
-	ui "github.com/mrchypark/ely-htmx"
-	"github.com/mrchypark/ely-htmx/internal/httpencoding"
+	"github.com/mrchypark/elysdui/internal/httpencoding"
+	ui "github.com/mrchypark/elysdui/ui/gohtmx"
 )
 
 // runHTTP runs instead of the codec sweep. Each invocation must be a new process

@@ -3,7 +3,7 @@ package playground
 import (
 	"encoding/json"
 	"fmt"
-	ui "github.com/mrchypark/ely-htmx"
+	sdui "github.com/mrchypark/elysdui/adapters/gohtmx"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -70,14 +70,14 @@ func ExportStatic(dir string) error {
 		}
 	}
 	styles := []string{}
-	err = fs.WalkDir(ui.Files, "assets", func(name string, entry fs.DirEntry, e error) error {
+	err = fs.WalkDir(sdui.Files, "assets", func(name string, entry fs.DirEntry, e error) error {
 		if e != nil {
 			return e
 		}
 		if entry.IsDir() || !(strings.HasSuffix(name, ".css") || strings.HasSuffix(name, ".ttf") || name == "assets/theme.js" || name == "assets/elysdui-mark.svg") {
 			return nil
 		}
-		b, e := ui.Files.ReadFile(name)
+		b, e := sdui.Files.ReadFile(name)
 		if e != nil {
 			return e
 		}

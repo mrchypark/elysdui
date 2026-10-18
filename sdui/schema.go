@@ -1,5 +1,5 @@
-// Package sdui compiles a deliberately bounded, data-only screen schema into
-// Ely's existing Go templates. Schemas never supply HTML, URLs, CSS or scripts.
+// Package sdui validates and composes a bounded, data-only screen schema into
+// renderer-neutral semantic plans. Renderer adapters own markup and transport.
 package sdui
 
 import (
@@ -15,7 +15,6 @@ const (
 	// Version is the only supported wire schema version.
 	Version        = "1"
 	MaxSchemaBytes = 1 << 20
-	MaxRenderBytes = 2 << 20
 	MaxNodes       = 1000
 	MaxDepth       = 32
 	MaxStringBytes = 16384

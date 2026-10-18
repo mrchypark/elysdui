@@ -7,8 +7,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	ui "github.com/mrchypark/ely-htmx"
-	gallery "github.com/mrchypark/ely-htmx/internal/gallery"
+	gallery "github.com/mrchypark/elysdui/internal/gallery"
+	ui "github.com/mrchypark/elysdui/ui/gohtmx"
 	"sort"
 	"strings"
 )
