@@ -526,16 +526,40 @@ register('interaction', root => {
   lottieCleanups.push(() => loadingFamily.destroy());
   lottieCleanups.push(() => sourceFamily.destroy());
   const dialogOpeners = new Map();
-  const restoreDialogFocus = dialog => {
+  const dialogFocusFrames = new Map();
+  const restoreDialogFocus = (dialog, ownedFocus = false) => {
+    // close events are queued: an earlier close must not consume a new opener.
+    if (dialog.open) return;
     const opener = dialogOpeners.get(dialog);
     dialogOpeners.delete(dialog);
-    if (opener?.isConnected) requestAnimationFrame(() => { if (opener.isConnected) opener.focus({preventScroll: true}); });
+    if (opener) {
+      const previous = dialogFocusFrames.get(dialog);
+      if (previous != null) cancelAnimationFrame(previous);
+      dialogFocusFrames.delete(dialog);
+    }
+    const focused = document.activeElement;
+    // Native close() normally restores focus immediately. A delayed fallback
+    // must neither repeat that work nor override the user's next focus target.
+    if (!root.isConnected || !opener?.isConnected || opener.disabled || focused === opener ||
+        !ownedFocus && focused && focused !== document.body && !dialog.contains(focused)) return;
+    const frame = requestAnimationFrame(() => {
+      if (dialogFocusFrames.get(dialog) !== frame) return;
+      dialogFocusFrames.delete(dialog);
+      if (root.isConnected && !dialog.open && opener.isConnected && !opener.disabled &&
+          document.activeElement === focused) opener.focus({preventScroll: true});
+    });
+    dialogFocusFrames.set(dialog, frame);
   };
+  lottieCleanups.push(() => {
+    dialogFocusFrames.forEach(cancelAnimationFrame);
+    dialogFocusFrames.clear(); dialogOpeners.clear();
+  });
   const closeDialog = dialog => {
     if (!dialog) return;
+    const ownedFocus = dialog.contains(document.activeElement);
     if (dialog.open) dialog.close();
     else dialog.hidden = true;
-    restoreDialogFocus(dialog);
+    restoreDialogFocus(dialog, ownedFocus);
   };
   const showTourStep = (dialog, index, notify = true) => {
     const steps = [...dialog.querySelectorAll('[data-interaction-tour-step]')];

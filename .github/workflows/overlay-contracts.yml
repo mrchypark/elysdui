@@ -1,0 +1,26 @@
+name: HTMX overlay focus contracts
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  overlay-contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: node interaction_overlay_test.mjs
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: node scripts/overlay-contracts-browser-test.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: overlay-contract-evidence
+          path: test-results/contracts/overlay.json
+          if-no-files-found: error
