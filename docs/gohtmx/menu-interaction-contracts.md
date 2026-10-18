@@ -157,23 +157,60 @@ The [explicit empty-submenu addition](menu-empty-submenu-contracts.md) separatel
 covers child-array presence, empty child focus/key behavior, and its exact-source
 controls. Its local Go/VM checks do not add browser credit to this earlier suite.
 
+## Enabled-leaf pointer selection
+
+In the ordinary menu row path, actual pointer movement onto an enabled plain,
+checkbox, or radio leaf transfers keyboard focus to that leaf without activating
+it or changing checked state. Enter or Space then confirms that leaf on keyup.
+Focus transfers before an old sibling child closes, keeping the parent open with
+a visible keyboard target. Moving onto a disabled leaf or submenu trigger leaves
+the valid current child and selection intact. Fractional pointer movement still
+counts when the browser rounds `movementX` and `movementY` to zero; stationary
+`pointerover` exposure does not count. Both source pins above support this bounded
+behavior; it adds no public property, hover timer, or aim corridor.
+
+The separate [pointer suite](../../ui/gohtmx/tests/browser/menu-pointer-selection-browser-test.mjs)
+requires 31 isolated cases on each of qualified-name Go, chapter/name Go, and
+SDUI rendering, including label/icon input, child depth, nested family ownership,
+empty/all-disabled panels, callback ordering, and real HTMX replacement. Six
+alias cases cover SubMenu, DropdownMenu, OverflowMenu, CheckboxMenuItem,
+RadioMenuItem, and ContextMenu; this does not grant whole-host parity. Its
+[focused workflow](../../.github/workflows/menu-pointer-selection.yml) also runs
+six exact-source controls per surface: leaf transfer, late disabled guard,
+fractional-delta filtering, stationary exposure, radio scope, and cleanup.
+Reports retain trusted input, observed/expected oracles, source/transport hashes,
+and renderer HTML. A control requires its exact designated failure after all
+prerequisites pass. Local checks alone supply no browser pass or mutation-kill
+credit.
+
+A separate [focus-swap supplement](../../ui/gohtmx/tests/browser/menu-pointer-focus-swap-browser-test.mjs)
+requires the bundled public `htmx.swap` path to remain safe when a caller's focus
+listener synchronously replaces the root's innerHTML or the focused row's
+outerHTML. It uses prefetched production fragments and actual HTMX lifecycle
+events; no runtime error is accepted as a successful test.
+
+Numbered manual ContextMenu requests are available through the bounded
+[owner-driven ContextMenu contract](advanced-interaction.md#owner-driven-contextmenu-requests),
+introduced in [PR #43](https://github.com/mrchypark/elysdui/pull/43). Its physical-root
+identity, last-number equality, restart, and HTMX remount rules are distinct from
+live row reconciliation; it does not certify the remaining menu APIs below.
+
 ## Explicitly remaining contracts
 
 These are implementation requirements, not evidence supplied by this increment:
 
-1. `ContextMenu::manual` numbered owner requests exist at **both** source pins in
-   `src/menus/hosts.rs`; the current web props do not expose this API.
-2. The newer `Menu::buttons` horizontal icon-button row and `across` traversal in
+1. The newer `Menu::buttons` horizontal icon-button row and `across` traversal in
    `src/menus/model.rs` have no web row representation in this increment.
-3. Newer delayed hover/aim behavior in `src/menus/aim.rs`, `draw.rs`, and `menu.rs`
+2. Newer delayed hover/aim behavior in `src/menus/aim.rs`, `draw.rs`, and `menu.rs`
    is not implemented by immediate web pointer-movement opening.
-4. Native `settle` preserves row identity during live owner updates. This suite
-   verifies complete HTMX replacement, not in-place row mutation while open.
-5. Root menus remain host-relative and recheck collisions on scroll/resize.
+3. Arbitrary live owner updates and in-place row reconciliation remain outside
+   this suite. The bounded supported-HTMX focus-swap cases above do not certify
+   arbitrary synchronous caller DOM mutation.
+4. Root menus remain host-relative and recheck collisions on scroll/resize.
    Arbitrary layout movement that creates a new viewport collision without either
    event, oversized panel scrolling, nested collision changes while already open,
    RTL layout, and mobile/touch behavior need additional browser requirements.
-6. MenuBar, MegaMenu, SearchableMenu, PieMenu, and native application menus share
+5. MenuBar, MegaMenu, SearchableMenu, PieMenu, and native application menus share
    some helpers but are not granted whole-component parity by these tests.
-7. Browser accessible names/focus/keyboard behavior is tested; screen-reader
+6. Browser accessible names/focus/keyboard behavior is tested; screen-reader
    announcements and a full assistive-technology matrix remain unverified.

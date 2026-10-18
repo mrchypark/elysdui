@@ -42,6 +42,13 @@ assert(harness.includes('report.browserVersion = browser.version()') && harness.
 assert(harness.includes('check.change-host-action-observer-order') && harness.includes("pointerLog.timeline.push({kind: 'hosts'"), 'chronological order needs a shared timeline');
 assert(harness.includes("['go', 'list', '-deps'"), 'standalone dependency proof must be recorded');
 const workflow = readFileSync('.github/workflows/menu-pointer-selection.yml', 'utf8');
+const focusSwap = readFileSync('ui/gohtmx/tests/browser/menu-pointer-focus-swap-browser-test.mjs', 'utf8');
+parse(focusSwap, {ecmaVersion: 'latest', sourceType: 'module'});
+assert(focusSwap.includes('htmx.swap(focusSwapContext)') && focusSwap.includes("['root-innerHTML', 'row-outerHTML']"));
+assert(focusSwap.includes("'swap.pointer-continuation-has-no-runtime-error'") && focusSwap.includes("if (report.status !== 'passed') process.exitCode = 1;"), 'focus-swap errors must fail, never be accepted as expected-red success');
+assert(!/new CustomEvent\(['"]htmx:/.test(focusSwap), 'focus supplement must use real HTMX lifecycle');
+assert(workflow.includes('node ui/gohtmx/tests/browser/menu-pointer-focus-swap-browser-test.mjs') && workflow.includes('test-results/contracts/menu-pointer-focus-swap-*.json'));
+for (const name of Object.keys(menuPointerControls)) assert(workflow.includes(`MENU_POINTER_MUTATION=${name} node ui/gohtmx/tests/browser/menu-pointer-selection-browser-test.mjs`), `${name}: focused CI must run the exact control`);
 assert(workflow.includes('fail-fast: false') && workflow.includes('surface: [qualified, chapter, sdui]'));
 assert(!/^\s*continue-on-error:/.test(workflow), 'baseline workflow may not suppress failure');
 console.log('Menu pointer test-source audit passed; no browser or behavior proof claimed.');

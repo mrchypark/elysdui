@@ -1799,6 +1799,13 @@ register('interaction', (root, registerCleanup) => {
     // Layout can reveal a row beneath a stationary pointer. Only movement,
     // as in upstream on_mouse_move, may take selection back from the keyboard.
     if (row?.closest('.ely-interaction--menus') && event.type !== 'pointermove') return;
+    if (row?.closest('.ely-interaction--menus')) {
+      const item = row.querySelector(':scope > button');
+      if (!root.isConnected || root.dataset.elyDisabled === 'true' || !item || item.disabled || item.closest('[hidden]')) return;
+      // Transfer focus before hiding the old child, so its focusout cannot
+      // dismiss the still-active parent menu. Disabled rows leave both intact.
+      if (item.hasAttribute('data-interaction-menu-action')) item.focus({preventScroll: true});
+    }
     if (row) row.parentElement.querySelectorAll(':scope > .ely-interaction__menu-row > [data-interaction-menu]').forEach(trigger => {
       if (!row.contains(trigger)) menu(root, trigger.dataset.interactionMenu, false);
     });

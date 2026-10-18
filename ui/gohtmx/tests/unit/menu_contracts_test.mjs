@@ -143,13 +143,13 @@ check('repeated context opening preserves the original focus owner',()=>{
 });
 check('stationary menu boundaries preserve keyboard confirmation and child selection',()=>{
  let active,checked=true;
- const root={},calls=[],menuHost={};
- const parentRow={parentElement:{querySelectorAll:()=>[parent]},contains:node=>node===parent,closest:()=>menuHost};
- const leafRow={parentElement:parentRow.parentElement,contains:()=>false,closest:()=>menuHost};
- const parent={row:parentRow,disabled:false,dataset:{interactionMenu:'sub'},expanded:'false',getAttribute(){return this.expanded;}};
- const child={disabled:false,closest:()=>null,click(){}},ruler={row:leafRow,disabled:false,closest:()=>null,click(){checked=!checked;}},label={row:parentRow,trigger:parent};
+ const root={isConnected:true,dataset:{}},calls=[],menuHost={};
+ const parentRow={parentElement:{querySelectorAll:()=>[parent]},contains:node=>node===parent,closest:()=>menuHost,querySelector(selector){assert.equal(selector,':scope > button');return parent;}};
+ const leafRow={parentElement:parentRow.parentElement,contains:()=>false,closest:()=>menuHost,querySelector(selector){assert.equal(selector,':scope > button');return ruler;}};
+ const parent={row:parentRow,disabled:false,dataset:{interactionMenu:'sub'},expanded:'false',getAttribute(){return this.expanded;},closest:()=>null,hasAttribute:()=>false};
+ const child={disabled:false,closest:()=>null,click(){}},ruler={row:leafRow,disabled:false,closest:()=>null,hasAttribute:key=>key==='data-interaction-menu-action',focus(){active=this;},click(){checked=!checked;}},label={row:parentRow,trigger:parent};
  const closest=(_root,target,selector)=>selector==='[data-interaction-quickaction]'?null:selector==='.ely-interaction__menu-row'?target.row:selector==='.ely-interaction__menu-row > [data-interaction-menu]'?(target===parent?parent:target.trigger):selector==='.ely-interaction--menus .ely-interaction__menu-row'&&target.row?.closest()?target.row:null;
- const hover=runInNewContext(slice(source,'  const pointerover = event => {',"  root.querySelectorAll('[data-interaction-search-menu] [data-interaction-filter]')")+'\n({pointerover,move:typeof menuPointerMove==="function"?menuPointerMove:null})',{root,closest,menu:(_root,_id,open)=>{calls.push(open);parent.expanded=String(open);if(open)active=child;},close(){}});
+ const hover=runInNewContext(slice(source,'  const pointerover = event => {',"  root.querySelectorAll('[data-interaction-search-menu] [data-interaction-filter]')")+'\n({pointerover,move:typeof menuPointerMove==="function"?menuPointerMove:null})',{root,closest,menu:(_root,_id,open)=>{if(!open)assert.equal(active,ruler,'leaf focus must transfer before sibling child closure');calls.push(open);parent.expanded=String(open);if(open)active=child;},close(){}});
  const start=slice(source,'  let menuConfirmKey','    if (sourceFamily.keydown(event)) return;'),end=slice(source,'  const keyup = event => {',"  root.addEventListener('pointerdown', holdStart)");
  const keys=runInNewContext(start+'};\n'+end+'\n({keydown,keyup})',{root:{isConnected:true,contains:()=>true},closest:(_root,target)=>target,holdEnd(){}});
  const key=()=>({target:active,key:' ',preventDefault(){},stopPropagation(){}});
