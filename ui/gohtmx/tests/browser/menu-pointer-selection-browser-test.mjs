@@ -293,7 +293,11 @@ for (const style of ['innerHTML', 'outerHTML']) add(`lifecycle.${style}`, async 
   current.controlPrefixStart = current.oracles.length;
   expect('lifecycle.cleanup-once', await page.evaluate(() => retainedPointer.cleanups), 1);
   expect('lifecycle.root-identity', await page.evaluate(() => retainedPointer.root === document.querySelector('[data-fixture-slot="primary"] [data-ely-family]')), style === 'innerHTML');
-  expect('lifecycle.real-network-request', report.requests.slice(requestStart).filter(request => request.path === '/fragment').map(request => ({method: request.method, htmx: request.htmx, target: request.target, status: request.status})), [{method: 'GET', htmx: 'true', target: targetID, status: 200}]);
+  // Bundled HTMX 4 builds HX-Target from the request source before ajax()
+  // applies its explicit target option. The actual swap task is the authority
+  // for disposal ownership; the request header identifies the source button.
+  expect('lifecycle.real-network-request', report.requests.slice(requestStart).filter(request => request.path === '/fragment').map(request => ({method: request.method, htmx: request.htmx, target: request.target, status: request.status})), [{method: 'GET', htmx: 'true', target: 'button#swap-source', status: 200}]);
+  expect('lifecycle.actual-swap-target-and-style', (await logs()).lifecycle.filter(event => event.type === 'htmx:before:swap').flatMap(event => event.tasks), [{target: targetID, swap: style}]);
   expect('lifecycle.old-panel-hidden', await page.evaluate(() => retainedPointer.panel.hidden), true);
   await root().evaluate(node => bindPointerRoot(node)); await clear();
   await page.evaluate(() => {

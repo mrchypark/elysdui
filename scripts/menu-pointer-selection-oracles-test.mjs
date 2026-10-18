@@ -27,6 +27,7 @@ assert(harness.includes("input.isTrusted && input.value === value && input.root 
 assert(harness.includes('received.movementX === 0 && received.movementY === 0'), 'fractional case must prove native zero-rounded-delta input');
 assert(harness.includes('received.x > start.x && received.y > start.y'), 'fractional case must prove actual coordinates changed');
 assert(harness.includes("htmx.ajax('GET'"), 'disposal requires real network HTMX');
+assert(harness.includes("target: 'button#swap-source'") && harness.includes("'lifecycle.actual-swap-target-and-style'") && harness.includes("[{target: targetID, swap: style}]"), 'request-source header and actual before:swap target must be distinguished');
 assert(!/new CustomEvent\(['"]htmx:/.test(harness), 'never fabricate HTMX lifecycle events');
 assert(harness.includes("if (report.status === 'failed') process.exitCode = 1;"), 'intended-behavior failure must fail CI');
 assert(harness.includes("report.status = !incidental && report.checks.every(check => check.status === 'passed') ? 'passed' : 'failed';"));
