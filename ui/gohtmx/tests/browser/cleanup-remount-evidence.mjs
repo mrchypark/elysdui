@@ -45,17 +45,244 @@ const desired = cleanupRemountCases.slice(0, 2);
 const lateCloseFailures = ['presentation.seed-survives-old-disposers', 'presentation.expanded-survives-old-disposers', 'presentation.seed-focus-on-enabled-row'];
 const absentStartupFailures = ['readiness.fresh-owner-survives-old-cleanup', ...lateCloseFailures, 'presentation.request-point-survives', 'ownership.listener-cardinality', 'fresh.changed-number-opens', 'fresh.changed-number-focus-first-enabled', 'fresh.native-navigation-skips-disabled', 'fresh.keyup-fresh-callback-once-after-dismissal', 'fresh.one-action-event', 'fresh.check-committed', 'fresh.cleanup-once'];
 const orderTrace = ['init:1', 'event', 'first:1', 'last:1', 'init:2'];
+// Source-owned targets: do not infer contracts from a report's expected fields.
+// The source-only test independently checks every target against the runner AST.
 export const cleanupRemountFixedExpected = {
-  'readiness.fresh-owner-survives-old-cleanup': 'true',
-  'presentation.seed-survives-old-disposers': false,
-  'presentation.expanded-survives-old-disposers': 'true',
-  'presentation.request-point-survives': ['222px', '223px'],
-  'presentation.seed-focus-on-enabled-row': 'open',
-  'serialization.all-old-disposers-before-new-init': orderTrace,
-  'serialization.fresh-ready': 'true',
-  'serialization.final-controller-disposed-once': 1,
-  'serialization.final-ready-cleared': null,
+  "fixture.unique-production-ids": true,
+  "setup.old-presentation-open": false,
+  "setup.old-owner-request-listener-once": 1,
+  "fixture.browser-exact-bytes./assets/ely-api.js": true,
+  "fixture.browser-exact-bytes./assets/ely-api-interaction.js": true,
+  "fixture.browser-exact-bytes./assets/ely-api-interaction-entry.js": true,
+  "fixture.browser-exact-bytes./assets/htmx.min.js": true,
+  "fixture.browser-exact-bytes./assets/app.css": true,
+  "fixture.browser-exact-bytes./assets/ely-api.css": true,
+  "fixture.browser-exact-bytes./assets/ely-api-interaction.css": true,
+  "fixture.browser-exact-bytes./fragment": true,
+  "cleanup.native-observer-not-inline-remove": 0,
+  "cleanup.old-owner-once": 1,
+  "cleanup.event-before-old-close": false,
+  "identity.textual-owner-unchanged": true,
+  "readiness.fresh-owner-survives-old-cleanup": "true",
+  "presentation.seed-survives-old-disposers": false,
+  "presentation.expanded-survives-old-disposers": "true",
+  "presentation.request-point-survives": [
+    "222px",
+    "223px"
+  ],
+  "presentation.seed-focus-on-enabled-row": "open",
+  "ownership.old-listener-identities-gone": false,
+  "seed.dismissed-duplicate-stays-closed": true,
+  "fresh.changed-number-opens": false,
+  "fresh.changed-number-focus-first-enabled": "open",
+  "input.owner-request-provenance": [
+    {
+      "constructor": "CustomEvent",
+      "isTrusted": false,
+      "detail": {
+        "number": "3",
+        "x": 222,
+        "y": 223
+      },
+      "sameOwner": true
+    }
+  ],
+  "fresh.native-navigation-skips-disabled": "check",
+  "fresh.keydown-no-business-callback": [],
+  "fresh.keyup-fresh-callback-once-after-dismissal": [
+    {
+      "generation": "fresh",
+      "value": "check",
+      "closed": true,
+      "values": [
+        [
+          "scope",
+          "caller-value"
+        ]
+      ]
+    }
+  ],
+  "fresh.one-action-event": [
+    "check"
+  ],
+  "fresh.check-committed": "true",
+  "input.native-keyboard-provenance": [
+    {
+      "type": "keydown",
+      "key": "ArrowDown",
+      "isTrusted": true
+    },
+    {
+      "type": "keyup",
+      "key": "ArrowDown",
+      "isTrusted": true
+    },
+    {
+      "type": "keydown",
+      "key": " ",
+      "isTrusted": true
+    },
+    {
+      "type": "keyup",
+      "key": " ",
+      "isTrusted": true
+    }
+  ],
+  "fresh.escape-returns-caller-focus": true,
+  "fresh.escape-closes": true,
+  "fresh.cleanup-once": 1,
+  "fresh.listeners-removed-after-final-detach": [],
+  "fresh.readiness-cleared-after-final-detach": null,
+  "errors.none.pageErrors": [],
+  "errors.none.consoleErrors": [],
+  "errors.none.requestFailures": [],
+  "errors.none.serverErrors": [],
+  "errors.none.transportErrors": [],
+  "errors.none.runtimeErrors": [],
+  "replacement.old-presentation-closed": true,
+  "replacement.old-listeners-removed": [],
+  "sequential.old-controller-finished-first": [
+    1,
+    null,
+    true,
+    0
+  ],
+  "normal-detach.old-presentation-closed": true,
+  "normal-detach.readiness-cleared": null,
+  "normal-detach.listeners-removed": [],
+  "htmx.actual-context-and-retained-target": [
+    {
+      "sameTarget": true,
+      "style": "innerHTML"
+    }
+  ],
+  "htmx.pending-context-present": true,
+  "htmx.cleanup-mount-does-not-initialize-seed": "111px",
+  "htmx.cleanup-mount-keeps-only-old-request-listener": 1,
+  "htmx.stopped-after-core-before-mutation": [
+    true,
+    true,
+    null,
+    true
+  ],
+  "htmx.old-owner-cleanup-once": 1,
+  "htmx.retained-physical-root": true,
+  "htmx.finally-resumes-same-context": [
+    [
+      true,
+      "true"
+    ]
+  ],
+  "readiness.fresh-owner-after-real-htmx": "true",
+  "presentation.seed-open-after-real-htmx": false,
+  "presentation.seed-point-after-real-htmx": [
+    "222px",
+    "223px"
+  ],
+  "presentation.seed-focus-after-real-htmx": "open",
+  "htmx.real-network-request": true,
+  "htmx.real-delay-stays-stopped-with-old-dom": {
+    "ready": null,
+    "hidden": true,
+    "samePanel": true
+  },
+  "serialization.native-observer-is-not-inline": 1,
+  "serialization.all-old-disposers-before-new-init": [
+    "init:1",
+    "event",
+    "first:1",
+    "last:1",
+    "init:2"
+  ],
+  "serialization.fresh-ready": "true",
+  "serialization.final-controller-disposed-once": 1,
+  "serialization.final-ready-cleared": null,
+  "pending-descendant.deferred-inside-cleanup": {
+    "starts": 0,
+    "ready": null,
+    "connected": true
+  },
+  "pending-descendant.real-owning-context-before-mutation": {
+    "starts": 0,
+    "ready": null,
+    "connected": true,
+    "contextSame": true,
+    "tasks": [
+      {
+        "sameTarget": true,
+        "style": "innerHTML"
+      }
+    ]
+  },
+  "pending-descendant.real-delay-does-not-start-new-child": {
+    "starts": 0,
+    "ready": null,
+    "connected": true
+  },
+  "pending-descendant.replaced-child-never-starts": {
+    "starts": 0,
+    "ready": null,
+    "connected": false
+  },
+  "pending-descendant.real-network-request": true,
+  "pending-descendant.cancelled-context-resumes-child-once": {
+    "starts": 1,
+    "ready": "true",
+    "connected": true
+  },
+  "pending-descendant.fresh-child-cleanup-once": 1
 };
+export function cleanupRemountExpected(check, surface, id) {
+  assert(['standalone', 'catalogue'].includes(surface), 'known renderer surface');
+  assert(cleanupRemountOracleIDs(check.name).includes(id), 'known case oracle');
+  if (Object.hasOwn(cleanupRemountFixedExpected, id)) return cleanupRemountFixedExpected[id];
+  switch (id) {
+    case 'fixture.renderer-screen-count': return surface === 'catalogue' ? 10 : 0;
+    case 'identity.physical-root': return check.name !== 'observer.different-root';
+    case 'identity.descendants-replaced-or-reused': return !['observer.different-root', 'observer.same-root-new-descendants'].includes(check.name);
+    case 'htmx.cancel-or-replace-descendants': return check.name === 'htmx.cancelled';
+    case 'ownership.listener-cardinality': return listenerCounts(check.afterTeardown.initialListeners);
+    case 'seed.duplicate-does-not-restart-or-reposition': return check.afterTeardown.state;
+    case 'normal-detach.old-owner-request-inert': return check.afterTeardown.old;
+    default: assert.fail(id + ': no source-owned contract target');
+  }
+}
+const listenerTypes = ['ely:context-request', 'ely:action', 'ely:change', 'keydown', 'keyup'];
+const listenerCounts = list => Object.fromEntries(listenerTypes.map(type => [type, list.filter(item => item.type === type).length]));
+const listenerProfile = ['ely:action:false', 'ely:change:false', 'ely:context-request:false', 'keydown:false', 'keydown:true', 'keyup:false'];
+const stoppedState = {hidden: true, expanded: 'false', ready: null, connected: false, left: '111px', top: '112px', focus: null};
+const freshState = {hidden: false, expanded: 'true', ready: 'true', connected: true, left: '222px', top: '223px', focus: 'open'};
+function verifyRelationalSnapshots(check, mutation) {
+  if (check.name.startsWith('serialization.')) return;
+  const snapshot = check.afterTeardown;
+  assert(snapshot && typeof snapshot === 'object', 'separately captured teardown snapshot');
+  for (const key of ['initialListeners', 'listeners']) {
+    const list = snapshot[key]; assert(Array.isArray(list), key + ': raw listener list');
+    for (const item of list) {
+      assert.deepEqual(Object.keys(item).sort(), ['capture', 'id', 'type']);
+      assert(listenerTypes.includes(item.type)); assert(Number.isSafeInteger(item.id) && item.id > 0); assert.equal(typeof item.capture, 'boolean');
+    }
+    assert.equal(new Set(list.map(item => item.id)).size, list.length, key + ': unique listener identities');
+  }
+  assert.deepEqual(snapshot.initialListeners.map(item => item.type + ':' + item.capture).sort(), listenerProfile, 'source-owned initial listener profile');
+  const currentProfile = check.name === 'observer.normal-detach' ? [] : mutation === 'disable-replay' && desired.includes(check.name) ? ['ely:action:false', 'ely:change:false'] : listenerProfile;
+  assert.deepEqual(snapshot.listeners.map(item => item.type + ':' + item.capture).sort(), currentProfile, 'case/mode-constrained current listener profile');
+  if (check.name === 'observer.normal-detach') {
+    assert.deepEqual(snapshot.old, stoppedState, 'stopped old owner snapshot');
+    assert.deepEqual(snapshot.state, snapshot.old); assert.deepEqual(snapshot.listeners, []); assert.deepEqual(snapshot.oldListeners, []);
+  } else {
+    let state = freshState;
+    if (mutation && desired.includes(check.name)) {
+      state = {...freshState, hidden: true, expanded: 'false', focus: null};
+      if (mutation === 'disable-replay') Object.assign(state, {ready: null, left: check.name === 'observer.same-root' ? '111px' : '', top: check.name === 'observer.same-root' ? '112px' : ''});
+    }
+    assert.deepEqual(snapshot.state, state, 'case/mode-constrained pre-request snapshot');
+    const cardinality = check.oracles.find(oracle => oracle.id === 'ownership.listener-cardinality');
+    assert.deepEqual(cardinality.observed, listenerCounts(snapshot.listeners), 'listener observation agrees with separate raw list');
+    const oldIdentity = check.oracles.find(oracle => oracle.id === 'ownership.old-listener-identities-gone');
+    assert.equal(oldIdentity.observed, snapshot.listeners.some(item => snapshot.initialListeners.some(old => old.id === item.id)), 'listener identity observation agrees with raw lists');
+  }
+}
 const mutatedTrace = {
   'disable-deferral': ['init:1', 'event', 'init:2', 'first:1', 'last:1'],
   'disable-replay': ['init:1', 'event', 'first:1', 'last:1'],
@@ -66,6 +293,7 @@ export function verifyCleanupRemountEvidence(report, expected, exit) {
   const {mutation, surface, revision, tree, assets, sourceFiles, fixtures, runToken, positiveChecks} = expected;
   const control = cleanupRemountCoreControls[mutation];
   assert(!mutation || control, 'unknown expected mutation');
+  assert(['standalone', 'catalogue'].includes(surface), 'known expected surface');
   assert.equal(typeof runToken, 'string'); assert(runToken.length); assert.equal(report.runToken, runToken, 'fresh invocation identity');
   assert.equal(report.suite, 'cleanup-remount'); assert.equal(report.group, 'all'); assert.equal(report.stage, 'checks');
   assert.equal(report.mutation, mutation); assert.equal(report.surface, surface); assert.equal(report.revision, revision); assert.equal(report.tree, tree); assert.equal(report.dirty, '');
@@ -100,16 +328,19 @@ export function verifyCleanupRemountEvidence(report, expected, exit) {
     assert.deepEqual(positiveChecks?.map(check => check.name), cleanupRemountCases, 'exact verified clean reference inventory');
     for (const check of positiveChecks) {
       assert.equal(check.status, 'passed'); assert.deepEqual(check.oracles.map(oracle => oracle.id), cleanupRemountOracleIDs(check.name));
+      verifyRelationalSnapshots(check, '');
+      for (const oracle of check.oracles) assert.deepEqual(oracle.expected, cleanupRemountExpected(check, surface, oracle.id), oracle.id + ': clean reference source-owned target');
       assert(check.oracles.every(oracle => oracle.pass === true && same(oracle.observed, oracle.expected)), 'clean reference must agree with raw observations');
     }
   }
   for (const check of report.checks) {
     assert.equal(check.error, undefined); assert.equal(check.captureError, undefined);
     assert.deepEqual(check.oracles.map(oracle => oracle.id), cleanupRemountOracleIDs(check.name), `${check.name}: exact unique ordered oracle inventory`);
+    verifyRelationalSnapshots(check, mutation);
     const failed = [];
     for (const oracle of check.oracles) {
       assert(Object.hasOwn(oracle, 'observed') && Object.hasOwn(oracle, 'expected'), `${oracle.id}: missing raw observation`);
-      if (Object.hasOwn(cleanupRemountFixedExpected, oracle.id)) assert.deepEqual(oracle.expected, cleanupRemountFixedExpected[oracle.id], `${oracle.id}: fixed contract target`);
+      assert.deepEqual(oracle.expected, cleanupRemountExpected(check, surface, oracle.id), `${oracle.id}: source-owned contract target`);
       const pass = same(oracle.observed, oracle.expected);
       assert.equal(oracle.pass, pass, `${oracle.id}: cached verdict disagrees with raw observation`);
       assert.equal(oracle.prerequisite, setup.includes(oracle.id), `${oracle.id}: prerequisite classification`);
