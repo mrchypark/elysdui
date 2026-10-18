@@ -1805,6 +1805,9 @@ register('interaction', (root, registerCleanup) => {
       // Transfer focus before hiding the old child, so its focusout cannot
       // dismiss the still-active parent menu. Disabled rows leave both intact.
       if (item.hasAttribute('data-interaction-menu-action')) item.focus({preventScroll: true});
+      // Caller focus listeners can synchronously swap this row through HTMX.
+      // A detached or reowned row must not continue the old controller's work.
+      if (!row.isConnected || row.closest('[data-ely-family]') !== root) return;
     }
     if (row) row.parentElement.querySelectorAll(':scope > .ely-interaction__menu-row > [data-interaction-menu]').forEach(trigger => {
       if (!row.contains(trigger)) menu(root, trigger.dataset.interactionMenu, false);

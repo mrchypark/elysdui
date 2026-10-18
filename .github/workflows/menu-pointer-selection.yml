@@ -36,6 +36,7 @@ jobs:
       # Separate supported-HTMX reentry regression. Its desired no-error oracle
       # must fail CI if a pointer-induced focus swap exposes stale continuation.
       - run: node ui/gohtmx/tests/browser/menu-pointer-focus-swap-browser-test.mjs
+      - run: MENU_POINTER_FOCUS_MUTATION=continuation-guard node ui/gohtmx/tests/browser/menu-pointer-focus-swap-browser-test.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:

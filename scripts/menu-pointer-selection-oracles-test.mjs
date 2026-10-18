@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {parse} from 'acorn';
 import {menuPointerControls, mutateMenuPointerSource} from '../ui/gohtmx/tests/browser/menu-pointer-selection-controls.mjs';
+import {focusSwapControl, focusSwapExpectedError, evaluateFocusSwapControl} from '../ui/gohtmx/tests/browser/menu-pointer-focus-swap-control.mjs';
 
 // Source-only fixture/oracle hygiene. This neither launches Chromium nor proves
 // that a negative control was killed. Browser reports are the evidence gate.
@@ -45,9 +46,28 @@ const workflow = readFileSync('.github/workflows/menu-pointer-selection.yml', 'u
 const focusSwap = readFileSync('ui/gohtmx/tests/browser/menu-pointer-focus-swap-browser-test.mjs', 'utf8');
 parse(focusSwap, {ecmaVersion: 'latest', sourceType: 'module'});
 assert(focusSwap.includes('htmx.swap(focusSwapContext)') && focusSwap.includes("['root-innerHTML', 'row-outerHTML']"));
-assert(focusSwap.includes("'swap.pointer-continuation-has-no-runtime-error'") && focusSwap.includes("if (report.status !== 'passed') process.exitCode = 1;"), 'focus-swap errors must fail, never be accepted as expected-red success');
+assert(focusSwap.includes("'swap.pointer-continuation-has-no-runtime-error'") && focusSwap.includes("if (report.status !== 'passed' && report.status !== 'mutation-killed') process.exitCode = 1;") && focusSwap.includes("report.status = report.causalControl.kill ? 'mutation-killed' : 'failed';"), 'focus-swap errors must fail except for the separately verified exact mutation kill');
 assert(!/new CustomEvent\(['"]htmx:/.test(focusSwap), 'focus supplement must use real HTMX lifecycle');
 assert(workflow.includes('node ui/gohtmx/tests/browser/menu-pointer-focus-swap-browser-test.mjs') && workflow.includes('test-results/contracts/menu-pointer-focus-swap-*.json'));
+assert(workflow.includes('MENU_POINTER_FOCUS_MUTATION=continuation-guard node ui/gohtmx/tests/browser/menu-pointer-focus-swap-browser-test.mjs'));
+const focusMutation = mutateMenuPointerSource(runtime, focusSwapControl, focusSwapControl.name);
+parse(focusMutation, {ecmaVersion: 'latest', sourceType: 'module'});
+assert(!focusMutation.includes(focusSwapControl.from));
+const expectedError = focusSwapExpectedError(focusMutation, 'http://127.0.0.1:1');
+const ids = [...focusSwapControl.prior, focusSwapControl.oracle, ...focusSwapControl.after];
+const validatorFixture = {mutation: focusSwapControl.name, pageErrors: [expectedError], transportErrors: [], serverErrors: [], consoleErrors: [], requestFailures: [], runtimeErrors: [], checks: ['root-innerHTML', 'row-outerHTML'].map(name => ({name, status: name === 'root-innerHTML' ? 'passed' : 'failed', oracles: ids.map(id => ({id, observed: id === focusSwapControl.oracle ? name === 'root-innerHTML' ? [] : [expectedError] : true, expected: id === focusSwapControl.oracle ? [] : true, pass: name === 'root-innerHTML' || id !== focusSwapControl.oracle, prerequisite: false}))}))};
+assert(evaluateFocusSwapControl(validatorFixture, expectedError).kill, 'synthetic validator fixture must match exact signature; not browser evidence');
+for (const corrupt of [
+  report => { report.pageErrors[0].message = 'unrelated error'; },
+  report => { report.pageErrors[0].stack += '\n    at unrelated'; },
+  report => { report.pageErrors.push({...report.pageErrors[0]}); },
+  report => { report.runtimeErrors.push({message: 'cleanup failed'}); },
+  report => { report.checks[1].oracles[0].pass = false; },
+  report => { report.checks[1].oracles[0].id = 'wrong prerequisite'; },
+  report => { report.checks[1].oracles.at(-1).pass = false; },
+  report => { report.checks[0].status = 'failed'; },
+]) { const report = structuredClone(validatorFixture); corrupt(report); assert(!evaluateFocusSwapControl(report, expectedError).kill, 'unrelated or incomplete failure must not count as a guard-removal kill'); }
+console.log('continuation-guard: exact error/prefix/postcondition validator rejects 8 corrupt records; browser kill unverified');
 for (const name of Object.keys(menuPointerControls)) assert(workflow.includes(`MENU_POINTER_MUTATION=${name} node ui/gohtmx/tests/browser/menu-pointer-selection-browser-test.mjs`), `${name}: focused CI must run the exact control`);
 assert(workflow.includes('fail-fast: false') && workflow.includes('surface: [qualified, chapter, sdui]'));
 assert(!/^\s*continue-on-error:/.test(workflow), 'baseline workflow may not suppress failure');

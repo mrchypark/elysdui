@@ -144,8 +144,8 @@ check('repeated context opening preserves the original focus owner',()=>{
 check('stationary menu boundaries preserve keyboard confirmation and child selection',()=>{
  let active,checked=true;
  const root={isConnected:true,dataset:{}},calls=[],menuHost={};
- const parentRow={parentElement:{querySelectorAll:()=>[parent]},contains:node=>node===parent,closest:()=>menuHost,querySelector(selector){assert.equal(selector,':scope > button');return parent;}};
- const leafRow={parentElement:parentRow.parentElement,contains:()=>false,closest:()=>menuHost,querySelector(selector){assert.equal(selector,':scope > button');return ruler;}};
+ const parentRow={isConnected:true,parentElement:{querySelectorAll:()=>[parent]},contains:node=>node===parent,closest:selector=>selector==='[data-ely-family]'?root:menuHost,querySelector(selector){assert.equal(selector,':scope > button');return parent;}};
+ const leafRow={isConnected:true,parentElement:parentRow.parentElement,contains:()=>false,closest:selector=>selector==='[data-ely-family]'?root:menuHost,querySelector(selector){assert.equal(selector,':scope > button');return ruler;}};
  const parent={row:parentRow,disabled:false,dataset:{interactionMenu:'sub'},expanded:'false',getAttribute(){return this.expanded;},closest:()=>null,hasAttribute:()=>false};
  const child={disabled:false,closest:()=>null,click(){}},ruler={row:leafRow,disabled:false,closest:()=>null,hasAttribute:key=>key==='data-interaction-menu-action',focus(){active=this;},click(){checked=!checked;}},label={row:parentRow,trigger:parent};
  const closest=(_root,target,selector)=>selector==='[data-interaction-quickaction]'?null:selector==='.ely-interaction__menu-row'?target.row:selector==='.ely-interaction__menu-row > [data-interaction-menu]'?(target===parent?parent:target.trigger):selector==='.ely-interaction--menus .ely-interaction__menu-row'&&target.row?.closest()?target.row:null;

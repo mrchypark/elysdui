@@ -8,16 +8,21 @@ import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {chromium} from 'playwright';
 import {loadContextOwnerAssets} from './context-owner-assets.mjs';
+import {mutateMenuPointerSource} from './menu-pointer-selection-controls.mjs';
+import {focusSwapControl, focusSwapExpectedError, evaluateFocusSwapControl} from './menu-pointer-focus-swap-control.mjs';
 
 // Supplemental real-browser regression, separate from the immutable 31-case
 // baseline. A caller focus listener invokes the bundled public HTMX swap API;
 // no lifecycle event, runtime handler, production row, or expected error is faked.
 const base = fileURLToPath(new URL('../../../../', import.meta.url));
 const surface = process.env.MENU_POINTER_SURFACE;
+const mutation = process.env.MENU_POINTER_FOCUS_MUTATION || '';
 assert(['qualified', 'chapter', 'sdui'].includes(surface), 'one explicit renderer is required');
+assert(!mutation || mutation === focusSwapControl.name, 'unknown focus-swap mutation');
 const sha = bytes => createHash('sha256').update(bytes).digest('hex');
 const report = {suite: 'menu-pointer-focus-swap', surface, status: 'running', checks: [], requests: [], assets: {}, fixtureSources: {}, fixtures: {}, httpAssetProof: [], browserResponses: [], transportErrors: [], serverErrors: [], pageErrors: [], consoleErrors: [], requestFailures: [], runtimeErrors: [], sourcePins: {menu: '49ed1f84056fa13347d68801b479a4a5a8e03b53', compatibilityAudit: 'da3fdcaf39f2fa85ce1dd9cad07c3c81cf1dd721'}, scope: 'Synchronous bundled htmx.swap during pointer-induced leaf focus, root innerHTML safe control and focused-row outerHTML regression; no arbitrary DOM reconciliation claim.'};
 let browser, server, page, temp, current;
+report.mutation = mutation;
 const responses = [];
 const record = (id, observed, expected, prerequisite = false) => {
   let pass = true; try { assert.deepEqual(observed, expected); } catch { pass = false; }
@@ -39,6 +44,7 @@ try {
   report.toolchain = {node: process.version, playwright: JSON.parse(await readFile(join(base, 'node_modules/playwright/package.json'), 'utf8')).version, go: execFileSync(process.env.GO || 'go', ['version'], {encoding: 'utf8'}).trim()};
   const fixturePath = surface === 'sdui' ? './adapters/gohtmx/tests/fixtures/menu-pointer-selection' : './ui/gohtmx/tests/fixtures/menu-pointer-selection';
   for (const path of ['ui/gohtmx/tests/browser/menu-pointer-focus-swap-browser-test.mjs', 'ui/gohtmx/tests/browser/menu-pointer-selection-browser-test.mjs', 'ui/gohtmx/tests/browser/context-owner-assets.mjs', fixturePath + '/main.go', 'ui/gohtmx/tests/fixtures/pointerfixture/fixture.go', 'ui/gohtmx/tests/fixtures/pointerfixture/verify.go', 'ui/gohtmx/templates/ely-api-interaction.html', 'ui/gohtmx/component.go', 'ui/gohtmx/menu.go', 'adapters/gohtmx/catalogue_manifest.json.gz', 'adapters/gohtmx/render.go']) report.fixtureSources[path] = sha(await readFile(join(base, path)));
+  for (const path of ['ui/gohtmx/tests/browser/menu-pointer-selection-controls.mjs', 'ui/gohtmx/tests/browser/menu-pointer-focus-swap-control.mjs']) report.fixtureSources[path] = sha(await readFile(join(base, path)));
   temp = await mkdtemp(join(tmpdir(), 'ely-pointer-focus-swap-'));
   const binary = join(temp, 'fixture');
   execFileSync(process.env.GO || 'go', ['build', '-o', binary, fixturePath], {cwd: base, stdio: 'pipe'});
@@ -48,8 +54,14 @@ try {
   const assets = await loadContextOwnerAssets(base);
   const icon = await readFile(join(base, 'ui/gohtmx/assets/ely/icons/circle.svg'));
   assets.set('/assets/ely/icons/circle.svg', {body: icon, contentType: 'image/svg+xml', sourceSHA256: sha(icon), servedSHA256: sha(icon), bytes: icon.length, referencedBy: new Set(['production fixture icon'])});
+  if (mutation) {
+    const asset = assets.get(focusSwapControl.file);
+    asset.body = Buffer.from(mutateMenuPointerSource(asset.body.toString('utf8'), focusSwapControl, mutation));
+    asset.servedSHA256 = sha(asset.body); asset.bytes = asset.body.length;
+    report.control = {...focusSwapControl, anchorCount: 1};
+  }
   for (const [path, {body, referencedBy, ...metadata}] of assets) report.assets[path] = {...metadata, referencedBy: [...referencedBy]};
-  assert(Object.values(report.assets).every(asset => asset.sourceSHA256 === asset.servedSHA256), 'supplement must serve unmodified production bytes');
+  assert.deepEqual(Object.entries(report.assets).filter(([, asset]) => asset.sourceSHA256 !== asset.servedSHA256).map(([path]) => path), mutation ? [focusSwapControl.file] : [], 'only the declared guard-removal control may alter production bytes');
   server = createServer((request, response) => {
     const path = new URL(request.url, 'http://localhost').pathname;
     const entry = {path, method: request.method, htmx: request.headers['hx-request'] || null}; report.requests.push(entry);
@@ -62,6 +74,7 @@ try {
   });
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
   const origin = `http://127.0.0.1:${server.address().port}`;
+  const expectedControlError = mutation ? focusSwapExpectedError(assets.get(focusSwapControl.file).body.toString('utf8'), origin) : null;
   for (const [path, asset] of assets) {
     const response = await fetch(origin + path), received = Buffer.from(await response.arrayBuffer());
     const proof = {path, status: response.status, expectedSHA256: asset.servedSHA256, receivedSHA256: sha(received)};
@@ -95,7 +108,7 @@ try {
       await page.goto(origin + '/');
       await page.waitForFunction(() => document.querySelectorAll('[data-ely-family]').length === 8 && [...document.querySelectorAll('[data-ely-family]')].every(node => node.dataset.elyReady === 'true'));
       await page.evaluate(() => document.fonts.ready); await Promise.all(responses);
-      must('fixture.exact-browser-runtime', report.browserResponses.some(proof => proof.check === kind && proof.path === '/assets/ely-api-interaction.js' && proof.receivedSHA256 === report.assets['/assets/ely-api-interaction.js'].sourceSHA256), true);
+      must('fixture.exact-browser-runtime', report.browserResponses.some(proof => proof.check === kind && proof.path === '/assets/ely-api-interaction.js' && proof.receivedSHA256 === report.assets['/assets/ely-api-interaction.js'].servedSHA256), true);
       must('fixture.clean-transport', report.transportErrors, []);
       await page.evaluate(async () => {
         const response = await fetch('/fragment'); if (!response.ok) throw new Error('Production fragment prefetch failed');
@@ -167,12 +180,16 @@ try {
   await Promise.all(responses);
   const incidental = ['transportErrors', 'serverErrors', 'pageErrors', 'consoleErrors', 'requestFailures', 'runtimeErrors'].some(key => report[key].length);
   report.status = !incidental && report.checks.length === 2 && report.checks.every(check => check.status === 'passed') ? 'passed' : 'failed';
+  if (mutation) {
+    report.causalControl = evaluateFocusSwapControl(report, expectedControlError);
+    report.status = report.causalControl.kill ? 'mutation-killed' : 'failed';
+  }
   for (const [path, body] of bodies) { const file = join(base, 'test-results/contracts', report.fixtures[path].html); await mkdir(join(base, 'test-results/contracts/menu-pointer-fixtures'), {recursive: true}); await writeFile(file, body); }
 } catch (error) { report.status = 'failed'; report.startupError = {message: error.message, stack: error.stack}; }
 finally {
   await Promise.all(responses);
   const directory = join(base, 'test-results/contracts'); await mkdir(directory, {recursive: true});
-  await writeFile(join(directory, `menu-pointer-focus-swap-${surface}.json`), JSON.stringify(report, null, 2));
+  await writeFile(join(directory, `menu-pointer-focus-swap-${surface}${mutation ? '-' + mutation : ''}.json`), JSON.stringify(report, null, 2));
   await browser?.close(); if (server) await new Promise(resolve => server.close(resolve)); if (temp) await rm(temp, {recursive: true, force: true});
 }
-if (report.status !== 'passed') process.exitCode = 1;
+if (report.status !== 'passed' && report.status !== 'mutation-killed') process.exitCode = 1;

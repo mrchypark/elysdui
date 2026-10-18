@@ -50,7 +50,7 @@ check('direct empty-panel navigation and both confirmation phases remain contain
 });
 check('hover and repeated click keep the empty child open without an action',()=>{
  const f=fixture();f.menu('root',true);
- const row={closest:()=>f.root,parentElement:{querySelectorAll:()=>[f.child.trigger]},contains:n=>n===f.child.trigger,querySelector(selector){assert.equal(selector,':scope > button');return f.child.trigger;}};
+ const row={isConnected:true,closest:()=>f.root,parentElement:{querySelectorAll:()=>[f.child.trigger]},contains:n=>n===f.child.trigger,querySelector(selector){assert.equal(selector,':scope > button');return f.child.trigger;}};
  const pointer=runInNewContext(cut('  const pointerover = event => {',"  root.querySelectorAll('[data-interaction-search-menu]")+'\npointerover',{root:f.root,closest:(_r,_t,s)=>s==='.ely-interaction__menu-row'?row:s==='.ely-interaction__menu-row > [data-interaction-menu]'?f.child.trigger:null,menu:f.runtime.menu});
  pointer({type:'pointermove',target:f.child.trigger});assert.equal(f.child.panel.hidden,false);assert.equal(f.document.activeElement,f.child.panel);
  const click=runInNewContext('(target)=>{'+cut("    const trigger = target?.closest('[data-interaction-menu]');","    if (target?.closest('.ely-interaction__navigation-menu")+'}',{root:f.root,CSS:{escape:s=>s},menu:f.runtime.menu,close(){throw Error('submenu click must not close root');}});

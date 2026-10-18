@@ -18,6 +18,9 @@ const rowSelection = `    if (row?.closest('.ely-interaction--menus')) {
       // Transfer focus before hiding the old child, so its focusout cannot
       // dismiss the still-active parent menu. Disabled rows leave both intact.
       ${leafSelection}
+      // Caller focus listeners can synchronously swap this row through HTMX.
+      // A detached or reowned row must not continue the old controller's work.
+      if (!row.isConnected || row.closest('[data-ely-family]') !== root) return;
     }`;
 const siblingClosure = `    if (row) row.parentElement.querySelectorAll(':scope > .ely-interaction__menu-row > [data-interaction-menu]').forEach(trigger => {
       if (!row.contains(trigger)) menu(root, trigger.dataset.interactionMenu, false);

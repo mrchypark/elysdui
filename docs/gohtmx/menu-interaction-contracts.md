@@ -188,6 +188,10 @@ requires the bundled public `htmx.swap` path to remain safe when a caller's focu
 listener synchronously replaces the root's innerHTML or the focused row's
 outerHTML. It uses prefetched production fragments and actual HTMX lifecycle
 events; no runtime error is accepted as a successful test.
+Its guard-removal control requires the exact detached-row TypeError and both
+production stack sites after every input/swap/disposal prerequisite passes;
+the root-innerHTML control and fresh callbacks must still pass. A generic
+page error, different stack, or unrelated failure does not count as a kill.
 
 Numbered manual ContextMenu requests are available through the bounded
 [owner-driven ContextMenu contract](advanced-interaction.md#owner-driven-contextmenu-requests),
