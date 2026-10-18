@@ -1,0 +1,82 @@
+import assert from 'node:assert/strict';
+import {readFileSync, mkdirSync, writeFileSync} from 'node:fs';
+import {execFileSync} from 'node:child_process';
+import {createHash} from 'node:crypto';
+import {runInNewContext} from 'node:vm';
+
+// Bounded production-function execution. Native focus/layout and HTTP swaps are
+// deliberately reserved for the production-renderer Playwright companion.
+const source = readFileSync(process.env.MENU_CONTRACT_SOURCE || './assets/ely-api-interaction.js', 'utf8');
+const core = readFileSync(process.env.MENU_CORE_SOURCE || './assets/ely-api.js', 'utf8');
+const slice = (text, start, end) => { const a=text.indexOf(start),b=text.indexOf(end,a);assert(a>=0&&b>a,`missing production boundary ${start}`);return text.slice(a,b); };
+const report = {suite:'menu-contracts-vm',revision:execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim(),sourceSHA256:createHash('sha256').update(source).digest('hex'),coreSHA256:createHash('sha256').update(core).digest('hex'),checks:[],status:'running'};
+const check = (name,fn) => {try {fn();report.checks.push({name,status:'passed'});} catch(error) {report.checks.push({name,status:'failed',error:error.message});}};
+const button = (name, group='density', checked=false) => ({name,value:name,dataset:{interactionMenuRadio:group,elyAction:'choose'},attrs:{'aria-checked':String(checked)},getAttribute(k){return this.attrs[k]??null;},setAttribute(k,v){this.attrs[k]=v;},hasAttribute(){return false;},focus(){document.activeElement=this;},closest(){return null;}});
+let document;
+check('radio state is panel-local and committed before observers',()=>{
+ const top={},nested={},a=button('a'),b=button('b','density',true),child=button('child','density',true),color=button('color','color',true);
+ for(const n of [a,b,color])n.closest=()=>top;child.closest=()=>nested;top.querySelectorAll=()=>[a,b,child,color];
+ const snapshots=[];let closed=false;
+ const handler=runInNewContext('(radio,event)=>{'+slice(source,'    if (radio) {','    if (checkbox) {')+'}',{root:{},change:(_,d)=>snapshots.push({...d,closed,states:[a,b,child,color].map(n=>n.attrs['aria-checked'])}),close(){closed=true;},menuAction(){}});
+ handler(a,{});
+ assert.deepEqual([a,b,child,color].map(n=>n.attrs['aria-checked']),['true','false','true','true'],'parent selection must preserve nested radio group');
+ assert.equal(snapshots.length,1);assert.equal(snapshots[0].closed,true,'change observer must see closed menu');
+});
+const menuFunction = () => {
+ const start=source.includes('const placeMenu =')?'const placeMenu =':source.includes('const menuReturnFocus =')?'const menuReturnFocus =':'const menu =';
+ return slice(source,start,'// Each mount owns its toast clocks.');
+};
+const fixture = ({context=false,empty=false}={}) => {
+ document={activeElement:null,body:{}};
+ const surface=button('surface'),prior=button('prior'),trigger=button('trigger'),item=button('item');
+ for(const n of [surface,prior,trigger,item])n.isConnected=true;
+ const panel={hidden:true,style:{},parentElement:{matches:()=>false},hasAttribute:k=>k==='tabindex',getAttribute:()=> 'menu',contains:n=>n===item||n===panel,closest:s=>s==='.ely-interaction--menus'?{}:null,querySelector:()=>null,querySelectorAll:s=>s==='[data-interaction-menu]'?[]:empty?[]:[item],matches:()=>false,focus(){document.activeElement=this;},getBoundingClientRect:()=>({width:200,height:80,right:200,bottom:80})};
+ trigger.closest=s=>s==='[data-interaction-context]'&&context?surface:null;trigger.getBoundingClientRect=()=>({left:180,right:220,top:20,bottom:50});surface.getBoundingClientRect=trigger.getBoundingClientRect;
+ item.closest=s=>s==='[role="menu"]'?panel:null;
+ const root={dataset:{},querySelector:s=>s.startsWith('#')?panel:trigger};document.activeElement=context?prior:trigger;
+ const placements=[];const runtime=runInNewContext(menuFunction()+'\n({menu,returns:typeof menuReturnFocus==="undefined"?null:menuReturnFocus})',{document,window:{innerWidth:320,innerHeight:200},CSS:{escape:s=>s},WeakMap,placeOverlay:(p,b)=>placements.push({p,b})});
+ return {root,trigger,panel,item,surface,prior,menu:runtime.menu,returns:runtime.returns,placements};
+};
+check('context dismissal returns the pre-menu focus owner',()=>{const f=fixture({context:true});f.menu(f.root,'menu',true);assert.equal(document.activeElement,f.item);f.menu(f.root,'menu',false,true);assert.equal(document.activeElement,f.prior,'context close must return original focus');});
+check('empty menu receives keyboard focus and restores trigger',()=>{const f=fixture({empty:true});f.menu(f.root,'menu',true);assert.equal(document.activeElement,f.panel);f.menu(f.root,'menu',false,true);assert.equal(document.activeElement,f.trigger);});
+check('ordinary menu opening requests viewport-aware placement',()=>{const f=fixture();f.menu(f.root,'menu',true);assert.equal(f.placements.length,1,'root menu must request viewport-aware placement');});
+check('generic dispatch leaves marked menu actions to the family',()=>{
+ const actions=[];const item=button('leaf');item.dataset.interactionMenuAction='';item.hasAttribute=k=>k==='data-interaction-menu-action';item.closest=()=>null;
+ const target={closest:()=>item};const root={};const click=runInNewContext(slice(core,'    const click = event => {','    const submit = event => {')+'\nclick',{belongs:()=>true,root,emit:(_,name)=>actions.push(name),FormData:class{}});
+ click({target,preventDefault(){}});assert.deepEqual(actions,[],'menu host action must wait for family state and dismissal');
+});
+check('hover-open submenu remains open on click',()=>{
+ const panel={hidden:false},nested={};const trigger={dataset:{interactionMenu:'sub'},closest:s=>s==='[role="menu"]'?nested:null};
+ let state;
+ const click=runInNewContext('(target)=>{'+slice(source,"    const trigger = target?.closest('[data-interaction-menu]');","    if (target?.closest('.ely-interaction__navigation-menu")+'}',{root:{querySelector:()=>panel},CSS:{escape:s=>s},menu:(_r,_id,open)=>{state=open;},close(){}});
+ click({closest:()=>trigger});assert.equal(state,true,'clicking hover-open submenu must keep it open');
+});
+check('context submenus return to their own trigger',()=>{
+ const f=fixture({context:true});f.trigger.closest=s=>s==='[role="menu"]'?{}:s==='[data-interaction-context]'?f.surface:null;
+ f.menu(f.root,'sub',true);f.menu(f.root,'sub',false,true);assert.equal(document.activeElement,f.trigger);
+});
+check('settled menu action preserves caller form data and cancellation',()=>{
+ const rows=[['scope','value']],calls=[];const item=button('leaf');item.hasAttribute=()=>true;item.form={};
+ class FormData {constructor(form){assert.equal(form,item.form);} *[Symbol.iterator](){yield*rows;}}
+ const handler=runInNewContext(slice(source,'const menuAction =','// Each mount owns its toast clocks.')+'\nmenuAction',{FormData,emit:(_root,action,detail)=>{calls.push({action,detail});return false;}});
+ let prevented=false;handler({}, {preventDefault(){prevented=true;}},item);
+ assert.equal(calls[0].action,'choose');assert.deepEqual(Array.from(calls[0].detail.values,entry=>Array.from(entry)),rows);assert(calls[0].detail.formData instanceof FormData);assert(prevented);
+});
+check('menu confirms activate once on keyup and block modified keys',()=>{
+ const calls=[],control={disabled:false,closest:()=>null,click:()=>calls.push('activate')},root={isConnected:true,contains:()=>true};
+ const begin=slice(source,'  let menuConfirmKey','    if (sourceFamily.keydown(event)) return;');
+ const end=slice(source,'  const keyup = event => {',"  root.addEventListener('pointerdown', holdStart)");
+ const handlers=runInNewContext(begin+'};\n'+end+'\n({keydown,keyup})',{root,closest:()=>control,holdEnd(){}});
+ const event=key=>({target:control,key,stopPropagation(){calls.push('stop');},preventDefault(){calls.push('prevent');}});
+ for(const key of ['Enter',' ']) {calls.length=0;handlers.keydown(event(key));assert(!calls.includes('activate'),'keydown must not activate');handlers.keyup(event(key));assert.deepEqual(calls,['stop','prevent','stop','prevent','activate']);}
+ calls.length=0;handlers.keydown({...event('Enter'),ctrlKey:true});handlers.keyup({...event('Enter'),ctrlKey:true});assert(!calls.includes('activate'));
+});
+check('repeated context opening preserves the original focus owner',()=>{
+ const f=fixture({context:true});f.surface.querySelector=()=>f.trigger;f.menu(f.root,'menu',true);f.trigger.dataset.interactionMenu='menu';
+ const handler=runInNewContext('(event)=>{'+slice(source,"    const surface = closest(root, event.target, '[data-interaction-context]');",'  const pointerover = event => {'),{root:f.root,closest:()=>f.surface,CSS:{escape:s=>s},window:{innerWidth:320,innerHeight:200},menu:f.menu,menuReturnFocus:f.returns,close:()=>f.menu(f.root,'menu',false)});
+ handler({target:{closest:()=>null},clientX:300,clientY:180,preventDefault(){}});f.menu(f.root,'menu',false,true);assert.equal(document.activeElement,f.prior,'repeat context open must preserve its original focus owner');
+});
+const failure=report.checks.some(c=>c.status==='failed');report.status=failure?'failed':'passed';
+mkdirSync('test-results/contracts',{recursive:true});writeFileSync(`test-results/contracts/menu-vm${process.env.MENU_EVIDENCE?'-'+process.env.MENU_EVIDENCE:''}.json`,JSON.stringify(report,null,2));
+for(const c of report.checks)console.log(`${c.status}: ${c.name}${c.error?'\n  '+c.error:''}`);
+assert(!failure,'menu contracts failed');
