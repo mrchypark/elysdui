@@ -33,3 +33,35 @@ Dense table variants keep their semantic caller data separate from the shared ta
 `Comparison` accepts `Plans` (`Label`, optional `Featured`) and feature `Features` (`Label`, `Values`), keeping the comparison matrix caller-owned. `DataTable` accepts ordinary table `Columns` and `Rows`; rows may additionally provide `Initials`, `Trend` SVG points, and a numeric `Quota` for the native person, sparkline, and meter cells. With `Paged: true`, its `PageSize` selects a local page window over every supplied row; Previous, Next, search, filtering, sorting, column visibility, and density remain local. `ColumnPinning` uses caller `Columns` and `Rows`; its first column remains sticky while the matrix scrolls. `RowGrouping` uses the same column schema plus `Groups` (`Value`, `Label`, `Rows`); it renders one shared toolbar and each group can fold locally, emitting `toggle-group` with its caller value.
 
 `BeforeAfter` accepts `BeforeURL`, `AfterURL`, accessible image alternatives, and a `Value` percentage. Its in-image divider supports pointer drag, press-to-position, and Left/Right movement; changes emit the caller `compare` action. `Watermark` accepts `Watermark`, `Title`, `Description`, and optional `Read`; Mark as read and Unmark as read update only local presentation and emit `watermark-read`. `QRCode` accepts a `Codes` collection (`Label`, `Value`, `Format` of `qr`, `code128`, or `ean13`); barcode aliases use their rendered `.Variant` and caller `Format`. `Stars` accepts read-only `Ratings` (`Value`, `Max`, `Text`, optional `Size`, and star `Fill` values from 0 to 100) for full and fractional score rows.
+
+### VirtualTable: supplied-row windowing
+
+The Go component's `TableSource: true` path accepts caller `Columns[].Label` and
+`Rows[].Cells`, with optional `Rows[].Key`, `RowHeader`/`Rows[].Label`, `Label`, `Empty`, `Error`, `Disabled`,
+and `VirtualTotal`. After initialization it attaches only a fixed-height 32-pixel
+row window plus four overscan rows on each side. A 300-pixel scroll region keeps
+the column headings visible. Arrow keys, Page Up/Down, Space/Shift-Space, and
+Home/End scroll the focused region. Rows retain their original DOM identity and
+caller order; there is no local sorting, selection or editing contract here.
+`Disabled` removes the region from tab order and blocks keyboard commands;
+read-only pointer scrolling remains available. `Error` displays the caller's
+escaped error instead of mounting a controller. Empty input displays `Empty` or
+"No rows.". On complete-root replacement/removal, lifecycle cleanup removes listeners and
+observers and restores all rows. Replace the complete component root with HTMX
+`outerHTML`; retained-root `innerHTML` updates do not remount this controller.
+
+Only supplied rows contribute to scroll geometry and accessible row counts.
+`VirtualTotal` is descriptive metadata: a larger number explicitly reports that
+remaining rows were not supplied, and never creates phantom rows or fetches
+records. The complete supplied rows are server-rendered and retained in browser
+memory; this bounds the attached DOM after mount, not transfer size, initial HTML
+parsing, or total memory. Without JavaScript all supplied rows remain readable.
+Use bounded caller data; this is not a claim of million-row scalability.
+
+This follows the reference's local fixed-height `DataTable.virtualized()` design
+(`src/tables/table.rs` and `examples/gallery/pages/tables/core.rs` at upstream
+`da3fdca`). Remote paging, source URLs, asynchronous range responses, and source
+error/retry protocols have no implemented host contract. The strict SDUI registry exposes these local-data properties using lower
+camel case (for example, `tableSource`, `virtualTotal`, and `rows[].key`); it has
+no remote-source or asynchronous window-response schema. Existing `TableSource: false` rendering
+remains the ordinary table fallback, without a virtualization claim.

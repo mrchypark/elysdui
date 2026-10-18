@@ -11,6 +11,59 @@ const changed = (root, detail = {}) => root.dispatchEvent(new CustomEvent('ely:c
 register('data', root => {
   const abort = new AbortController();
   const listen = (target, type, handler, options = {}) => target.addEventListener(type, handler, { ...options, signal: abort.signal });
+  const virtualCleanups = [];
+  root.querySelectorAll('[data-ely-virtual-table]').forEach(container => {
+    if (container.closest('[data-ely-family]') !== root) return;
+    const viewport = container.querySelector('[data-ely-virtual-viewport]');
+    const table = viewport?.querySelector('table');
+    const body = table?.tBodies[0];
+    if (!body) return; // A caller error is displayed without a scroll controller.
+    const rows = [...body.rows];
+    const rowHeight = 32, overscan = 4;
+    const status = container.querySelector('[data-ely-virtual-status]');
+    const declared = Number(container.dataset.elyTotal);
+    table.setAttribute('aria-rowcount', String(rows.length + 1));
+    rows.forEach((row, index) => row.setAttribute('aria-rowindex', String(index + 2)));
+    const spacer = () => {
+      const row = document.createElement('tr');
+      row.dataset.elyVirtualSpacer = '';
+      row.setAttribute('aria-hidden', 'true');
+      const cell = document.createElement('td');
+      cell.colSpan = Math.max(1, table.tHead?.rows[0]?.cells.length || 1);
+      row.append(cell);
+      return row;
+    };
+    const top = spacer(), bottom = spacer();
+    let start = -1, end = -1;
+    const render = () => {
+      const headerHeight = table.tHead?.getBoundingClientRect().height || rowHeight;
+      const capacity = Math.max(1, Math.ceil((viewport.clientHeight - headerHeight) / rowHeight));
+      const first = Math.max(0, Math.min(rows.length - 1, Math.floor(viewport.scrollTop / rowHeight)));
+      const nextStart = Math.max(0, first - overscan);
+      const nextEnd = Math.min(rows.length, first + capacity + overscan);
+      if (nextStart === start && nextEnd === end) return;
+      start = nextStart; end = nextEnd;
+      top.firstElementChild.style.height = `${start * rowHeight}px`;
+      bottom.firstElementChild.style.height = `${(rows.length - end) * rowHeight}px`;
+      body.replaceChildren(top, ...rows.slice(start, end), bottom);
+      status.textContent = rows.length ? `Rows ${start + 1}–${end} of ${rows.length} supplied` : '0 supplied rows';
+      if (Number.isFinite(declared) && declared > rows.length) status.textContent += ` (${declared} declared; remaining rows not supplied)`;
+    };
+    listen(viewport, 'scroll', render, { passive: true });
+    listen(viewport, 'keydown', event => {
+      if (event.target !== viewport || root.dataset.elyDisabled === 'true') return;
+      const page = Math.max(rowHeight, viewport.clientHeight - rowHeight);
+      const offsets = { ArrowDown: rowHeight, ArrowUp: -rowHeight, PageDown: page, PageUp: -page, ' ': event.shiftKey ? -page : page };
+      if (!(event.key in offsets) && !['Home', 'End'].includes(event.key)) return;
+      event.preventDefault();
+      viewport.scrollTop = event.key === 'Home' ? 0 : event.key === 'End' ? viewport.scrollHeight : viewport.scrollTop + offsets[event.key];
+      render();
+    });
+    const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(render) : null;
+    observer?.observe(viewport);
+    render();
+    virtualCleanups.push(() => { observer?.disconnect(); body.replaceChildren(); rows.forEach(row => body.append(row)); });
+  });
   const updateConverter = form => {
     const amount = Number(form.elements.amount?.value);
     const from = form.elements.from?.selectedOptions[0];
@@ -758,6 +811,7 @@ register('data', root => {
   }));
   return () => {
     abort.abort();
+    virtualCleanups.forEach(cleanup => cleanup());
     root.querySelectorAll('[data-ely-selectable]').forEach(list => { selectionAnchors.delete(list); typeAheadStates.delete(list); });
   };
 });

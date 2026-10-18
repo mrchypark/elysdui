@@ -28,7 +28,7 @@ func TestDataTableFixturesMatchSourceSpecimens(t *testing.T) {
 		{"tables/Spreadsheet", []string{"Quarterly budget", "10,176", "108,120", "Share of rent", "9.41"}},
 		{"tables/TreeTable", []string{"src", "842 KB", "ui", "main.rs", "assets", "2,480 KB", "Cargo.toml"}},
 		{"tables/PivotTable", []string{"Sales in thousands.", "1,301"}},
-		{"tables/VirtualTable", []string{"aria-rowcount=\"100000\"", "Event 1", "Event 9"}},
+		{"tables/VirtualTable", []string{"data-ely-total=\"100000\"", "9 supplied rows (declared total: 100000)", "Event 1", "Event 9"}},
 		{"tables/HeatmapTable", []string{"Visits by weekday and hour", "Mon", "Sun", "157", "ComparisonTable is Comparison, in Data Display."}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -36,6 +36,9 @@ func TestDataTableFixturesMatchSourceSpecimens(t *testing.T) {
 			var output bytes.Buffer
 			if err := ui.RenderComponent(server.templates, &output, fixture.Component); err != nil {
 				t.Fatal(err)
+			}
+			if test.name == "tables/VirtualTable" && strings.Contains(output.String(), `aria-rowcount="100000"`) {
+				t.Fatal("declared total must not pretend unsupplied rows exist")
 			}
 			for _, want := range test.wants {
 				if !strings.Contains(output.String(), want) {

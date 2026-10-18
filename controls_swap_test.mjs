@@ -154,7 +154,7 @@ function assertInitialized(fixture, label) {
   assert.equal(fixture.tagEntry.required, false, `${label}: populated tags satisfy required`);
   assert.equal(fixture.comboValue.disabled, fixture.disabled, `${label}: combobox submission and disabled state`);
   assert.equal(fixture.comboInput.value, 'Beta', `${label}: selected combobox label`);
-  assert.equal(fixture.comboInput.getAttribute('aria-activedescendant'), fixture.options[1].id, `${label}: active option`);
+  assert.equal(fixture.comboInput.getAttribute('aria-activedescendant'), null, `${label}: collapsed popup has no active descendant`);
   assert.deepEqual(fixture.panels.map(panel => panel.hidden), [true, false], `${label}: selected tab`);
   assert.deepEqual(fixture.tabButtons.map(tab => tab.tabIndex), [-1, 0], `${label}: tab stops`);
   assert.equal(fixture.fallback.hasAttribute('name'), false, `${label}: signature fallback stops duplicate submission`);
