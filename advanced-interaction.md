@@ -21,7 +21,7 @@ All text props are escaped. `Items` is caller data: each item may have `Value`, 
 | buttons/SplitButton | `Items` | `Action`, item `Action` or `select` |
 | buttons/ToggleButton | `Pressed` | local `ely:change` |
 | buttons/ToggleGroup | `Multiple`, `Items[].Selected` | local `ely:change` |
-| buttons/SegmentedControl | `Items[].Selected` | local `ely:change` |
+| buttons/SegmentedControl | `Value`, `Name`, `Items[].Selected`, `Items[].Disabled` | local `ely:change` |
 | buttons/FloatingActionButton | `Icon` | `Action` or `create` |
 | buttons/ConfirmButton | `Action`, `Value` | `Action` or `confirm` after hold |
 | buttons/CopyButton | `Value`, `Action` | `copy` or `Action` |
@@ -29,7 +29,7 @@ All text props are escaped. `Items` is caller data: each item may have `Value`, 
 | buttons/BulkActionBar | `Items`, `Value` | item `Action` or `bulk` |
 | buttons/ActionSheet | `Items` | item `Action` or `select` |
 | buttons/QuickActions | `Items` | item `Action` or `action` |
-| navigation/Tabs | `Placement` (`top`, `left`, or `bottom`), `Items[].Content`, `Items[].Note`, `Items[].Selected` | local `ely:change` |
+| navigation/Tabs | `Placement` (`top`, `left`, or `bottom`), `Items[].Content`, `Items[].Note`, `Items[].Selected`, `Value`, optional `ContextAction` | local `ely:change`; optional context action with `value`, `x`, `y` |
 | navigation/EditorTabs | `Items[].Selected`, `Items[].Pinned`, `Items[].Pinnable`, `Items[].Dirty`, `Items[].Preview`, `Items[].Closable`, `Items[].Icon`, `Items[].PinAction` | `toggle-pin`, `reorder`; local `ely:change` |
 | navigation/Breadcrumb | `Items[].Href` | browser navigation |
 | navigation/Pagination | `Page`, `Total`, `PreviousPage`, `NextPage`, `Jump`, `Items[].Gap`, `Items[].Selected` | local `ely:change` |
@@ -117,7 +117,7 @@ Tour steps can reference caller elements with `Target` CSS selectors. Without a 
 
 The source's overlay Tooltip page is explanatory navigation to other chapters. Its gallery preview uses `ReferenceOnly`; the reusable Tooltip API still renders the delayed tooltip. Run `node interaction_overlay_test.mjs` for deterministic bounds, focus, validation, hover-delay, cleanup, and lightbox-boundary coverage. Browser regressions and rendered pixel comparison remain separate parent integration checks.
 
-Toggle groups use `aria-pressed` per item. Set `Multiple: true` for independent marks; omit it for one selected item. Segmented controls use `role="radiogroup"` and one `role="radio"` choice. Tabs use roving tab focus; `left` placement uses Up and Down, while `top` and `bottom` use Left and Right. Escape closes an open menu or popover and returns focus to its trigger. Each local change emits bubbling `ely:change` with the selected `value` and its state (`selected`, `pressed`, or `checked`) where applicable.
+Toggle groups use `aria-pressed` per item and include the whole current selection as `values` in each change event. Set `Multiple: true` for independent marks; omit it for one selected item after activation. Initial toggle `Selected`/`Pressed` flags are caller-owned; provide at most one in a single-select group. Segmented controls use `role="radiogroup"` and one `role="radio"` choice. For tabs and segmented controls, a nonempty `Value` takes precedence over item `Selected` flags; only the first matching item is selected. An unknown value selects nothing. Reselecting the active choice does not emit a change. Segmented controls use roving focus with arrow keys, Home and End, skipping disabled choices. Tabs use roving tab focus; `left` placement uses Up and Down, while `top` and `bottom` use Left and Right. Escape closes an open menu or popover and returns focus to its trigger. Each local change emits bubbling `ely:change` with the selected `value` and its state (`selected`, `pressed`, or `checked`) where applicable.
 
 Editor tabs support pointer drag reorder and Alt+Left or Alt+Right keyboard reorder. `Pinnable` renders a pin control; it emits `PinAction` or `toggle-pin` and updates `aria-pressed`. For `Items[].Icon`, a lowercase, hyphenated name maps to `/assets/ely/icons/<name>.svg` as a `currentColor` mask; an unavailable or invalid name leaves the text label visible.
 

@@ -157,6 +157,7 @@ register('data', root => {
     });
   }
   root.querySelectorAll('[data-ely-table-filter-column]').forEach(control => listen(control, 'change', () => {
+    if (control.closest('[data-ely-paged-table]')) return;
     const table = control.closest('.ui-data-table')?.querySelector('table');
     const column = Number(control.dataset.elyTableFilterColumn);
     const value = control.value.trim().toLocaleLowerCase();
@@ -168,29 +169,60 @@ register('data', root => {
     const table = tableRoot.querySelector('table'), body = table?.tBodies[0], search = tableRoot.querySelector('[data-ui-table-filter]');
     const status = tableRoot.querySelector('[data-ely-table-filter-column]'), size = tableRoot.querySelector('[data-ely-table-page-size]');
     const pageStatus = tableRoot.querySelector('[data-ely-table-page-status]'), summary = tableRoot.querySelector('[data-ui-table-summary]');
+    const originalRows = body ? [...body.rows] : [];
+    const selectAll = tableRoot.querySelector('[data-ely-table-select-all]');
+    const syncSelection = () => {
+      if (!selectAll) return;
+      const controls = [...tableRoot.querySelectorAll('[data-ely-table-select]')].filter(control => !control.disabled && !control.closest('tr')?.hidden);
+      const selected = controls.filter(control => control.checked).length;
+      selectAll.checked = controls.length > 0 && selected === controls.length;
+      selectAll.indeterminate = selected > 0 && selected < controls.length;
+      selectAll.disabled = controls.length === 0;
+    };
     let page = 0;
     const apply = () => {
       if (!body) return;
       const query = search?.value.trim().toLocaleLowerCase() || '', statusValue = status?.value.trim().toLocaleLowerCase() || '';
-      const rows = [...body.rows], matches = rows.filter(row => row.textContent.toLocaleLowerCase().includes(query) && (!statusValue || row.cells[1]?.textContent.toLocaleLowerCase().includes(statusValue)));
+      const rows = [...body.rows], matches = rows.filter(row => row.textContent.toLocaleLowerCase().includes(query) && (!statusValue || row.cells[Number(status?.dataset.elyTableFilterColumn)]?.textContent.toLocaleLowerCase().includes(statusValue)));
       const pageSize = Math.max(1, Number(size?.value) || 8), pages = Math.max(1, Math.ceil(matches.length / pageSize));
-      page = Math.min(page, pages - 1);
+      page = Math.max(0, Math.min(page, pages - 1));
       const start = page * pageSize;
       rows.forEach(row => { row.hidden = !matches.includes(row) || matches.indexOf(row) < start || matches.indexOf(row) >= start + pageSize; });
       if (pageStatus) pageStatus.textContent = matches.length ? `${start + 1}–${Math.min(start + pageSize, matches.length)} of ${matches.length}` : '0 rows';
       if (summary) summary.textContent = `${matches.length} / ${rows.length} rows`;
       tableRoot.querySelector('[data-ely-table-page="previous"]')?.toggleAttribute('disabled', page === 0);
       tableRoot.querySelector('[data-ely-table-page="next"]')?.toggleAttribute('disabled', page + 1 >= pages);
+      syncSelection();
     };
     const reset = () => { page = 0; apply(); };
-    listen(search, 'input', reset); listen(status, 'change', reset); listen(size, 'change', reset);
-    tableRoot.querySelectorAll('[data-ely-table-page]').forEach(button => listen(button, 'click', () => { page += button.dataset.elyTablePage === 'next' ? 1 : -1; apply(); changed(root, { action: 'page', page: page + 1, pageSize: Number(size?.value) || 8 }); }));
-    tableRoot.querySelectorAll('[data-ui-table-column]').forEach(control => listen(control, 'change', () => { const column = Number(control.dataset.uiTableColumn); tableRoot.querySelectorAll('tr').forEach(row => { if (row.cells[column]) row.cells[column].hidden = !control.checked; }); }));
-    tableRoot.querySelectorAll('[data-ui-table-sort]').forEach(button => listen(button, 'click', () => { const column = Number(button.dataset.uiTableSort), heading = button.closest('th'), ascending = heading?.getAttribute('aria-sort') !== 'ascending'; tableRoot.querySelectorAll('th').forEach(cell => cell.setAttribute('aria-sort', 'none')); heading?.setAttribute('aria-sort', ascending ? 'ascending' : 'descending'); body?.append(...[...body.rows].sort((left, right) => left.cells[column].textContent.localeCompare(right.cells[column].textContent, undefined, { numeric: true }) * (ascending ? 1 : -1))); reset(); }));
+    listen(search, 'input', reset);
+    listen(status, 'change', () => { reset(); changed(root, { action: 'filter', column: Number(status.dataset.elyTableFilterColumn), value: status.value }); });
+    listen(size, 'change', reset);
+    tableRoot.querySelectorAll('[data-ely-table-page]').forEach(button => listen(button, 'click', () => { if (button.disabled) return; page += button.dataset.elyTablePage === 'next' ? 1 : -1; apply(); changed(root, { action: 'page', page: page + 1, pageSize: Number(size?.value) || 8 }); }));
+    tableRoot.querySelectorAll('[data-ui-table-column]').forEach(control => listen(control, 'change', () => { const column = Number(control.dataset.uiTableColumn) + 1; tableRoot.querySelectorAll('tr').forEach(row => { if (row.cells[column]) row.cells[column].hidden = !control.checked; }); }));
+    tableRoot.querySelectorAll('[data-ui-table-sort]').forEach(button => listen(button, 'click', () => {
+      if (button.disabled || !body) return;
+      const column = Number(button.dataset.uiTableSort) + 1, heading = button.closest('th');
+      const previous = heading?.getAttribute('aria-sort');
+      const direction = previous === 'ascending' ? 'descending' : previous === 'descending' ? 'none' : 'ascending';
+      tableRoot.querySelectorAll('th[aria-sort]').forEach(cell => cell.setAttribute('aria-sort', 'none'));
+      heading?.setAttribute('aria-sort', direction);
+      const rows = direction === 'none' ? originalRows : [...originalRows].sort((left, right) => (left.cells[column]?.textContent || '').localeCompare(right.cells[column]?.textContent || '', undefined, { numeric: true }) * (direction === 'ascending' ? 1 : -1));
+      body.append(...rows);
+      reset();
+    }));
     listen(tableRoot.querySelector('[data-ui-table-density]'), 'click', () => { tableRoot.dataset.density = tableRoot.dataset.density === 'compact' ? 'default' : 'compact'; });
-    const selectAll = tableRoot.querySelector('[data-ely-table-select-all]');
-    listen(selectAll, 'change', () => { tableRoot.querySelectorAll('[data-ely-table-select]').forEach(control => { if (!control.closest('tr')?.hidden) control.checked = selectAll.checked; }); changed(root, { action: 'select-rows', count: tableRoot.querySelectorAll('[data-ely-table-select]:checked').length }); });
-    tableRoot.querySelectorAll('[data-ely-table-select]').forEach(control => listen(control, 'change', () => { if (selectAll) selectAll.checked = [...tableRoot.querySelectorAll('[data-ely-table-select]')].every(item => item.checked); changed(root, { action: 'select-rows', count: tableRoot.querySelectorAll('[data-ely-table-select]:checked').length }); }));
+    listen(selectAll, 'change', () => {
+      if (selectAll.disabled) return;
+      tableRoot.querySelectorAll('[data-ely-table-select]').forEach(control => { if (!control.disabled && !control.closest('tr')?.hidden) control.checked = selectAll.checked; });
+      syncSelection();
+      changed(root, { action: 'select-rows', count: tableRoot.querySelectorAll('[data-ely-table-select]:checked').length });
+    });
+    tableRoot.querySelectorAll('[data-ely-table-select]').forEach(control => listen(control, 'change', () => {
+      if (control.disabled) return;
+      syncSelection();
+      changed(root, { action: 'select-rows', count: tableRoot.querySelectorAll('[data-ely-table-select]:checked').length });
+    }));
     apply();
   });
   root.querySelectorAll('[data-ely-group-toggle]').forEach(control => listen(control, 'click', () => {
