@@ -32,6 +32,89 @@ assert.equal(validate(form), false); assert.equal(field.message, 'A name cannot 
 field.value = 'Road/map'; assert.equal(validate(form), false); assert.equal(error.textContent, 'Names cannot hold a slash.');
 field.value = 'Roadmap'; assert.equal(validate(form), true); assert.equal(field.message, '');
 
+// Native close() returns focus synchronously but queues its close event. Drive
+// both that task and animation frames explicitly; elapsed time is not an oracle.
+const dialogFocusSource = source.slice(source.indexOf('  const dialogOpeners ='), source.indexOf('  const showTourStep ='));
+const focusHarness = () => {
+  const frames = new Map(), closeEvents = [], cleanups = [];
+  let frameID = 0;
+  const focusDocument = {body: {}, activeElement: null};
+  const root = {isConnected: true};
+  const opener = {isConnected: true, disabled: false, calls: 0, focus() { this.calls++; focusDocument.activeElement = this; }};
+  const field = {};
+  const dialog = {open: true, hidden: false, nativeRestore: true, contains: node => node === field, close() {
+    this.open = false;
+    focusDocument.activeElement = this.nativeRestore && opener.isConnected && !opener.disabled ? this.nativeTarget || opener : focusDocument.body;
+    closeEvents.push(() => api.restoreDialogFocus(this));
+  }};
+  const api = runInNewContext(`${dialogFocusSource}\n({dialogOpeners, restoreDialogFocus, closeDialog})`, {
+    root, document: focusDocument, lottieCleanups: cleanups,
+    requestAnimationFrame(fn) { frames.set(++frameID, fn); return frameID; },
+    cancelAnimationFrame(id) { frames.delete(id); },
+  });
+  api.dialogOpeners.set(dialog, opener);
+  focusDocument.activeElement = field;
+  return {...api, root, opener, field, dialog, document: focusDocument, frames,
+    flushFrames() { const pending = [...frames.values()]; frames.clear(); pending.forEach(fn => fn()); },
+    flushCloseEvents() { closeEvents.splice(0).forEach(fn => fn()); },
+    cleanup() { cleanups.splice(0).forEach(fn => fn()); },
+  };
+};
+for (const phase of ['trigger', 'switch']) {
+  const h = focusHarness(), nextControl = {};
+  h.closeDialog(h.dialog);
+  assert.equal(h.document.activeElement, h.opener, 'native close restores the opener synchronously');
+  h.document.activeElement = nextControl;
+  h.flushCloseEvents(); h.flushFrames();
+  assert.equal(h.document.activeElement, nextControl, `a closed dialog must not steal the next popover ${phase} focus`);
+}
+{
+  const h = focusHarness(); h.dialog.nativeRestore = false;
+  h.closeDialog(h.dialog); h.flushCloseEvents(); h.flushFrames();
+  assert.equal(h.document.activeElement, h.opener, 'fallback close still returns keyboard focus to the opener');
+  assert.equal(h.opener.calls, 1, 'duplicate close notifications restore focus at most once');
+}
+{
+  const h = focusHarness(), priorFocus = {};
+  h.dialog.nativeTarget = priorFocus;
+  h.closeDialog(h.dialog);
+  assert.equal(h.document.activeElement, priorFocus, 'native close can restore an earlier target after programmatic opening');
+  h.flushCloseEvents(); h.flushFrames();
+  assert.equal(h.document.activeElement, h.opener, 'an owned close still restores the explicitly activated opener');
+}
+{
+  const h = focusHarness(); h.dialog.nativeRestore = false;
+  const newerOpener = {isConnected: true, disabled: false, calls: 0, focus() { this.calls++; h.document.activeElement = this; }};
+  h.closeDialog(h.dialog);
+  h.dialog.open = true; h.dialogOpeners.set(h.dialog, newerOpener); h.document.activeElement = h.field;
+  h.closeDialog(h.dialog); h.flushCloseEvents(); h.flushFrames();
+  assert.equal(h.document.activeElement, newerOpener, 'rapid close/reopen/reclose restores only the newest opener');
+  assert.equal(h.opener.calls, 0, 'the older generation never restores focus');
+  assert.equal(newerOpener.calls, 1, 'the newest generation restores focus once');
+}
+for (const interrupt of ['move-focus', 'disconnect-root', 'disconnect-opener', 'disable-opener', 'reopen', 'cleanup']) {
+  const h = focusHarness(), next = {}; h.dialog.nativeRestore = false;
+  h.closeDialog(h.dialog);
+  if (interrupt === 'move-focus') h.document.activeElement = next;
+  if (interrupt === 'disconnect-root') h.root.isConnected = false;
+  if (interrupt === 'disconnect-opener') h.opener.isConnected = false;
+  if (interrupt === 'disable-opener') h.opener.disabled = true;
+  if (interrupt === 'reopen') { h.dialog.open = true; h.dialogOpeners.set(h.dialog, next); h.document.activeElement = h.field; }
+  if (interrupt === 'cleanup') { h.cleanup(); h.root.isConnected = false; h.root.isConnected = true; }
+  const expected = h.document.activeElement;
+  h.flushCloseEvents(); h.flushFrames();
+  assert.equal(h.document.activeElement, expected, `${interrupt} cancels stale focus restoration`);
+  assert.equal(h.opener.calls, 0, `${interrupt} must not refocus the old opener`);
+  if (interrupt === 'reopen') assert.equal(h.dialogOpeners.get(h.dialog), next, 'queued close must retain the reopened dialog opener');
+  if (interrupt === 'cleanup') assert.equal(h.dialogOpeners.size, 0, 'cleanup releases opener references');
+}
+{
+  const h = focusHarness(), next = {};
+  h.dialog.close(); h.document.activeElement = next; h.flushCloseEvents(); h.flushFrames();
+  assert.equal(h.document.activeElement, next, 'a queued native close event must respect focus already moved elsewhere');
+}
+console.log('Overlay dialog focus ownership, queued close, interruption, and cleanup checks passed');
+
 // Run the production hover binding against a deterministic clock.
 const events = {}, pending = new Map(), cleanups = [];
 let serial = 0, delay, positions = 0;
