@@ -1,0 +1,28 @@
+name: Menu alias default contracts
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  menu-alias-contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: go test ./ui/gohtmx ./adapters/gohtmx -run TestMenuAlias -count=1
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: node adapters/gohtmx/tests/browser/menu-alias-contracts-browser-test.mjs
+      - run: MENU_ALIAS_NEGATIVE_CONTROL=radio-default node adapters/gohtmx/tests/browser/menu-alias-contracts-browser-test.mjs
+      - run: MENU_ALIAS_NEGATIVE_CONTROL=overflow-default node adapters/gohtmx/tests/browser/menu-alias-contracts-browser-test.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: menu-alias-contract-evidence
+          path: test-results/contracts/menu-alias*.json
+          if-no-files-found: error

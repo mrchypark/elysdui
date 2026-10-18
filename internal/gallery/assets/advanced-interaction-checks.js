@@ -494,6 +494,49 @@ const check = async ({root,expectError}, selector) => {
   if (disabled) { const before = emitted.length; disabled.click(); assert(emitted.length === before, 'disabled button emitted an action'); }
 };
 
+// This exact alias has radio defaults even though it shares the checkbox renderer.
+// Keep mandatory radio roles and interaction assertions separate from CheckboxMenuItem.
+const radioMenuItemCheck = async ({root,twin}) => {
+  assert(root.dataset.elyComponent === 'menus/RadioMenuItem', 'RadioMenuItem check requires the exact alias');
+  assert(root.dataset.elyReady === 'true', 'RadioMenuItem root did not mount');
+  const trigger = root.querySelector('[data-interaction-menu]');
+  const panel = trigger && root.querySelector(`#${CSS.escape(trigger.dataset.interactionMenu)}`);
+  assert(trigger && panel?.getAttribute('role') === 'menu', 'RadioMenuItem is missing its controlled menu');
+  const rows = [...panel.querySelectorAll('[data-interaction-menu-action]')].filter(row => row.closest('[role="menu"]') === panel);
+  assert(rows.length === 6 && rows.every(row => row.getAttribute('role') === 'menuitemradio' && row.hasAttribute('data-interaction-menu-radio') && !row.hasAttribute('data-interaction-checkbox')), 'RadioMenuItem fixture leaves must expose radio semantics');
+  const groups = new Map();
+  for (const row of rows) { const name = row.dataset.interactionMenuRadio; if (!groups.has(name)) groups.set(name, []); groups.get(name).push(row); }
+  assert(groups.size === 2 && groups.get('default')?.length === 3 && groups.get('density')?.length === 3, 'RadioMenuItem must preserve default and explicit density groups');
+  const state = nodes => nodes.map(row => [row.value, row.getAttribute('aria-checked')]);
+  const twinBefore = twin && JSON.stringify(state([...twin.querySelectorAll('[aria-checked]')]));
+  const changes = [], actions = [], order = [];
+  const capture = (events, kind) => event => { if (event.target === root) { order.push(kind); events.push({...event.detail, panelClosed:panel.hidden}); } };
+  const onChange = capture(changes, 'change'), onAction = capture(actions, 'action');
+  root.addEventListener('ely:change', onChange); root.addEventListener('ely:action', onAction);
+  try {
+    for (const [group, items] of groups) {
+      const target = items.find(row => row.getAttribute('aria-checked') === 'false' && !row.disabled);
+      assert(target, `RadioMenuItem ${group} needs an enabled unselected caller option`);
+      const peers = rows.filter(row => row.dataset.interactionMenuRadio !== group), peersBefore = JSON.stringify(state(peers));
+      for (const repeat of [false, true]) {
+        changes.length = 0; actions.length = 0; order.length = 0;
+        trigger.click();
+        assert(!panel.hidden && trigger.getAttribute('aria-expanded') === 'true', 'RadioMenuItem trigger did not open its menu');
+        target.click();
+        assert(items.every(row => row.getAttribute('aria-checked') === String(row === target)), repeat ? 'RadioMenuItem reselection must stay selected' : 'RadioMenuItem selection must be exclusive within its group');
+        assert(JSON.stringify(state(peers)) === peersBefore, 'RadioMenuItem selection must preserve the other group');
+        assert(panel.hidden && trigger.getAttribute('aria-expanded') === 'false' && document.activeElement === trigger, 'RadioMenuItem selection must dismiss and restore trigger focus');
+        assert(order.join(',') === 'change,action' && changes.length === 1 && actions.length === 1, 'RadioMenuItem must emit exactly one settled change then action');
+        assert(changes[0].name === group && changes[0].value === target.value && changes[0].checked === true && changes[0].panelClosed, 'RadioMenuItem change must report its committed caller value after dismissal');
+        assert(actions[0].id === root.id && actions[0].component === 'menus/RadioMenuItem' && actions[0].action === target.dataset.elyAction && actions[0].value === target.value && actions[0].panelClosed, 'RadioMenuItem action must retain exact alias identity and caller payload after dismissal');
+      }
+    }
+    if (twin) assert(JSON.stringify(state([...twin.querySelectorAll('[aria-checked]')])) === twinBefore, 'RadioMenuItem selection must not alter its independent twin');
+  } finally {
+    root.removeEventListener('ely:change', onChange); root.removeEventListener('ely:action', onAction);
+  }
+};
+
 const lottieCheck = async ({root}) => {
   const host = root.querySelector('[data-interaction-lottie]');
   const play = root.querySelector('[data-interaction-lottie-play]');
@@ -511,5 +554,6 @@ const lottieCheck = async ({root}) => {
 };
 
 const checks = Object.fromEntries(Object.entries(stories).flatMap(([chapter, names]) => names.map(name => [`${chapter}/${name}`, context => check(context, contracts[chapter][name])])));
+checks['menus/RadioMenuItem'] = radioMenuItemCheck;
 checks['motion/Lottie Player'] = lottieCheck;
 registerChecks('interaction', checks);

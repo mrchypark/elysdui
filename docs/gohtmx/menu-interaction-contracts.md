@@ -30,7 +30,9 @@ that the host persisted the choice.
 
 - Roots: `ID`, `Label`/`Title`, `Icon`, `Disabled`, and `Items`
 - Dropdown: `Host` is `dropdown`, `split`, or `overflow`; omitted `Host` retains
-  the established split default. `Action`, `ActionLabel`, and `Value` describe
+  the established split default for `menus/DropdownMenu` and `menus/SplitButton`.
+  The exact OverflowMenu alias has an [overflow default](menu-alias-contracts.md).
+  `Action`, `ActionLabel`, and `Value` describe
   the split primary action
 - Context: `Content` and optional `ActionLabel`; right pointer, ContextMenu key,
   and Shift+F10 open the menu
