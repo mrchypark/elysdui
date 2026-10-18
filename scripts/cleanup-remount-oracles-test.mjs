@@ -3,6 +3,7 @@ import {createHash} from 'node:crypto';
 import {readFile} from 'node:fs/promises';
 import {parse} from 'acorn';
 import vm from 'node:vm';
+import {cleanupRemountCoreControls, mutateCleanupRemountCore} from '../ui/gohtmx/tests/browser/cleanup-remount-core-controls.mjs';
 import {cleanupRemountControl, elideCleanupClose} from '../ui/gohtmx/tests/browser/cleanup-remount-control.mjs';
 const base = new URL('../', import.meta.url);
 const read = path => readFile(new URL(path, base), 'utf8');
@@ -61,3 +62,29 @@ assert.equal(window.remountLog.errors.length, 2);
 assert.equal(window.remountLog.errors[1].action, 'fresh-action');
 assert.equal(window.remountLog.errors[1].connected, true);
 console.log('Detached/connected root error telemetry and event-identity deduplication unit checks passed; no browser proof claimed.');
+
+// These four baseline functions retain their byte-exact oracle/setup bodies.
+// New core probes and mutation serving must not weaken their expectations.
+const baselineFunctions = {
+  ready: '72dd754fe10d76d869ac745899cb3c2656d7eedf798324da012da2b66995d906',
+  observerCase: 'c5225b4d707253e14c3391b63fc9b35fc91e60309e45b678ff63b35769ed53f1',
+  verifyFreshOwner: '36b95af561e79535ca2bf8be939711cd274904b5b41a6db499e6989ee331aca2',
+  htmxCase: '541d45b95c3fefb719baf1f6af8f115d2318bb4e1805ae03ca21559a9fc1f725',
+};
+for (const [name, expected] of Object.entries(baselineFunctions)) {
+  const node = runnerAST.body.find(node => node.type === 'FunctionDeclaration' && node.id?.name === name);
+  assert(node, `missing original ${name}`);
+  assert.equal(createHash('sha256').update(runner.slice(node.start, node.end)).digest('hex'), expected, `${name}: original baseline body must remain unchanged`);
+}
+const core = await read('ui/gohtmx/assets/ely-api.js');
+for (const [name, control] of Object.entries(cleanupRemountCoreControls)) {
+  const mutated = mutateCleanupRemountCore(core, name);
+  parse(mutated, {ecmaVersion: 'latest', sourceType: 'module'});
+  assert.equal(mutated, core.replace(control.anchor, control.replacement));
+  assert.throws(() => mutateCleanupRemountCore(core.replace(control.anchor, 'missing'), name), /exactly one/);
+  assert.throws(() => mutateCleanupRemountCore(core + control.anchor, name), /exactly one/);
+}
+parse(await read('scripts/cleanup-remount-browser-controls.mjs'), {ecmaVersion: 'latest', sourceType: 'module'});
+assert(workflow.includes('node scripts/cleanup-remount-browser-controls.mjs'));
+assert(!workflow.includes("github.head_ref == 'test/cleanup-remount-baseline'"), 'temporary automatic close-elision trigger must be removed');
+console.log('Baseline browser function hashes and repair-control syntax/anchors passed; real browser repair proof still requires CI.');

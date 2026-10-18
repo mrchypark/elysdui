@@ -196,4 +196,21 @@ check('newer synchronous seeded remount survives the old initializer return',()=
  f.request('99',333,334);assert.equal(f.panel.style.left,'333px','same-stack stopped request number remains available to the new owner');
 });
 
+check('cleanup remount seed starts after the old production family disposer',()=>{
+ const f=setup();seed(f,'1',111,112);const runtime=startProduction(f);let inside;
+ f.root.addEventListener('ely:cleanup',()=>{seed(f,'2',222,223);runtime.api.mount(f.root);inside={number:runtime.api.contextRequestOwners.get(f.root).lastNumber,hidden:f.panel.hidden};});
+ runtime.doc.dispatchEvent({type:'htmx:before:swap',detail:{tasks:[{target:f.root,swapSpec:{style:'innerHTML'}}]}});
+ assert.deepEqual(inside,{number:'1',hidden:false},'automatic fresh seed remains deferred inside cleanup');
+ assert.equal(f.panel.hidden,false,'fresh seed must survive the full old production disposer');assert.equal(f.panel.style.left,'222px');assert.equal(f.panel.style.top,'223px');assert.equal(document.activeElement,f.item);
+ assert.equal(runtime.api.contextRequestOwners.get(f.root).lastNumber,'2');assert.equal(f.root.handlers.get('ely:context-request').size,1);assert.equal(f.root.dataset.elyReady,'true');assert.deepEqual(runtime.errors,[]);
+});
+check('explicit owner request inside cleanup retains the old-listener boundary',()=>{
+ const f=setup();seed(f,'1',111,112);const runtime=startProduction(f);let inside;
+ f.root.addEventListener('ely:cleanup',()=>{seed(f,'2',222,223);runtime.api.mount(f.root);f.request('2',222,223);inside={number:runtime.api.contextRequestOwners.get(f.root).lastNumber,hidden:f.panel.hidden};});
+ runtime.doc.dispatchEvent({type:'htmx:before:swap',detail:{tasks:[{target:f.root,swapSpec:{style:'innerHTML'}}]}});
+ assert.deepEqual(inside,{number:'2',hidden:false},'old owner listener can still consume an explicit request before its disposer');
+ assert.equal(f.panel.hidden,true,'explicitly consumed number remains consumed when the deferred seed runs');assert.equal(runtime.api.contextRequestOwners.get(f.root).lastNumber,'2');
+ assert.equal(f.root.handlers.get('ely:context-request').size,1);assert.equal(f.root.dataset.elyReady,'true');f.request('2');assert.equal(f.panel.hidden,true);f.request('3');assert.equal(f.panel.hidden,false);assert.deepEqual(runtime.errors,[]);
+});
+
 report.status=report.checks.every(c=>c.status==='passed')?'passed':'failed';mkdirSync('test-results/contracts',{recursive:true});writeFileSync(process.env.CONTEXT_REQUEST_REPORT||'test-results/contracts/context-owner-vm.json',JSON.stringify(report,null,2));for(const c of report.checks)console.log(`${c.status}: ${c.name}${c.error?'\n'+c.error:''}`);assert.equal(report.status,'passed');

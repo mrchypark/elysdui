@@ -1,13 +1,16 @@
 # Cleanup/remount desired lifecycle baseline
 
-This is a **test-only desired contract**, not an assertion that today's public
-API already promises complete reentrant presentation survival. The
-[existing lifecycle contract](../gohtmx/asset-loading.md#component-replacement-lifecycle)
-expressly preserves fresh readiness during cleanup/error reentry and orders
-`ely:cleanup` before disposers. It does not expressly guarantee that all family
-presentation survives a same-physical-root mount inside that event. That existing
-readiness guarantee and the stronger desired presentation guarantee are separate
-oracles here.
+The original revision was a **test-only desired contract**. Its public API
+promised fresh readiness during cleanup/error reentry and `ely:cleanup` before
+disposers, but did not promise full same-physical-root presentation survival.
+The readiness and stronger presentation expectations remain separate oracles.
+
+This document preserves that baseline and its diagnostic method. The current
+production serialization candidate and added checks are described under
+[repair candidate verification](#repair-candidate-verification). Its precise
+ownership and timing behavior is now documented in the
+[lifecycle contract](../gohtmx/asset-loading.md#component-replacement-lifecycle).
+Browser acceptance still requires exact-candidate CI evidence.
 
 ## Desired outcome and timing
 
@@ -25,25 +28,24 @@ but deliberately does not require initialization there to remain synchronous.
 There is no claim that arbitrary insertion alone initializes controllers. Every
 reconnection requiring initialization explicitly calls public `mount`.
 
-One possible future design is to accept a cleanup-time mount synchronously but
-defer its family initialization until the current root's old disposer sequence
-has finished, before the next task. That is a proposal, **not implemented here**.
-Its compatibility change must be stated: callers cannot rely on newly initialized
-presentation being observable before their cleanup listener returns. Ordinary
-mounts outside teardown should retain their synchronous behavior. Multiple
-cleanup-time mounts, a returned host disposer, disconnection before queued start,
-initializer/cleanup errors, nested roots, and pending HTMX contexts need explicit
-ownership/cancellation rules and additional tests before selecting that design.
+The baseline proposed accepting a cleanup-time mount synchronously while
+serializing family startup behind the old disposer sequence. The repair candidate
+now implements and tests that design. Newly initialized presentation is not
+observable before the cleanup listener returns; ordinary unblocked mounts remain
+synchronous. The candidate adds explicit ownership and cancellation tests for
+repeated mounts, returned host disposers, disconnected scopes, errors, nested
+roots and pending HTMX contexts.
 
 Moving disposers ahead of `ely:cleanup` is not an equivalent fix. It reverses the
 documented order and changes what listeners see, handler availability, cleanup
-error ordering, and foundation/host listener interactions. This baseline keeps
-the pre-disposer event and verifies old presentation is still visible when it
-fires. No production guard, event reordering or speculative fix is included.
+error ordering, and foundation/host listener interactions. Both the original
+baseline and the repair preserve that event order and verify old presentation is
+still visible during the event. The original baseline included no production
+guard; the candidate adds serialization without changing these baseline oracles.
 
 ## Cases and causal isolation
 
-All eight cases start on independent full pages. Both surfaces use the existing
+All eight original cases start on independent full pages. Both surfaces use the existing
 production fixture commands: `ui.RenderComponent` for standalone, and the actual
 SDUI `CatalogueRegistry + Decode + Compile + Plan.Render` path for catalogue.
 The standalone dependency list must contain neither SDUI nor adapters. All core,
@@ -127,17 +129,10 @@ CLEANUP_REMOUNT_SURFACE=catalogue CLEANUP_REMOUNT_GROUP=controls node ui/gohtmx/
 The [focused workflow](../../.github/workflows/cleanup-remount.yml) separates safe
 controls from desired cases in independent non-fail-fast jobs, so failing desired
 behavior cannot skip safe controls. No failure suppression or expected-red
-success mode exists. The baseline branch `test/cleanup-remount-baseline`
-automatically runs the close-elision diagnostic for both renderers on push and
-pull request, alongside all four clean jobs. Workflow dispatch with `causal=true`
-also enables it. This temporary branch-scoped trigger supports a fresh causal
-comparison where workflow dispatch is unavailable; preserve the original clean
-run and its exact source/tree/artifacts before advancing the branch.
-
-Diagnostic jobs retain their real nonzero exit: normal-close coverage should fail
-and they are not release acceptance. They do not modify tracked production files
-or suppress clean desired failures. Remove the temporary automatic trigger before
-integrating a later production repair, then re-run clean CI and inspect exact-head
+success mode exists. Workflow dispatch with `causal=true` additionally runs the
+close-elision diagnostic for both renderers; those diagnostic jobs should fail
+normal-close coverage and are not release acceptance. It does not modify tracked
+production files. Re-run clean CI after any later fix and inspect the exact-head
 reports before treating the strengthened requirement as supported.
 
 Reports under `test-results/contracts/cleanup-remount-*.json` record the clean
@@ -152,3 +147,64 @@ interaction and HTMX bytes before each case is interpreted.
 Local syntax, source-oracle audits, renderer/unit tests and package checks cannot
 establish real observer scheduling, native focus, actual HTMX delivery or browser
 presentation. No local browser/user computer execution is part of this patch.
+
+
+## Repair candidate verification
+
+The core serialization candidate retains the baseline desired and safe-control
+assertions unchanged. It keeps `ely:cleanup` before disposal and immediate host
+binding, but delays overlapping family startup until every old registered
+disposer and readiness removal has finished. It then re-scans connected live
+scopes synchronously. Pending HTMX ancestors and descendants continue to block
+startup. See [the lifecycle contract](../gohtmx/asset-loading.md) for the separate
+late-unregistered-cleanup and explicit-input-during-cleanup limits.
+
+The temporary automatic close-elision trigger used on the historical baseline
+branch has been removed. The optional `causal=true` diagnostic remains available;
+its raw normal-close failures are still failures and are not repair acceptance.
+Historical baseline artifacts remain evidence for their original revision only.
+
+The focused workflow adds independent repair-control jobs on both renderers.
+Each job first requires a fully passing clean eleven-case run (the original eight
+cases plus a separate real-MutationObserver ordering probe and two real-HTMX
+pending-descendant probes). It then serves three
+single-anchor mutated core variants: disabled deferral, disabled replay, and
+replay before the last old disposer. All real old disposers remain in these
+variants. Each raw run must exit nonzero, fail its named desired oracle and the
+strict ordering probe, and preserve all six original safe controls with empty
+runtime/transport error arrays. The independent verifier reports a killed mutant
+without changing the raw failure report. A pure verifier requires the exact
+ordered unique case/oracle inventory, recomputes every raw observed/expected
+verdict and case/report status, verifies all prerequisites and candidate
+source/served hashes, and rejects unrelated failures. Its source-only unit tests
+include malformed empty reports, missing/duplicate/foreign/reordered cases and
+oracles, stale cached verdicts, wrong hashes and incidental errors. These fixtures
+are validator tests, never browser evidence. Exact source and served hashes remain
+in the browser reports.
+
+The ordering probe uses the public family-registration extension API with two
+registered disposers and records the final old disposer before initialization 2.
+It supplements the production renderer/menu cases; it is not a substitute for
+them. No browser result is established by source inspection or the VM suite.
+Check the exact candidate commit's workflow artifacts before claiming browser
+acceptance. Run the focused source/VM checks locally with:
+
+```sh
+node ui/gohtmx/tests/unit/cleanup_remount_test.mjs
+node scripts/cleanup-remount-negative-test.mjs
+node scripts/cleanup-remount-evidence-test.mjs
+node scripts/cleanup-remount-oracles-test.mjs
+```
+
+The VM suite also tests nested and overlapping teardown records, error-listener
+reentry, latest host ownership, disconnected/no-request behavior, fresh scope and
+family resolution, pending ancestor/descendant contexts and old async result
+invalidation. Additional source controls remove each pending-overlap direction
+and cache an obsolete replay snapshot to prove those targeted oracles.
+
+The pending-descendant browser probes insert an extension-family child during
+cleanup after real HTMX has already collected its affected roots. A genuine
+120 ms delayed swap must leave that child uninitialized until replacement removes
+it. A cancelled real swap must resume that still-connected child exactly once.
+The broader pending-ancestor case is covered by the VM and its targeted mutation;
+no separate browser coverage is claimed for that direction.

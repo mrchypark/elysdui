@@ -9,6 +9,8 @@ import {fileURLToPath} from 'node:url';
 import {chromium} from 'playwright';
 import {loadContextOwnerAssets} from './context-owner-assets.mjs';
 import {cleanupRemountControl, elideCleanupClose} from './cleanup-remount-control.mjs';
+import {cleanupRemountCoreControls, mutateCleanupRemountCore} from './cleanup-remount-core-controls.mjs';
+import {cleanupRemountSourcePaths} from './cleanup-remount-evidence.mjs';
 
 // Desired-oracle baseline. No known-bug/expected-red mode. Real MutationObserver
 // pruning and actual bundled HTMX are mandatory; no lifecycle is manufactured.
@@ -20,9 +22,10 @@ const mutation = process.env.CLEANUP_REMOUNT_MUTATION || '';
 const groups = {
   desired: ['observer.same-root', 'observer.same-root-new-descendants'],
   controls: ['observer.different-root', 'observer.sequential', 'observer.normal-detach', 'htmx.retained', 'htmx.delayed', 'htmx.cancelled'],
+  serialization: ['serialization.disposer-order', 'serialization.pending-delayed', 'serialization.pending-cancelled'],
 };
 const report = {
-  suite: 'cleanup-remount', surface, group, mutation, status: 'running', stage: 'startup',
+  suite: 'cleanup-remount', runToken: process.env.CLEANUP_REMOUNT_RUN_TOKEN || null, surface, group, mutation, status: 'running', stage: 'startup',
   scope: 'Desired strengthened support: explicit same-physical-root mount from ely:cleanup settles with fresh presentation intact after old disposers. Existing documented readiness guarantee is asserted separately.',
   settlement: 'Next task plus two animation frames after real observer cleanup; inside-listener initialization is recorded, not required.',
   inputLabels: {owner: 'synthetic root-local ely:context-request CustomEvent', keyboard: 'trusted Playwright keyboard', detach: 'caller DOM remove followed by native MutationObserver scheduling', htmx: 'public bundled htmx.ajax with actual HTTP response/context', listeners: 'transparent add/removeEventListener identity observation, no callback wrapping'},
@@ -276,10 +279,72 @@ async function htmxCase(name) {
   await verifyFreshOwner('2');
 }
 
+// Supplement the unchanged production-renderer desired cases with a core-family
+// extension probe: two real registered disposers and native observer delivery.
+async function serializationCase() {
+  await page.evaluate(() => {
+    window.serializationTrace = []; window.serializationStarts = 0;
+    const probe = document.createElement('div');
+    probe.id = 'serialization-probe'; probe.dataset.elyFamily = 'serialization-probe';
+    document.body.append(probe); window.serializationProbe = probe; remountObserveErrors(probe);
+    remountAPI.register('serialization-probe', (root, registerCleanup) => {
+      const generation = ++serializationStarts;
+      serializationTrace.push('init:' + generation);
+      registerCleanup(() => serializationTrace.push('first:' + generation));
+      registerCleanup(() => serializationTrace.push('last:' + generation));
+    });
+    probe.addEventListener('ely:cleanup', () => {
+      serializationTrace.push('event'); document.body.append(probe); remountAPI.mount(probe);
+    }, {once: true});
+    probe.remove();
+    window.serializationInlineStarts = serializationStarts;
+  });
+  await settle();
+  expect('serialization.native-observer-is-not-inline', await page.evaluate(() => serializationInlineStarts), 1);
+  expect('serialization.all-old-disposers-before-new-init', await page.evaluate(() => serializationTrace), ['init:1', 'event', 'first:1', 'last:1', 'init:2']);
+  expect('serialization.fresh-ready', await page.evaluate(() => serializationProbe.dataset.elyReady || null), 'true');
+  await page.evaluate(() => serializationProbe.remove()); await settle();
+  expect('serialization.final-controller-disposed-once', await page.evaluate(() => serializationTrace.filter(item => item === 'last:2').length), 1);
+  expect('serialization.final-ready-cleared', await page.evaluate(() => serializationProbe.dataset.elyReady || null), null);
+}
+
+async function pendingDescendantCase(name) {
+  await page.evaluate(async name => {
+    window.pendingChildStarts = 0; window.pendingChildDisposals = 0;
+    window.pendingChildContext = null; window.pendingChildInside = null; window.pendingChildBefore = null; window.pendingChildDelayed = null;
+    remountAPI.register('pending-child-probe', () => { pendingChildStarts++; return () => pendingChildDisposals++; });
+    document.addEventListener('htmx:before:swap', event => { window.pendingChildContext = event.detail?.ctx; }, {capture: true, once: true});
+    remountOld.addEventListener('ely:cleanup', () => {
+      const child = document.createElement('div'); child.id = 'pending-child-probe'; child.dataset.elyFamily = 'pending-child-probe';
+      remountOld.append(child); window.pendingChild = child; remountObserveErrors(child);
+      remountAPI.mount(remountOld); remountAPI.mount(child);
+      window.pendingChildInside = {starts: pendingChildStarts, ready: child.dataset.elyReady || null, connected: child.isConnected};
+    }, {once: true});
+    document.addEventListener('htmx:before:swap', event => {
+      window.pendingChildBefore = {starts: pendingChildStarts, ready: pendingChild.dataset.elyReady || null, connected: pendingChild.isConnected, contextSame: event.detail?.ctx === pendingChildContext, tasks: event.detail?.tasks.map(task => ({sameTarget: task.target === remountOld, style: task.swapSpec?.style}))};
+      if (name === 'serialization.pending-cancelled') event.preventDefault();
+      else queueMicrotask(() => { window.pendingChildDelayed = {starts: pendingChildStarts, ready: pendingChild.dataset.elyReady || null, connected: pendingChild.isConnected}; });
+    }, {once: true});
+    await htmx.ajax('GET', '/fragment', {source: '#swap-source', target: remountOld, select: '[data-ely-family] > *', swap: 'innerHTML swap:120 settle:0'});
+  }, name);
+  await settle();
+  expect('pending-descendant.deferred-inside-cleanup', await page.evaluate(() => pendingChildInside), {starts: 0, ready: null, connected: true});
+  expect('pending-descendant.real-owning-context-before-mutation', await page.evaluate(() => pendingChildBefore), {starts: 0, ready: null, connected: true, contextSame: true, tasks: [{sameTarget: true, style: 'innerHTML'}]});
+  if (name === 'serialization.pending-delayed') {
+    expect('pending-descendant.real-delay-does-not-start-new-child', await page.evaluate(() => pendingChildDelayed), {starts: 0, ready: null, connected: true});
+    expect('pending-descendant.replaced-child-never-starts', await page.evaluate(() => ({starts: pendingChildStarts, ready: pendingChild.dataset.elyReady || null, connected: pendingChild.isConnected})), {starts: 0, ready: null, connected: false});
+  } else {
+    expect('pending-descendant.cancelled-context-resumes-child-once', await page.evaluate(() => ({starts: pendingChildStarts, ready: pendingChild.dataset.elyReady || null, connected: pendingChild.isConnected})), {starts: 1, ready: 'true', connected: true});
+    await page.evaluate(() => pendingChild.remove()); await settle();
+    expect('pending-descendant.fresh-child-cleanup-once', await page.evaluate(() => pendingChildDisposals), 1);
+  }
+  expect('pending-descendant.real-network-request', report.requests.some(entry => entry.check === current.name && entry.path === '/fragment' && entry.htmx === 'true'), true);
+}
+
 try {
   assert(['standalone', 'catalogue'].includes(surface), 'unknown renderer surface');
-  assert(['all', 'desired', 'controls'].includes(group), 'unknown case group');
-  assert(!mutation || mutation === cleanupRemountControl.name, 'unknown causal intervention');
+  assert(['all', 'desired', 'controls', 'serialization'].includes(group), 'unknown case group');
+  assert(!mutation || mutation === cleanupRemountControl.name || Object.hasOwn(cleanupRemountCoreControls, mutation), 'unknown causal intervention');
   assert(!mutation || group === 'all', 'causal intervention must include normal teardown, safe controls and desired cases');
   report.revision = execFileSync('git', ['rev-parse', 'HEAD'], {cwd: base, encoding: 'utf8'}).trim();
   report.tree = execFileSync('git', ['rev-parse', 'HEAD^{tree}'], {cwd: base, encoding: 'utf8'}).trim();
@@ -287,7 +352,7 @@ try {
   assert.equal(report.dirty, '', 'browser evidence requires a clean committed checkout');
   report.toolchain = {node: process.version, playwright: JSON.parse(await readFile(join(base, 'node_modules/playwright/package.json'), 'utf8')).version, go: execFileSync(process.env.GO || 'go', ['version'], {encoding: 'utf8'}).trim()};
   const fixturePath = surface === 'standalone' ? './ui/gohtmx/tests/fixtures/context-owner-requests' : './adapters/gohtmx/tests/fixtures/context-owner-requests';
-  const sourcePaths = ['ui/gohtmx/tests/browser/cleanup-remount-browser-test.mjs', 'ui/gohtmx/tests/browser/cleanup-remount-control.mjs', 'ui/gohtmx/tests/browser/context-owner-assets.mjs', 'ui/gohtmx/tests/fixtures/context-owner-requests/main.go', 'adapters/gohtmx/tests/fixtures/context-owner-requests/main.go', 'ui/gohtmx/tests/fixtures/contextfixture/fixture.go', 'ui/gohtmx/tests/fixtures/contextfixture/verify.go', 'ui/gohtmx/templates/ely-api-interaction.html', 'ui/gohtmx/menu.go', 'ui/gohtmx/ui.go', 'ui/gohtmx/component.go', 'adapters/gohtmx/catalogue_manifest.json.gz', 'adapters/gohtmx/render.go', 'adapters/gohtmx/formats.go', 'package-lock.json', '.github/workflows/cleanup-remount.yml', 'scripts/cleanup-remount-oracles-test.mjs', 'ui/gohtmx/tests/browser/diagnostics/cleanup-remount-original.mjs'];
+  const sourcePaths = cleanupRemountSourcePaths;
   for (const path of sourcePaths) report.sourceFiles[path] = sha(await readFile(join(base, path)));
   const deps = execFileSync(process.env.GO || 'go', ['list', '-deps', './ui/gohtmx/tests/fixtures/context-owner-requests'], {cwd: base, encoding: 'utf8'}).trim().split('\n');
   assert(!deps.some(dep => /github\.com\/mrchypark\/elysdui\/(sdui|adapters)(\/|$)/.test(dep)), 'standalone fixture may not depend on SDUI/adapter');
@@ -305,14 +370,20 @@ try {
     report.fixtures[path] = {html, sourceSHA256: sha(body), servedSHA256: sha(body), bytes: body.length, command: [fixturePath, ...(path === '/' ? ['-full'] : fragmentArgs)], productionRenderer: surface === 'standalone' ? 'ui.RenderComponent' : 'CatalogueRegistry + Decode + Compile + Plan.Render'};
   }
   const assets = await loadContextOwnerAssets(base);
-  if (mutation) {
+  if (mutation === cleanupRemountControl.name) {
     const asset = assets.get(cleanupRemountControl.file);
     asset.body = Buffer.from(elideCleanupClose(asset.body.toString('utf8')));
     asset.servedSHA256 = sha(asset.body); asset.bytes = asset.body.length;
     report.causalIntervention = {...cleanupRemountControl, anchorCount: 1, interpretation: 'Diagnostic only. Normal-detach close must fail; removing disposal is not a fix. No failures are converted to success.'};
   }
+  if (Object.hasOwn(cleanupRemountCoreControls, mutation)) {
+    const control = cleanupRemountCoreControls[mutation], asset = assets.get(control.file);
+    asset.body = Buffer.from(mutateCleanupRemountCore(asset.body.toString('utf8'), mutation));
+    asset.servedSHA256 = sha(asset.body); asset.bytes = asset.body.length;
+    report.causalIntervention = {name: mutation, ...control, anchorCount: 1, interpretation: 'Test-only startup mutation; all old disposers remain. Raw failures retain their nonzero exit.'};
+  }
   for (const [path, {body, referencedBy, ...metadata}] of assets) report.assets[path] = {...metadata, referencedBy: [...referencedBy]};
-  assert.deepEqual(Object.entries(report.assets).filter(([, asset]) => asset.sourceSHA256 !== asset.servedSHA256).map(([path]) => path), mutation ? [cleanupRemountControl.file] : [], 'only declared causal bytes may differ');
+  assert.deepEqual(Object.entries(report.assets).filter(([, asset]) => asset.sourceSHA256 !== asset.servedSHA256).map(([path]) => path), mutation ? [report.causalIntervention.file] : [], 'only declared causal bytes may differ');
   server = createServer((request, response) => {
     const path = new URL(request.url, 'http://localhost').pathname;
     const entry = {check: current?.name, path, method: request.method, htmx: request.headers['hx-request'] || null}; report.requests.push(entry);
@@ -347,11 +418,11 @@ try {
     })());
   });
   await page.addInitScript(observeBrowser);
-  const cases = group === 'all' ? [...groups.desired, ...groups.controls] : groups[group];
+  const cases = group === 'all' ? [...groups.desired, ...groups.controls, ...groups.serialization] : groups[group];
   report.stage = 'checks';
   for (const name of cases) {
     current = {name, status: 'running', oracles: []}; report.checks.push(current);
-    try { await ready(origin); await (name.startsWith('htmx.') ? htmxCase(name) : observerCase(name)); }
+    try { await ready(origin); await (name.startsWith('serialization.pending-') ? pendingDescendantCase(name) : name.startsWith('serialization.') ? serializationCase() : name.startsWith('htmx.') ? htmxCase(name) : observerCase(name)); }
     catch (error) { current.error = {message: error.message, stack: error.stack}; }
     try { current.final = await snapshot(); report.runtimeErrors.push(...current.final.errors.map(error => ({check: name, ...error}))); }
     catch (error) { current.captureError = String(error); }

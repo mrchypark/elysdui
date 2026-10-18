@@ -83,7 +83,8 @@ const controls = [
     oracle: 'error handler remount cannot receive the old error state',
   },
   {
-    name: 'stop-ready-owner', from: 'if (!mounted.has(root)) delete root.dataset.elyReady;', to: 'delete root.dataset.elyReady;',
+    name: 'stop-ready-order', from: 'if (scope === document || scope.isConnected) start(scope);',
+    to: 'if (scope === document || scope.isConnected) { start(scope); delete root.dataset.elyReady; }',
     check: 'I12.cleanup-event remount keeps fresh readiness and callbacks',
     oracle: 'old stop cannot erase the replacement ready state',
   },

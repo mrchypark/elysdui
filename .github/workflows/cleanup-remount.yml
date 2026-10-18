@@ -1,4 +1,4 @@
-name: Cleanup remount lifecycle baseline
+name: Cleanup remount lifecycle
 on:
   push:
   pull_request:
@@ -32,6 +32,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: node scripts/cleanup-remount-oracles-test.mjs
+      - run: node scripts/cleanup-remount-evidence-test.mjs
       - run: go test ./ui/gohtmx/tests/fixtures/contextfixture ./ui/gohtmx/tests/fixtures/context-owner-requests ./adapters/gohtmx/tests/fixtures/context-owner-requests -count=1
       - run: npx playwright install --with-deps chromium
       # Safe controls get independent jobs even when the desired baseline fails.
@@ -45,12 +46,38 @@ jobs:
             test-results/contracts/cleanup-remount-*.json
             test-results/contracts/cleanup-remount-fixtures/
           if-no-files-found: error
+  repair-causal-controls:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        surface: [standalone, catalogue]
+    env:
+      CLEANUP_REMOUNT_SURFACE: ${{ matrix.surface }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: node scripts/cleanup-remount-oracles-test.mjs
+      - run: node scripts/cleanup-remount-evidence-test.mjs
+      - run: npx playwright install --with-deps chromium
+      - run: node scripts/cleanup-remount-browser-controls.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cleanup-remount-${{ matrix.surface }}-repair-controls
+          path: |
+            test-results/contracts/cleanup-remount-*.json
+            test-results/contracts/cleanup-remount-fixtures/
+          if-no-files-found: error
   causal-diagnostic:
-    # Temporary baseline-branch diagnostic; real nonzero results stay visible.
-    if: >-
-      ${{ (github.event_name == 'workflow_dispatch' && inputs.causal) ||
-          (github.event_name == 'push' && github.ref == 'refs/heads/test/cleanup-remount-baseline') ||
-          (github.event_name == 'pull_request' && github.head_ref == 'test/cleanup-remount-baseline') }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.causal }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false

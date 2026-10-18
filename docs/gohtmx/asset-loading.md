@@ -195,13 +195,38 @@ An initializer that throws while it still owns the root retains the existing
 runs on teardown. A throwing cleanup also emits `ely:error` with `{id, error}`,
 without changing readiness or preventing remaining cleanup and sibling roots
 from stopping. Cleanup remains ordered after `ely:cleanup`; a remount during
-cleanup or error notification keeps its own readiness.
+cleanup or error notification keeps its own readiness. If startup overlaps a
+root currently running its old cleanup, family startup waits until all of that
+teardown's registered disposers and readiness removal finish. Repeated requests
+coalesce, then synchronously re-scan the connected live subtree, current family
+and pending HTMX contexts. This includes newly inserted descendant roots; an
+unrelated sibling or different replacement element remains synchronous. A pending
+ancestor or descendant swap also blocks overlapping startup until its last owning
+context completes. Detached queued scopes are discarded.
+
+`mount` still replaces host handlers and returns their disposer immediately;
+only overlapping family startup is deferred. A previously returned host disposer
+cannot remove the latest binding. Disposing the current host binding during
+cleanup removes its callbacks but does not cancel the requested family startup.
+Ordinary mounting with no overlapping teardown
+or pending swap remains synchronous. No remount is scheduled by cleanup alone.
+
+This serialization does not make arbitrary retired cleanup bodies harmless. An
+initializer that stops and then returns a previously unregistered DOM-mutating
+cleanup can still affect a fresh mount, as can a later call to its old registrar.
+Register the complete cleanup before any callback that can stop initialization.
+Also, old family listeners still exist during `ely:cleanup`, before their
+disposers run. An explicit `ely:context-request` dispatched there can be consumed
+by that old listener; startup deferral does not defer or suppress such input.
+Automatic seed startup and explicit input during cleanup are separate behaviors.
 
 Focused checks (browser launch requires a browser-capable runner):
 
 ```sh
 node ui/gohtmx/tests/unit/initializer_cleanup_test.mjs
 node scripts/initializer-cleanup-negative-test.mjs
+node ui/gohtmx/tests/unit/cleanup_remount_test.mjs
+node scripts/cleanup-remount-negative-test.mjs
 node ui/gohtmx/tests/unit/family_lifecycle_test.mjs
 LIFECYCLE_NEGATIVE_CONTROL=stale-refs node ui/gohtmx/tests/unit/family_lifecycle_test.mjs
 LIFECYCLE_NEGATIVE_CONTROL=stale-results node ui/gohtmx/tests/unit/family_lifecycle_test.mjs
