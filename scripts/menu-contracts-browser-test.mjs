@@ -15,6 +15,17 @@ const mutations = {
   'native-focus': {asset:'/assets/ely-api-interaction.js', from:'if (panel.contains(event.relatedTarget)) return;', to:'// restored transient-activeElement focusout dismissal', oracle:'clicking a hover-open submenu keeps it open'},
   'outside-focus': {asset:'/assets/ely-api-interaction.js', from:'document.activeElement === document.body) opener.focus({preventScroll: true});', to:'document.activeElement === document.body) { /* removed gesture-owned focus return */ }', oracle:'blank pointer dismissal must return focus after native default'},
 };
+// Playwright 1.57's dispatchEvent map omits contextmenu and otherwise creates a
+// plain Event, which discards clientX/clientY. Keep this browser callback explicit
+// and record the event actually received by the surface before production runs.
+const dispatchContextPointer = (surface, point) => {
+  let observed;
+  const receive = event => { observed = {constructor:event.constructor.name,type:event.type,clientX:event.clientX,clientY:event.clientY,isTrusted:event.isTrusted}; };
+  surface.addEventListener('contextmenu',receive,true);
+  try {surface.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,view:window,button:2,buttons:2,clientX:point.clientX,clientY:point.clientY}));}
+  finally {surface.removeEventListener('contextmenu',receive,true);}
+  return observed;
+};
 const report = {
   suite:'menu-contracts', revision:execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim(),
   dirty:!!execFileSync('git',['status','--porcelain','--untracked-files=no'],{encoding:'utf8'}).trim(),
@@ -76,6 +87,12 @@ try {
   const reset=()=>page.evaluate(()=>{for(const key of Object.keys(menuLog))menuLog[key]=[];});
   const logs=()=>page.evaluate(()=>menuLog);
   const open=async id=>{await trigger(id).focus();await page.keyboard.press('ArrowDown');assert.equal(await hidden(id),false);};
+  const contextAt=async(surface,clientX,clientY)=>{
+    const observed=await surface.evaluate(dispatchContextPointer,{clientX,clientY});
+    (report.contextPointerInputs ||= []).push({requested:{clientX,clientY},observed});
+    assert(observed&&Number.isFinite(observed.clientX)&&Number.isFinite(observed.clientY),'context fixture must deliver finite pointer coordinates');
+    assert.deepEqual(observed,{constructor:'MouseEvent',type:'contextmenu',clientX,clientY,isTrusted:false});
+  };
   await check('menu.open-keyboard-disabled-separator-skip-wrap-home-end',async()=>{
     await open('menu-a');await focused('#menu-a [value="open"]');assert.equal(await page.getByRole('menu',{name:'File menu',exact:true}).isVisible(),true);
     assert.equal(await row('menu-a','open').locator('[data-interaction-menu-label]').textContent(),'Open <safe>');assert.equal(await row('menu-a','open').locator('kbd').textContent(),'Ctrl+O');
@@ -191,7 +208,7 @@ try {
     await page.locator('#before').focus();const surface=root('context-a').locator('[data-interaction-context]');
     // Synthetic edge-coordinate clamping deliberately uses a point outside
     // this canvas while preserving the prior focus owner. The later
-    // surface.click({button:'right'}) separately exercises real pointer input.
+    // measured page.mouse.click below separately exercises real pointer input.
     const bounds=await surface.boundingBox();assert(bounds&&bounds.width>0&&bounds.height>0);
     await page.evaluate(()=>{
       const root=document.getElementById('context-a'),surface=root.querySelector('[data-interaction-context]'),panel=root.querySelector('[role="menu"]');
@@ -210,16 +227,27 @@ try {
       document.addEventListener('focusin',focus,true);document.addEventListener('focusout',focus,true);window.addEventListener('scroll',scroll,true);
       window.stopContextPlacementDiagnostics=()=>{diagnostics.after=snapshot();if(ownRect)Object.defineProperty(panel,'getBoundingClientRect',ownRect);else delete panel.getBoundingClientRect;document.removeEventListener('focusin',focus,true);document.removeEventListener('focusout',focus,true);window.removeEventListener('scroll',scroll,true);delete window.stopContextPlacementDiagnostics;return diagnostics;};
     });
-    try {await surface.dispatchEvent('contextmenu',{clientX:1098,clientY:898});}
+    try {await contextAt(surface,1098,898);}
     finally {report.contextPlacementDiagnostics=await page.evaluate(()=>stopContextPlacementDiagnostics());}
     let box=await panel('context-a').boundingBox();report.contextPlacementDiagnostics.playwrightBox=box;const pointerBox=box;assert(box&&box.x>=0&&box.y>=0&&box.x+box.width<=1100.5&&box.y+box.height<=900.5,'context pointer menu must remain inside viewport');
-    await focused('#context-a [value="open"]');await surface.dispatchEvent('contextmenu',{clientX:1090,clientY:890});await page.keyboard.press('Escape');await focused('#before','context dismissal must restore original focus');
+    await focused('#context-a [value="open"]');await contextAt(surface,1090,890);await page.keyboard.press('Escape');await focused('#before','context dismissal must restore original focus');
     await surface.focus();await page.keyboard.press('Shift+F10');await focused('#context-a [value="open"]');box=await panel('context-a').boundingBox();assert(box,'keyboard context needs a visible panel');const anchor=await surface.boundingBox();const expectedLeft=Math.max(8,Math.min(anchor.x,1100-box.width-8));const below=anchor.y+anchor.height+6;const expectedTop=Math.max(8,Math.min(below+box.height>892?anchor.y-box.height-6:below,900-box.height-8));assert(Math.abs(box.x-expectedLeft)<=1&&Math.abs(box.y-expectedTop)<=1,'keyboard context must reanchor to its current surface');assert(Math.abs(box.x-pointerBox.x)>50,'keyboard context must discard the previous pointer position');
     await row('context-a','recent').focus();await page.keyboard.press('ArrowRight');await focused('#context-a [value="nested-comfortable"]');await page.keyboard.press('ArrowLeft');await focused('#context-a [value="recent"]');await page.keyboard.press('Escape');await focused('#context-a [data-interaction-context]');
-    await surface.click({button:'right'});assert.equal(await hidden('context-a'),false);await page.keyboard.press('Escape');
-    await page.locator('#before').focus();await surface.dispatchEvent('contextmenu',{clientX:bounds.x+20,clientY:bounds.y+20});await page.evaluate(()=>window.menuKeyLeaks=[]);await reset();await page.keyboard.press('Enter');await focused('#before');assert.equal((await logs()).actions.length,1);assert.deepEqual(await page.evaluate(()=>menuKeyLeaks),[],'context confirmation must contain keyup before restoring outside focus');
+    const nativeBounds=await surface.boundingBox();assert(nativeBounds);const nativePoint={x:nativeBounds.x+nativeBounds.width/2,y:nativeBounds.y+nativeBounds.height/2};
+    await surface.evaluate(element=>{
+      let observed;const receive=event=>{observed={constructor:event.constructor.name,type:event.type,mouseEvent:event instanceof MouseEvent,clientX:event.clientX,clientY:event.clientY,isTrusted:event.isTrusted};};
+      element.addEventListener('contextmenu',receive,true);
+      window.stopNativeContextInput=()=>{element.removeEventListener('contextmenu',receive,true);delete window.stopNativeContextInput;return observed;};
+    });
+    try {await page.mouse.click(nativePoint.x,nativePoint.y,{button:'right'});}
+    finally {report.nativeContextPointer={requested:nativePoint,observed:await page.evaluate(()=>stopNativeContextInput())};}
+    const nativeInput=report.nativeContextPointer.observed;assert(nativeInput&&nativeInput.isTrusted&&nativeInput.mouseEvent,'real right click must deliver a trusted coordinate-bearing contextmenu');
+    assert(Number.isFinite(nativeInput.clientX)&&Number.isFinite(nativeInput.clientY)&&Math.abs(nativeInput.clientX-nativePoint.x)<=1&&Math.abs(nativeInput.clientY-nativePoint.y)<=1);
+    const nativeBox=await panel('context-a').boundingBox();report.nativeContextPointer.panelBox=nativeBox;assert(nativeBox&&Math.abs(nativeBox.x-Math.max(0,Math.min(nativeInput.clientX,1100-nativeBox.width)))<=1&&Math.abs(nativeBox.y-Math.max(0,Math.min(nativeInput.clientY,900-nativeBox.height)))<=1,'real context menu must be positioned at its delivered pointer');
+    await focused('#context-a [value="open"]');assert.equal(await hidden('context-a'),false);await page.keyboard.press('Escape');
+    await page.locator('#before').focus();await contextAt(surface,bounds.x+20,bounds.y+20);await page.evaluate(()=>window.menuKeyLeaks=[]);await reset();await page.keyboard.press('Enter');await focused('#before');assert.equal((await logs()).actions.length,1);assert.deepEqual(await page.evaluate(()=>menuKeyLeaks),[],'context confirmation must contain keyup before restoring outside focus');
     await page.evaluate(()=>{const prior=document.createElement('button');prior.id='context-removed-prior';document.body.prepend(prior);prior.focus();});
-    await surface.dispatchEvent('contextmenu',{clientX:bounds.x+20,clientY:bounds.y+20});await page.locator('#context-removed-prior').evaluate(n=>n.remove());await page.locator('#outside-blank').click();
+    await contextAt(surface,bounds.x+20,bounds.y+20);await page.locator('#context-removed-prior').evaluate(n=>n.remove());await page.locator('#outside-blank').click();
     await focused('#context-a [data-interaction-context]','outside dismissal with a removed prior owner must retain the context surface fallback');assert.equal(await hidden('context-a'),true);
   });
   await check('menu.disabled-and-modified-activation-do-not-notify',async()=>{

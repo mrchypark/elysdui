@@ -8,8 +8,9 @@ import {runInNewContext} from 'node:vm';
 // deliberately reserved for the production-renderer Playwright companion.
 const source = readFileSync(process.env.MENU_CONTRACT_SOURCE || './assets/ely-api-interaction.js', 'utf8');
 const core = readFileSync(process.env.MENU_CORE_SOURCE || './assets/ely-api.js', 'utf8');
+const harness = readFileSync(process.env.MENU_BROWSER_HARNESS || './scripts/menu-contracts-browser-test.mjs', 'utf8');
 const slice = (text, start, end) => { const a=text.indexOf(start),b=text.indexOf(end,a);assert(a>=0&&b>a,`missing production boundary ${start}`);return text.slice(a,b); };
-const report = {suite:'menu-contracts-vm',revision:execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim(),sourceSHA256:createHash('sha256').update(source).digest('hex'),coreSHA256:createHash('sha256').update(core).digest('hex'),checks:[],status:'running'};
+const report = {suite:'menu-contracts-vm',revision:execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim(),sourceSHA256:createHash('sha256').update(source).digest('hex'),coreSHA256:createHash('sha256').update(core).digest('hex'),harnessSHA256:createHash('sha256').update(harness).digest('hex'),checks:[],status:'running'};
 const check = (name,fn) => {try {fn();report.checks.push({name,status:'passed'});} catch(error) {report.checks.push({name,status:'failed',error:error.message});}};
 const button = (name, group='density', checked=false) => ({name,value:name,dataset:{interactionMenuRadio:group,elyAction:'choose'},attrs:{'aria-checked':String(checked)},getAttribute(k){return this.attrs[k]??null;},setAttribute(k,v){this.attrs[k]=v;},hasAttribute(){return false;},focus(){document.activeElement=this;},closest(){return null;}});
 let document;
@@ -139,6 +140,15 @@ check('repeated context opening preserves the original focus owner',()=>{
  const f=fixture({context:true});f.surface.querySelector=()=>f.trigger;f.menu(f.root,'menu',true);f.trigger.dataset.interactionMenu='menu';
  const handler=runInNewContext('(event)=>{'+slice(source,"    const surface = closest(root, event.target, '[data-interaction-context]');",'  const pointerover = event => {'),{root:f.root,closest:()=>f.surface,CSS:{escape:s=>s},window:{innerWidth:320,innerHeight:200},menu:f.menu,menuReturnFocus:f.returns,close:()=>f.menu(f.root,'menu',false)});
  handler({target:{closest:()=>null},clientX:300,clientY:180,preventDefault(){}});f.menu(f.root,'menu',false,true);assert.equal(document.activeElement,f.prior,'repeat context open must preserve its original focus owner');
+});
+check('synthetic context fixture delivers a coordinate-bearing MouseEvent',()=>{
+ class MouseEvent extends Event {constructor(type,init){super(type,init);this.clientX=init.clientX;this.clientY=init.clientY;}}
+ const callback=runInNewContext(slice(harness,'const dispatchContextPointer =','const report =')+'\ndispatchContextPointer',{MouseEvent,Event,window:{}});
+ const listeners=new Set(),surface={addEventListener(type,fn){assert.equal(type,'contextmenu');listeners.add(fn);},removeEventListener(_type,fn){listeners.delete(fn);},dispatchEvent(event){for(const fn of listeners)fn(event);}};
+ for(const point of [{clientX:1098,clientY:898},{clientX:60,clientY:214}]) {
+  const received=callback(surface,point);assert.deepEqual({...received},{constructor:'MouseEvent',type:'contextmenu',...point,isTrusted:false});assert.equal(listeners.size,0);
+ }
+ assert(!harness.includes("surface.dispatchEvent('contextmenu'"),'coordinate fixtures must use the typed browser callback');
 });
 const failure=report.checks.some(c=>c.status==='failed');report.status=failure?'failed':'passed';
 mkdirSync('test-results/contracts',{recursive:true});writeFileSync(`test-results/contracts/menu-vm${process.env.MENU_EVIDENCE?'-'+process.env.MENU_EVIDENCE:''}.json`,JSON.stringify(report,null,2));
