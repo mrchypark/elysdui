@@ -163,6 +163,8 @@ check('stationary menu boundaries preserve keyboard confirmation and child selec
  assert(source.includes("root.addEventListener('pointermove', menuPointerMove);"));assert(source.includes("root.removeEventListener('pointermove', menuPointerMove);"));
 });
 check('stationary boundary fixture declares synthetic PointerEvent input and cleans up',()=>{
+ const setup=harness.indexOf('report.checkboxKeyboardTrials=[];report.checkboxModeTraces={};'),injection=harness.indexOf('const injected=report.stationaryBoundaryInjection='),trials=harness.indexOf("for(const mode of ['instant','held-space'])");
+ assert(setup>=0&&setup<injection&&injection<trials,'deterministic boundary replay must run before native timing trials');
  class PointerEvent extends Event {constructor(type,init){super(type,init);for(const key of ['pointerType','clientX','clientY','movementX','movementY','buttons'])this[key]=init[key];}}
  const callback=runInNewContext(slice(harness,'const dispatchStationaryBoundary =','// Observe the current requirement')+'\ndispatchStationaryBoundary',{PointerEvent});
  const listeners=new Set(),label={dispatchEvent(event){for(const fn of listeners)fn(event);}},element={querySelector:()=>label,addEventListener(type,fn,capture){assert.equal(type,'pointerover');assert.equal(capture,true);listeners.add(fn);},removeEventListener(type,fn,capture){assert.equal(type,'pointerover');assert.equal(capture,true);listeners.delete(fn);}};

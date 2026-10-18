@@ -181,6 +181,36 @@ try {
   });
   await check('checkbox-menu.submenu-is-a-trigger-not-an-inherited-check',async()=>{
     report.checkboxKeyboardTrials=[];report.checkboxModeTraces={};
+    // Inject only the browser boundary event in a separate case. Space down/up
+    // are still native input, and the recorded boundary explicitly isTrusted=false.
+    // Run this first so the mutant reaches the deterministic edge before trials.
+    // Isolate this injected schedule from native boundary delivery; each native
+    // trial below still moves to/clicks the submenu through its unchanged path.
+    const outside=await page.locator('#before').boundingBox();assert(outside&&outside.width>0&&outside.height>0);
+    const outsidePoint={x:outside.x+outside.width/2,y:outside.y+outside.height/2};
+    await page.mouse.move(outsidePoint.x,outsidePoint.y);
+    assert.equal(await page.evaluate(({x,y})=>document.elementFromPoint(x,y)?.closest('#before')?.id,outsidePoint),'before','isolated replay pointer must remain outside menu rows');
+    await row('checks','ruler').evaluate(node=>node.setAttribute('aria-checked','true'));
+    await open('checks');await row('checks','ruler').focus();await reset();
+    const bounds=await row('checks','parent').boundingBox();assert(bounds&&bounds.width>0&&bounds.height>0);
+    const point={clientX:Math.round(bounds.x+bounds.width/2),clientY:Math.round(bounds.y+bounds.height/2)};
+    const injected=report.stationaryBoundaryInjection={kind:'synthetic-boundary-between-native-key-phases',isolatedPointer:{selector:'#before',...outsidePoint},requested:point};
+    const snapshot=()=>page.evaluate(()=>({active:document.activeElement?.value||document.activeElement?.id,checked:document.querySelector('#checks [value="ruler"]').getAttribute('aria-checked'),open:!document.querySelector('#checks [role="menu"]').hidden,actions:menuLog.actions,changes:menuLog.changes}));
+    await page.evaluate(()=>resetMenuCheckTrace({mode:'injected-boundary',trial:1}));
+    let released=false;
+    try {
+      injected.before=await snapshot();assert.equal(injected.before.active,'ruler','isolated replay must begin with ruler focus');
+      await page.keyboard.down('Space');injected.afterDown=await snapshot();assert.equal(injected.afterDown.active,'ruler','native keydown must retain ruler focus before injection');
+      injected.observed=await row('checks','parent').evaluate(dispatchStationaryBoundary,point);injected.afterBoundary=await snapshot();
+      await page.keyboard.up('Space');released=true;injected.after=await snapshot();
+    } finally {if(!released)await page.keyboard.up('Space');injected.trace=await page.evaluate(()=>readMenuCheckTrace());}
+    assert.deepEqual(injected.observed,{constructor:'PointerEvent',type:'pointerover',isTrusted:false,pointerType:'mouse',...point,movementX:0,movementY:0,buttons:0},'edge injection must deliver the declared synthetic stationary boundary');
+    assert.equal(injected.after.checked,'false','stationary pointer must not steal checkbox keyboard confirmation');
+    assert.equal(injected.before.active,'ruler');assert.equal(injected.before.checked,'true');
+    assert.equal(injected.afterBoundary.active,'ruler','stationary pointer must not steal checkbox keyboard confirmation');
+    const phases=injected.trace.events.filter(event=>event.phase==='capture'&&['keydown','keyup'].includes(event.type)&&event.key===' ');
+    assert.deepEqual(phases.map(event=>({type:event.type,isTrusted:event.isTrusted,target:event.target.value})),[{type:'keydown',isTrusted:true,target:'ruler'},{type:'keyup',isTrusted:true,target:'ruler'}]);
+    assert.deepEqual(injected.after.actions.map(({value})=>value),['ruler']);assert.deepEqual(injected.after.changes.map(({value,checked})=>({value,checked})),[{value:'ruler',checked:false}]);assert.equal(injected.after.open,false);
     for(const mode of ['instant','held-space']) {
       for(let trial=1;trial<=20;trial++) {
         // Restore the caller's initial checked input between diagnostic trials;
@@ -197,28 +227,6 @@ try {
       }
       report.checkboxModeTraces[mode]=await page.evaluate(()=>readMenuCheckTrace());
     }
-    // Inject only the browser boundary event in a separate case. Space down/up
-    // are still native input, and the recorded boundary explicitly isTrusted=false.
-    await row('checks','ruler').evaluate(node=>node.setAttribute('aria-checked','true'));
-    await open('checks');await row('checks','ruler').focus();await reset();
-    const bounds=await row('checks','parent').boundingBox();assert(bounds&&bounds.width>0&&bounds.height>0);
-    const point={clientX:Math.round(bounds.x+bounds.width/2),clientY:Math.round(bounds.y+bounds.height/2)};
-    const injected=report.stationaryBoundaryInjection={kind:'synthetic-boundary-between-native-key-phases',requested:point};
-    const snapshot=()=>page.evaluate(()=>({active:document.activeElement?.value||document.activeElement?.id,checked:document.querySelector('#checks [value="ruler"]').getAttribute('aria-checked'),open:!document.querySelector('#checks [role="menu"]').hidden,actions:menuLog.actions,changes:menuLog.changes}));
-    await page.evaluate(()=>resetMenuCheckTrace({mode:'injected-boundary',trial:1}));
-    let released=false;
-    try {
-      injected.before=await snapshot();await page.keyboard.down('Space');injected.afterDown=await snapshot();
-      injected.observed=await row('checks','parent').evaluate(dispatchStationaryBoundary,point);injected.afterBoundary=await snapshot();
-      await page.keyboard.up('Space');released=true;injected.after=await snapshot();
-    } finally {if(!released)await page.keyboard.up('Space');injected.trace=await page.evaluate(()=>readMenuCheckTrace());}
-    assert.deepEqual(injected.observed,{constructor:'PointerEvent',type:'pointerover',isTrusted:false,pointerType:'mouse',...point,movementX:0,movementY:0,buttons:0},'edge injection must deliver the declared synthetic stationary boundary');
-    assert.equal(injected.after.checked,'false','stationary pointer must not steal checkbox keyboard confirmation');
-    assert.equal(injected.before.active,'ruler');assert.equal(injected.before.checked,'true');
-    assert.equal(injected.afterBoundary.active,'ruler','stationary pointer must not steal checkbox keyboard confirmation');
-    const phases=injected.trace.events.filter(event=>event.phase==='capture'&&['keydown','keyup'].includes(event.type)&&event.key===' ');
-    assert.deepEqual(phases.map(event=>({type:event.type,isTrusted:event.isTrusted,target:event.target.value})),[{type:'keydown',isTrusted:true,target:'ruler'},{type:'keyup',isTrusted:true,target:'ruler'}]);
-    assert.deepEqual(injected.after.actions.map(({value})=>value),['ruler']);assert.deepEqual(injected.after.changes.map(({value,checked})=>({value,checked})),[{value:'ruler',checked:false}]);assert.equal(injected.after.open,false);
   });
   await check('dropdown.hosts-primary-closes-before-host-empty-focus',async()=>{
     for(const id of ['dropdown','overflow']) {await trigger(id).click();await focused(`#${id} [value="open"]`);await reset();await page.keyboard.press('Enter');assert.deepEqual((await logs()).actions.map(({action})=>action),['open-file']);assert.equal(await hidden(id),true);}

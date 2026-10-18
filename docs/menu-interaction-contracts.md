@@ -136,17 +136,20 @@ passed all forty even with the boundary guard removed. Its artifact SHA-256 is
 `a7c1fa154b8016b2f9087742c6dd60bd9effe2547e09ac3267b8431e12505562`;
 that surviving control remains a failed run, not evidence that the guard is unnecessary.
 
-A separate edge replay now follows the unchanged forty native trials. It injects
-an explicitly synthetic `PointerEvent("pointerover")` at measured submenu-row
+A separate edge replay runs before the unchanged forty native trials. Only this
+isolated case moves the real pointer onto the measured outside button before
+opening the menu, and requires ruler focus before and after native keydown. It
+then injects an explicitly synthetic `PointerEvent("pointerover")` at measured submenu-row
 coordinates between native Space keydown and keyup. The report requires
 `isTrusted: false`, zero movement, the received constructor/coordinates, native
 key phases, focus snapshots, and the exact checkbox/action/change outcome. The
 injection fixes event order for the causal control; it is not described as native
 pointer evidence. Native key release and event-listener cleanup run even on error.
 The `stationary-hover` mutant removes only the menu-row boundary guard and must
-fail the named checkbox-confirmation oracle, either in a native trial or in this
-separately labelled edge replay. Actual fixed-head browser success and the eighth
-kill require CI evidence; VM success alone is not proof of native scheduling.
+fail the named checkbox-confirmation oracle in this separately labelled edge
+replay, before any timing-dependent trial can end the control early. The positive
+then runs all forty native trials. Actual fixed-head browser success and the
+eighth kill require CI evidence; VM success alone is not proof of native scheduling.
 
 ## Explicitly remaining contracts
 
