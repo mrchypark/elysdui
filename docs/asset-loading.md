@@ -151,3 +151,44 @@ implementation. The Go fixtures, JavaScript syntax, import graphs, and Node
 lifecycle checks were validated locally; the browser network and timing
 acceptance criteria require a successful run on a normal browser-capable runner.
 Do not treat the static table above as a substitute for that run.
+
+### Component replacement lifecycle
+
+For bundled HTMX `innerHTML`, `outerHTML`, `outerSync`, `textContent`, and `delete`
+swaps, the shared family runtime tears down affected controllers before replacing
+markup and initializes connected roots after the swap. This includes actual swap
+targets in out-of-band tasks, rather than assuming the request button is the target.
+A retained component root therefore gets fresh descendant references after the
+normal default `innerHTML` swap. Nested roots affected by replacement clean up
+once; unrelated siblings and ancestors of a nested component are left intact.
+Repeated after-swap notifications do not duplicate controllers. Delayed and
+overlapping swaps keep affected roots suspended until their own contexts finish;
+unrelated completed swaps cannot initialize the old descendants. Cancelled prepared
+swaps recover their controllers on the final swap notification.
+
+`mount(root, handlers)` bindings belong to that DOM element. A retained root keeps
+its host callbacks across replacement, but pending operations from the previous
+markup cannot publish `ely:result` or `ely:error`. This does not cancel the host's
+own network request or undo effects performed inside its callback. Removed roots
+lose their bindings; a replacement element, or an old element reinserted after
+removal, needs a new `mount` call. Replacement bindings dispose the previous
+binding; an old returned disposer cannot remove the newer binding. Host code must
+not rely on arbitrary DOM mutations or custom/morph swaps to rebuild controllers.
+
+Focused checks (browser launch requires a browser-capable runner):
+
+```sh
+node family_lifecycle_test.mjs
+LIFECYCLE_NEGATIVE_CONTROL=stale-refs node family_lifecycle_test.mjs
+LIFECYCLE_NEGATIVE_CONTROL=stale-results node family_lifecycle_test.mjs
+node scripts/family-lifecycle-browser-test.mjs
+LIFECYCLE_NEGATIVE_CONTROL=stale-refs node scripts/family-lifecycle-browser-test.mjs
+LIFECYCLE_NEGATIVE_CONTROL=stale-results node scripts/family-lifecycle-browser-test.mjs
+```
+
+The browser suite uses production Go-rendered DataTables and real default
+`innerHTML` and `outerHTML` HTMX requests. It checks cached references, detached
+handlers, same-node reinsertion, host callback results, nested ownership, and
+balanced timer/observer disposal using an instrumented additional family. The
+negative controls deliberately remove teardown or pending-operation invalidation;
+they pass only when the corresponding behavioral assertion detects the defect.
