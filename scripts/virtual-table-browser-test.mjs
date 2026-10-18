@@ -3,21 +3,29 @@ import {execFileSync} from 'node:child_process';
 import {createServer} from 'node:http';
 import {readFile,mkdir,writeFile} from 'node:fs/promises';
 import {chromium} from 'playwright';
-const fixture=execFileSync('go',['run','./tests/virtual-table-contracts'],{encoding:'utf8'});
-const fragment=execFileSync('go',['run','./tests/virtual-table-contracts','fragment'],{encoding:'utf8'});
 const mutation=process.env.VIRTUAL_TABLE_NEGATIVE_CONTROL||'';
-assert(['','unbounded','spacer','cleanup'].includes(mutation),'unknown mutation');
 const expected={unbounded:'attached rows must stay bounded',spacer:'top spacer must preserve scroll geometry',cleanup:'detached controller must stay inert'}[mutation];
-const report={suite:'virtual-table',revision:execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim(),mutation,status:'running',checks:[]};
+const report={suite:'virtual-table',revision:null,mutation,status:'running',stage:'startup',checks:[]};
+const renderOptions={encoding:'utf8',maxBuffer:16*1024*1024};
 async function asset(url){let s=await readFile(new URL(`..${url}`,import.meta.url),'utf8');if(url==='/assets/ely-api-data.js'){
  const replacements={unbounded:['...rows.slice(start, end)','...rows'],spacer:['`${start * rowHeight}px`','`0px`'],cleanup:["listen(viewport, 'scroll', render, { passive: true });","viewport.addEventListener('scroll', render, { passive: true });"]};
  if(mutation){const [from,to]=replacements[mutation];assert(s.includes(from),'mutation anchor missing');s=s.replace(from,to);}
 }return s;}
-const server=createServer(async(req,res)=>{try{res.setHeader('content-type',req.url.endsWith('.css')?'text/css':req.url.startsWith('/assets/')?'text/javascript':'text/html');res.end(req.url==='/'?fixture:req.url==='/fragment'?fragment:await asset(req.url));}catch(e){res.writeHead(500).end(String(e));}});
-let browser;
+let browser,server;
 try{
+ assert(['','unbounded','spacer','cleanup'].includes(mutation),'unknown mutation');
+ report.revision=execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim();
+ report.stage='render-fixture';
+ const fixture=execFileSync('go',['run','./tests/virtual-table-contracts'],renderOptions);
+ report.stage='render-fragment';
+ const fragment=execFileSync('go',['run','./tests/virtual-table-contracts','fragment'],renderOptions);
+ report.fixtureBytes=Buffer.byteLength(fixture);report.fragmentBytes=Buffer.byteLength(fragment);
+ report.stage='server-start';
+ server=createServer(async(req,res)=>{try{res.setHeader('content-type',req.url.endsWith('.css')?'text/css':req.url.startsWith('/assets/')?'text/javascript':'text/html');res.end(req.url==='/'?fixture:req.url==='/fragment'?fragment:await asset(req.url));}catch(e){res.writeHead(500).end(String(e));}});
  await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(0,'127.0.0.1',resolve);});
+ report.stage='browser-launch';
  browser=await chromium.launch({headless:true,...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH?{executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH}:{})});
+ report.stage='browser-contracts';
  const page=await browser.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));
  await page.goto(`http://127.0.0.1:${server.address().port}`);await page.waitForFunction(()=>document.querySelector('#virtual-a')?.dataset.elyReady==='true');
  const viewport=page.locator('#virtual-a [data-ely-virtual-viewport]'),rows=page.locator('#virtual-a [data-ely-virtual-row]');
@@ -45,4 +53,4 @@ try{
  }
  assert.deepEqual(errors,[]);assert.equal(mutation,'','negative control survived');report.checks.push('two real HTMX replacements clean old controllers and mount keyboard handlers exactly once');report.status='passed';
 }catch(error){report.error=error.stack;if(mutation&&error instanceof assert.AssertionError&&error.message.includes(expected)){report.status='mutation-killed';}else{report.status='failed';throw error;}}
-finally{await mkdir('test-results/contracts',{recursive:true});await writeFile(`test-results/contracts/virtual-table${mutation?'-'+mutation:''}.json`,JSON.stringify(report,null,2));await browser?.close();await new Promise(resolve=>server.close(resolve));}
+finally{await mkdir('test-results/contracts',{recursive:true});await writeFile(`test-results/contracts/virtual-table${mutation?'-'+mutation:''}.json`,JSON.stringify(report,null,2));await browser?.close();if(server?.listening)await new Promise(resolve=>server.close(resolve));}
