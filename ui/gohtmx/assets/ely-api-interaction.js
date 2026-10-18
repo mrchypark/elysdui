@@ -1307,6 +1307,7 @@ register('interaction', (root, registerCleanup) => {
     });
   };
   let menuConfirmKey, menuConfirmTarget;
+  let menuSearchConfirm;
   const keydown = event => {
     const menuPanel = closest(root, event.target, '.ely-interaction--menus [role="menu"]');
     const menuControl = closest(root, event.target, '.ely-interaction--menus [role="menu"] button');
@@ -1327,9 +1328,17 @@ register('interaction', (root, registerCleanup) => {
     const searchField = closest(root, event.target, '[data-interaction-search-menu] input');
     if (searchField && ['ArrowDown', 'ArrowUp', 'Enter'].includes(event.key)) {
       event.preventDefault();
+      if (event.key === 'Enter') {
+        event.stopPropagation();
+        // Typing confirms on release. Repeats cannot re-arm a rejected or
+        // interrupted gesture, even if its modifier was released meanwhile.
+        if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) menuSearchConfirm = undefined;
+        else if (!event.repeat) menuSearchConfirm = {field: searchField, panel: menuPanel, generation: menuGeneration.get(menuPanel)};
+        return;
+      }
       const items = [...searchField.parentElement.querySelectorAll('[role="menuitem"]:not(:disabled), [role="menuitemcheckbox"]:not(:disabled), [role="menuitemradio"]:not(:disabled)')].filter(item => !item.closest('[hidden]'));
       const item = event.key === 'ArrowUp' ? items.at(-1) : items[0];
-      if (event.key === 'Enter') item?.click(); else item?.focus();
+      item?.focus();
       return;
     }
     const pie = closest(root, event.target, '.ely-interaction__pie');
@@ -1848,6 +1857,21 @@ register('interaction', (root, registerCleanup) => {
   root.addEventListener('click', click); root.addEventListener('scroll', scroll, true); root.addEventListener('input', input); root.addEventListener('submit', submit); root.addEventListener('keydown', keydown); root.addEventListener('ely:result', result); root.addEventListener('ely:error', error); root.addEventListener('contextmenu', contextmenu); root.addEventListener('pointerover', pointerover); root.addEventListener('pointermove', menuPointerMove);
   root.addEventListener('dragend', dragend); root.addEventListener('dragstart', dragstart); root.addEventListener('dragover', dragover); root.addEventListener('drop', drop);
   const keyup = event => {
+    if (event.key === 'Enter' && menuSearchConfirm) {
+      const {field, panel, generation} = menuSearchConfirm;
+      menuSearchConfirm = undefined;
+      event.stopPropagation(); event.preventDefault();
+      if (event.target === field && document.activeElement === field && root.isConnected && root.dataset.elyDisabled !== 'true' &&
+          field.closest('[data-ely-family]') === root && !field.disabled && !field.closest('[hidden]') &&
+          field.closest('[role="menu"]') === panel && menuGeneration.get(panel) === generation &&
+          !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey) {
+        // Filtering can change while Enter is held. Resolve the current first
+        // visible enabled result, never a stale row or another family's item.
+        const item = [...panel.querySelectorAll('[role="menuitem"]:not(:disabled), [role="menuitemcheckbox"]:not(:disabled), [role="menuitemradio"]:not(:disabled)')]
+          .find(item => item.closest('[data-ely-family]') === root && item.closest('[role="menu"]') === panel && !item.closest('[hidden]'));
+        item?.click();
+      }
+    }
     if (menuConfirmKey === event.key) {
       const target = menuConfirmTarget;
       menuConfirmKey = menuConfirmTarget = undefined;
@@ -1909,9 +1933,9 @@ register('interaction', (root, registerCleanup) => {
     if (!root.contains(event.target)) close();
   };
   document.addEventListener('pointerdown', outside);
-  const contextRequests = bindContextRequests(root, () => { menuPointerReturn = contextPointerFocus = undefined; menuConfirmKey = menuConfirmTarget = undefined; });
+  const contextRequests = bindContextRequests(root, () => { menuPointerReturn = contextPointerFocus = undefined; menuConfirmKey = menuConfirmTarget = menuSearchConfirm = undefined; });
   const cleanupContextRequests = contextRequests.cleanup;
-  const cleanup = () => { close(); cleanupContextRequests(); clearReorderPreview(); timers.forEach(clearTimeout); lottieCleanups.forEach(cleanup => cleanup()); root.removeEventListener('click', click); root.removeEventListener('scroll', scroll, true); root.removeEventListener('input', input); root.removeEventListener('keydown', keydown); root.removeEventListener('ely:result', result); root.removeEventListener('ely:error', error); root.removeEventListener('contextmenu', contextmenu); root.removeEventListener('pointerover', pointerover); root.removeEventListener('pointermove', menuPointerMove); root.removeEventListener('dragend', dragend); root.removeEventListener('dragstart', dragstart); root.removeEventListener('dragover', dragover); root.removeEventListener('drop', drop); root.removeEventListener('pointerdown', lightboxPointerDownHandler); root.removeEventListener('pointerup', lightboxPointerUpHandler); root.removeEventListener('pointerdown', holdStart); root.removeEventListener('pointerup', holdEnd); root.removeEventListener('pointercancel', holdEnd); root.removeEventListener('keyup', keyup); document.removeEventListener('pointerdown', outside); };
+  const cleanup = () => { close(); cleanupContextRequests(); clearReorderPreview(); menuSearchConfirm = undefined; timers.forEach(clearTimeout); lottieCleanups.forEach(cleanup => cleanup()); root.removeEventListener('click', click); root.removeEventListener('scroll', scroll, true); root.removeEventListener('input', input); root.removeEventListener('keydown', keydown); root.removeEventListener('ely:result', result); root.removeEventListener('ely:error', error); root.removeEventListener('contextmenu', contextmenu); root.removeEventListener('pointerover', pointerover); root.removeEventListener('pointermove', menuPointerMove); root.removeEventListener('dragend', dragend); root.removeEventListener('dragstart', dragstart); root.removeEventListener('dragover', dragover); root.removeEventListener('drop', drop); root.removeEventListener('pointerdown', lightboxPointerDownHandler); root.removeEventListener('pointerup', lightboxPointerUpHandler); root.removeEventListener('pointerdown', holdStart); root.removeEventListener('pointerup', holdEnd); root.removeEventListener('pointercancel', holdEnd); root.removeEventListener('keyup', keyup); document.removeEventListener('pointerdown', outside); };
   registerCleanup?.(cleanup);
   contextRequests.openSeed();
   return cleanup;
