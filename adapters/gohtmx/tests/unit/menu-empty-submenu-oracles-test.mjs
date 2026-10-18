@@ -48,15 +48,15 @@ function fixture(source) {
       isConnected: true, disabled: false, value: id, dataset: {interactionMenu: id}, attributes: {},
       setAttribute(name, value) { this.attributes[name] = value; },
       getAttribute(name) { return this.attributes[name] ?? null; },
-      closest(selector) { if (selector === '[role="menu"]') return parent || null; return null; },
+      closest(selector) { if (selector === '[role="menu"]') return parent || null; if (selector === '[data-ely-family]') return root; return null; },
       focus() { document.activeElement = this; },
     };
     const panel = {
       id, isConnected: true, hidden: true, children: [], style: {},
       parentElement: {matches: () => !!parent},
       hasAttribute: name => name === 'tabindex', getAttribute: name => name === 'role' ? 'menu' : null,
-      closest: () => null, matches: () => false, querySelector: () => null,
-      querySelectorAll(selector) { return selector === '[data-interaction-menu]' ? this.children : this.children.filter(node => !node.disabled); },
+      closest: selector => selector === '[data-ely-family]' ? root : null, matches: () => false, querySelector: () => null,
+      querySelectorAll(selector) { return selector === '[data-interaction-menu]' ? this.children : selector === 'input:not(:disabled)' ? [] : this.children.filter(node => !node.disabled); },
       contains(node) { return this === node || this.children.includes(node); },
       focus() { document.activeElement = this; },
       getBoundingClientRect: () => ({width: 200, height: 8, right: 220, bottom: 48}),
@@ -108,12 +108,12 @@ function exercise(source, name) {
   }
   assert.equal(name, 'cleanup');
   const close = runInNewContext(slice(source, '  const close = (restoreFocus = false) =>', '  const selectHistory =') + '\nclose;', {...f.context, menu: f.menu});
-  const line = source.split('\n').filter(line => line.startsWith('  return () => {') && line.includes('clearReorderPreview();'));
+  const line = source.split('\n').filter(line => line.startsWith('  const cleanup = () => {') && line.includes('clearReorderPreview();'));
   assert.equal(line.length, 1, 'actual cleanup callback must be unique');
   const empty = () => {};
-  const cleanupContext = {...f.context, close, clearReorderPreview: empty, timers: new Set(), clearTimeout: empty, lottieCleanups: [empty]};
+  const cleanupContext = {...f.context, close, cleanupContextRequests: empty, clearReorderPreview: empty, timers: new Set(), clearTimeout: empty, lottieCleanups: [empty]};
   for (const name of ['click', 'scroll', 'input', 'keydown', 'result', 'error', 'contextmenu', 'pointerover', 'menuPointerMove', 'dragend', 'dragstart', 'dragover', 'drop', 'lightboxPointerDownHandler', 'lightboxPointerUpHandler', 'holdStart', 'holdEnd', 'keyup', 'outside']) cleanupContext[name] = empty;
-  const cleanup = runInNewContext(`(${line[0].trim().replace(/^return /, '').replace(/;$/, '')})`, cleanupContext);
+  const cleanup = runInNewContext(`(${line[0].trim().replace(/^const cleanup = /, '').replace(/;$/, '')})`, cleanupContext);
   cleanup();
   assert(f.removals.some(({type}) => type === 'click'), 'both cleanup variants must still remove click listeners');
   assert(f.removals.some(({type}) => type === 'keydown'), 'both cleanup variants must still remove keyboard listeners');

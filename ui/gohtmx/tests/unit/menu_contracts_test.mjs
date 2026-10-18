@@ -31,10 +31,10 @@ const fixture = ({context=false,empty=false}={}) => {
  document={activeElement:null,body:{}};
  const surface=button('surface'),prior=button('prior'),trigger=button('trigger'),item=button('item');
  for(const n of [surface,prior,trigger,item])n.isConnected=true;
- const panel={hidden:true,style:{},parentElement:{matches:()=>false},hasAttribute:k=>k==='tabindex',getAttribute:()=> 'menu',contains:n=>n===item||n===panel,closest:s=>s==='.ely-interaction--menus'?{}:null,querySelector:()=>null,querySelectorAll:s=>s==='[data-interaction-menu]'?[]:empty?[]:[item],matches:()=>false,focus(){document.activeElement=this;},getBoundingClientRect:()=>({width:200,height:80,right:200,bottom:80})};
+ const panel={hidden:true,style:{},parentElement:{matches:()=>false},hasAttribute:k=>k==='tabindex',getAttribute:()=> 'menu',contains:n=>n===item||n===panel,closest:s=>s==='.ely-interaction--menus'?{}:null,querySelector:()=>null,querySelectorAll:s=>s==='[data-interaction-menu]'||s==='input:not(:disabled)'?[]:empty?[]:[item],matches:()=>false,focus(){document.activeElement=this;},getBoundingClientRect:()=>({width:200,height:80,right:200,bottom:80})};
  trigger.closest=s=>s==='[data-interaction-context]'&&context?surface:null;trigger.getBoundingClientRect=()=>({left:180,right:220,top:20,bottom:50});surface.getBoundingClientRect=trigger.getBoundingClientRect;
- item.closest=s=>s==='[role="menu"]'?panel:null;
- const root={dataset:{},querySelector:s=>s.startsWith('#')?panel:trigger};document.activeElement=context?prior:trigger;
+ item.closest=s=>s==='[role="menu"]'?panel:s==='[data-ely-family]'?root:null;
+ const root={dataset:{},querySelector:s=>s.startsWith('#')?panel:trigger};surface.closest=s=>s==='[data-ely-family]'?root:null;document.activeElement=context?prior:trigger;
  const placements=[];const runtime=runInNewContext(menuFunction()+'\n({menu,returns:typeof menuReturnFocus==="undefined"?null:menuReturnFocus})',{document,window:{innerWidth:320,innerHeight:200},CSS:{escape:s=>s},WeakMap,placeOverlay:(p,b)=>placements.push({p,b})});
  return {root,trigger,panel,item,surface,prior,menu:runtime.menu,returns:runtime.returns,placements};
 };
@@ -47,19 +47,19 @@ check('generic dispatch leaves marked menu actions to the family',()=>{
  click({target,preventDefault(){}});assert.deepEqual(actions,[],'menu host action must wait for family state and dismissal');
 });
 check('hover-open submenu remains open on click',()=>{
- const panel={hidden:false},nested={};const trigger={dataset:{interactionMenu:'sub'},closest:s=>s==='[role="menu"]'?nested:null};
+ const root={querySelector:()=>panel},panel={hidden:false},nested={closest:()=>root};const trigger={dataset:{interactionMenu:'sub'},closest:s=>s==='[role="menu"]'?nested:null};
  let state;
- const click=runInNewContext('(target)=>{'+slice(source,"    const trigger = target?.closest('[data-interaction-menu]');","    if (target?.closest('.ely-interaction__navigation-menu")+'}',{root:{querySelector:()=>panel},CSS:{escape:s=>s},menu:(_r,_id,open)=>{state=open;},close(){}});
+ const click=runInNewContext('(target)=>{'+slice(source,"    const trigger = target?.closest('[data-interaction-menu]');","    if (target?.closest('.ely-interaction__navigation-menu")+'}',{root,CSS:{escape:s=>s},menu:(_r,_id,open)=>{state=open;},close(){}});
  click({closest:()=>trigger});assert.equal(state,true,'clicking hover-open submenu must keep it open');
 });
 check('native pointer focus back to a submenu trigger does not dismiss its panel',()=>{
  const pending=[],handlers={},cleanups=[];
  let dismissals=0;
  const child={},trigger={},outside={};
- const panel={id:'menu',hidden:false,parentElement:{matches:()=>false},contains:n=>n===child||n===trigger,addEventListener:(type,handler)=>{handlers[type]=handler;},removeEventListener(type,handler){assert.equal(handlers[type],handler);delete handlers[type];}};
+ const panel={id:'menu',hidden:false,closest:s=>s==='[data-ely-family]'?root:null,parentElement:{matches:()=>false},contains:n=>n===child||n===trigger,addEventListener:(type,handler)=>{handlers[type]=handler;},removeEventListener(type,handler){assert.equal(handlers[type],handler);delete handlers[type];}};
  const root={isConnected:true,querySelectorAll:()=>[panel]};
  document={activeElement:child,body:{}};
- runInNewContext(slice(source,"  root.querySelectorAll('.ely-interaction--menus [role=\"menu\"]').forEach(panel => {","  root.querySelectorAll('[data-interaction-popover]').forEach(panel => {"),{root,document,lottieCleanups:cleanups,queueMicrotask:fn=>pending.push(fn),menu:(_root,_id,open)=>{dismissals++;panel.hidden=!open;}});
+ runInNewContext(slice(source,"  root.querySelectorAll('.ely-interaction--menus [role=\"menu\"]').forEach(panel => {","  root.querySelectorAll('[data-interaction-popover]').forEach(panel => {"),{root,document,contextPointerFocus:null,lottieCleanups:cleanups,queueMicrotask:fn=>pending.push(fn),menu:(_root,_id,open)=>{dismissals++;panel.hidden=!open;}});
  // Hover opens a submenu and focuses its first child. Native mousedown then
  // focuses its parent trigger: focusout runs while activeElement is body,
  // before focusin installs relatedTarget as the new active element. A native
@@ -91,7 +91,7 @@ check('outside blank pointer restores focus only while its gesture still owns di
   const menuReturnFocus=new WeakMap([[panel,priorDetached?{isConnected:false}:opener]]);
   const menuGeneration=new WeakMap([[panel,1]]);
   const begin=source.includes('  let menuPointerReturn;')?'  let menuPointerReturn;':'  const outside = event => {';
-  runInNewContext(slice(source,begin,'  return () => { close(); clearReorderPreview();'),{root,document,CSS:{escape:s=>s},menuReturnFocus,menuGeneration,lottieCleanups:cleanups,close(){},menu:(_root,_id,open,restore)=>{menuGeneration.set(panel,menuGeneration.get(panel)+1);panel.hidden=!open;if(restore)opener.focus();}});
+  runInNewContext(slice(source,begin,'  const contextRequests = '),{root,document,contextPointerFocus:null,CSS:{escape:s=>s},menuReturnFocus,menuGeneration,lottieCleanups:cleanups,close(){},menu:(_root,_id,open,restore)=>{menuGeneration.set(panel,menuGeneration.get(panel)+1);panel.hidden=!open;if(restore)opener.focus();}});
   const send=(type,extra={})=>{const event={type,target:blank,pointerId:1,...extra};for(const fn of listeners.get(type)||[])fn(event);};
   document.activeElement={};send('pointerdown');assert.equal(panel.hidden,true);assert.equal(document.activeElement,opener,'pointerdown initially restores the owner');
   // Native mousedown follows pointerdown and blurs focus on nonfocusable space.
@@ -117,7 +117,7 @@ check('outside blank pointer restores focus only while its gesture still owns di
  }
 });
 check('context submenus return to their own trigger',()=>{
- const f=fixture({context:true});f.trigger.closest=s=>s==='[role="menu"]'?{}:s==='[data-interaction-context]'?f.surface:null;
+ const f=fixture({context:true});f.trigger.closest=s=>s==='[role="menu"]'?{closest:()=>f.root}:s==='[data-interaction-context]'?f.surface:null;
  f.menu(f.root,'sub',true);f.menu(f.root,'sub',false,true);assert.equal(document.activeElement,f.trigger);
 });
 check('settled menu action preserves caller form data and cancellation',()=>{
