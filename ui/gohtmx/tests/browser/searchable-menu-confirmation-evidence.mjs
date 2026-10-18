@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import {isDeepStrictEqual as same} from 'node:util';
+import {searchableControls, searchableIntervention, searchableMutantCases} from './searchable-menu-confirmation-controls.mjs';
 
 // Pure source-owned contract. Report-authored expected/pass/status values are
 // never targets: observations are recomputed from separately retained raw data.
@@ -15,9 +16,13 @@ export const searchableSourcePaths = [
   'ui/gohtmx/tests/browser/searchable-menu-confirmation-browser-test.mjs',
   'ui/gohtmx/tests/browser/searchable-menu-confirmation-evidence.mjs',
   'ui/gohtmx/tests/browser/searchable-menu-confirmation-inputs.mjs',
+  'ui/gohtmx/tests/browser/searchable-menu-confirmation-controls.mjs',
   'scripts/searchable-menu-confirmation-run.mjs',
   'scripts/searchable-menu-confirmation-evidence-test.mjs',
   'scripts/searchable-menu-confirmation-oracles-test.mjs',
+  'scripts/searchable-menu-confirmation-controls-test.mjs',
+  'scripts/searchable-menu-confirmation-browser-controls.mjs',
+  'ui/gohtmx/tests/unit/searchable_menu_confirmation_test.mjs',
   'ui/gohtmx/tests/fixtures/searchablefixture/fixture.go',
   'ui/gohtmx/tests/fixtures/searchablefixture/verify.go',
   'ui/gohtmx/tests/fixtures/searchablefixture/fixture_test.go',
@@ -136,9 +141,85 @@ export function searchableOracles(check, surface) {
   if (r.repeat) add('errors.none.repeat-runtime', r.repeat.log.errors, []);
   return out;
 }
+// Additional setup coverage makes the unchanged swap contract non-vacuous:
+// the replacement must have real selectable results before its unarmed release.
+export function searchableReplacementOracles(check) {
+  if (!check.name.startsWith('swap.')) return [];
+  const {before, after, queryTrace, identity} = check.raw.replacementSetup;
+  const out = [];
+  const add = (id, observed, expected) => out.push({id, observed, expected, pass: same(observed, expected), prerequisite: true});
+  add('replacement.physical-owner-and-focused-input', {freshOwner: identity.freshOwner, oldConnected: identity.oldConnected, sameTextualID: identity.sameTextualID, generation: identity.generation, focusedTag: identity.focusedTag, focusedFilter: identity.focusedFilter, focusedFreshOwner: identity.focusedFreshOwner}, {freshOwner: true, oldConnected: false, sameTextualID: true, generation: 'fresh', focusedTag: 'INPUT', focusedFilter: true, focusedFreshOwner: true});
+  add('replacement.capture-owner-identities', [identity.ownerID, typeof identity.panelID === 'string' && identity.panelID.length > 0, identity.fieldID], [check.raw.swap.freshID, true, null]);
+  add('replacement.textual-owner-identity', [before.state.id, after.state.id], [check.raw.swap.freshID, check.raw.swap.freshID]);
+  add('replacement.enter-still-held', after.log.inputs.filter(event => event.key === 'Enter').map(event => ({type: event.type, trusted: event.isTrusted, filter: event.filter, generation: event.ownerGeneration})), [{type: 'keydown', trusted: true, filter: true, generation: 'original'}]);
+  add('replacement.no-fresh-enter-press', queryTrace.inputs.some(event => event.key === 'Enter'), false);
+  add('replacement.editing-owned-and-trusted', queryTrace.inputs.every(event => event.isTrusted && event.filter && event.slot === 'primary' && event.targetTag === 'INPUT' && event.ownerGeneration === 'fresh' && event.focusedTarget && event.connected && event.ownerID === identity.ownerID && event.panelID === identity.panelID), true);
+  const keyboard = (type, key, code, ctrl = false) => ({type, key, code, trusted: true, ctrl, alt: false, meta: false, shift: false});
+  const expectedEditing = [keyboard('keydown', 'Control', 'ControlLeft', true), keyboard('keydown', 'A', 'KeyA', true), keyboard('keyup', 'A', 'KeyA', true), keyboard('keyup', 'Control', 'ControlLeft'), ...['keydown', 'keyup'].map(type => keyboard(type, 'Backspace', 'Backspace')), ...[...'Alpha'].flatMap(key => ['keydown', 'keyup'].map(type => keyboard(type, key, 'Key' + key.toUpperCase())))];
+  const editSequence = [['keydown', 'Control'], ['keydown', 'A'], ['keyup', 'A'], ['keyup', 'Control'], ...['Backspace', ...'Alpha'].flatMap(key => [['keydown', key], ['input', null], ['keyup', key]])];
+  add('replacement.exact-editing-sequence', queryTrace.inputs.map(event => [event.type, event.key]), editSequence);
+  add('replacement.no-action-or-input-before-edit', Object.fromEntries(['inputs', 'actions', 'hosts', 'errors'].map(key => [key, before.log[key]])), Object.fromEntries(['inputs', 'actions', 'hosts', 'errors'].map(key => [key, check.raw.down.log[key]])));
+  const seedChange = {slot: 'primary', name: 'filter', value: 'root-query'}, nativeChange = {slot: 'primary', name: '', value: 'Alpha'};
+  const initializationChanges = before.log.changes.slice(check.raw.down.log.changes.length);
+  add('replacement.bounded-initialization-changes', same(initializationChanges, [seedChange]) || !check.raw.down.state.hidden && check.raw.down.state.focusedFilter && same(initializationChanges, [nativeChange, seedChange]), true);
+  add('replacement.original-press-trace-preserved', Object.fromEntries(Object.keys(check.raw.down.log).map(key => [key, before.log[key].slice(0, check.raw.down.log[key].length)])), check.raw.down.log);
+  add('replacement.editing-extends-pre-edit', Object.fromEntries(Object.keys(before.log).map(key => [key, after.log[key].slice(0, before.log[key].length)])), before.log);
+  add('replacement.exact-trusted-editing-key-phases', queryTrace.inputs.filter(event => ['keydown', 'keyup'].includes(event.type)).map(event => ({...keyProjection(event), code: event.code})), expectedEditing);
+  add('replacement.exact-raw-query-values', queryTrace.inputs.filter(event => event.type === 'input').map(event => event.value), ['', 'A', 'Al', 'Alp', 'Alph', 'Alpha']);
+  const released = check.raw.after.log;
+  add('replacement.release-extends-raw-pre-release', Object.fromEntries(Object.keys(after.log).map(key => [key, released[key].slice(0, after.log[key].length)])), after.log);
+  const releaseInputs = released.inputs.slice(after.log.inputs.length);
+  add('replacement.exact-fresh-native-release', releaseInputs.map(event => ({...keyProjection(event), code: event.code, slot: event.slot, filter: event.filter, targetTag: event.targetTag, ownerGeneration: event.ownerGeneration, value: event.value, targetID: event.targetID, activeID: event.activeID, focusedTarget: event.focusedTarget, connected: event.connected, ownerID: event.ownerID, panelID: event.panelID})), [{...keyboard('keyup', 'Enter', 'Enter'), slot: 'primary', filter: true, targetTag: 'INPUT', ownerGeneration: 'fresh', value: 'Alpha', targetID: identity.fieldID, activeID: identity.fieldID, focusedTarget: true, connected: true, ownerID: identity.ownerID, panelID: identity.panelID}]);
+  const releasedActions = released.actions.slice(after.log.actions.length);
+  const closedOnRelease = releasedActions.length > 0 && check.raw.after.state.hidden;
+  add('replacement.native-release-change', released.changes.slice(after.log.changes.length), closedOnRelease ? [nativeChange] : []);
+  add('replacement.no-unrelated-release-events', Object.fromEntries(['errors', 'lifecycle'].map(key => [key, released[key].slice(after.log[key].length)])), {errors: [], lifecycle: []});
+  add('replacement.open-focused-seed', openState(before.state), {hidden: false, expanded: 'true', focusedFilter: true, query: 'root-query'});
+  add('replacement.open-focused-query', openState(after.state), {hidden: false, expanded: 'true', focusedFilter: true, query: 'Alpha'});
+  add('replacement.exact-filtered-row-profile', rowProfile(after.state.rows), targetRows('primary', 'Alpha'));
+  add('replacement.visible-enabled-targets', after.state.rows.filter(row => !row.hidden && !row.disabled).map(row => row.value), ['alpha-one', 'alpha-two']);
+  add('replacement.trace-is-raw-segment', queryTrace, Object.fromEntries(['inputs', 'actions', 'hosts', 'changes', 'errors'].map(key => [key, after.log[key].slice(before.log[key].length)])));
+  add('replacement.trusted-query-input', queryTrace.inputs.filter(event => event.type === 'input').map(event => ({trusted: event.isTrusted, slot: event.slot, filter: event.filter})), Array.from({length: 6}, () => ({trusted: true, slot: 'primary', filter: true})));
+  add('replacement.raw-filter-change', queryTrace.changes.at(-1), {slot: 'primary', name: 'filter', value: 'Alpha'});
+  add('replacement.no-implicit-action', [queryTrace.actions, queryTrace.hosts, queryTrace.errors], [[], [], []]);
+  add('replacement.peer-initial', peerState(after.peer), peerInitial);
+  return out;
+}
+function verifySearchableMutationRaw(check, mutation) {
+  const r = check.raw, chosen = [action()], delivered = [host()];
+  if (mutation === 'activate-on-keydown' && (check.name === 'phase' || check.name.startsWith('swap.'))) {
+    assert.deepEqual([actions(r.down.log), hosts(r.down.log), r.down.state.hidden], [chosen, delivered, true], 'designated early action and dismissal');
+    assert.deepEqual(r.down.log.hosts.map(item => ({phase: item.phase, generation: item.generation})), [{phase: 'keydown', generation: 'original'}], 'designated callback is actually early on the original owner');
+    assert.deepEqual(r.after.log.hosts.map(item => ({phase: item.phase, generation: item.generation})), [{phase: 'keydown', generation: 'original'}], 'early callback retains its original owner');
+    assert.deepEqual([actions(r.after.log), hosts(r.after.log)], [chosen, delivered], 'no extra release action');
+  } else if (mutation === 'bypass-filter-modifiers' && check.name.startsWith('modifier.')) {
+    assert.deepEqual([actions(r.down.log), hosts(r.down.log), r.down.state.hidden], [[], [], false], 'modifier control keeps press safe');
+    assert.deepEqual([actions(r.after.log), hosts(r.after.log), r.after.state.hidden, r.after.state.focusedFilter], [chosen, delivered, true, false], 'designated modified release action');
+    assert.deepEqual(r.after.log.hosts.map(item => ({phase: item.phase, generation: item.generation})), [{phase: 'keyup', generation: 'original'}]);
+  } else if (mutation === 'confirm-filter-space' && check.name === 'text.space') {
+    assert.deepEqual([actions(r.down.log), hosts(r.down.log), r.down.state.hidden], [[], [], false], 'Space control keeps press safe');
+    assert.deepEqual([r.after.state.query, r.after.log.changes, actions(r.after.log), hosts(r.after.log), r.after.state.hidden, r.after.state.focusedFilter], ['Alpha', [{slot: 'primary', name: '', value: 'Alpha'}], chosen, delivered, true, false], 'designated text Space is wrongly consumed as confirmation');
+    assert.deepEqual(r.after.log.hosts.map(item => ({phase: item.phase, generation: item.generation})), [{phase: 'keyup', generation: 'original'}]);
+  } else if (mutation === 'release-without-arm' && check.name.startsWith('swap.')) {
+    assert.deepEqual([actions(r.down.log), hosts(r.down.log), r.down.state.hidden], [[], [], false], 'pairing control keeps original press safe');
+    assert.deepEqual([actions(r.after.log), hosts(r.after.log)], [chosen, delivered], 'designated unarmed replacement release action');
+    const preRelease = r.replacementSetup.after.log;
+    assert.deepEqual(actions({actions: r.after.log.actions.slice(preRelease.actions.length)}), chosen, 'designated action is added after the pre-release snapshot');
+    assert.deepEqual(hosts({hosts: r.after.log.hosts.slice(preRelease.hosts.length)}), delivered, 'designated host callback is added after the pre-release snapshot');
+    assert.deepEqual(openState(r.after.state), {hidden: true, expanded: 'false', focusedFilter: false, query: 'Alpha'}, 'unarmed release actually dismisses the replacement');
+    assert.deepEqual(r.after.log.hosts.map(item => ({phase: item.phase, generation: item.generation})), [{phase: 'keyup', generation: 'fresh'}], 'wrong action belongs to the replacement release');
+  }
+}
 const hash = value => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
 export function verifySearchableEvidence(report, trusted, exitCode) {
-  const {surface, group, revision, tree, runToken, sourceFiles, assets, fixtures} = trusted;
+  const {surface, group, revision, tree, runToken, sourceFiles, assets, fixtures, mutation = ''} = trusted;
+  const control = searchableControls[mutation];
+  assert(!mutation || control, 'known expected causal control');
+  if (mutation) assert.equal(group, 'all', 'causal mode uses the source-declared designated inventory');
+  const caseInventory = mutation ? searchableMutantCases(mutation) : searchableCases(group);
+  assert.deepEqual(report.caseInventory, caseInventory, 'explicit source-owned selected inventory');
+  assert.equal(report.mutation, mutation);
+  assert.deepEqual(report.causalIntervention, searchableIntervention(mutation), 'exact source intervention');
   assert(searchableSurfaces.includes(surface)); assert(searchableCases(group));
   assert.equal(report.suite, 'searchable-menu-confirmation'); assert.equal(report.stage, 'checks');
   for (const [key, value] of Object.entries({surface, group, revision, tree, runToken})) assert.equal(report[key], value, 'trusted ' + key);
@@ -156,7 +237,8 @@ export function verifySearchableEvidence(report, trusted, exitCode) {
   assert.deepEqual(Object.keys(sourceFiles), searchableSourcePaths); assert.deepEqual(report.sourceFiles, sourceFiles);
   for (const value of Object.values(sourceFiles)) assert(hash(value));
   assert.deepEqual(report.assets, assets, 'independently loaded production assets');
-  for (const asset of Object.values(assets)) { assert(hash(asset.sourceSHA256)); assert.equal(asset.sourceSHA256, asset.servedSHA256); assert(asset.bytes > 0); }
+  for (const asset of Object.values(assets)) { assert(hash(asset.sourceSHA256)); assert(hash(asset.servedSHA256)); assert(asset.bytes > 0); }
+  assert.deepEqual(Object.entries(assets).filter(([, asset]) => asset.sourceSHA256 !== asset.servedSHA256).map(([path]) => path), mutation ? [control.file] : [], 'only the designated served runtime may differ from source');
   assert.deepEqual(Object.keys(fixtures), ['/', '/fragment']); assert.deepEqual(report.fixtures, fixtures, 'independently rendered fixture bytes');
   for (const fixture of Object.values(fixtures)) { assert(hash(fixture.sourceSHA256)); assert.equal(fixture.sourceSHA256, fixture.servedSHA256); assert.equal(fixture.html, 'searchable-menu-fixtures/' + fixture.sourceSHA256 + '.html'); }
   assert.deepEqual(report.httpAssetProof.map(item => item.path), [...Object.keys(assets), '/', '/fragment']);
@@ -164,20 +246,28 @@ export function verifySearchableEvidence(report, trusted, exitCode) {
   for (const proof of [...report.httpAssetProof, ...report.browserResponses]) {
     const spec = wanted(proof.path); assert(spec, 'foreign response path'); assert.equal(proof.status, 200);
     assert.equal(proof.expectedSHA256, spec.servedSHA256); assert.equal(proof.receivedSHA256, spec.servedSHA256); assert.equal(proof.bytes, spec.bytes);
-    if (Object.hasOwn(proof, 'check')) assert(searchableCases(group).includes(proof.check), 'foreign response case');
+    if (Object.hasOwn(proof, 'check')) assert(caseInventory.includes(proof.check), 'foreign response case');
   }
-  assert.deepEqual(report.checks.map(check => check.name), searchableCases(group), 'exact unique ordered case inventory');
+  assert.deepEqual(report.checks.map(check => check.name), caseInventory, 'exact unique ordered case inventory');
   for (const check of report.checks) {
     assert.equal(check.error, undefined); assert.equal(check.captureError, undefined);
     assert.deepEqual(check.finalTrace, (check.raw.repeat || check.raw.after).log, 'final trace agrees with last captured snapshot');
+    const replacement = searchableReplacementOracles(check);
+    assert.deepEqual(check.replacementOracles, replacement, 'independent non-vacuous replacement setup');
+    for (const oracle of replacement) assert(oracle.pass, check.name + '/' + oracle.id + ': failed prerequisite');
     const computed = searchableOracles(check, surface);
     assert.deepEqual(check.oracles, computed, check.name + ': source-owned expectations and raw observation recomputation');
     for (const oracle of computed) if (oracle.prerequisite) assert(oracle.pass, check.name + '/' + oracle.id + ': failed prerequisite');
     assert.equal(check.status, computed.every(oracle => oracle.pass) ? 'passed' : 'failed');
+    if (mutation) {
+      assert.deepEqual(computed.filter(oracle => !oracle.pass).map(oracle => oracle.id), control.failures[check.name] || [], check.name + ': exact designated raw failure set; unrelated failures cannot count as a kill');
+      verifySearchableMutationRaw(check, mutation);
+    }
     for (const path of [...requiredBrowserPaths, ...(check.name.startsWith('swap.') ? ['/fragment'] : [])]) assert(report.browserResponses.some(proof => proof.check === check.name && proof.path === path), check.name + ': missing browser bytes ' + path);
     if (check.name.startsWith('swap.')) assert(report.requests.some(req => req.check === check.name && req.path === '/fragment' && req.method === 'GET' && req.htmx === 'true' && req.status === 200 && req.responseSHA256 === fixtures['/fragment'].servedSHA256), check.name + ': missing real HTMX request');
   }
   const status = report.checks.every(check => check.status === 'passed') ? 'passed' : 'failed';
   assert.equal(report.status, status); assert.equal(exitCode, status === 'passed' ? 0 : 1, 'raw nonzero contract failure must survive validation');
-  return {status, surface, group, revision, tree, failed: report.checks.filter(check => check.status === 'failed').map(check => check.name)};
+  if (mutation) assert.equal(status, 'failed', 'causal intervention must fail its designated contracts');
+  return {status, surface, group, mutation, revision, tree, failed: report.checks.filter(check => check.status === 'failed').map(check => check.name)};
 }

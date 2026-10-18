@@ -5,10 +5,12 @@ import {mkdtemp, readFile, rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {loadContextOwnerAssets} from './context-owner-assets.mjs';
+import {searchableControls, mutateSearchableSource, searchableIntervention} from './searchable-menu-confirmation-controls.mjs';
 import {searchableSourcePaths, searchableSurfaces} from './searchable-menu-confirmation-evidence.mjs';
 export const searchableSHA = value => createHash('sha256').update(value).digest('hex');
-export async function loadSearchableInputs(base, surface) {
+export async function loadSearchableInputs(base, surface, mutation = '') {
   assert(searchableSurfaces.includes(surface));
+  assert(!mutation || Object.hasOwn(searchableControls, mutation), 'known SearchableMenu causal control');
   const git = args => execFileSync('git', args, {cwd: base, encoding: 'utf8'}).trim();
   const sourceFiles = {};
   for (const path of searchableSourcePaths) sourceFiles[path] = searchableSHA(await readFile(join(base, path)));
@@ -16,6 +18,11 @@ export async function loadSearchableInputs(base, surface) {
   const assetBodies = await loadContextOwnerAssets(base);
   const icon = '/assets/ely/icons/search.svg', iconBody = await readFile(join(base, 'ui/gohtmx', icon));
   assetBodies.set(icon, {body: iconBody, sourceSHA256: searchableSHA(iconBody), servedSHA256: searchableSHA(iconBody), bytes: iconBody.length, contentType: 'image/svg+xml'});
+  if (mutation) {
+    const asset = assetBodies.get(searchableControls[mutation].file);
+    asset.body = Buffer.from(mutateSearchableSource(asset.body.toString('utf8'), mutation));
+    asset.servedSHA256 = searchableSHA(asset.body); asset.bytes = asset.body.length;
+  }
   const assets = Object.fromEntries([...assetBodies].map(([path, {sourceSHA256, servedSHA256, bytes, contentType}]) => [path, {sourceSHA256, servedSHA256, bytes, contentType}]));
   const fixturePath = surface === 'sdui' ? './adapters/gohtmx/tests/fixtures/searchable-menu-confirmation' : './ui/gohtmx/tests/fixtures/searchable-menu-confirmation';
   const go = process.env.GO || 'go';
@@ -33,7 +40,7 @@ export async function loadSearchableInputs(base, surface) {
       fixtures[path] = {sourceSHA256: searchableSHA(body), servedSHA256: searchableSHA(body), bytes: body.length, html: 'searchable-menu-fixtures/' + searchableSHA(body) + '.html', renderer: surface === 'sdui' ? 'CatalogueRegistry + Decode + Compile + Plan.Render' : 'ui.RenderComponent ' + surface};
     }
   } finally { await rm(temp, {recursive: true, force: true}); }
-  return {revision, tree, dirty, sourceFiles, assets, fixtures, assetBodies, fixtureBodies,
+  return {revision, tree, dirty, mutation, ...(mutation ? {causalIntervention: searchableIntervention(mutation)} : {}), sourceFiles, assets, fixtures, assetBodies, fixtureBodies,
     standaloneDependencyProof: {SHA256: searchableSHA(standaloneDeps.join('\n')), forbiddenImports: []},
     toolchain: {node: process.version, go: execFileSync(go, ['version'], {cwd: base, encoding: 'utf8'}).trim(), playwright: JSON.parse(await readFile(join(base, 'node_modules/playwright/package.json'), 'utf8')).version}};
 }

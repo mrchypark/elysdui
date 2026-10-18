@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import {createHash} from 'node:crypto';
 import {readFile} from 'node:fs/promises';
 import {parse} from 'acorn';
 import {searchableCases, searchableSourcePaths} from '../ui/gohtmx/tests/browser/searchable-menu-confirmation-evidence.mjs';
@@ -12,7 +11,7 @@ assert.equal(new Set(searchableCases('all')).size, 15);
 assert(runner.includes("process.env.CI, 'true'") && wrapper.includes("process.env.CI, 'true'"));
 assert(runner.includes("assert.equal(report.dirty, '', 'browser evidence requires a clean committed checkout')"));
 assert(runner.includes("if (report.status !== 'passed') process.exitCode = 1;"));
-assert(wrapper.includes('process.exitCode = child.status;') && wrapper.includes('randomUUID()') && wrapper.includes('loadSearchableInputs(base, surface)'));
+assert(wrapper.includes('process.exitCode = child.status;') && wrapper.includes('randomUUID()') && wrapper.includes('loadSearchableInputs(base, surface, mutation)'));
 assert(runner.includes("await page.keyboard.down(modifier)") && runner.includes("await page.keyboard.up(modifier)"));
 assert(runner.includes("await page.keyboard.down(key)") && runner.includes("await page.keyboard.up(key)"));
 assert(runner.includes("ctrlKey: Boolean(event.ctrlKey)") && runner.includes("metaKey: Boolean(event.metaKey)"));
@@ -22,6 +21,8 @@ assert(!/new (?:CustomEvent|Event|KeyboardEvent)\(['"](?:htmx:|key)/.test(runner
 assert(!/page\.route|dispatchEvent|\.prune\(|\.stop\(/.test(runner), 'no request substitution or synthetic key/lifecycle dispatch');
 assert(workflow.includes('surface: [qualified, chapter, sdui]') && workflow.includes('group: [desired, controls, lifecycle]') && workflow.includes('fail-fast: false'));
 assert(!/^\s*continue-on-error:/m.test(workflow));
-const old = await read('ui/gohtmx/tests/unit/interaction_menu_test.mjs');
-assert.equal(createHash('sha256').update(old).digest('hex'), '0125f9e765f5f375ce41efd6e40654e0c8f3c2b22ef8ee95677afbac3c20ed14', 'historical wrong-phase VM oracle remains unmodified and is not desired evidence');
-console.log('SearchableMenu source inventories, native-input runner syntax, CI isolation and unchanged historical VM oracle checked; no browser was launched.');
+const controls = await read('scripts/searchable-menu-confirmation-browser-controls.mjs');
+assert(controls.includes("process.env.CI, 'true'") && controls.includes('randomUUID()'));
+assert(workflow.includes('repair-causal-controls:') && workflow.includes('node scripts/searchable-menu-confirmation-browser-controls.mjs'));
+assert(runner.includes('current.raw.replacementSetup') && runner.includes("await page.keyboard.type('Alpha')"));
+console.log('SearchableMenu unchanged case inventory, native-input runner syntax, byte-bound controls and CI isolation checked; no browser was launched.');

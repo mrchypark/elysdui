@@ -5,15 +5,19 @@ import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {chromium} from 'playwright';
 import {loadSearchableInputs, searchableSHA as sha} from './searchable-menu-confirmation-inputs.mjs';
-import {searchableCases, searchableSurfaces, searchableOracles, searchableErrors} from './searchable-menu-confirmation-evidence.mjs';
+import {searchableReportName, searchableMutantCases} from './searchable-menu-confirmation-controls.mjs';
+import {searchableCases, searchableSurfaces, searchableOracles, searchableReplacementOracles, searchableErrors} from './searchable-menu-confirmation-evidence.mjs';
 
-// CI-only genuine browser baseline. Production sources remain unchanged.
+// CI-only genuine browser evidence. Mutations affect only served runtime bytes.
 // Desired failures keep exit 1; neither this runner nor its wrapper blesses red.
 const base = fileURLToPath(new URL('../../../../', import.meta.url));
 const surface = process.env.SEARCHABLE_MENU_SURFACE || 'qualified';
 const group = process.env.SEARCHABLE_MENU_GROUP || 'all';
+const mutation = process.env.SEARCHABLE_MENU_MUTATION || '';
+if (mutation) assert.equal(group, 'all', 'causal mode uses the source-declared designated inventory');
+const caseInventory = mutation ? searchableMutantCases(mutation) : searchableCases(group);
 const report = {
-  suite: 'searchable-menu-confirmation', surface, group, runToken: process.env.SEARCHABLE_MENU_RUN_TOKEN || null,
+  suite: 'searchable-menu-confirmation', surface, group, caseInventory, runToken: process.env.SEARCHABLE_MENU_RUN_TOKEN || null,
   status: 'running', stage: 'startup', actualMainBaseline: '49a792722ed4704d1b6fc06d7d2ee768ffe318aa',
   sourcePins: {menu: '49ed1f84056fa13347d68801b479a4a5a8e03b53', compatibilityAudit: 'da3fdcaf39f2fa85ce1dd9cad07c3c81cf1dd721'},
   scope: 'SearchableMenu query-input confirmation only; no alias, schema, hover, query reconciliation or whole-contract parity claim.',
@@ -32,6 +36,7 @@ const snapshot = (slot = 'primary') => page.evaluate(slot => ({state: searchStat
 export function observeSearchableBrowser() {
   window.searchLog = {actions: [], hosts: [], inputs: [], changes: [], errors: [], lifecycle: []};
   window.searchPhase = null;
+  window.searchGenerations = new WeakMap();
   window.searchRoot = slot => document.querySelector(`[data-fixture-slot="${slot}"] [data-ely-family]`);
   window.searchSlot = node => node?.closest?.('[data-fixture-slot]')?.dataset.fixtureSlot || null;
   window.searchState = node => {
@@ -53,7 +58,7 @@ export function observeSearchableBrowser() {
     searchLog.inputs.push({type, key: event.key || null, code: event.code || null, isTrusted: event.isTrusted, constructor: event.constructor.name,
       ctrlKey: Boolean(event.ctrlKey), altKey: Boolean(event.altKey), metaKey: Boolean(event.metaKey), shiftKey: Boolean(event.shiftKey),
       slot: searchSlot(event.target), targetID: event.target.id || null, targetTag: event.target.tagName, filter: event.target.matches?.('[data-interaction-filter]') || false,
-      value: event.target.value ?? null, activeID: document.activeElement?.id || null, connected: event.target.isConnected});
+      value: event.target.value ?? null, focusedTarget: document.activeElement === event.target, ownerID: event.target.closest?.('[data-ely-family]')?.id || null, panelID: event.target.closest?.('[role="menu"]')?.id || null, ownerGeneration: searchGenerations.get(event.target.closest?.('[data-ely-family]')) || null, activeID: document.activeElement?.id || null, connected: event.target.isConnected});
   }, true);
   document.addEventListener('ely:action', event => searchLog.actions.push({slot: searchSlot(event.target), value: event.detail.value, action: event.detail.action, closed: event.target.querySelector('[role="menu"]').hidden, phase: searchPhase}));
   document.addEventListener('ely:change', event => searchLog.changes.push({slot: searchSlot(event.target), name: event.detail.name, value: event.detail.value}));
@@ -70,7 +75,7 @@ async function ready(origin) {
   await page.evaluate(async () => {
     const {mount} = await import('/assets/ely-api.js');
     window.searchBind = (node, generation = 'original') => {
-      searchObserveRoot(node);
+      searchObserveRoot(node); searchGenerations.set(node, generation);
       mount(node, {onAction(detail, owner) {
         searchLog.hosts.push({slot: searchSlot(owner), value: detail.value, action: detail.action, closed: owner.querySelector('[role="menu"]').hidden, phase: searchPhase, generation});
         return {ok: true};
@@ -123,6 +128,19 @@ async function runCase(name) {
     // The newly mounted filter receives the outstanding physical keyup. That
     // unarmed keyup must not dispatch through either old or replacement owner.
     await root().locator('[data-interaction-menu]').first().click(); await field().focus();
+    // The replacement seed hides every leaf. Establish a real current target
+    // while the original Enter is still held, without clearing its raw trace.
+    // Otherwise an incorrect unarmed-release handler could pass vacuously.
+    const replacementBefore = await snapshot();
+    await page.keyboard.press('Control+A'); await page.keyboard.press('Backspace');
+    await page.keyboard.type('Alpha'); await settle();
+    const replacementAfter = await snapshot();
+    current.raw.replacementSetup = {before: replacementBefore, after: replacementAfter,
+      identity: await page.evaluate(() => ({freshOwner: searchRoot('primary') !== searchOld, oldConnected: searchOld.isConnected,
+        sameTextualID: searchRoot('primary').id === searchOld.id, ownerID: searchRoot('primary').id, panelID: document.activeElement?.closest('[role="menu"]')?.id || null, fieldID: document.activeElement?.id || null, generation: searchGenerations.get(searchRoot('primary')),
+        focusedTag: document.activeElement?.tagName, focusedFilter: document.activeElement?.matches('[data-interaction-filter]'),
+        focusedFreshOwner: document.activeElement?.closest('[data-ely-family]') === searchRoot('primary')})),
+      queryTrace: Object.fromEntries(['inputs', 'actions', 'hosts', 'changes', 'errors'].map(key => [key, replacementAfter.log[key].slice(replacementBefore.log[key].length)]))};
     await page.keyboard.up('Enter'); await settle(); current.raw.after = await snapshot();
     // Close explicitly so prepare can reopen via the ordinary trigger.
     await page.keyboard.press('Escape');
@@ -139,7 +157,7 @@ async function runCase(name) {
 try {
   assert.equal(process.env.CI, 'true', 'browser execution is restricted to CI');
   assert(searchableSurfaces.includes(surface)); assert(searchableCases(group)); assert(report.runToken, 'fresh wrapper invocation token required');
-  inputs = await loadSearchableInputs(base, surface);
+  inputs = await loadSearchableInputs(base, surface, mutation);
   const {assetBodies, fixtureBodies, ...metadata} = inputs; Object.assign(report, metadata);
   assert.equal(report.dirty, '', 'browser evidence requires a clean committed checkout');
   server = createServer((req, res) => {
@@ -180,16 +198,16 @@ try {
   page.on('console', message => { if (message.type() === 'error') report.consoleErrors.push({check: current?.name, message: message.text()}); });
   page.on('requestfailed', request => report.requestFailures.push({check: current?.name, url: request.url(), error: request.failure()?.errorText}));
   report.stage = 'checks';
-  for (const name of searchableCases(group)) {
-    current = {name, raw: {}, oracles: [], status: 'running'}; report.checks.push(current);
-    try { await ready(origin); await runCase(name); current.oracles = searchableOracles(current, surface); }
+  for (const name of caseInventory) {
+    current = {name, raw: {}, oracles: [], replacementOracles: [], status: 'running'}; report.checks.push(current);
+    try { await ready(origin); await runCase(name); current.oracles = searchableOracles(current, surface); current.replacementOracles = searchableReplacementOracles(current); }
     catch (error) { current.error = {message: error.message, stack: error.stack}; }
     finally {
       try { const log = await page.evaluate(() => structuredClone(searchLog)); current.finalTrace = log; report.runtimeErrors.push(...log.errors.map(error => ({check: name, ...error}))); }
       catch (error) { current.captureError = String(error); }
-      current.status = !current.error && !current.captureError && current.oracles.every(oracle => oracle.pass) ? 'passed' : 'failed';
+      current.status = !current.error && !current.captureError && current.oracles.every(oracle => oracle.pass) && current.replacementOracles.every(oracle => oracle.pass) ? 'passed' : 'failed';
       console.log(`${surface}/${name}: ${current.status}`);
-      for (const oracle of current.oracles.filter(oracle => !oracle.pass)) console.error(`${oracle.id}: observed=${JSON.stringify(oracle.observed)} expected=${JSON.stringify(oracle.expected)}`);
+      for (const oracle of [...current.oracles, ...(current.replacementOracles || [])].filter(oracle => !oracle.pass)) console.error(`${oracle.id}: observed=${JSON.stringify(oracle.observed)} expected=${JSON.stringify(oracle.expected)}`);
       await Promise.all(responses);
     }
   }
@@ -199,7 +217,7 @@ finally {
   await Promise.all(responses);
   await mkdir(join(output, 'searchable-menu-fixtures'), {recursive: true});
   for (const body of inputs?.fixtureBodies.values() || []) await writeFile(join(output, 'searchable-menu-fixtures/' + sha(body) + '.html'), body);
-  await writeFile(join(output, `searchable-menu-confirmation-${surface}-${group}.json`), JSON.stringify(report, null, 2));
+  await writeFile(join(output, searchableReportName(surface, group, mutation)), JSON.stringify(report, null, 2));
   await browser?.close(); if (server?.listening) await new Promise(resolve => server.close(resolve));
   if (report.status !== 'passed') process.exitCode = 1;
 }

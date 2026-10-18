@@ -1,9 +1,11 @@
 # SearchableMenu filter confirmation baseline
 
-This is a test-only baseline on published main
+This records the historical test-only baseline on published main
 [`49a792722ed4704d1b6fc06d7d2ee768ffe318aa`](https://github.com/mrchypark/elysdui/commit/49a792722ed4704d1b6fc06d7d2ee768ffe318aa),
-source tree `ebbb4d739ee965a92a0e57e265e11556d8a77abe`. It does not change
+source tree `ebbb4d739ee965a92a0e57e265e11556d8a77abe`. That baseline did not change
 production behavior, schema, aliases, source pins, or global support claims.
+The subsequent bounded implementation and stronger replacement-release setup
+are described separately in [repair verification](searchable-menu-confirmation-repair.md).
 
 ## Source-owned intended behavior
 
@@ -24,10 +26,12 @@ does not arm the filter input. These are source facts, not browser execution.
 
 The historical
 [isolated VM search test](https://github.com/mrchypark/elysdui/blob/49a792722ed4704d1b6fc06d7d2ee768ffe318aa/ui/gohtmx/tests/unit/interaction_menu_test.mjs#L44-L53)
-expects selection during keydown. It is retained byte-for-byte and explicitly
-classified as an incorrect source-parity oracle. Its green result cannot prove
-this intended keyphase contract. The new source test pins its SHA-256 to
+expected selection during keydown. The test-only baseline retained it byte-for-byte
+and explicitly classified it as an incorrect source-parity oracle. Its green
+result could not prove this intended keyphase contract. The baseline source test
+pinned its SHA-256 to
 `0125f9e765f5f375ce41efd6e40654e0c8f3c2b22ef8ee95677afbac3c20ed14`.
+The repair removes that wrong expectation and adds complete-runtime event tests.
 
 ## Bounded fixture and case matrix
 
@@ -56,7 +60,10 @@ filtering, keyboard handling, lifecycle or callback behavior.
   replacement identity/readiness, and a complete fresh replacement gesture.
   The relational pre-swap snapshot is constrained to zero callbacks/open or the
   exact known early callback/dismissal profile; arbitrary payloads or duplicates
-  cannot pass as a preservation control.
+  cannot pass as a preservation control. The original replacement retained
+  `root-query`, which hid every result before the outstanding keyup. Its no-extra-
+  callback observation is therefore bounded to that no-match condition; it did
+  not independently establish release pairing with a selectable replacement.
 
 No checkbox/radio mutation is claimed by these plain-row fixtures. Nested query
 reconciliation, alternate input/result focus models, hover delay/aim, button-row

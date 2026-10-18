@@ -41,13 +41,14 @@ runInNewContext(`(() => {${radioSource}})()`, {radio: radios[1], root: {}, chang
 assert.deepEqual(radios.map(item => item.checked), ['false', 'true', 'true']);
 assert.ok(closed, 'radio selection closes and restores focus');
 
-// Search input arrows and Enter operate on enabled, visible results only.
-let focused, picked;
-const options = [true, false, false].map((hidden, index) => ({closest: () => hidden, focus() { focused = index; }, click() { picked = index; }}));
+// Search arrows keep their existing first/last visible-result behavior.
+// The old isolated branch oracle incorrectly expected Enter on keydown. The
+// whole-runtime searchable_menu_confirmation_test.mjs now checks both phases.
+let focused;
+const options = [true, false, false].map((hidden, index) => ({closest: () => hidden, focus() { focused = index; }}));
 const searchField = {parentElement: {querySelectorAll: () => options}};
 const keys = source.slice(source.indexOf('    const searchField ='), source.indexOf('    const pie = closest(root, event.target'));
 const key = runInNewContext(`event => {${keys}}`, {root: {}, closest: () => searchField});
 key({key: 'ArrowDown', preventDefault() {}}); assert.equal(focused, 1);
 key({key: 'ArrowUp', preventDefault() {}}); assert.equal(focused, 2);
-key({key: 'Enter', preventDefault() {}}); assert.equal(picked, 1);
-console.log('Menu filtering, radio state, and keyboard checks passed');
+console.log('Menu filtering, radio state, and arrow navigation checks passed');
