@@ -33,6 +33,10 @@ export async function checkEveryGalleryPage({browser, origin, base, staticMode, 
   const persist = () => writeFile(resolve(output, `${mode}-complete-report.json`), JSON.stringify(reports, null, 2));
   async function session(url, exercise) {
     const context = await browser.newContext({viewport: {width: 1440, height: 1000}, serviceWorkers: 'block'});
+    // Copy controls require a genuinely successful browser clipboard write.
+    // Synthetic audit clicks cannot supply transient user activation; grant only
+    // this isolated test origin instead of treating rejected writes as success.
+    await context.grantPermissions(['clipboard-read', 'clipboard-write'], {origin});
     const page = await context.newPage();
     const errors = [];
     page.on('pageerror', error => errors.push(String(error)));
