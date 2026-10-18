@@ -68,7 +68,7 @@ HTMX. The [browser suite](../scripts/menu-contracts-browser-test.mjs) observes:
 | Checkbox host nesting | A nested trigger opens its child instead of toggling/closing |
 | Host variants | Dropdown/overflow actions and split-primary close before callback |
 | Empty/all-disabled | Focusable named panel receives focus and Escape restores the trigger |
-| Dismissal | Tab leaves rows, Shift+Tab returns to trigger, outside click preserves its destination |
+| Dismissal | Tab leaves rows, Shift+Tab returns to trigger, outside click preserves its destination; blank pointer release restores the owner without overriding new focus/reopen/teardown or blocking text selection |
 | Context | Pointer clamp, keyboard reanchor, original focus return, and nested trigger return |
 | Disabled/modifiers | Synthetic disabled activation and modified Enter/Space do not notify |
 | Geometry | Root edge collision correction and left-opening nested panel, using measured boxes |
@@ -78,8 +78,8 @@ HTMX. The [browser suite](../scripts/menu-contracts-browser-test.mjs) observes:
 JSON evidence is always written to `test-results/contracts/menu*.json`, including
 failures. It records the exact commit, dirty state, fixture and served-source
 hashes, both source pins, requests, passed requirements, and the failing assertion.
-The six source-level causal mutants are `radio-scope`, `action-order`,
-`context-focus`, `placement`, `cleanup`, and `native-focus`. A mutant counts as killed only when
+The seven source-level causal mutants are `radio-scope`, `action-order`,
+`context-focus`, `placement`, `cleanup`, `native-focus`, and `outside-focus`. A mutant counts as killed only when
 its designated assertion fails; an unrelated exception or timeout is a failed
 run. The coordinator runs actual browser proof in CI. Local VM/Go success does
 not imply browser success.
@@ -89,11 +89,16 @@ snapshots, including `focusout.relatedTarget`, `document.activeElement` at the
 handler and microtask boundary, and trigger/panel geometry. The `native-focus`
 mutant restores dismissal based only on transient active focus. It must fail the
 unchanged hover-open submenu click assertion, not an unrelated earlier check.
+Outside-blank dismissal also retains native event/focus snapshots. Its
+`outside-focus` mutant removes only the matching-gesture pointerup focus return
+and must fail the named blank-dismissal oracle. The fallback never prevents
+pointer defaults and is invalidated by newer input, focus, menu generations,
+disconnect, or teardown.
 
 ```sh
 node menu_contracts_test.mjs
 node scripts/menu-contracts-browser-test.mjs
-for mutant in radio-scope action-order context-focus placement cleanup native-focus; do
+for mutant in radio-scope action-order context-focus placement cleanup native-focus outside-focus; do
   MENU_NEGATIVE_CONTROL="$mutant" node scripts/menu-contracts-browser-test.mjs
 done
 ```

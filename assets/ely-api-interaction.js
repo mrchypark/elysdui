@@ -137,10 +137,12 @@ const placeMenu = (panel, anchor) => {
 // Per-panel references disappear on close/teardown; context menus return to the
 // focus owner that existed before opening rather than their hidden trigger.
 const menuReturnFocus = new WeakMap();
+const menuGeneration = new WeakMap();
 const menu = (root, id, open, restoreFocus = false) => {
   const panel = root.querySelector(`#${CSS.escape(id)}`);
   const trigger = root.querySelector(`[data-interaction-menu="${CSS.escape(id)}"]`);
   if (!panel || !trigger || open && (trigger.disabled || root.dataset.elyDisabled === 'true')) return;
+  menuGeneration.set(panel, (menuGeneration.get(panel) || 0) + 1);
   const context = !trigger.closest('[role="menu"]') && trigger.closest('[data-interaction-context]');
   if (open && panel.hidden) {
     const previous = document.activeElement;
@@ -1749,6 +1751,28 @@ register('interaction', root => {
   };
   root.addEventListener('pointerdown', holdStart); root.addEventListener('pointerup', holdEnd); root.addEventListener('pointercancel', holdEnd); root.addEventListener('keyup', keyup);
   root.querySelector('[autofocus]')?.focus();
+  let menuPointerReturn;
+  const cancelMenuPointerReturn = event => {
+    if (event.type !== 'focusin' || event.target !== document.body) menuPointerReturn = undefined;
+  };
+  const restoreMenuPointerReturn = event => {
+    const pending = menuPointerReturn;
+    menuPointerReturn = undefined;
+    if (!pending || event.pointerId !== pending.pointerId) return;
+    const {panel, opener, generation} = pending;
+    // Native mousedown on nonfocusable space may blur the synchronous return
+    // performed on pointerdown. Wait for this gesture's pointerup, without
+    // suppressing its default selection/click behavior or stealing newer focus.
+    if (root.isConnected && root.dataset.elyDisabled !== 'true' && panel.isConnected && panel.hidden &&
+        menuGeneration.get(panel) === generation && opener.isConnected && !opener.disabled &&
+        document.activeElement === document.body) opener.focus({preventScroll: true});
+  };
+  const menuPointerListeners = [['pointerdown', cancelMenuPointerReturn, true], ['keydown', cancelMenuPointerReturn, true], ['focusin', cancelMenuPointerReturn, true], ['pointercancel', cancelMenuPointerReturn, true], ['pointerup', restoreMenuPointerReturn, false]];
+  menuPointerListeners.forEach(([type, handler, capture]) => document.addEventListener(type, handler, capture));
+  lottieCleanups.push(() => {
+    menuPointerReturn = undefined;
+    menuPointerListeners.forEach(([type, handler, capture]) => document.removeEventListener(type, handler, capture));
+  });
   const outside = event => {
     root.querySelectorAll('[data-interaction-popover]:not([hidden])').forEach(panel => {
       const trigger = root.querySelector(`[data-interaction-menu="${CSS.escape(panel.id)}"]`);
@@ -1757,7 +1781,11 @@ register('interaction', root => {
     root.querySelectorAll('.ely-interaction--menus [role="menu"]:not([hidden])').forEach(panel => {
       if (panel.parentElement.matches('.ely-interaction__menu-row')) return;
       const trigger = root.querySelector(`[data-interaction-menu="${CSS.escape(panel.id)}"]`);
-      if (!panel.contains(event.target) && !trigger?.contains(event.target)) menu(root, panel.id, false, true);
+      if (!panel.contains(event.target) && !trigger?.contains(event.target)) {
+        menu(root, panel.id, false, true);
+        const opener = document.activeElement;
+        if (opener && opener !== document.body && opener !== document.documentElement && !panel.contains(opener)) menuPointerReturn = {panel, opener, pointerId: event.pointerId, generation: menuGeneration.get(panel)};
+      }
     });
     if (!root.contains(event.target)) close();
   };

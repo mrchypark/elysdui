@@ -13,6 +13,7 @@ const mutations = {
   'placement': {asset:'/assets/ely-api-interaction.js', from:"panel.hasAttribute('data-interaction-popover') || panel.closest('.ely-interaction--menus') && !panel.parentElement.matches('.ely-interaction__menu-row') && !panel.matches('.ely-interaction__pie')", to:"panel.hasAttribute('data-interaction-popover')", oracle:'edge dropdown must remain inside viewport'},
   'cleanup': {asset:'/assets/ely-api-interaction.js', from:'return () => { close(); clearReorderPreview();', to:'return () => { clearReorderPreview();', oracle:'teardown must close the old open menu'},
   'native-focus': {asset:'/assets/ely-api-interaction.js', from:'if (panel.contains(event.relatedTarget)) return;', to:'// restored transient-activeElement focusout dismissal', oracle:'clicking a hover-open submenu keeps it open'},
+  'outside-focus': {asset:'/assets/ely-api-interaction.js', from:'document.activeElement === document.body) opener.focus({preventScroll: true});', to:'document.activeElement === document.body) { /* removed gesture-owned focus return */ }', oracle:'blank pointer dismissal must return focus after native default'},
 };
 const report = {
   suite:'menu-contracts', revision:execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim(),
@@ -149,7 +150,36 @@ try {
     await open('menu-a');await page.keyboard.press('Tab');await focused('#menu-b [data-interaction-menu="menu-b-menu"]');assert.equal(await hidden('menu-a'),true);
     await open('menu-a');await page.keyboard.press('Shift+Tab');await focused('#menu-a [data-interaction-menu="menu-a-menu"]');assert.equal(await hidden('menu-a'),true);
     await open('menu-a');await page.locator('#before').click();await focused('#before');assert.equal(await hidden('menu-a'),true);
-    await open('menu-a');await page.locator('#outside-blank').click();assert.equal(await hidden('menu-a'),true);await focused('#menu-a [data-interaction-menu="menu-a-menu"]');
+    await open('menu-a');
+    await page.evaluate(()=>{
+      const root=document.getElementById('menu-a'),panel=root.querySelector('[role="menu"]'),trigger=root.querySelector('[data-interaction-menu]');
+      const describe=node=>node?{tag:node.tagName,id:node.id||'',value:node.value||''}:null;
+      const snapshot=()=>{const {x,y,width,height}=trigger.getBoundingClientRect();return {active:describe(document.activeElement),panelHidden:panel.hidden,triggerBox:{x,y,width,height},selection:getSelection().toString()};};
+      const diagnostics={before:snapshot(),events:[],truncated:false},listeners=[];
+      const record=(event,phase)=>{if(diagnostics.events.length>=100){diagnostics.truncated=true;return;}diagnostics.events.push({type:event.type,phase,target:describe(event.target),relatedTarget:describe(event.relatedTarget),active:describe(document.activeElement),defaultPrevented:event.defaultPrevented,panelHidden:panel.hidden});};
+      for(const type of ['pointerdown','mousedown','blur','focusout','focusin','pointerup','mouseup','click']) {
+        const listener=event=>{record(event,'handler');queueMicrotask(()=>record(event,'microtask'));};document.addEventListener(type,listener,true);listeners.push([type,listener]);
+      }
+      window.stopOutsideMenuDiagnostics=()=>{for(const [type,listener] of listeners)document.removeEventListener(type,listener,true);diagnostics.after=snapshot();delete window.stopOutsideMenuDiagnostics;return diagnostics;};
+    });
+    try {
+      await page.locator('#outside-blank').click();assert.equal(await hidden('menu-a'),true);await focused('#menu-a [data-interaction-menu="menu-a-menu"]','blank pointer dismissal must return focus after native default');
+    } finally {report.outsideBlankDiagnostics=await page.evaluate(()=>stopOutsideMenuDiagnostics());}
+    assert.equal(report.outsideBlankDiagnostics.events.some(event=>event.defaultPrevented),false,'outside pointer defaults must remain available');
+    const pressBlank=async id=>{await open(id);await page.locator('#outside-blank').scrollIntoViewIfNeeded();const box=await page.locator('#outside-blank').boundingBox();assert(box);await page.mouse.move(box.x+box.width/2,box.y+box.height/2);await page.mouse.down();assert.equal(await hidden(id),true);};
+    await pressBlank('menu-a');await page.locator('#before').focus();await page.mouse.up();await focused('#before','a newer outside focus owner must survive pointer release');
+    await pressBlank('menu-a');await trigger('menu-a').evaluate(n=>n.click());await page.mouse.up();await focused('#menu-a [value="open"]','reopening must cancel the older outside focus return');assert.equal(await hidden('menu-a'),false);await page.keyboard.press('Escape');
+    await pressBlank('menu-b');
+    await page.evaluate(()=>{window.disposedPeer=document.getElementById('menu-b');window.peerNext=disposedPeer.nextSibling;disposedPeer.remove();});
+    await page.waitForFunction(()=>!disposedPeer.dataset.elyReady);
+    await page.evaluate(()=>{document.getElementById('region').insertBefore(disposedPeer,peerNext);bindMenu(disposedPeer);});
+    await page.waitForFunction(()=>disposedPeer.dataset.elyReady==='true');await page.mouse.up();assert.equal(await page.evaluate(()=>document.activeElement===document.body),true,'dispose/remount must cancel the older outside focus return');
+    // A real text drag must retain native selection, even when its pointerdown
+    // dismisses the menu. Focus restoration must never prevent pointer defaults.
+    await open('menu-a');await page.locator('#outside-blank').scrollIntoViewIfNeeded();
+    const textBox=await page.locator('#outside-blank').evaluate(n=>{getSelection().removeAllRanges();const range=document.createRange();range.selectNodeContents(n);const {x,y,width,height}=range.getBoundingClientRect();return {x,y,width,height};});
+    await page.mouse.move(textBox.x+0.5,textBox.y+textBox.height/2);await page.mouse.down();await page.mouse.move(textBox.x+textBox.width-0.5,textBox.y+textBox.height/2,{steps:8});await page.mouse.up();
+    assert.equal(await page.evaluate(()=>getSelection().toString()),'Outside nonfocusable space','outside text remains selectable during dismissal');assert.equal(await hidden('menu-a'),true);await page.evaluate(()=>getSelection().removeAllRanges());
     // A nonfocusable descendant outside the panel remains inside the family.
     await open('menu-a');await root('menu-a').evaluate(n=>n.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true})));assert.equal(await hidden('menu-a'),true);
   });
@@ -169,6 +199,9 @@ try {
     await row('context-a','recent').focus();await page.keyboard.press('ArrowRight');await focused('#context-a [value="nested-comfortable"]');await page.keyboard.press('ArrowLeft');await focused('#context-a [value="recent"]');await page.keyboard.press('Escape');await focused('#context-a [data-interaction-context]');
     await surface.click({button:'right'});assert.equal(await hidden('context-a'),false);await page.keyboard.press('Escape');
     await page.locator('#before').focus();await surface.dispatchEvent('contextmenu',{clientX:bounds.x+20,clientY:bounds.y+20});await page.evaluate(()=>window.menuKeyLeaks=[]);await reset();await page.keyboard.press('Enter');await focused('#before');assert.equal((await logs()).actions.length,1);assert.deepEqual(await page.evaluate(()=>menuKeyLeaks),[],'context confirmation must contain keyup before restoring outside focus');
+    await page.evaluate(()=>{const prior=document.createElement('button');prior.id='context-removed-prior';document.body.prepend(prior);prior.focus();});
+    await surface.dispatchEvent('contextmenu',{clientX:bounds.x+20,clientY:bounds.y+20});await page.locator('#context-removed-prior').evaluate(n=>n.remove());await page.locator('#outside-blank').click();
+    await focused('#context-a [data-interaction-context]','outside dismissal with a removed prior owner must retain the context surface fallback');assert.equal(await hidden('context-a'),true);
   });
   await check('menu.disabled-and-modified-activation-do-not-notify',async()=>{
     await reset();for(const id of ['disabled-Menu','disabled-DropdownMenu','disabled-ContextMenu']) {await trigger(id).dispatchEvent('click');await trigger(id).dispatchEvent('keydown',{key:'ArrowDown'});assert.equal(await hidden(id),true);}

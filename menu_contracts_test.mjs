@@ -80,6 +80,41 @@ check('native pointer focus back to a submenu trigger does not dismiss its panel
  while(pending.length)pending.shift()();assert.equal(panel.hidden,false,'a detached root must ignore pending focusout work');assert.equal(dismissals,2);
  assert.equal(cleanups.length,1);cleanups[0]();assert.equal(handlers.focusout,undefined,'teardown must remove the focusout listener');
 });
+check('outside blank pointer restores focus only while its gesture still owns dismissal',()=>{
+ const setup=(priorDetached=false)=>{
+  const listeners=new Map(),cleanups=[],blank={},next={};
+  document={body:{},activeElement:null,addEventListener(type,fn){const list=listeners.get(type)||[];list.push(fn);listeners.set(type,list);},removeEventListener(type,fn){listeners.set(type,listeners.get(type).filter(item=>item!==fn));}};
+  const opener={isConnected:true,disabled:false,focus(){document.activeElement=this;}},panel={id:'menu',isConnected:true,hidden:false,parentElement:{matches:()=>false},contains:()=>false};
+  opener.contains=node=>node===opener;
+  const root={dataset:{},isConnected:true,contains:node=>node===opener,querySelector:()=>opener,querySelectorAll:selector=>selector.startsWith('[data-interaction-popover]')||panel.hidden?[]:[panel]};
+  const menuReturnFocus=new WeakMap([[panel,priorDetached?{isConnected:false}:opener]]);
+  const menuGeneration=new WeakMap([[panel,1]]);
+  const begin=source.includes('  let menuPointerReturn;')?'  let menuPointerReturn;':'  const outside = event => {';
+  runInNewContext(slice(source,begin,'  return () => { close(); clearReorderPreview();'),{root,document,CSS:{escape:s=>s},menuReturnFocus,menuGeneration,lottieCleanups:cleanups,close(){},menu:(_root,_id,open,restore)=>{menuGeneration.set(panel,menuGeneration.get(panel)+1);panel.hidden=!open;if(restore)opener.focus();}});
+  const send=(type,extra={})=>{const event={type,target:blank,pointerId:1,...extra};for(const fn of listeners.get(type)||[])fn(event);};
+  document.activeElement={};send('pointerdown');assert.equal(panel.hidden,true);assert.equal(document.activeElement,opener,'pointerdown initially restores the owner');
+  // Native mousedown follows pointerdown and blurs focus on nonfocusable space.
+  document.activeElement=document.body;
+  return {send,opener,panel,root,next,cleanups,listeners,menuGeneration};
+ };
+ let h=setup();h.send('pointerup');assert.equal(document.activeElement,h.opener,'blank pointer dismissal must retain opener focus after the native default');
+ h=setup(true);h.send('pointerup');assert.equal(document.activeElement,h.opener,'a disconnected prior owner must use the actual restored context fallback');
+ for(const interrupt of ['focus-destination','focus-then-blur','new-pointer','new-key','cancel','different-pointer','reopen','reopen-reclose','disconnect-root','disconnect-panel','disconnect-opener','disable-opener','cleanup']) {
+  h=setup();
+  if(interrupt.startsWith('focus-')){document.activeElement=h.next;h.send('focusin',{target:h.next});if(interrupt==='focus-then-blur')document.activeElement=document.body;}
+  if(interrupt==='new-pointer')h.send('pointerdown',{pointerId:2});
+  if(interrupt==='new-key')h.send('keydown');
+  if(interrupt==='cancel')h.send('pointercancel');
+  if(interrupt==='reopen')h.panel.hidden=false;
+  if(interrupt==='reopen-reclose')h.menuGeneration.set(h.panel,h.menuGeneration.get(h.panel)+2);
+  if(interrupt==='disconnect-root')h.root.isConnected=false;
+  if(interrupt==='disconnect-panel')h.panel.isConnected=false;
+  if(interrupt==='disconnect-opener')h.opener.isConnected=false;
+  if(interrupt==='disable-opener')h.opener.disabled=true;
+  if(interrupt==='cleanup'){h.cleanups.forEach(fn=>fn());assert.equal([...h.listeners.values()].flat().length,1,'only the separately-owned outside listener remains');}
+  const expected=document.activeElement;h.send('pointerup',{pointerId:interrupt==='different-pointer'?2:1});assert.equal(document.activeElement,expected,`${interrupt} must cancel stale outside focus restoration`);
+ }
+});
 check('context submenus return to their own trigger',()=>{
  const f=fixture({context:true});f.trigger.closest=s=>s==='[role="menu"]'?{}:s==='[data-interaction-context]'?f.surface:null;
  f.menu(f.root,'sub',true);f.menu(f.root,'sub',false,true);assert.equal(document.activeElement,f.trigger);
