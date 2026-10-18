@@ -127,10 +127,17 @@ CLEANUP_REMOUNT_SURFACE=catalogue CLEANUP_REMOUNT_GROUP=controls node ui/gohtmx/
 The [focused workflow](../../.github/workflows/cleanup-remount.yml) separates safe
 controls from desired cases in independent non-fail-fast jobs, so failing desired
 behavior cannot skip safe controls. No failure suppression or expected-red
-success mode exists. Workflow dispatch with `causal=true` additionally runs the
-close-elision diagnostic for both renderers; those diagnostic jobs should fail
-normal-close coverage and are not release acceptance. It does not modify tracked
-production files. Re-run clean CI after any later fix and inspect the exact-head
+success mode exists. The baseline branch `test/cleanup-remount-baseline`
+automatically runs the close-elision diagnostic for both renderers on push and
+pull request, alongside all four clean jobs. Workflow dispatch with `causal=true`
+also enables it. This temporary branch-scoped trigger supports a fresh causal
+comparison where workflow dispatch is unavailable; preserve the original clean
+run and its exact source/tree/artifacts before advancing the branch.
+
+Diagnostic jobs retain their real nonzero exit: normal-close coverage should fail
+and they are not release acceptance. They do not modify tracked production files
+or suppress clean desired failures. Remove the temporary automatic trigger before
+integrating a later production repair, then re-run clean CI and inspect exact-head
 reports before treating the strengthened requirement as supported.
 
 Reports under `test-results/contracts/cleanup-remount-*.json` record the clean

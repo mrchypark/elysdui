@@ -46,7 +46,11 @@ jobs:
             test-results/contracts/cleanup-remount-fixtures/
           if-no-files-found: error
   causal-diagnostic:
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.causal }}
+    # Temporary baseline-branch diagnostic; real nonzero results stay visible.
+    if: >-
+      ${{ (github.event_name == 'workflow_dispatch' && inputs.causal) ||
+          (github.event_name == 'push' && github.ref == 'refs/heads/test/cleanup-remount-baseline') ||
+          (github.event_name == 'pull_request' && github.head_ref == 'test/cleanup-remount-baseline') }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
