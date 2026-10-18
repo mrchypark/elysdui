@@ -180,4 +180,3 @@ exercise real browser submission and dynamic animation loading.
 - [WHATWG CompressionStream constructor](https://compression.spec.whatwg.org/#dom-compressionstream): unsupported formats throw; detect them at runtime
 - [Browser gRPC-Web features](https://github.com/grpc/grpc-web/blob/master/doc/browser-features.md)
 - [Official gRPC-Web quick start](https://grpc.io/docs/platforms/web/quickstart/)
-- [Original BREACH research and mitigation guidance](https://www.breachattack.com/resources/BREACH%20-%20SSL%2C%20gone%20in%2030%20seconds.pdf)
