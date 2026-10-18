@@ -1462,9 +1462,16 @@ register('interaction', root => {
 
   root.querySelectorAll('.ely-interaction--menus [role="menu"]').forEach(panel => {
     if (panel.parentElement.matches('.ely-interaction__menu-row')) return;
-    const focusout = () => queueMicrotask(() => {
-      if (root.isConnected && !panel.hidden && !panel.contains(document.activeElement)) menu(root, panel.id, false);
-    });
+    const focusout = event => {
+      // During native pointer focus, activeElement can still be body at the
+      // event callback's microtask checkpoint. relatedTarget already names
+      // the destination: moving from a submenu child to its trigger stays in
+      // this menu and must not hide that trigger before its click arrives.
+      if (panel.contains(event.relatedTarget)) return;
+      queueMicrotask(() => {
+        if (root.isConnected && !panel.hidden && !panel.contains(document.activeElement)) menu(root, panel.id, false);
+      });
+    };
     panel.addEventListener('focusout', focusout);
     lottieCleanups.push(() => panel.removeEventListener('focusout', focusout));
   });

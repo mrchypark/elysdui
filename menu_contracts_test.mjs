@@ -51,6 +51,35 @@ check('hover-open submenu remains open on click',()=>{
  const click=runInNewContext('(target)=>{'+slice(source,"    const trigger = target?.closest('[data-interaction-menu]');","    if (target?.closest('.ely-interaction__navigation-menu")+'}',{root:{querySelector:()=>panel},CSS:{escape:s=>s},menu:(_r,_id,open)=>{state=open;},close(){}});
  click({closest:()=>trigger});assert.equal(state,true,'clicking hover-open submenu must keep it open');
 });
+check('native pointer focus back to a submenu trigger does not dismiss its panel',()=>{
+ const pending=[],handlers={},cleanups=[];
+ let dismissals=0;
+ const child={},trigger={},outside={};
+ const panel={id:'menu',hidden:false,parentElement:{matches:()=>false},contains:n=>n===child||n===trigger,addEventListener:(type,handler)=>{handlers[type]=handler;},removeEventListener(type,handler){assert.equal(handlers[type],handler);delete handlers[type];}};
+ const root={isConnected:true,querySelectorAll:()=>[panel]};
+ document={activeElement:child,body:{}};
+ runInNewContext(slice(source,"  root.querySelectorAll('.ely-interaction--menus [role=\"menu\"]').forEach(panel => {","  root.querySelectorAll('[data-interaction-popover]').forEach(panel => {"),{root,document,lottieCleanups:cleanups,queueMicrotask:fn=>pending.push(fn),menu:(_root,_id,open)=>{dismissals++;panel.hidden=!open;}});
+ // Hover opens a submenu and focuses its first child. Native mousedown then
+ // focuses its parent trigger: focusout runs while activeElement is body,
+ // before focusin installs relatedTarget as the new active element. A native
+ // event callback may reach its microtask checkpoint between these phases.
+ document.activeElement=document.body;
+ handlers.focusout({target:child,relatedTarget:trigger});
+ while(pending.length)pending.shift()();
+ assert.equal(panel.hidden,false,'in-panel native focus transition must not hide the clicked submenu trigger');
+ document.activeElement=trigger;
+ // Real departure still dismisses, without stealing the destination focus.
+ document.activeElement=document.body;handlers.focusout({target:trigger,relatedTarget:outside});
+ while(pending.length)pending.shift()();assert.equal(panel.hidden,true);
+ panel.hidden=false;document.activeElement=child;handlers.focusout({target:trigger,relatedTarget:null});
+ while(pending.length)pending.shift()();assert.equal(panel.hidden,false,'null relatedTarget must retain the settled-focus fallback');
+ document.activeElement=outside;handlers.focusout({target:child,relatedTarget:null});
+ while(pending.length)pending.shift()();assert.equal(panel.hidden,true,'null relatedTarget must still dismiss when settled focus leaves');
+ handlers.focusout({target:child,relatedTarget:outside});while(pending.length)pending.shift()();assert.equal(dismissals,2,'an already hidden panel must not dismiss again');
+ panel.hidden=false;root.isConnected=false;handlers.focusout({target:child,relatedTarget:outside});
+ while(pending.length)pending.shift()();assert.equal(panel.hidden,false,'a detached root must ignore pending focusout work');assert.equal(dismissals,2);
+ assert.equal(cleanups.length,1);cleanups[0]();assert.equal(handlers.focusout,undefined,'teardown must remove the focusout listener');
+});
 check('context submenus return to their own trigger',()=>{
  const f=fixture({context:true});f.trigger.closest=s=>s==='[role="menu"]'?{}:s==='[data-interaction-context]'?f.surface:null;
  f.menu(f.root,'sub',true);f.menu(f.root,'sub',false,true);assert.equal(document.activeElement,f.trigger);

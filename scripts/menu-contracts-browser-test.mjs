@@ -12,6 +12,7 @@ const mutations = {
   'context-focus': {asset:'/assets/ely-api-interaction.js', from:'(previous?.isConnected ? previous : context || trigger).focus();', to:'trigger.focus();', oracle:'context dismissal must restore original focus'},
   'placement': {asset:'/assets/ely-api-interaction.js', from:"panel.hasAttribute('data-interaction-popover') || panel.closest('.ely-interaction--menus') && !panel.parentElement.matches('.ely-interaction__menu-row') && !panel.matches('.ely-interaction__pie')", to:"panel.hasAttribute('data-interaction-popover')", oracle:'edge dropdown must remain inside viewport'},
   'cleanup': {asset:'/assets/ely-api-interaction.js', from:'return () => { close(); clearReorderPreview();', to:'return () => { clearReorderPreview();', oracle:'teardown must close the old open menu'},
+  'native-focus': {asset:'/assets/ely-api-interaction.js', from:'if (panel.contains(event.relatedTarget)) return;', to:'// restored transient-activeElement focusout dismissal', oracle:'clicking a hover-open submenu keeps it open'},
 };
 const report = {
   suite:'menu-contracts', revision:execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim(),
@@ -106,8 +107,27 @@ try {
     await page.keyboard.press('End');await focused('#menu-a [value="deep"]');await page.keyboard.press('ArrowRight');await focused('#menu-a [value="deep-leaf"]');
     await page.keyboard.press('Escape');await focused('#menu-a [value="deep"]');assert.equal(await row('menu-a','recent').getAttribute('aria-expanded'),'true');
     await page.keyboard.press('ArrowLeft');await focused('#menu-a [value="recent"]');assert.equal(await row('menu-a','recent').getAttribute('aria-expanded'),'false');
-    await row('menu-a','recent').hover();assert.equal(await row('menu-a','recent').getAttribute('aria-expanded'),'true');
-    await row('menu-a','recent').click();assert.equal(await row('menu-a','recent').getAttribute('aria-expanded'),'true','clicking a hover-open submenu keeps it open');await focused('#menu-a [value="nested-comfortable"]');
+    // Retain the native pointer/focus sequence, including the transient
+    // activeElement seen during focusout and its microtask checkpoint. This
+    // diagnoses the real-browser red without replacing any behavioral oracle.
+    await page.evaluate(()=>{
+      const menu=document.getElementById('menu-a'),panel=menu.querySelector('[role="menu"]'),trigger=menu.querySelector('[value="recent"]');
+      const describe=node=>node?{tag:node.tagName,id:node.id||'',value:node.value||'',control:node.closest?.('button')?.value||''}:null;
+      const box=node=>{const {x,y,width,height}=node.getBoundingClientRect();return {x,y,width,height};};
+      const snapshot=()=>({active:describe(document.activeElement),panelHidden:panel.hidden,expanded:trigger.getAttribute('aria-expanded'),triggerBox:box(trigger),panelBox:box(panel),scroll:{x:scrollX,y:scrollY}});
+      const diagnostics={before:snapshot(),events:[],truncated:false},listeners=[];
+      const record=(event,phase)=>{if(diagnostics.events.length>=200){diagnostics.truncated=true;return;}diagnostics.events.push({type:event.type,phase,target:describe(event.target),relatedTarget:describe(event.relatedTarget),active:describe(document.activeElement),panelHidden:panel.hidden,expanded:trigger.getAttribute('aria-expanded')});};
+      for(const type of ['pointerover','pointerdown','mousedown','blur','focusout','focus','focusin','pointerup','mouseup','click']) {
+        const listener=event=>{record(event,'handler');if(type==='focusout')queueMicrotask(()=>record(event,'microtask'));};
+        document.addEventListener(type,listener,true);listeners.push([type,listener]);
+      }
+      window.menuHoverSnapshot=()=>snapshot();
+      window.stopMenuHoverDiagnostics=()=>{for(const [type,listener] of listeners)document.removeEventListener(type,listener,true);diagnostics.after=snapshot();delete window.menuHoverSnapshot;delete window.stopMenuHoverDiagnostics;return diagnostics;};
+    });
+    try {
+      await row('menu-a','recent').hover();report.hoverClickAfterHover=await page.evaluate(()=>menuHoverSnapshot());assert.equal(await row('menu-a','recent').getAttribute('aria-expanded'),'true');
+      await row('menu-a','recent').click();assert.equal(await row('menu-a','recent').getAttribute('aria-expanded'),'true','clicking a hover-open submenu keeps it open');await focused('#menu-a [value="nested-comfortable"]');
+    } finally {report.hoverClickDiagnostics=await page.evaluate(()=>stopMenuHoverDiagnostics());}
     await row('menu-a','recent').focus();await page.keyboard.press('ArrowDown');await focused('#menu-a [value="last"]');assert.equal(await row('menu-a','recent').getAttribute('aria-expanded'),'false');
     await page.keyboard.press('Escape');
   });

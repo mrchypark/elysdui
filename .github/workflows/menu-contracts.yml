@@ -18,6 +18,7 @@ jobs:
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       - run: node scripts/menu-contracts-browser-test.mjs
+      - run: MENU_NEGATIVE_CONTROL=native-focus node scripts/menu-contracts-browser-test.mjs
       - run: MENU_NEGATIVE_CONTROL=radio-scope node scripts/menu-contracts-browser-test.mjs
       - run: MENU_NEGATIVE_CONTROL=action-order node scripts/menu-contracts-browser-test.mjs
       - run: MENU_NEGATIVE_CONTROL=context-focus node scripts/menu-contracts-browser-test.mjs

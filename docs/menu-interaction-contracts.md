@@ -78,16 +78,22 @@ HTMX. The [browser suite](../scripts/menu-contracts-browser-test.mjs) observes:
 JSON evidence is always written to `test-results/contracts/menu*.json`, including
 failures. It records the exact commit, dirty state, fixture and served-source
 hashes, both source pins, requests, passed requirements, and the failing assertion.
-The five source-level causal mutants are `radio-scope`, `action-order`,
-`context-focus`, `placement`, and `cleanup`. A mutant counts as killed only when
+The six source-level causal mutants are `radio-scope`, `action-order`,
+`context-focus`, `placement`, `cleanup`, and `native-focus`. A mutant counts as killed only when
 its designated assertion fails; an unrelated exception or timeout is a failed
 run. The coordinator runs actual browser proof in CI. Local VM/Go success does
 not imply browser success.
 
+Hover/click evidence additionally retains bounded native pointer/focus event
+snapshots, including `focusout.relatedTarget`, `document.activeElement` at the
+handler and microtask boundary, and trigger/panel geometry. The `native-focus`
+mutant restores dismissal based only on transient active focus. It must fail the
+unchanged hover-open submenu click assertion, not an unrelated earlier check.
+
 ```sh
 node menu_contracts_test.mjs
 node scripts/menu-contracts-browser-test.mjs
-for mutant in radio-scope action-order context-focus placement cleanup; do
+for mutant in radio-scope action-order context-focus placement cleanup native-focus; do
   MENU_NEGATIVE_CONTROL="$mutant" node scripts/menu-contracts-browser-test.mjs
 done
 ```
