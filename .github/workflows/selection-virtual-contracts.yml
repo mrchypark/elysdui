@@ -17,6 +17,7 @@ jobs:
       - run: node form_selection_test.mjs && node scripts/form-selection-negative-test.mjs && node virtual_table_test.mjs
       - run: npm ci
       - run: npx playwright install --with-deps chromium
+      - run: node scripts/controls-swap-browser-test.mjs
       - run: node scripts/form-selection-browser-test.mjs
       - run: node scripts/virtual-table-browser-test.mjs
       - run: VIRTUAL_TABLE_NEGATIVE_CONTROL=unbounded node scripts/virtual-table-browser-test.mjs

@@ -162,6 +162,28 @@ function assertInitialized(fixture, label) {
   assert.equal(fixture.canvas.listeners.get('pointerdown').length, 1, `${label}: one canvas listener`);
   assert.equal(fixture.dialog.listeners.get('close').length, 1, `${label}: one dialog listener`);
 }
+// Execute the exact browser fixture's combobox assertions against this production
+// runtime too, so collapsed/open ARIA expectations cannot silently diverge.
+const browserFixture = readFileSync(new URL('./tests/controls_swap_browser.html', import.meta.url), 'utf8');
+const comboCheckStart = browserFixture.indexOf('    function checkCombobox(');
+const comboCheckEnd = browserFixture.indexOf('    function check(form,', comboCheckStart);
+assert(comboCheckStart >= 0 && comboCheckEnd > comboCheckStart);
+const checkBrowserCombobox = runInNewContext('(' + browserFixture.slice(comboCheckStart, comboCheckEnd).trim() + ')', {
+  q: (node, selector) => selector.split(" ").reduce((root, part) => root?.querySelector(part), node),
+  assert: (condition, message) => assert(condition, message), KeyboardEvent: DOMEvent,
+});
+for (const disabled of [false, true]) {
+  const prefix = disabled ? 'fixture-disabled' : 'fixture-enabled';
+  const fixture = controls(prefix, disabled);
+  fixture.options.forEach((option, index) => option.id = `${prefix}-${index ? 'b' : 'a'}`);
+  fixture.comboInput.setAttribute('aria-expanded', 'false');
+  const form = element('form', {}, fixture.nodes); body.append(form);
+  document.dispatchEvent(new DOMEvent('htmx:after:swap'));
+  checkBrowserCombobox(form, prefix, disabled);
+  form.remove();
+}
+console.log('Exact browser fixture combobox checks: collapsed/open/dismissed ARIA, committed value and disabled keyboard guard passed');
+
 // Match HTMX 4: payload is {ctx}; dispatch from the source when connected,
 // otherwise from document. ctx.target is not updated after outerHTML.
 function afterSwap(sourceElement, target, swap) {
