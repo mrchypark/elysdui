@@ -100,7 +100,7 @@ func (s *Server) advancedAudit(w http.ResponseWriter, r *http.Request) {
 			if err = ui.RenderComponent(s.templates, &twin, component); err != nil {
 				break
 			}
-			p.Cases = append(p.Cases, advancedRenderedCase{Key: resolved.Chapter + "/" + resolved.Name, Name: key, Family: resolved.Family, Primary: name == resolved.Name, Preview: template.HTML(preview.String()), Twin: template.HTML(twin.String())})
+			p.Cases = append(p.Cases, advancedRenderedCase{Key: BehaviorCheckKey(key, resolved.Chapter+"/"+resolved.Name), Name: key, Family: resolved.Family, Primary: name == resolved.Name, Preview: template.HTML(preview.String()), Twin: template.HTML(twin.String())})
 		}
 		if err != nil {
 			break

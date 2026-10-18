@@ -86,6 +86,23 @@ and failure details. The six rejection cells verify exactly one caller/error, no
 success result, dismissed state and restored focus; only radio emits a change. Actual browser execution
 belongs to CI; local renderer and syntax checks are not browser proof.
 
+## Scoped gallery check
+
+The gallery audit routes `menus/RadioMenuItem` to its exact
+`gallery-check:menus/RadioMenuItem` key. Its caller fixture checks default and
+explicit density radio groups, exclusive selection and reselection, group/twin
+isolation, ordered change/action payloads, dismissal and trigger focus.
+`menus/CheckboxMenuItem` retains its mandatory checkbox-role/toggle check.
+Audit markup and the expected evidence inventory share this routing. Gallery
+reports retain `fullContractVerified: false` because these are scoped fixture
+assertions.
+
+`go test ./internal/gallery -run TestMenuAliasGalleryCheckRouting -count=1`
+checks the rendered route and roles. `node scripts/menu-alias-gallery-test.mjs`
+executes the registered checks against bounded production selection branches,
+with modeled DOM/event/focus adapters and seven causal controls. These local
+checks do not establish live or static browser execution.
+
 ## Deferred ambiguities
 
 `menus/SubMenu` (capital M) still resolves to a full Menu host, whereas upstream

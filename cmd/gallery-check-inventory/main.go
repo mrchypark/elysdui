@@ -4,8 +4,10 @@ package main
 
 import (
 	"encoding/json"
-	ui "github.com/mrchypark/elysdui/ui/gohtmx"
 	"os"
+
+	gallery "github.com/mrchypark/elysdui/internal/gallery"
+	ui "github.com/mrchypark/elysdui/ui/gohtmx"
 )
 
 type check struct {
@@ -37,7 +39,7 @@ func main() {
 			if err != nil {
 				panic(err)
 			}
-			cases = append(cases, check{qualified, resolved.Chapter + "/" + resolved.Name, resolved.Family})
+			cases = append(cases, check{qualified, gallery.BehaviorCheckKey(qualified, resolved.Chapter+"/"+resolved.Name), resolved.Family})
 		}
 	}
 	for _, chapter := range catalogue {
