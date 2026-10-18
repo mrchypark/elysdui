@@ -4,6 +4,8 @@ const mounted = new Map();
 const hostBindings = new Map();
 const swapContexts = new WeakMap();
 const pendingSwaps = new Map();
+// A removed mounted entry can still own disposers that touch the live subtree.
+const stopping = new Map();
 
 function dispose(root, cleanup) {
   try { cleanup(); }
@@ -18,10 +20,23 @@ function stop(root) {
   hostBindings.get(root)?.invalidate();
   const cleanups = mounted.get(root);
   if (!cleanups) return;
+  const teardown = { starts: new Set() };
+  stopping.set(root, teardown);
   mounted.delete(root);
-  root.dispatchEvent(new CustomEvent('ely:cleanup'));
-  cleanups.forEach(cleanup => dispose(root, cleanup));
-  if (!mounted.has(root)) delete root.dataset.elyReady;
+  try {
+    root.dispatchEvent(new CustomEvent('ely:cleanup'));
+    cleanups.forEach(cleanup => dispose(root, cleanup));
+  } finally {
+    if (!mounted.has(root)) delete root.dataset.elyReady;
+    // Only this teardown may release its barrier. A reentrant stop with no
+    // mounted generation must not release it or run the queued starts.
+    if (stopping.get(root) === teardown) {
+      stopping.delete(root);
+      for (const scope of teardown.starts) {
+        if (scope === document || scope.isConnected) start(scope);
+      }
+    }
+  }
 }
 
 function prune() {
@@ -41,11 +56,28 @@ function belongs(root, target) {
   return target instanceof Element && target.closest('[data-ely-family]') === root;
 }
 
+function overlaps(a, b) {
+  return a === b || a.contains(b) || b.contains(a);
+}
+
+function deferStart(root, scope) {
+  let deferred = false;
+  for (const [owner, teardown] of stopping) {
+    if (!overlaps(owner, root)) continue;
+    teardown.starts.add(scope);
+    deferred = true;
+  }
+  return deferred;
+}
+
 function start(scope = document) {
   const roots = [...scope.querySelectorAll('[data-ely-family]')];
   if (scope instanceof Element && scope.matches('[data-ely-family]')) roots.unshift(scope);
   roots.forEach(root => {
-    if (mounted.has(root) || pendingSwaps.has(root)) return;
+    // Re-scan the requested scope after all overlapping old disposers finish.
+    // Other roots remain synchronous; host binding in mount() is immediate.
+    if (deferStart(root, scope)) return;
+    if (mounted.has(root) || [...pendingSwaps.keys()].some(owner => overlaps(owner, root))) return;
     const initialize = families.get(root.dataset.elyFamily);
     if (!initialize) return;
     const cleanups = [];

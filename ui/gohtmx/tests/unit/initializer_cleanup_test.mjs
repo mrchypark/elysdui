@@ -16,6 +16,7 @@ class Element {
   closest(selector) { return this.matches(selector) ? this : this.parentElement?.closest(selector) || null; }
   querySelectorAll(selector) { return this.children.flatMap(child => [...(child.matches(selector) ? [child] : []), ...child.querySelectorAll(selector)]); }
   querySelector(selector) { return this.querySelectorAll(selector)[0] || null; }
+  contains(node) { return node === this || this.children.some(child => child.contains(node)); }
   append(child) { child.parentElement = this; this.children.push(child); }
   addEventListener(type, fn) { if (!this.listeners.has(type)) this.listeners.set(type, new Set()); this.listeners.get(type).add(fn); }
   removeEventListener(type, fn) { this.listeners.get(type)?.delete(fn); }

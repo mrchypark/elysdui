@@ -1,0 +1,111 @@
+name: Cleanup remount lifecycle
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      causal:
+        description: 'Also run the close-elision diagnostic (real nonzero failure is retained)'
+        type: boolean
+        default: false
+permissions:
+  contents: read
+jobs:
+  cleanup-remount:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        surface: [standalone, catalogue]
+        group: [desired, controls]
+    env:
+      CLEANUP_REMOUNT_SURFACE: ${{ matrix.surface }}
+      CLEANUP_REMOUNT_GROUP: ${{ matrix.group }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: node scripts/cleanup-remount-oracles-test.mjs
+      - run: node scripts/cleanup-remount-evidence-test.mjs
+      - run: go test ./ui/gohtmx/tests/fixtures/contextfixture ./ui/gohtmx/tests/fixtures/context-owner-requests ./adapters/gohtmx/tests/fixtures/context-owner-requests -count=1
+      - run: npx playwright install --with-deps chromium
+      # Safe controls get independent jobs even when the desired baseline fails.
+      # No continue-on-error, expected-red conversion or production workaround.
+      - run: node ui/gohtmx/tests/browser/cleanup-remount-browser-test.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cleanup-remount-${{ matrix.surface }}-${{ matrix.group }}
+          path: |
+            test-results/contracts/cleanup-remount-*.json
+            test-results/contracts/cleanup-remount-fixtures/
+          if-no-files-found: error
+  repair-causal-controls:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        surface: [standalone, catalogue]
+    env:
+      CLEANUP_REMOUNT_SURFACE: ${{ matrix.surface }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: node scripts/cleanup-remount-oracles-test.mjs
+      - run: node scripts/cleanup-remount-evidence-test.mjs
+      - run: npx playwright install --with-deps chromium
+      - run: node scripts/cleanup-remount-browser-controls.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cleanup-remount-${{ matrix.surface }}-repair-controls
+          path: |
+            test-results/contracts/cleanup-remount-*.json
+            test-results/contracts/cleanup-remount-fixtures/
+          if-no-files-found: error
+  causal-diagnostic:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.causal }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        surface: [standalone, catalogue]
+    env:
+      CLEANUP_REMOUNT_SURFACE: ${{ matrix.surface }}
+      CLEANUP_REMOUNT_GROUP: all
+      CLEANUP_REMOUNT_MUTATION: elide-close
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      # Diagnostic only: omitting teardown must fail normal-close coverage.
+      # Do not turn that failure into acceptance or propose this as the fix.
+      - run: node ui/gohtmx/tests/browser/cleanup-remount-browser-test.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cleanup-remount-${{ matrix.surface }}-causal
+          path: |
+            test-results/contracts/cleanup-remount-*.json
+            test-results/contracts/cleanup-remount-fixtures/
+          if-no-files-found: error
