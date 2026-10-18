@@ -162,6 +162,14 @@ check('stationary menu boundaries preserve keyboard confirmation and child selec
  parent.disabled=false;parentRow.closest=()=>null;hover.pointerover({type:'pointerover',target:parent});assert.equal(parent.expanded,'true','other families retain their existing pointerover path');
  assert(source.includes("root.addEventListener('pointermove', menuPointerMove);"));assert(source.includes("root.removeEventListener('pointermove', menuPointerMove);"));
 });
+check('stationary boundary fixture declares synthetic PointerEvent input and cleans up',()=>{
+ class PointerEvent extends Event {constructor(type,init){super(type,init);for(const key of ['pointerType','clientX','clientY','movementX','movementY','buttons'])this[key]=init[key];}}
+ const callback=runInNewContext(slice(harness,'const dispatchStationaryBoundary =','// Observe the current requirement')+'\ndispatchStationaryBoundary',{PointerEvent});
+ const listeners=new Set(),label={dispatchEvent(event){for(const fn of listeners)fn(event);}},element={querySelector:()=>label,addEventListener(type,fn,capture){assert.equal(type,'pointerover');assert.equal(capture,true);listeners.add(fn);},removeEventListener(type,fn,capture){assert.equal(type,'pointerover');assert.equal(capture,true);listeners.delete(fn);}};
+ const point={clientX:831,clientY:189},received=callback(element,point);
+ assert.deepEqual({...received},{constructor:'PointerEvent',type:'pointerover',isTrusted:false,pointerType:'mouse',...point,movementX:0,movementY:0,buttons:0});assert.equal(listeners.size,0);
+ label.dispatchEvent=()=>{throw Error('fixture dispatch failed');};assert.throws(()=>callback(element,point),/fixture dispatch failed/);assert.equal(listeners.size,0,'injection capture must be removed even when dispatch fails');
+});
 check('synthetic context fixture delivers a coordinate-bearing MouseEvent',()=>{
  class MouseEvent extends Event {constructor(type,init){super(type,init);this.clientX=init.clientX;this.clientY=init.clientY;}}
  const callback=runInNewContext(slice(harness,'const dispatchContextPointer =','const report =')+'\ndispatchContextPointer',{MouseEvent,Event,window:{}});

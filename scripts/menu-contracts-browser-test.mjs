@@ -16,6 +16,16 @@ const mutations = {
   'native-focus': {asset:'/assets/ely-api-interaction.js', from:'if (panel.contains(event.relatedTarget)) return;', to:'// restored transient-activeElement focusout dismissal', oracle:'clicking a hover-open submenu keeps it open'},
   'outside-focus': {asset:'/assets/ely-api-interaction.js', from:'document.activeElement === document.body) opener.focus({preventScroll: true});', to:'document.activeElement === document.body) { /* removed gesture-owned focus return */ }', oracle:'blank pointer dismissal must return focus after native default'},
 };
+// A separately labelled edge injection fixes event ordering for the causal
+// control; the forty native pointer/keyboard trials below remain independent.
+const dispatchStationaryBoundary = (element, point) => {
+  let observed;
+  const receive=event=>{observed={constructor:event.constructor.name,type:event.type,isTrusted:event.isTrusted,pointerType:event.pointerType,clientX:event.clientX,clientY:event.clientY,movementX:event.movementX,movementY:event.movementY,buttons:event.buttons};};
+  element.addEventListener('pointerover',receive,true);
+  try {(element.querySelector('[data-interaction-menu-label]')||element).dispatchEvent(new PointerEvent('pointerover',{bubbles:true,cancelable:true,composed:true,pointerType:'mouse',pointerId:1,isPrimary:true,clientX:point.clientX,clientY:point.clientY,movementX:0,movementY:0,buttons:0}));}
+  finally {element.removeEventListener('pointerover',receive,true);}
+  return observed;
+};
 // Observe the current requirement without changing focus, pointer position or
 // production handlers. Always retain the final (including failing) check trace.
 const traceMenuCheck = name => {
@@ -187,6 +197,28 @@ try {
       }
       report.checkboxModeTraces[mode]=await page.evaluate(()=>readMenuCheckTrace());
     }
+    // Inject only the browser boundary event in a separate case. Space down/up
+    // are still native input, and the recorded boundary explicitly isTrusted=false.
+    await row('checks','ruler').evaluate(node=>node.setAttribute('aria-checked','true'));
+    await open('checks');await row('checks','ruler').focus();await reset();
+    const bounds=await row('checks','parent').boundingBox();assert(bounds&&bounds.width>0&&bounds.height>0);
+    const point={clientX:Math.round(bounds.x+bounds.width/2),clientY:Math.round(bounds.y+bounds.height/2)};
+    const injected=report.stationaryBoundaryInjection={kind:'synthetic-boundary-between-native-key-phases',requested:point};
+    const snapshot=()=>page.evaluate(()=>({active:document.activeElement?.value||document.activeElement?.id,checked:document.querySelector('#checks [value="ruler"]').getAttribute('aria-checked'),open:!document.querySelector('#checks [role="menu"]').hidden,actions:menuLog.actions,changes:menuLog.changes}));
+    await page.evaluate(()=>resetMenuCheckTrace({mode:'injected-boundary',trial:1}));
+    let released=false;
+    try {
+      injected.before=await snapshot();await page.keyboard.down('Space');injected.afterDown=await snapshot();
+      injected.observed=await row('checks','parent').evaluate(dispatchStationaryBoundary,point);injected.afterBoundary=await snapshot();
+      await page.keyboard.up('Space');released=true;injected.after=await snapshot();
+    } finally {if(!released)await page.keyboard.up('Space');injected.trace=await page.evaluate(()=>readMenuCheckTrace());}
+    assert.deepEqual(injected.observed,{constructor:'PointerEvent',type:'pointerover',isTrusted:false,pointerType:'mouse',...point,movementX:0,movementY:0,buttons:0},'edge injection must deliver the declared synthetic stationary boundary');
+    assert.equal(injected.after.checked,'false','stationary pointer must not steal checkbox keyboard confirmation');
+    assert.equal(injected.before.active,'ruler');assert.equal(injected.before.checked,'true');
+    assert.equal(injected.afterBoundary.active,'ruler','stationary pointer must not steal checkbox keyboard confirmation');
+    const phases=injected.trace.events.filter(event=>event.phase==='capture'&&['keydown','keyup'].includes(event.type)&&event.key===' ');
+    assert.deepEqual(phases.map(event=>({type:event.type,isTrusted:event.isTrusted,target:event.target.value})),[{type:'keydown',isTrusted:true,target:'ruler'},{type:'keyup',isTrusted:true,target:'ruler'}]);
+    assert.deepEqual(injected.after.actions.map(({value})=>value),['ruler']);assert.deepEqual(injected.after.changes.map(({value,checked})=>({value,checked})),[{value:'ruler',checked:false}]);assert.equal(injected.after.open,false);
   });
   await check('dropdown.hosts-primary-closes-before-host-empty-focus',async()=>{
     for(const id of ['dropdown','overflow']) {await trigger(id).click();await focused(`#${id} [value="open"]`);await reset();await page.keyboard.press('Enter');assert.deepEqual((await logs()).actions.map(({action})=>action),['open-file']);assert.equal(await hidden(id),true);}
