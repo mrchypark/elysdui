@@ -36,7 +36,7 @@ func WithFormats(rules map[string]FormatRule) RegistryOption {
 func validateHostFormat(p Property, rule FormatRule) error {
 	// Reject attempts to override a built-in, even when the override is unused.
 	switch p.Format {
-	case "", "field-name", "text", "url", "image-url", "media-url", "action", "identifier", "data-token", "numeric-token":
+	case "", "field-name", "text", "url", "image-url", "media-url", "action", "identifier", "data-token", "numeric-token", "empty-array":
 		return fmt.Errorf("cannot override built-in format %q", p.Format)
 	}
 	if p.Type != rule.Type {

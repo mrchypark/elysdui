@@ -58,7 +58,9 @@ path. Disabled roots and rows suppress both paths.
 [SDUI adapter tests](../../adapters/gohtmx/menu_alias_defaults_test.go) render actual public names, verify
 radio and checkbox overrides, grouping attributes, selected/disabled state,
 escaping, accessible trigger relationships, and all explicit host presentations.
-The catalogue manifest changes only its source hash.
+The alias-default change affects only the catalogue source hash. The combined
+[empty-submenu contract](menu-empty-submenu-contracts.md) separately corrects
+fifteen terminal child properties without changing other row schemas.
 
 The [browser fixture](../../adapters/gohtmx/tests/fixtures/menu-alias-contracts/main.go) renders the exact qualified Go, Chapter/Name Go,
 and SDUI aliases using production templates. The
@@ -107,7 +109,9 @@ checks do not establish live or static browser execution.
 
 `menus/SubMenu` (capital M) still resolves to a full Menu host, whereas upstream
 maps the name to `MenuItem::submenu`. The intended standalone-vs-host web API
-needs a separate compatibility decision. An explicitly empty child `Items: []`
-also still becomes a leaf because the current template tests truthiness. Neither
-case is changed or claimed as covered here. Other remaining menu requirements
+needs a separate compatibility decision. That alias-identity question remains
+open. Explicitly empty child `Items: []` now remains a submenu under the
+[empty-submenu contract](menu-empty-submenu-contracts.md), including direct rows
+of RadioMenuItem; submenu identity takes precedence over radio and checkbox
+defaults. Other remaining menu requirements
 stay in the [bounded menu contract's remaining list](menu-interaction-contracts.md#explicitly-remaining-contracts).

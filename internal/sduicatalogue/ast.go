@@ -462,6 +462,13 @@ func (a *analysis) command(c *parse.CommandNode, s *scope, prev symbol, piped bo
 			out = mergeSymbol(out, arg)
 		}
 		return symbol{fields: map[string]symbol{"*": out}}
+	case "menuHasItems":
+		// The result is boolean, but the caller value remains a typed array.
+		// Do not propagate the input path into conditions on the result.
+		if len(args) > 0 {
+			a.mark(args[0], "array", "menu-items", false)
+		}
+		return symbol{}
 	case "join":
 		if len(args) > 0 {
 			a.mark(args[0], "array", "", false)

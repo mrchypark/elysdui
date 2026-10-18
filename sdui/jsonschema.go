@@ -13,7 +13,7 @@ func JSONSchema(registry *Registry) (map[string]any, error) {
 		return nil, fmt.Errorf("sdui: JSON Schema requires a registry")
 	}
 	definitions := registry.Definitions()
-	formats := []string{"text", "field-name", "url", "image-url", "media-url", "action", "identifier", "data-token", "numeric-token"}
+	formats := []string{"text", "field-name", "url", "image-url", "media-url", "action", "identifier", "data-token", "numeric-token", "empty-array"}
 	registry.mu.RLock()
 	for _, name := range sortedKeys(registry.formats) {
 		formats = append(formats, name)
@@ -235,6 +235,9 @@ func propertySchema(property Property) map[string]any {
 			limit := property.MaxItems
 			if limit == 0 {
 				limit = MaxArrayItems
+			}
+			if property.Format == "empty-array" {
+				limit = 0
 			}
 			schema["maxItems"] = limit
 			if property.Items != nil {

@@ -1238,7 +1238,12 @@ register('interaction', root => {
     const menuPanel = closest(root, event.target, '.ely-interaction--menus [role="menu"]');
     const menuControl = closest(root, event.target, '.ely-interaction--menus [role="menu"] button');
     if (menuPanel && event.key === 'Escape') { event.stopPropagation(); event.preventDefault(); }
-    if (menuControl && ['Enter', ' '].includes(event.key)) {
+    // Empty (or fully disabled) panels own focus. Keep navigation/confirm
+    // keys inside the menu without scrolling the page or selecting an action.
+    if (menuPanel && event.target === menuPanel && ['ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) {
+      event.stopPropagation(); event.preventDefault(); return;
+    }
+    if ((menuControl || menuPanel && event.target === menuPanel) && ['Enter', ' '].includes(event.key)) {
       menuConfirmKey = event.key;
       menuConfirmTarget = event.ctrlKey || event.metaKey || event.altKey || event.shiftKey ? null : menuControl;
       // Confirm on keyup so both phases stay inside even when a context menu
