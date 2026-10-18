@@ -1,0 +1,40 @@
+name: Menu pointer selection contracts
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  menu-pointer-selection:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        surface: [qualified, chapter, sdui]
+    env:
+      MENU_POINTER_SURFACE: ${{ matrix.surface }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: go test ./ui/gohtmx/tests/fixtures/pointerfixture ./ui/gohtmx/tests/fixtures/menu-pointer-selection ./adapters/gohtmx/tests/fixtures/menu-pointer-selection -count=1
+      - run: npm ci
+      - run: node scripts/menu-pointer-selection-oracles-test.mjs
+      - run: npx playwright install --with-deps chromium
+      # Baseline must genuinely fail. No continue-on-error, expected-red pass,
+      # runtime patch or DOM workaround may stand in for the intended behavior.
+      - run: node ui/gohtmx/tests/browser/menu-pointer-selection-browser-test.mjs
+      - run: MENU_POINTER_MUTATION=stationary-over node ui/gohtmx/tests/browser/menu-pointer-selection-browser-test.mjs
+      - run: MENU_POINTER_MUTATION=radio-scope node ui/gohtmx/tests/browser/menu-pointer-selection-browser-test.mjs
+      - run: MENU_POINTER_MUTATION=cleanup-close node ui/gohtmx/tests/browser/menu-pointer-selection-browser-test.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: menu-pointer-selection-${{ matrix.surface }}
+          path: |
+            test-results/contracts/menu-pointer-selection-*.json
+            test-results/contracts/menu-pointer-fixtures/
+          if-no-files-found: error
