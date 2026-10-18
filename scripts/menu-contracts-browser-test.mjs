@@ -189,11 +189,30 @@ try {
   });
   await check('context.pointer-clamp-keyboard-reanchor-and-focus-return',async()=>{
     await page.locator('#before').focus();const surface=root('context-a').locator('[data-interaction-context]');
-    // ContextMenu does not focus on right pointer in Chromium consistently;
-    // send the actual event at a measured canvas point while preserving opener.
+    // Synthetic edge-coordinate clamping deliberately uses a point outside
+    // this canvas while preserving the prior focus owner. The later
+    // surface.click({button:'right'}) separately exercises real pointer input.
     const bounds=await surface.boundingBox();assert(bounds&&bounds.width>0&&bounds.height>0);
-    await surface.dispatchEvent('contextmenu',{clientX:1098,clientY:898});
-    let box=await panel('context-a').boundingBox();const pointerBox=box;assert(box&&box.x>=0&&box.y>=0&&box.x+box.width<=1100.5&&box.y+box.height<=900.5);
+    await page.evaluate(()=>{
+      const root=document.getElementById('context-a'),surface=root.querySelector('[data-interaction-context]'),panel=root.querySelector('[role="menu"]');
+      const nativeRect=Element.prototype.getBoundingClientRect,ownRect=Object.getOwnPropertyDescriptor(panel,'getBoundingClientRect');
+      const describe=node=>node?{tag:node.tagName,id:node.id||'',value:node.value||''}:null;
+      const rect=box=>({x:box.x,y:box.y,width:box.width,height:box.height,top:box.top,right:box.right,bottom:box.bottom,left:box.left});
+      const measure=node=>{const style=getComputedStyle(node);return {node:describe(node),box:rect(nativeRect.call(node)),clientRects:[...node.getClientRects()].map(rect),hidden:node.hidden,inlineStyle:node.style.cssText,offsetParent:describe(node.offsetParent),computed:Object.fromEntries(['position','display','boxSizing','width','height','minWidth','maxWidth','minHeight','maxHeight','left','top','right','bottom','marginLeft','marginRight','marginTop','marginBottom','alignSelf','justifySelf','alignItems','justifyContent','overflow','transform','contain','zoom'].map(key=>[key,style[key]]))};};
+      const snapshot=()=>({active:describe(document.activeElement),scroll:{x:scrollX,y:scrollY},viewport:{width:innerWidth,height:innerHeight,clientWidth:document.documentElement.clientWidth,clientHeight:document.documentElement.clientHeight},root:measure(root),surface:measure(surface),panel:measure(panel)});
+      const diagnostics={input:'synthetic contextmenu edge coordinates',client:{x:1098,y:898},before:snapshot(),steps:[],truncated:false};
+      const record=(kind,detail={})=>{if(diagnostics.steps.length>=64){diagnostics.truncated=true;return;}diagnostics.steps.push({kind,...detail,...snapshot()});};
+      // Observe actual production measurement boundaries without changing the
+      // served runtime or the rectangle returned to its positioning code.
+      panel.getBoundingClientRect=function(){const box=nativeRect.call(this);record('production-panel-measurement',{returned:rect(box),stack:new Error().stack.split('\n').slice(1,5)});return box;};
+      const focus=event=>{record(event.type,{target:describe(event.target),relatedTarget:describe(event.relatedTarget)});queueMicrotask(()=>record(`${event.type}:microtask`,{target:describe(event.target)}));};
+      const scroll=event=>record('scroll',{target:describe(event.target)});
+      document.addEventListener('focusin',focus,true);document.addEventListener('focusout',focus,true);window.addEventListener('scroll',scroll,true);
+      window.stopContextPlacementDiagnostics=()=>{diagnostics.after=snapshot();if(ownRect)Object.defineProperty(panel,'getBoundingClientRect',ownRect);else delete panel.getBoundingClientRect;document.removeEventListener('focusin',focus,true);document.removeEventListener('focusout',focus,true);window.removeEventListener('scroll',scroll,true);delete window.stopContextPlacementDiagnostics;return diagnostics;};
+    });
+    try {await surface.dispatchEvent('contextmenu',{clientX:1098,clientY:898});}
+    finally {report.contextPlacementDiagnostics=await page.evaluate(()=>stopContextPlacementDiagnostics());}
+    let box=await panel('context-a').boundingBox();report.contextPlacementDiagnostics.playwrightBox=box;const pointerBox=box;assert(box&&box.x>=0&&box.y>=0&&box.x+box.width<=1100.5&&box.y+box.height<=900.5,'context pointer menu must remain inside viewport');
     await focused('#context-a [value="open"]');await surface.dispatchEvent('contextmenu',{clientX:1090,clientY:890});await page.keyboard.press('Escape');await focused('#before','context dismissal must restore original focus');
     await surface.focus();await page.keyboard.press('Shift+F10');await focused('#context-a [value="open"]');box=await panel('context-a').boundingBox();assert(box,'keyboard context needs a visible panel');const anchor=await surface.boundingBox();const expectedLeft=Math.max(8,Math.min(anchor.x,1100-box.width-8));const below=anchor.y+anchor.height+6;const expectedTop=Math.max(8,Math.min(below+box.height>892?anchor.y-box.height-6:below,900-box.height-8));assert(Math.abs(box.x-expectedLeft)<=1&&Math.abs(box.y-expectedTop)<=1,'keyboard context must reanchor to its current surface');assert(Math.abs(box.x-pointerBox.x)>50,'keyboard context must discard the previous pointer position');
     await row('context-a','recent').focus();await page.keyboard.press('ArrowRight');await focused('#context-a [value="nested-comfortable"]');await page.keyboard.press('ArrowLeft');await focused('#context-a [value="recent"]');await page.keyboard.press('Escape');await focused('#context-a [data-interaction-context]');
