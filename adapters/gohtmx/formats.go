@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	ui "github.com/mrchypark/elysdui/ui/gohtmx"
 	"github.com/mrchypark/elysdui/sdui"
+	ui "github.com/mrchypark/elysdui/ui/gohtmx"
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/extension"
 	"golang.org/x/net/html"
@@ -481,6 +481,13 @@ func formatsForDefinition(d Definition) map[string]sdui.FormatRule {
 		"color":           pattern(colorValue, "color value", false),
 		"css-token":       pattern(cssToken, "CSS custom property name", true),
 		"font-family":     pattern(fontFamilyValue, "font family", false),
+	}
+	if d.Chapter == "menus" && d.Component == "ContextMenu" {
+		rule := check(func(value string, _ URLPolicy) error { return ui.ValidateContextRequestNumber(value) })
+		// This editor hint describes canonical decimal spelling and length.
+		// The shared UI validator also enforces the unsigned 64-bit maximum.
+		rule.Pattern = `^(0|[1-9][0-9]{0,19})$`
+		rules["context-request-number"] = rule
 	}
 	if d.SandboxHTML {
 		rules["sandbox-html"] = sdui.FormatRule{Type: sdui.String, NormalizeString: normalizeSandboxHTML}

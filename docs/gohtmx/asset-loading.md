@@ -179,9 +179,29 @@ removal, needs a new `mount` call. Replacement bindings dispose the previous
 binding; an old returned disposer cannot remove the newer binding. Host code must
 not rely on arbitrary DOM mutations or custom/morph swaps to rebuild controllers.
 
+Family initializers registered through `register(family, initialize)` may accept
+an optional second argument, `initialize(root, registerCleanup)`. Register a
+cleanup function before any synchronous focus or event callback that could stop
+or replace the controller. Existing one-argument initializers may still return a
+cleanup function. Registering and returning the same function disposes it only
+once per initialization, including when initialization resumes after a stop.
+The registration callback belongs to its original mount: functions registered
+after that mount stops or is replaced run immediately, without joining the newer
+mount. Stale initializer returns and errors cannot overwrite the newer mount's
+readiness or publish an old initialization error.
+
+An initializer that throws while it still owns the root retains the existing
+`ely:error` event and `data-ely-ready="error"` behavior; its registered cleanup
+runs on teardown. A throwing cleanup also emits `ely:error` with `{id, error}`,
+without changing readiness or preventing remaining cleanup and sibling roots
+from stopping. Cleanup remains ordered after `ely:cleanup`; a remount during
+cleanup or error notification keeps its own readiness.
+
 Focused checks (browser launch requires a browser-capable runner):
 
 ```sh
+node ui/gohtmx/tests/unit/initializer_cleanup_test.mjs
+node scripts/initializer-cleanup-negative-test.mjs
 node ui/gohtmx/tests/unit/family_lifecycle_test.mjs
 LIFECYCLE_NEGATIVE_CONTROL=stale-refs node ui/gohtmx/tests/unit/family_lifecycle_test.mjs
 LIFECYCLE_NEGATIVE_CONTROL=stale-results node ui/gohtmx/tests/unit/family_lifecycle_test.mjs

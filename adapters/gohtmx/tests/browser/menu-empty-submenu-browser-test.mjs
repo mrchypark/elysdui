@@ -60,7 +60,7 @@ const mutations = {
   },
   cleanup: {
     file: interaction,
-    from: 'return () => { close(); clearReorderPreview();', to: 'return () => { clearReorderPreview();',
+    from: 'const cleanup = () => { close(); cleanupContextRequests(); clearReorderPreview();', to: 'const cleanup = () => { cleanupContextRequests(); clearReorderPreview();',
     check: 'empty.htmx.innerHTML', oracle: 'cleanup.old-empty-panel-hidden',
     prior: ['cleanup.old-empty-was-visible', 'cleanup.old-root-was-visible', 'cleanup.fresh-root-ready', 'cleanup.event-once'], actual: false, expected: true,
   },

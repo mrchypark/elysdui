@@ -143,7 +143,8 @@ const menu = (root, id, open, restoreFocus = false) => {
   const trigger = root.querySelector(`[data-interaction-menu="${CSS.escape(id)}"]`);
   if (!panel || !trigger || open && (trigger.disabled || root.dataset.elyDisabled === 'true')) return;
   menuGeneration.set(panel, (menuGeneration.get(panel) || 0) + 1);
-  const context = !trigger.closest('[role="menu"]') && trigger.closest('[data-interaction-context]');
+  const surface = trigger.closest('[data-interaction-context]');
+  const context = trigger.closest('[role="menu"]')?.closest('[data-ely-family]') !== root && surface?.closest('[data-ely-family]') === root && surface;
   if (open && panel.hidden) {
     const previous = document.activeElement;
     menuReturnFocus.set(panel, context && previous?.isConnected && previous !== document.body && !panel.contains(previous) ? previous : context || trigger);
@@ -153,14 +154,14 @@ const menu = (root, id, open, restoreFocus = false) => {
   if (open && (panel.hasAttribute('data-interaction-popover') || panel.closest('.ely-interaction--menus') && !panel.parentElement.matches('.ely-interaction__menu-row') && !panel.matches('.ely-interaction__pie'))) {
     (panel.hasAttribute('data-interaction-popover') ? placeOverlay : placeMenu)(panel, (context || trigger).getBoundingClientRect());
   }
-  if (!open) panel.querySelectorAll('[data-interaction-menu]').forEach(child => menu(root, child.dataset.interactionMenu, false));
+  if (!open) panel.querySelectorAll('[data-interaction-menu]').forEach(child => { if (child.closest('[data-ely-family]') === root) menu(root, child.dataset.interactionMenu, false); });
   if (open && panel.parentElement.matches('.ely-interaction__menu-row')) {
     panel.style.left = '100%'; panel.style.top = '0';
     const bounds = panel.getBoundingClientRect();
     if (bounds.right > window.innerWidth) panel.style.left = `-${bounds.width}px`;
     if (bounds.bottom > window.innerHeight) panel.style.top = `${Math.min(0, window.innerHeight - bounds.bottom)}px`;
   }
-  if (open) (panel.querySelector('input:not(:disabled)') || [...panel.querySelectorAll(':is(button,a):not(:disabled)')].find(item => (panel.getAttribute('role') !== 'menu' || item.closest('[role="menu"]') === panel) && !item.closest('[hidden]')) || (panel.hasAttribute('tabindex') ? panel : null))?.focus();
+  if (open) ([...panel.querySelectorAll('input:not(:disabled)')].find(item => item.closest('[data-ely-family]') === root && (panel.getAttribute('role') !== 'menu' || item.closest('[role="menu"]') === panel) && !item.closest('[hidden]')) || [...panel.querySelectorAll(':is(button,a):not(:disabled)')].find(item => item.closest('[data-ely-family]') === root && (panel.getAttribute('role') !== 'menu' || item.closest('[role="menu"]') === panel) && !item.closest('[hidden]')) || (panel.hasAttribute('tabindex') ? panel : null))?.focus();
   else {
     const previous = menuReturnFocus.get(panel);
     menuReturnFocus.delete(panel);
@@ -174,6 +175,77 @@ const menuAction = (root, event, button) => {
   if (!button?.hasAttribute('data-interaction-menu-action')) return;
   const formData = button.form ? new FormData(button.form) : null;
   if (!emit(root, button.dataset.elyAction, {value: button.value || button.dataset.value || '', formData, values: formData ? [...formData] : []})) event.preventDefault();
+};
+
+// Owner request memory belongs to the physical root and stable semantic owner,
+// not to a controller, panel, pending operation or timer. Equality is deliberate:
+// A -> B -> A is a new presentation, including numbers above JS integer precision.
+const contextRequestOwners = new WeakMap();
+const validContextRequest = value => {
+  try {
+    if (!value || typeof value !== 'object' || Array.isArray(value) || Object.prototype.toString.call(value) !== '[object Object]') return false;
+    const keys = Reflect.ownKeys(value);
+    if (keys.length !== 3 || !['number', 'x', 'y'].every(key => Object.prototype.hasOwnProperty.call(value, key))) return false;
+    const fields = Object.getOwnPropertyDescriptors(value);
+    if (!['number', 'x', 'y'].every(key => Object.prototype.hasOwnProperty.call(fields[key], 'value'))) return false;
+    // Snapshot primitives before focus can reenter owner code or mutate detail.
+    const request = {number: fields.number.value, x: fields.x.value, y: fields.y.value};
+    if (typeof request.number !== 'string' || /^(0|[1-9][0-9]{0,19})$/.exec(request.number)?.[0] !== request.number || request.number.length === 20 && request.number > '18446744073709551615') return false;
+    if (typeof request.x !== 'number' || !Number.isFinite(request.x) || typeof request.y !== 'number' || !Number.isFinite(request.y)) return false;
+    return request;
+  } catch { return false; }
+};
+const bindContextRequests = (root, resetPending) => {
+  if (root.dataset.elyFamily !== 'interaction' || root.dataset.elyComponent !== 'menus/ContextMenu') return {cleanup() {}, openSeed() {}};
+  const identity = {id: root.id, family: root.dataset.elyFamily, component: root.dataset.elyComponent};
+  const matchesIdentity = owner => owner.id === root.id && owner.family === root.dataset.elyFamily && owner.component === root.dataset.elyComponent;
+  let owner = contextRequestOwners.get(root);
+  if (!owner || !matchesIdentity(owner)) { owner = {...identity}; contextRequestOwners.set(root, owner); }
+  const surface = [...root.querySelectorAll('[data-interaction-context]')].find(node => node.closest('[data-ely-family]') === root);
+  const trigger = surface && [...surface.querySelectorAll('[data-interaction-menu]')].find(node => node.closest('[data-ely-family]') === root && node.closest('[role="menu"]')?.closest('[data-ely-family]') !== root);
+  const panel = trigger && root.querySelector(`#${CSS.escape(trigger.dataset.interactionMenu)}`);
+  let active = true, presentation = 0;
+  const accept = (request, target = root) => {
+    if (target !== root || root.dataset.elyComponent !== 'menus/ContextMenu') return;
+    if (!active || !root.isConnected || !matchesIdentity(identity) || surface?.dataset.elyContextMode !== 'manual') return;
+    if (!surface?.isConnected || !trigger?.isConnected || !panel?.isConnected || !root.contains(surface) || !surface.contains(trigger) || !surface.contains(panel) || panel.closest('[data-ely-family]') !== root) return;
+    request = validContextRequest(request);
+    if (!request) return;
+    if (root.dataset.elyDisabled === 'true' || trigger.disabled) return;
+    if (owner.lastNumber === request.number) return;
+    owner.lastNumber = request.number;
+    const currentPresentation = ++presentation;
+    resetPending();
+    const previousOwner = menuReturnFocus.get(panel);
+    // A changed request restarts this root presentation, never a nested family.
+    panel.querySelectorAll('[data-interaction-menu]').forEach(child => {
+      if (child.closest('[data-ely-family]') === root) menu(root, child.dataset.interactionMenu, false);
+    });
+    menu(root, trigger.dataset.interactionMenu, true);
+    if (!active || currentPresentation !== presentation || !root.isConnected || !matchesIdentity(identity)) return;
+    if (previousOwner) menuReturnFocus.set(panel, previousOwner);
+    const bounds = panel.getBoundingClientRect();
+    panel.style.position = 'fixed';
+    panel.style.left = `${Math.max(0, Math.min(request.x, window.innerWidth - bounds.width))}px`;
+    panel.style.top = `${Math.max(0, Math.min(request.y, window.innerHeight - bounds.height))}px`;
+  };
+  const request = event => accept(event.detail, event.target);
+  root.addEventListener('ely:context-request', request);
+  const cleanup = () => {
+    active = false;
+    root.removeEventListener('ely:context-request', request);
+    // Keep owner watermark across compatible controller cleanup.
+  };
+  // Binding and synchronous presentation are separate so the full family
+  // cleanup is registered before focus can synchronously prepare an HTMX swap.
+  const openSeed = () => {
+    // Attribute conversion is only for validated server-rendered values;
+    // public event values always use the strict non-coercing validator.
+    if (surface?.hasAttribute('data-ely-context-number') && surface.hasAttribute('data-ely-context-x') && surface.hasAttribute('data-ely-context-y')) {
+      accept({number: surface.dataset.elyContextNumber, x: Number(surface.dataset.elyContextX), y: Number(surface.dataset.elyContextY)});
+    }
+  };
+  return {cleanup, openSeed};
 };
 
 // Each mount owns its toast clocks. Stay=0 is persistent; hidden rows are reusable recipes.
@@ -549,7 +621,7 @@ const copyFeedback = (root, notify, action) => {
   }};
 };
 
-register('interaction', root => {
+register('interaction', (root, registerCleanup) => {
   const timers = new Set();
   const lottieCleanups = [];
   const clipboard = copyFeedback(root, detail => change(root, detail), (action, detail) => emit(root, action, detail));
@@ -651,8 +723,9 @@ register('interaction', root => {
   root.querySelectorAll('[data-loading-more]').forEach(host=>{ const rows=[...host.querySelectorAll('[data-loading-more-row]')], shown=Math.min(rows.length,Number(host.dataset.shown)||0); rows.forEach((row,i)=>row.hidden=i>=shown); host.querySelector('[data-interaction-more-count]').textContent=`Showing ${shown} of ${rows.length}`; if(rows.length)host.querySelector('button').hidden=shown>=rows.length; });
 
   const close = (restoreFocus = false) => root.querySelectorAll('[data-interaction-menu]').forEach(trigger => {
+    if (trigger.closest('[data-ely-family]') !== root) return;
     const panel = root.querySelector(`#${CSS.escape(trigger.dataset.interactionMenu)}`);
-    if (panel && !panel.hidden) menu(root, trigger.dataset.interactionMenu, false, restoreFocus && !trigger.closest('[role="menu"]'));
+    if (panel && !panel.hidden) menu(root, trigger.dataset.interactionMenu, false, restoreFocus && trigger.closest('[role="menu"]')?.closest('[data-ely-family]') !== root);
   });
   const selectHistory = (history, index) => {
     const items = [...history.querySelectorAll('[data-interaction-history-item]')];
@@ -1086,7 +1159,7 @@ register('interaction', root => {
     const primary = target?.closest('[data-interaction-menu-primary]');
     if (primary) { close(); menuAction(root, event, primary); return; }
     const trigger = target?.closest('[data-interaction-menu]');
-    if (trigger) { const panel = root.querySelector(`#${CSS.escape(trigger.dataset.interactionMenu)}`); const open = trigger.closest('[role="menu"]') ? true : Boolean(panel?.hidden); if (trigger.closest('.ely-interaction__navigation-menu, .ely-interaction__menubar') && !trigger.closest('[role="menu"]')) close(); menu(root, trigger.dataset.interactionMenu, open); return; }
+    if (trigger) { if (trigger.closest('[role="menu"]')?.closest('[data-ely-family]') !== root && trigger.closest('[data-interaction-context]')?.closest('[data-ely-family]') === root && trigger.closest('[data-interaction-context]').dataset.elyContextMode === 'manual') return; const panel = root.querySelector(`#${CSS.escape(trigger.dataset.interactionMenu)}`); const open = trigger.closest('[role="menu"]')?.closest('[data-ely-family]') === root ? true : Boolean(panel?.hidden); if (trigger.closest('.ely-interaction__navigation-menu, .ely-interaction__menubar') && trigger.closest('[role="menu"]')?.closest('[data-ely-family]') !== root) close(); menu(root, trigger.dataset.interactionMenu, open); return; }
     if (target?.closest('.ely-interaction__navigation-menu [role="menuitem"]')) { close(true); return; }
     const historyControl = target?.closest('[data-interaction-history-back], [data-interaction-history-forward], [data-interaction-history-item]');
     if (historyControl) {
@@ -1268,7 +1341,8 @@ register('interaction', root => {
       return;
     }
     const menuTrigger = closest(root, event.target, '.ely-interaction--menus [data-interaction-menu]');
-    if (menuTrigger && !menuTrigger.disabled && (event.key === 'ArrowDown' && !menuTrigger.closest('[role="menu"]') || event.key === 'ArrowRight' && menuTrigger.closest('[role="menu"]'))) {
+    if (menuTrigger && !menuTrigger.disabled && (event.key === 'ArrowDown' && menuTrigger.closest('[role="menu"]')?.closest('[data-ely-family]') !== root || event.key === 'ArrowRight' && menuTrigger.closest('[role="menu"]')?.closest('[data-ely-family]') === root)) {
+      if (menuTrigger.closest('[role="menu"]')?.closest('[data-ely-family]') !== root && menuTrigger.closest('[data-interaction-context]')?.closest('[data-ely-family]') === root && menuTrigger.closest('[data-interaction-context]').dataset.elyContextMode === 'manual') return;
       event.preventDefault(); menu(root, menuTrigger.dataset.interactionMenu, true); return;
     }
     const nested = closest(root, event.target, '.ely-interaction__menu-row > [role="menu"]');
@@ -1285,7 +1359,7 @@ register('interaction', root => {
       return;
     }
     const context = closest(root, event.target, '[data-interaction-context]');
-    if (context && (event.key === 'ContextMenu' || event.shiftKey && event.key === 'F10')) { event.preventDefault(); context.querySelector('[data-interaction-menu]:not(:disabled)')?.click(); return; }
+    if (context && (event.key === 'ContextMenu' || event.shiftKey && event.key === 'F10')) { if (context.dataset.elyContextMode === 'manual') return; event.preventDefault(); context.querySelector('[data-interaction-menu]:not(:disabled)')?.click(); return; }
     const confirmHold = closest(root, event.target, '[data-interaction-confirm-mode="hold"]');
     if (confirmHold && !event.repeat && [' ', 'Enter'].includes(event.key)) { event.preventDefault(); holdStart(event); return; }
     const openDialog = closest(root, event.target, 'dialog[open], [data-interaction-popover]:not([hidden])');
@@ -1467,20 +1541,31 @@ register('interaction', root => {
   const holdStart = event => { const button = closest(root, event.target, '[data-interaction-hold], [data-interaction-longpress]'); if (!button || button.hasAttribute('data-direct-press') || button.dataset.interactionConfirmMode === 'twice') return; const threshold = Number(button.dataset.interactionConfirmThreshold || 700); button.classList.add('is-confirming'); button.dataset.interactionTimer = String(later(() => { button.classList.remove('is-confirming'); root.querySelector('[data-interaction-status]')?.replaceChildren(document.createTextNode('confirmed')); emit(root, button.dataset.interactionLongpress || button.dataset.interactionHold || 'confirm', {value: button.value || ''}); }, threshold)); };
   const holdEnd = event => { const button = closest(root, event.target, '[data-interaction-hold], [data-interaction-longpress]'); const timer = Number(button?.dataset.interactionTimer); if (timer) { clearTimeout(timer); timers.delete(timer); delete button.dataset.interactionTimer; button.classList.remove('is-confirming'); } };
 
+  let contextPointerFocus;
   root.querySelectorAll('.ely-interaction--menus [role="menu"]').forEach(panel => {
+    if (panel.closest('[data-ely-family]') !== root) return;
     if (panel.parentElement.matches('.ely-interaction__menu-row')) return;
+    let focusActive = true;
     const focusout = event => {
       // During native pointer focus, activeElement can still be body at the
       // event callback's microtask checkpoint. relatedTarget already names
       // the destination: moving from a submenu child to its trigger stays in
       // this menu and must not hide that trigger before its click arrives.
-      if (panel.contains(event.relatedTarget)) return;
+      if (panel.contains(event.relatedTarget) || contextPointerFocus?.contains(event.relatedTarget)) return;
       queueMicrotask(() => {
-        if (root.isConnected && !panel.hidden && !panel.contains(document.activeElement)) menu(root, panel.id, false);
+        if (focusActive && root.isConnected && !panel.hidden && !panel.contains(document.activeElement) && !contextPointerFocus?.contains(document.activeElement)) menu(root, panel.id, false);
       });
     };
     panel.addEventListener('focusout', focusout);
-    lottieCleanups.push(() => panel.removeEventListener('focusout', focusout));
+    const contextSurface = panel.closest('[data-interaction-context]');
+    const manualSurface = contextSurface?.closest('[data-ely-family]') === root && contextSurface.dataset.elyContextMode === 'manual' ? contextSurface : null;
+    // A preserved right-host gesture can move focus from the panel to the host.
+    // Its later Tab/focus leave originates on that host, not on the old panel.
+    const hostFocusout = event => {
+      if (event.target?.closest('[data-ely-family]') === root && !panel.contains(event.target)) focusout(event);
+    };
+    manualSurface?.addEventListener('focusout', hostFocusout);
+    lottieCleanups.push(() => { focusActive = false; panel.removeEventListener('focusout', focusout); manualSurface?.removeEventListener('focusout', hostFocusout); });
   });
   root.querySelectorAll('[data-interaction-popover]').forEach(panel => {
     const focusout = () => queueMicrotask(() => {
@@ -1691,6 +1776,7 @@ register('interaction', root => {
     }
     const surface = closest(root, event.target, '[data-interaction-context]');
     if (!surface) return;
+    if (surface.dataset.elyContextMode === 'manual') return;
     event.preventDefault();
     const trigger = surface.querySelector('[data-interaction-menu]:not(:disabled)');
     if (trigger && root.dataset.elyDisabled !== 'true') {
@@ -1764,9 +1850,11 @@ register('interaction', root => {
   root.querySelector('[autofocus]')?.focus();
   let menuPointerReturn;
   const cancelMenuPointerReturn = event => {
+    if (event.type !== 'focusin' || !contextPointerFocus?.contains(event.target)) contextPointerFocus = undefined;
     if (event.type !== 'focusin' || event.target !== document.body) menuPointerReturn = undefined;
   };
   const restoreMenuPointerReturn = event => {
+    contextPointerFocus = undefined;
     const pending = menuPointerReturn;
     menuPointerReturn = undefined;
     if (!pending || event.pointerId !== pending.pointerId) return;
@@ -1781,7 +1869,7 @@ register('interaction', root => {
   const menuPointerListeners = [['pointerdown', cancelMenuPointerReturn, true], ['keydown', cancelMenuPointerReturn, true], ['focusin', cancelMenuPointerReturn, true], ['pointercancel', cancelMenuPointerReturn, true], ['pointerup', restoreMenuPointerReturn, false]];
   menuPointerListeners.forEach(([type, handler, capture]) => document.addEventListener(type, handler, capture));
   lottieCleanups.push(() => {
-    menuPointerReturn = undefined;
+    menuPointerReturn = contextPointerFocus = undefined;
     menuPointerListeners.forEach(([type, handler, capture]) => document.removeEventListener(type, handler, capture));
   });
   const outside = event => {
@@ -1791,7 +1879,17 @@ register('interaction', root => {
     });
     root.querySelectorAll('.ely-interaction--menus [role="menu"]:not([hidden])').forEach(panel => {
       if (panel.parentElement.matches('.ely-interaction__menu-row')) return;
+      if (panel.closest?.('[data-ely-family]') && panel.closest('[data-ely-family]') !== root) return;
       const trigger = root.querySelector(`[data-interaction-menu="${CSS.escape(panel.id)}"]`);
+      const contextSurface = trigger?.closest?.('[data-interaction-context]');
+      const manual = contextSurface?.closest('[data-ely-family]') === root && contextSurface.dataset.elyContextMode === 'manual' ? contextSurface : null;
+      if (manual && root.contains(event.target) && event.target.closest?.('[data-ely-family]') !== root) return;
+      if (manual?.contains(event.target) && event.button !== 0) {
+        // The following native focus step belongs to this right-host gesture.
+        // Do not mistake it for Tab or focus leaving the context host.
+        if (event.button === 2) contextPointerFocus = manual;
+        return;
+      }
       if (!panel.contains(event.target) && !trigger?.contains(event.target)) {
         menu(root, panel.id, false, true);
         const opener = document.activeElement;
@@ -1801,5 +1899,10 @@ register('interaction', root => {
     if (!root.contains(event.target)) close();
   };
   document.addEventListener('pointerdown', outside);
-  return () => { close(); clearReorderPreview(); timers.forEach(clearTimeout); lottieCleanups.forEach(cleanup => cleanup()); root.removeEventListener('click', click); root.removeEventListener('scroll', scroll, true); root.removeEventListener('input', input); root.removeEventListener('keydown', keydown); root.removeEventListener('ely:result', result); root.removeEventListener('ely:error', error); root.removeEventListener('contextmenu', contextmenu); root.removeEventListener('pointerover', pointerover); root.removeEventListener('pointermove', menuPointerMove); root.removeEventListener('dragend', dragend); root.removeEventListener('dragstart', dragstart); root.removeEventListener('dragover', dragover); root.removeEventListener('drop', drop); root.removeEventListener('pointerdown', lightboxPointerDownHandler); root.removeEventListener('pointerup', lightboxPointerUpHandler); root.removeEventListener('pointerdown', holdStart); root.removeEventListener('pointerup', holdEnd); root.removeEventListener('pointercancel', holdEnd); root.removeEventListener('keyup', keyup); document.removeEventListener('pointerdown', outside); };
+  const contextRequests = bindContextRequests(root, () => { menuPointerReturn = contextPointerFocus = undefined; menuConfirmKey = menuConfirmTarget = undefined; });
+  const cleanupContextRequests = contextRequests.cleanup;
+  const cleanup = () => { close(); cleanupContextRequests(); clearReorderPreview(); timers.forEach(clearTimeout); lottieCleanups.forEach(cleanup => cleanup()); root.removeEventListener('click', click); root.removeEventListener('scroll', scroll, true); root.removeEventListener('input', input); root.removeEventListener('keydown', keydown); root.removeEventListener('ely:result', result); root.removeEventListener('ely:error', error); root.removeEventListener('contextmenu', contextmenu); root.removeEventListener('pointerover', pointerover); root.removeEventListener('pointermove', menuPointerMove); root.removeEventListener('dragend', dragend); root.removeEventListener('dragstart', dragstart); root.removeEventListener('dragover', dragover); root.removeEventListener('drop', drop); root.removeEventListener('pointerdown', lightboxPointerDownHandler); root.removeEventListener('pointerup', lightboxPointerUpHandler); root.removeEventListener('pointerdown', holdStart); root.removeEventListener('pointerup', holdEnd); root.removeEventListener('pointercancel', holdEnd); root.removeEventListener('keyup', keyup); document.removeEventListener('pointerdown', outside); };
+  registerCleanup?.(cleanup);
+  contextRequests.openSeed();
+  return cleanup;
 });

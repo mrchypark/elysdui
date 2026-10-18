@@ -279,13 +279,14 @@ func Funcs() template.FuncMap {
 			}
 			return result, nil
 		},
-		"list":         func(v ...any) []any { return v },
-		"add":          func(a, b int) int { return a + b },
-		"join":         joinStrings,
-		"menuHasItems": menuHasItems,
-		"attrName":     attrName,
-		"contains":     strings.Contains,
-		"hasPrefix":    strings.HasPrefix,
+		"list":              func(v ...any) []any { return v },
+		"add":               func(a, b int) int { return a + b },
+		"join":              joinStrings,
+		"menuHasItems":      menuHasItems,
+		"menuContextConfig": menuContextConfig,
+		"attrName":          attrName,
+		"contains":          strings.Contains,
+		"hasPrefix":         strings.HasPrefix,
 		"deref": func(v any) any {
 			r := reflect.ValueOf(v)
 			if r.IsValid() && r.Kind() == reflect.Pointer {

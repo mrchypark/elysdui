@@ -48,6 +48,62 @@ completion, documentation, or schema tooling. `CatalogueInfo()` returns coverage
 metadata. `RegisterCatalogue` validates the whole batch before installing it;
 a duplicate registration does not partially modify the registry.
 
+## ContextMenu owner requests
+
+Only the exact `menus/ContextMenu` contract accepts `contextMode` and
+`contextRequest`. Omitted `contextMode` means `automatic`; the other allowed
+value is `manual`. Manual mode opens only when its owner supplies a request:
+
+```json
+{
+  "version": "1",
+  "id": "canvas-screen",
+  "root": {
+    "id": "canvas-menu",
+    "type": "menus/ContextMenu",
+    "props": {
+      "label": "Canvas commands",
+      "contextMode": "manual",
+      "contextRequest": {
+        "number": "9007199254740993",
+        "x": 120.5,
+        "y": 80
+      },
+      "items": [{"label": "Inspect", "action": "inspect", "value": "canvas"}]
+    }
+  }
+}
+```
+
+The request is optional and nullable. A present object has exactly three
+required fields: `number`, `x`, and `y`. `number` is a canonical decimal u64
+string from `"0"` through `"18446744073709551615"`, at most 20 ASCII digits,
+without signs, leading zeroes, whitespace, decimals, or exponents. Keep it a
+string through JSON, host data, and JavaScript to preserve values above 2^53.
+The adapter's string-format validator enforces the maximum; the generated
+JSON Schema pattern is an editor hint, and compilation/resolution remain
+authoritative. Coordinates are finite numbers in viewport CSS pixels, including
+zero, fractions, negative values and arbitrarily large finite values. Numeric
+strings, booleans, NaN and infinities are invalid. The browser clamps valid
+coordinates to the viewport using the existing ContextMenu placement policy.
+
+`bindings: {"contextRequest": "/@data/contextRequest"}` can supply the same
+object or explicit null. A missing bound path is an error. Null or omission is
+no request: it neither closes the current menu nor resets the remembered number.
+A valid request in automatic mode is inert, but its shape is still validated.
+The number is compared only with the last accepted request: A → A is ignored,
+while A → B → A is accepted each time. A compatible retained-root remount keeps
+that number; a replacement root starts a new owner lifetime.
+
+The browser also accepts a root-local `ely:context-request` CustomEvent with the
+same lower-camel request object as `detail`, or null. This is an incoming owner
+signal, not an outgoing SDUI action event. It does not invoke a business callback
+or reinterpret `ely:result`. Dispatch only to the current connected, initialized
+root; invalid, disabled, wrong-mode and stopped-controller requests are ignored
+without queuing or consuming the number. The owner must cancel its own stale
+asynchronous work and provide a labeled, keyboard-accessible opener in manual
+mode. See the [menu guide](../gohtmx/advanced-interaction.md) for runtime usage.
+
 ## Generation and review
 
 ```sh

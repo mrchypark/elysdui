@@ -5,6 +5,13 @@ const hostBindings = new Map();
 const swapContexts = new WeakMap();
 const pendingSwaps = new Map();
 
+function dispose(root, cleanup) {
+  try { cleanup(); }
+  catch (error) {
+    root.dispatchEvent(new CustomEvent('ely:error', { bubbles: true, detail: { id: root.id, error } }));
+  }
+}
+
 // Stop before HTMX mutates descendants: family cleanup may need the old DOM.
 // Retained roots keep their host handlers, but never an in-flight old result.
 function stop(root) {
@@ -13,8 +20,8 @@ function stop(root) {
   if (!cleanups) return;
   mounted.delete(root);
   root.dispatchEvent(new CustomEvent('ely:cleanup'));
-  cleanups.forEach(cleanup => cleanup());
-  delete root.dataset.elyReady;
+  cleanups.forEach(cleanup => dispose(root, cleanup));
+  if (!mounted.has(root)) delete root.dataset.elyReady;
 }
 
 function prune() {
@@ -85,13 +92,22 @@ function start(scope = document) {
     root.addEventListener('change', change);
     cleanups.push(() => { root.removeEventListener('click', click); root.removeEventListener('submit', submit); root.removeEventListener('change', change); });
     mounted.set(root, cleanups);
+    // Keep function identity after stop too: a reentrant initializer can return
+    // an already-disposed function after a newer mount has taken ownership.
+    const registeredCleanups = new Set();
+    const registerCleanup = cleanup => {
+      if (typeof cleanup !== 'function' || registeredCleanups.has(cleanup)) return;
+      registeredCleanups.add(cleanup);
+      if (mounted.get(root) === cleanups) cleanups.push(cleanup);
+      else dispose(root, cleanup);
+    };
     try {
-      const cleanup = initialize(root);
-      if (typeof cleanup === 'function') cleanups.push(cleanup);
-      root.dataset.elyReady = 'true';
+      registerCleanup(initialize(root, registerCleanup));
+      if (mounted.get(root) === cleanups) root.dataset.elyReady = 'true';
     } catch (error) {
+      if (mounted.get(root) !== cleanups) return;
       root.dispatchEvent(new CustomEvent('ely:error', { bubbles: true, detail: { id: root.id, error } }));
-      root.dataset.elyReady = 'error';
+      if (mounted.get(root) === cleanups) root.dataset.elyReady = 'error';
     }
   });
 }

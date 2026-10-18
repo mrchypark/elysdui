@@ -154,3 +154,103 @@ Catalogue 231–243 was checked against the pinned feedback clock, spinner, skel
 `DemoDelay` is an explicit local fixture simulation in milliseconds. Source fixtures use 1600/2400 ms for Save/Export, 900 ms for paging, 1400 ms for the overlay, and 1500 ms for the report. Production callers with `Action` and no `DemoDelay` wait for their matching `ely:result`/`ely:error` or host replacement HTML. Completion cancels prior timers; errors do not advance paging. The overlay blocks its covered content while active and fades over the source 120 ms. Transition exit retains content for 200 ms, and a rapid reversal cancels stale exit work. Lazy rows reveal only when their bounds intersect the viewport and remain loaded afterward. Countdown restart re-arms its completion event after zero; Timer Stop/Reset preserves elapsed time and starts a fresh clock.
 
 Toast native timer calls use wrappers so the browser never receives the clock object as the native API receiver. `node ui/gohtmx/tests/unit/interaction_feedback_test.mjs` includes a receiver-sensitive regression for the production default clock. `node ui/gohtmx/tests/unit/interaction_motion_test.mjs` now also covers loading clocks, expiry/restart, reversible transitions, finite paging, independent pending actions, report retry, stale timer cancellation, and measured Reorder hover/cancel/drop. The loading render/fixture tests are `TestInteractionLoadingCallerContracts` and `TestInteractionLoadingSourceFixtures`. Browser execution remains the parent integration check.
+
+### Owner-driven ContextMenu requests
+
+Only `menus/ContextMenu` accepts `ContextMode` and `ContextRequest`. Omitted
+`ContextMode` means `automatic`, preserving right-click, ContextMenu/Shift+F10,
+and the existing fallback button. Explicit modes are `automatic` and `manual`;
+empty or null modes are invalid. A valid request in automatic mode is inert and
+unconsumed. The standalone renderer still validates its shape.
+
+```go
+ui.Component{
+    Chapter: "menus", Name: "ContextMenu", ID: "canvas-menu",
+    Props: map[string]any{
+        "ContextMode": "manual",
+        "ContextRequest": map[string]any{
+            "Number": strconv.FormatUint(requestNumber, 10),
+            "X": 120.5, "Y": 80.25,
+        },
+        "Label": "Canvas commands",
+        "Items": []map[string]any{{"Label": "Copy", "Value": "copy"}},
+    },
+}
+```
+
+`ContextRequest` may be omitted or nil. Otherwise it is a closed
+`map[string]any` containing exactly `Number`, `X` and `Y`. `Number` is a canonical
+decimal u64 string from `"0"` through `"18446744073709551615"`; signs, leading
+zeros, whitespace, decimal/exponent spellings, numeric values and overflow are
+rejected. Use `strconv.FormatUint` in Go and a string or `BigInt.toString()` in
+JavaScript. Never convert an arbitrary u64 through a JavaScript Number.
+`X`/`Y` are finite numeric viewport/client coordinates in CSS pixels. Zero,
+negative, fractional and very large finite values are accepted; existing
+fixed-point placement clamps the measured menu to the viewport. NaN, infinity,
+booleans and numeric strings are invalid. Labels/content remain escaped.
+
+After the family is ready, the owner can synchronously request a presentation on
+the connected component root, independently of SDUI:
+
+```html
+<button type="button" id="canvas-menu-open">Open canvas commands</button>
+<script type="module">
+const button = document.getElementById('canvas-menu-open');
+let requestNumber = 0n;
+button.addEventListener('click', () => {
+  const root = document.getElementById('canvas-menu');
+  const box = button.getBoundingClientRect();
+  root.dispatchEvent(new CustomEvent('ely:context-request', {
+    detail: {number: (++requestNumber).toString(), x: box.left, y: box.bottom},
+  }));
+});
+</script>
+```
+
+The button must be a labeled, keyboard-accessible owner control. Keep request
+numbers within u64 and choose the owner's numbering policy. Manual mode owns
+all opening: the built-in root trigger is hidden and removed from tab order,
+including when `ActionLabel` is supplied. Synthetic trigger clicks, ArrowDown,
+right-click and ContextMenu/Shift+F10 cannot open or reposition it. Right-click
+and host context-key handlers return without preventing the native browser
+menu; preventing that menu is the owner's decision. Keyboard navigation,
+confirmation and Escape inside an already open menu continue working. Left
+pointer interaction on the host dismisses; right pointer on the host leaves an
+open manual menu unchanged. Outside interactions retain their normal defaults.
+This owner-only keyboard policy is a web adaptation, not a native parity claim.
+
+Event detail must be null or the exact lowercase three-field object shown.
+Values are not coerced. Malformed/accessor objects, disabled roots/triggers,
+wrong-mode events and events targeting a descendant or another root are atomic
+no-ops. They do not consume a number or emit action/change/error events. There
+is no replay queue: reissue a request after readiness or after enabling.
+Opening focuses the first enabled direct row, or the named root panel when it
+has no enabled rows. A repeated number changes nothing, including after close.
+Null/omission changes nothing and does not close an open menu or erase the last
+number. Only the last accepted number is remembered: A → B → A opens three
+times. A changed request restarts this root's presentation, clears its old
+submenu selection, and preserves the original outside focus owner. Existing
+focus return, leaf/check/radio callback ordering and payloads are unchanged.
+
+Deduplication belongs to the physical root plus its ID, family and exact
+component name. Compatible default `innerHTML` HTMX remounts close old panels
+before mutation but retain the last number. An unchanged seed stays closed;
+a changed seed opens once. Manual → automatic → manual retains the number.
+A new outerHTML root, or an ID change observed at ContextMenu remount, starts a
+new owner. Removing/reinserting the same node keeps its number, but requires
+normal startup and a fresh host binding. Changing component families requires
+replacement rather than retained-element conversion.
+
+Cleanup removes request listeners and invalidates pending runtime focus/key
+work. Requests while an HTMX swap is stopped are not queued. The request path
+owns no fetch, promise or deferred opening. Owners must cancel/filter their own
+stale asynchronous work, for example on `ely:cleanup`; a changed-number event
+explicitly dispatched to the current live root is accepted regardless of when
+host work started. Last-number equality cannot establish request age.
+
+This bounded API does not add programmatic close, open/close callbacks, live
+row reconciliation, continuous point tracking, native adapter support, visual
+host variants, hover aim, arbitrary content slots, or oversized/RTL/touch
+geometry. Go and VM checks do not establish native-browser focus or HTMX
+network behavior; the companion browser matrix runs on both standalone and
+adapter fixtures in CI.
