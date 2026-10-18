@@ -3,6 +3,7 @@
   window.__elyControls = true;
 
   const initialized = new WeakSet();
+  const initializedCombobox = new WeakMap();
   const dialogOpeners = new WeakMap();
   const initializedNative = new WeakSet();
   const root = (target) => target instanceof Element ? target.closest('[data-ui-component]') : null;
@@ -69,27 +70,34 @@
   };
   const openCombo = component => {
     const input=component.querySelector('[data-ui-combobox-input]'),list=component.querySelector('[data-ui-combobox-list]');
-    if(!input||input.disabled||!list||!list.hidden)return false;
+    if(!input||input.disabled||input.readOnly||!list||!list.hidden)return false;
     component.querySelectorAll('[data-ui-option]').forEach(option=>option.hidden=false);
     list.hidden=false;input.setAttribute('aria-expanded','true');
-    setComboActive(component,component.querySelector('[data-ui-option][aria-selected="true"]')||visibleOptions(component)[0]);
+    setComboActive(component,visibleOptions(component).find(option=>option.getAttribute('aria-selected')==='true')||visibleOptions(component)[0]);
     return true;
+  };
+  const closeCombo = (component, restore = false) => {
+    const input = component.querySelector('[data-ui-combobox-input]');
+    component.querySelector('[data-ui-combobox-list]').hidden = true;
+    input.setAttribute('aria-expanded', 'false');
+    setComboActive(component, null);
+    if (restore && !component.hasAttribute('data-ui-combobox-free')) {
+      const selected = component.querySelector('[data-ui-option][aria-selected="true"]');
+      input.value = selected ? (selected.dataset.uiLabel ?? selected.textContent.trim()) : '';
+    }
+    validateCombo(component);
   };
   const selectCombo = (component, option) => {
     const input = component.querySelector('[data-ui-combobox-input]');
     const hidden = hiddenValue(component);
-    const list = component.querySelector('[data-ui-combobox-list]');
-    if (!input || !hidden || !option || option.getAttribute("aria-disabled") === "true") return;
+    if (!input || input.disabled || input.readOnly || !hidden || !option || option.getAttribute("aria-disabled") === "true") return;
     hidden.value = option.dataset.value || '';
     input.value = option.dataset.uiLabel ?? option.textContent.trim();
     component.querySelectorAll('[data-ui-option]').forEach((item) => item.setAttribute('aria-selected', String(item === option)));
-    setComboActive(component, option);
-    list.hidden = true;
-    input.setAttribute('aria-expanded', 'false');
-    validateCombo(component);
+    input.focus();
+    closeCombo(component);
     hidden.dispatchEvent(new Event('input', { bubbles: true }));
     hidden.dispatchEvent(new Event('change', { bubbles: true }));
-    input.focus();
   };
 
   const addKeyValue = (component) => {
@@ -227,7 +235,7 @@
   };
 
   const initComponent = (component) => {
-    if (initialized.has(component)) return;
+    if (initialized.has(component) && (component.dataset.uiComponent !== 'combobox' || initializedCombobox.get(component) === hiddenValue(component))) return;
     initialized.add(component);
     switch (component.dataset.uiComponent) {
       case 'pin-input': syncPin(component, true); break;
@@ -237,10 +245,11 @@
         const hidden = hiddenValue(component);
         const input = component.querySelector('[data-ui-combobox-input]');
         if (!hidden || !input) break;
+        initializedCombobox.set(component, hidden);
         if (!hidden.hasAttribute('data-ui-permanently-disabled')) hidden.disabled = false;
         const selected = component.querySelector('[data-ui-option][aria-selected="true"]');
         if (selected) input.value = selected.dataset.uiLabel ?? selected.textContent.trim();
-        setComboActive(component, selected || visibleOptions(component)[0]);
+        setComboActive(component, null);
         validateCombo(component);
         break;
       }
@@ -279,7 +288,7 @@
   document.addEventListener('auxclick', preventUnavailableActivation, true);
 
   document.addEventListener('click', (event) => {
-    document.querySelectorAll('[data-ui-component=combobox]').forEach(combo=>{if(!combo.contains(event.target)){combo.querySelector('[data-ui-combobox-list]').hidden=true;combo.querySelector('[data-ui-combobox-input]').setAttribute('aria-expanded','false');}});
+    document.querySelectorAll('[data-ui-component=combobox]').forEach(combo=>{if(!combo.contains(event.target)){closeCombo(combo, true);}});
     const trigger = event.target.closest?.('[data-ui-dialog-open]');
     if (trigger && !isDisabled(trigger)) {
       const dialog = document.getElementById(trigger.dataset.uiDialogOpen);
@@ -300,6 +309,26 @@
     const tab = event.target.closest('[data-ui-tab]'); if (tab) activateTab(component, tab);
   });
 
+  // Commit submitted text before target/ancestor input listeners (including HTMX).
+  document.addEventListener('input', (event) => {
+    const component = root(event.target);
+    if (!component || isDisabled(event.target)) return;
+    if (event.target.matches('[data-ui-combobox-input]')) {
+      if (event.target.readOnly) return;
+      const query = event.target.value.trim().toLowerCase();
+      const list = component.querySelector('[data-ui-combobox-list]');
+      component.querySelectorAll('[data-ui-option]').forEach((option) => { option.hidden = ![option.textContent,option.dataset.value,option.dataset.uiSearch].join(' ').toLowerCase().includes(query); });
+      list.hidden = false;
+      event.target.setAttribute('aria-expanded', 'true');
+      setComboActive(component, visibleOptions(component)[0]);
+      if (component.hasAttribute('data-ui-combobox-free')) {
+        hiddenValue(component).value = event.target.value;
+        component.querySelectorAll('[data-ui-option]').forEach(option => option.setAttribute('aria-selected', 'false'));
+      }
+      validateCombo(component);
+    }
+  }, true);
+
   document.addEventListener('input', (event) => {
     const component = root(event.target);
     if (!component || isDisabled(event.target)) return;
@@ -310,16 +339,7 @@
       syncPin(component);
       if (event.target.value) slots[index + 1]?.focus();
     }
-    if (event.target.matches('[data-ui-combobox-input]')) {
-      const query = event.target.value.toLowerCase();
-      const list = component.querySelector('[data-ui-combobox-list]');
-      component.querySelectorAll('[data-ui-option]').forEach((option) => { option.hidden = ![option.textContent,option.dataset.value,option.dataset.uiSearch].join(' ').toLowerCase().includes(query); });
-      list.hidden = false;
-      event.target.setAttribute('aria-expanded', 'true');
-      setComboActive(component, visibleOptions(component)[0]);
-      hiddenValue(component).value = component.hasAttribute('data-ui-combobox-free') ? event.target.value : '';
-      validateCombo(component);
-    }
+
   });
 
   document.addEventListener('keydown', (event) => {
@@ -351,6 +371,8 @@
       if (event.key === 'Backspace' && !event.target.value && index) slots[index - 1].focus();
     }
     if (event.target.matches('[data-ui-combobox-input]')) {
+      if (event.target.readOnly || event.isComposing) return;
+      if (event.key === 'Tab') { closeCombo(component, true); return; }
       if(['ArrowDown','ArrowUp'].includes(event.key)&&openCombo(component)){event.preventDefault();return;}
       if(component.querySelector('[data-ui-combobox-list]').hidden)return;
       const options = visibleOptions(component);
@@ -363,7 +385,7 @@
       }
       if (event.key === 'Enter' && options.length) { event.preventDefault(); selectCombo(component, options[Math.max(0, active)] || options[0]); }
       else if (event.key === 'Enter' && component.hasAttribute('data-ui-combobox-free')) { event.preventDefault(); component.querySelector('[data-ui-combobox-list]').hidden = true; event.target.setAttribute('aria-expanded', 'false'); hiddenValue(component).dispatchEvent(new Event('change', {bubbles:true})); }
-      if (event.key === 'Escape') { component.querySelector('[data-ui-combobox-list]').hidden = true; event.target.setAttribute('aria-expanded', 'false'); }
+      if (event.key === 'Escape') { event.preventDefault(); closeCombo(component, true); }
     }
     if (event.target.matches('[data-ui-tab]') && ['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) {
       event.preventDefault();
@@ -388,7 +410,18 @@
     slots[Math.min(index, slots.length - 1)]?.focus();
   });
 
+  document.addEventListener('focusout', (event) => {
+    const component = root(event.target);
+    if (component?.dataset.uiComponent === 'combobox' && !component.contains(event.relatedTarget)) closeCombo(component, true);
+  });
+
+  // Keep option clicks from blurring the editable field before selection.
+  document.addEventListener('mousedown', (event) => {
+    if (event.target.closest?.('[data-ui-option]')) event.preventDefault();
+  });
+
   document.addEventListener('focusin', (event) => {
+    if (event.target.matches?.('[data-ui-combobox-input]')) openCombo(root(event.target));
     if (event.target.matches?.('[data-ui-hotkey]')) event.target.dataset.uiHotkeyPrevious = event.target.value;
   });
 

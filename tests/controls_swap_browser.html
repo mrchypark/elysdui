@@ -61,13 +61,27 @@
         <button type="button" data-ui-signature-clear ${off}>Clear</button>
       </div>`;
     }
+    function checkCombobox(form, prefix, disabled = false) {
+      const input = q(form, '[data-ui-combobox-input]');
+      const hidden = q(form, '[data-ui-component=combobox] input[type=hidden]');
+      const list = q(form, '[data-ui-combobox-list]');
+      assert(input.value === 'Beta', `${prefix}: combobox selected label`);
+      assert(list.hidden && input.getAttribute('aria-expanded') === 'false' && !input.hasAttribute('aria-activedescendant'), `${prefix}: collapsed combobox has no active descendant`);
+      assert(hidden.disabled === disabled, `${prefix}: combobox disabled state`);
+      input.dispatchEvent(new KeyboardEvent('keydown', {key: 'ArrowDown', bubbles: true, cancelable: true}));
+      if (disabled) {
+        assert(list.hidden && !input.hasAttribute('aria-activedescendant'), `${prefix}: disabled combobox cannot open or activate an option`);
+      } else {
+        assert(!list.hidden && input.getAttribute('aria-expanded') === 'true' && input.getAttribute('aria-activedescendant') === `${prefix}-b`, `${prefix}: opened combobox activates selected option`);
+        input.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', bubbles: true, cancelable: true}));
+        assert(list.hidden && input.getAttribute('aria-expanded') === 'false' && !input.hasAttribute('aria-activedescendant'), `${prefix}: dismissed combobox clears active descendant`);
+      }
+      assert(input.value === 'Beta' && hidden.value === 'b', `${prefix}: opening and dismissal preserve committed selection`);
+    }
     function check(form, prefix, disabled = false) {
       assert(all(form, '[data-ui-pin-slot]').map(slot => slot.value).join('') === '1234', `${prefix}: PIN digits initialized`);
       assert(all(form, '[data-ui-tags] [data-ui-tag-text]').map(tag => tag.textContent).join(',') === 'alpha,beta', `${prefix}: tags rendered`);
-      const input = q(form, '[data-ui-combobox-input]');
-      const hidden = q(form, '[data-ui-component=combobox] input[type=hidden]');
-      assert(input.value === 'Beta' && input.getAttribute('aria-activedescendant') === `${prefix}-b`, `${prefix}: combobox selected label and active option`);
-      assert(hidden.disabled === disabled, `${prefix}: combobox disabled state`);
+      checkCombobox(form, prefix, disabled);
       const panels = all(form, '[data-ui-tab-panel]');
       assert(panels[0].hidden && !panels[1].hidden, `${prefix}: tab panels initialized`);
       const fallback = q(form, 'textarea');
