@@ -21,13 +21,13 @@ func checkedProperty(t *testing.T, p Property) Property {
 
 func TestRecursivePropertiesNormalizeAndCopy(t *testing.T) {
 	p := checkedProperty(t, Property{Type: Array, Items: &Property{Type: Object, Properties: map[string]Property{
-		"id":     {Type: String, Target: "ID", Format: "identifier", Required: true},
-		"kind":   {Type: String, Target: "Kind", Format: "data-token"},
-		"body":   {Type: String, Target: "Body", Format: "text"},
-		"name":   {Type: String, Target: "Name", Format: "text"},
-		"style":  {Type: String, Target: "Style", Format: "text"},
-		"labels": {Type: Array, Target: "Labels", Items: &Property{Type: String}},
-		"values": {Type: Object, Target: "Values", AdditionalProperties: &Property{Type: Integer}},
+		"id":     {Type: String, Format: "identifier", Required: true},
+		"kind":   {Type: String, Format: "data-token"},
+		"body":   {Type: String, Format: "text"},
+		"name":   {Type: String, Format: "text"},
+		"style":  {Type: String, Format: "text"},
+		"labels": {Type: Array, Items: &Property{Type: String}},
+		"values": {Type: Object, AdditionalProperties: &Property{Type: Integer}},
 	}}})
 	input := []map[string]any{{"id": "record_1", "kind": "note", "body": "<script>alert(1)</script>", "name": "Display name / not a field", "style": "display data", "labels": []string{"alpha"}, "values": map[string]int{"a": 3}}}
 	normalized, err := normalize(p, input)
@@ -35,13 +35,13 @@ func TestRecursivePropertiesNormalizeAndCopy(t *testing.T) {
 		t.Fatal(err)
 	}
 	row := normalized.([]any)[0].(map[string]any)
-	if row["ID"] != "record_1" || row["Kind"] != "note" || row["Body"] != "<script>alert(1)</script>" || row["Name"] != "Display name / not a field" {
+	if row["id"] != "record_1" || row["kind"] != "note" || row["body"] != "<script>alert(1)</script>" || row["name"] != "Display name / not a field" {
 		t.Fatalf("lost nested data: %#v", row)
 	}
 	input[0]["id"] = "changed"
 	input[0]["labels"].([]string)[0] = "changed"
 	input[0]["values"].(map[string]int)["a"] = 99
-	if row["ID"] != "record_1" || row["Labels"].([]any)[0] != "alpha" || row["Values"].(map[string]any)["a"] != 3 {
+	if row["id"] != "record_1" || row["labels"].([]any)[0] != "alpha" || row["values"].(map[string]any)["a"] != 3 {
 		t.Fatal("normalization retained mutable input")
 	}
 	for _, input := range []any{[]map[string]any{{"id": "valid", "extra": true}}, []map[string]any{{"id": "valid", "labels": []int{1}}}, []map[string]any{{"kind": "note"}}, []map[string]any{{"id": template.HTML("bad")}}} {
@@ -188,7 +188,7 @@ func TestSemanticURLPolicies(t *testing.T) {
 	p, err := validatePropertyPolicy(Property{Type: String, Format: "image-url"}, func(format, raw string) bool {
 		calls++
 		return format == "image-url" && strings.HasPrefix(raw, "https://images.example/")
-	}, false)
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -236,11 +236,11 @@ func TestPropertyPolicyCannotBypassReservedSelectors(t *testing.T) {
 }
 
 func TestDeepRegistryDefinitionsSnapshotAndConcurrency(t *testing.T) {
-	tpl := template.Must(template.New("leaf").Parse(`{{.Rows}}`))
+
 	min := 0.0
-	rows := Property{Type: Array, Target: "Rows", Items: &Property{Type: Object, Properties: map[string]Property{"label": {Type: String, Target: "Label", Enum: []string{"hello", "world"}}, "count": {Type: Integer, Target: "Count", Min: &min}}}, Default: []map[string]any{{"label": "hello", "count": 1}}}
-	r := NewRegistry(tpl)
-	d := Definition{Name: "custom/Rows and cards", Template: "leaf", Properties: map[string]Property{"rows": rows}, Slots: map[string]SlotDefinition{"footer": {Target: "Footer", AllowedTypes: []string{"text"}}}}
+	rows := Property{Type: Array, Items: &Property{Type: Object, Properties: map[string]Property{"label": {Type: String, Enum: []string{"hello", "world"}}, "count": {Type: Integer, Min: &min}}}, Default: []map[string]any{{"label": "hello", "count": 1}}}
+	r := NewRegistry()
+	d := Definition{Name: "custom/Rows and cards", Properties: map[string]Property{"rows": rows}, Slots: map[string]SlotDefinition{"footer": {AllowedTypes: []string{"text"}}}}
 	if err := r.Register(d); err != nil {
 		t.Fatal(err)
 	}
@@ -250,14 +250,14 @@ func TestDeepRegistryDefinitionsSnapshotAndConcurrency(t *testing.T) {
 	d.Slots["footer"].AllowedTypes[0] = "mutated"
 	snapshot := r.Definitions()
 	copyRows := snapshot[0].Properties["rows"]
-	if *copyRows.Items.Properties["count"].Min != 0 || copyRows.Default.([]any)[0].(map[string]any)["Label"] != "hello" || snapshot[0].Slots["footer"].AllowedTypes[0] != "text" {
+	if *copyRows.Items.Properties["count"].Min != 0 || copyRows.Default.([]any)[0].(map[string]any)["label"] != "hello" || snapshot[0].Slots["footer"].AllowedTypes[0] != "text" {
 		t.Fatal("caller mutated registry")
 	}
-	copyRows.Default.([]any)[0].(map[string]any)["Label"] = "world"
+	copyRows.Default.([]any)[0].(map[string]any)["label"] = "world"
 	copyRows.Items.Properties["label"].Enum[0] = "bad"
 	snapshot[0].Slots["footer"].AllowedTypes[0] = "bad"
 	again := r.Definitions()[0]
-	if again.Properties["rows"].Default.([]any)[0].(map[string]any)["Label"] != "hello" || again.Properties["rows"].Items.Properties["label"].Enum[0] != "hello" || again.Slots["footer"].AllowedTypes[0] != "text" {
+	if again.Properties["rows"].Default.([]any)[0].(map[string]any)["label"] != "hello" || again.Properties["rows"].Items.Properties["label"].Enum[0] != "hello" || again.Slots["footer"].AllowedTypes[0] != "text" {
 		t.Fatal("Definitions snapshot mutated registry")
 	}
 	var wg sync.WaitGroup
@@ -265,7 +265,7 @@ func TestDeepRegistryDefinitionsSnapshotAndConcurrency(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			if err := r.Register(Definition{Name: fmt.Sprintf("concurrent-%d", i), Template: "leaf", Properties: map[string]Property{"text": {Type: String}}}); err != nil {
+			if err := r.Register(Definition{Name: fmt.Sprintf("concurrent-%d", i), Properties: map[string]Property{"text": {Type: String}}}); err != nil {
 				t.Error(err)
 			}
 			for j := 0; j < 10; j++ {
@@ -281,7 +281,7 @@ func TestDeepRegistryDefinitionsSnapshotAndConcurrency(t *testing.T) {
 }
 
 func TestPropertyJSONRoundTrip(t *testing.T) {
-	raw := `{"type":"array","target":"Rows","maxItems":10,"items":{"type":"object","properties":{"id":{"type":"string","target":"ID","format":"identifier"}},"maxProperties":8}}`
+	raw := `{"type":"array","maxItems":10,"items":{"type":"object","properties":{"id":{"type":"string","format":"identifier"}},"maxProperties":8}}`
 	var p Property
 	if err := json.Unmarshal([]byte(raw), &p); err != nil {
 		t.Fatal(err)
@@ -299,18 +299,6 @@ func TestPropertyJSONRoundTrip(t *testing.T) {
 	}
 }
 
-func TestDictionaryCannotShadowDeclaredTarget(t *testing.T) {
-	p := checkedProperty(t, Property{Type: Object, Properties: map[string]Property{"url": {Type: String, Target: "URL", Format: "url"}}, AdditionalProperties: &Property{Type: String}})
-	for _, v := range []map[string]string{{"URL": "javascript:alert(1)"}, {"url": "/safe", "URL": "/other"}} {
-		if _, err := normalize(p, v); err == nil {
-			t.Fatalf("dictionary bypassed target contract: %#v", v)
-		}
-	}
-	if _, err := normalize(p, map[string]string{"url": "/safe", "other": "safe text"}); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func TestReviewedStructuredDataAndNestedSelectors(t *testing.T) {
 	for _, name := range []string{"data", "Data", "DataPoints", "dataset"} {
 		if !propertyAllowed(name, Property{Type: Array, Items: &Property{Type: Number}}) {
@@ -324,247 +312,5 @@ func TestReviewedStructuredDataAndNestedSelectors(t *testing.T) {
 		if !propertyAllowedAt(name, Property{Type: String, Format: "text"}, false) {
 			t.Errorf("nested data %s rejected", name)
 		}
-	}
-}
-
-func TestSandboxDocumentSafety(t *testing.T) {
-	p, err := validatePropertyPolicy(Property{Type: String, Format: "sandbox-html"}, nil, true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, input := range []string{`<h1>Hello</h1><p>Safe &amp; sound</p>`, `<!doctype html><html><head><title>Preview</title></head><body><a href="/help">Help</a><img src="/preview.png" alt="preview"></body></html>`} {
-		got, err := normalize(p, input)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, ok := got.(string); !ok {
-			t.Fatalf("HTML became a trusted value: %T", got)
-		}
-	}
-	for _, input := range []string{
-		`<img src="https://evil.example/tracker">`,
-		`<script>alert(1)</script>`,
-		`<svg><image href="https://evil.example/x"/></svg>`,
-		`<img src="/x" onerror="alert(1)">`,
-		`<meta http-equiv="refresh" content="0;url=https://evil.example">`,
-		`<style>body{background:url(https://evil.example/x)}</style>`,
-		`<div style="background:url(https://evil.example/x)">x</div>`,
-		`<link rel="stylesheet" href="/x.css">`,
-		`<iframe src="/embed"></iframe>`,
-		`<object data="/embed"></object>`,
-		`<a href="javascript:alert(1)">bad</a>`,
-		`<img srcset="/safe.png 1x, https://evil.example/x 2x">`,
-		`<form action="/submit"><input></form>`,
-		`<img src="data:image/svg+xml,bad">`,
-	} {
-		if _, err := normalize(p, input); err == nil {
-			t.Errorf("unsafe document accepted: %s", input)
-		}
-	}
-	policy := func(format, raw string) bool {
-		return format == "image-url" && strings.HasPrefix(raw, "https://images.example/")
-	}
-	p, err = validatePropertyPolicy(Property{Type: String, Format: "sandbox-html"}, policy, true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := normalize(p, `<img src="https://images.example/photo.png">`); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := normalize(p, `<a href="https://images.example/path">link</a>`); err == nil {
-		t.Fatal("image permission authorized link URL")
-	}
-}
-
-func TestColorAndInertDesignFormats(t *testing.T) {
-	p := checkedProperty(t, Property{Type: String, Format: "color"})
-	for _, v := range []string{"red", "transparent", "currentColor", "#abc", "#abcf", "#123456", "#12345678", "rgb(12 23 34 / 0.5)", "hsl(180, 50%, 20%)"} {
-		if _, err := normalize(p, v); err != nil {
-			t.Errorf("safe color %q: %v", v, err)
-		}
-	}
-	for _, v := range []string{"url(https://evil.example/x)", "var(--external)", "red; background:url(/x)", "expression(alert(1))", "r\\65 d", "@import '/x'", "#12345", "rgba(1, 2, 3, x)"} {
-		if _, err := normalize(p, v); err == nil {
-			t.Errorf("unsafe color accepted: %q", v)
-		}
-	}
-	if !propertyAllowed("target", Property{Type: String, Format: "numeric-token"}) {
-		t.Fatal("numeric chart goal rejected")
-	}
-	if _, err := normalize(Property{Type: String, Format: "numeric-token"}, "#unrelated-node"); err == nil {
-		t.Fatal("numeric goal admitted selector")
-	}
-	if !propertyAllowedAt("kind", Property{Type: String, Format: "action"}, false) {
-		t.Fatal("nested action kind rejected")
-	}
-	if !propertyAllowedAt("on", Property{Type: Boolean, Format: "data-token"}, false) {
-		t.Fatal("nested boolean On rejected")
-	}
-	if propertyAllowedAt("onclick", Property{Type: Boolean, Format: "data-token"}, false) {
-		t.Fatal("event handler admitted")
-	}
-}
-
-func TestInertDataCapabilityScope(t *testing.T) {
-	p := Property{Type: Object, Target: "Devtools", Format: "inert-data", Properties: map[string]Property{
-		"url":      {Type: String, Format: "text"},
-		"on":       {Type: String, Format: "text"},
-		"template": {Type: Object, Properties: map[string]Property{"name": {Type: String, Format: "text"}}},
-	}}
-	if _, err := validateProperty(p); err == nil {
-		t.Fatal("screen parameter acquired inert-data capability")
-	}
-	q, err := validatePropertyContext(p, nil, false, true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	result, err := normalize(q, map[string]any{"url": "wss://example.test/{{baseURL}}", "on": "u.id = o.user_id", "template": map[string]string{"name": "data, not a renderer"}})
-	if err != nil || result.(map[string]any)["url"] != "wss://example.test/{{baseURL}}" {
-		t.Fatalf("inert data changed: %#v %v", result, err)
-	}
-	for _, name := range []string{"Attrs", "onclick", "Style", "HTML"} {
-		bad := p
-		bad.Properties = map[string]Property{name: {Type: String, Format: "text"}}
-		if _, err := validatePropertyContext(bad, nil, false, true); err == nil {
-			t.Errorf("inert-data bypassed %s", name)
-		}
-	}
-	bad := p
-	bad.AdditionalProperties = &Property{Type: String}
-	if _, err := validatePropertyContext(bad, nil, false, true); err == nil {
-		t.Fatal("open inert dictionary accepted")
-	}
-	tpl := template.Must(template.New("leaf").Parse(`{{.Devtools}}`))
-	for _, target := range []string{"Devtools", "Other"} {
-		bad := p
-		bad.Target = target
-		if err := NewRegistry(tpl).Register(Definition{Name: "custom", Template: "leaf", Properties: map[string]Property{"data": bad}}); err == nil {
-			t.Fatal("unreviewed renderer acquired inert-data")
-		}
-	}
-}
-
-func TestMarkdownResourcePolicy(t *testing.T) {
-	p := checkedProperty(t, Property{Type: String, Format: "markdown-source"})
-	for _, source := range []string{"# Caller heading\n\n**bold**", "[local](/docs#section)", "![preview](/images/one.png)", "<script>alert(1)</script>", "<img src=\"https://evil.example/image\">"} {
-		if _, err := normalize(p, source); err != nil {
-			t.Errorf("safe markdown rejected: %q: %v", source, err)
-		}
-	}
-	for _, source := range []string{
-		"![tracker](https://evil.example/image.png)",
-		"[external](https://evil.example/)",
-		"<https://evil.example/>",
-		"https://evil.example/",
-		"![reference][tracking]\n\n[tracking]: https://evil.example/image.png",
-		"![encoded](https&#58;//evil.example/image.png)",
-		"![protocol-relative](//evil.example/image.png)",
-		"![relative](images/local.png)",
-	} {
-		if _, err := normalize(p, source); err == nil {
-			t.Errorf("external markdown resource accepted: %q", source)
-		}
-	}
-	p, err := validatePropertyPolicy(Property{Type: String, Format: "markdown-source"}, func(format, raw string) bool {
-		return format == "image-url" && strings.HasPrefix(raw, "https://images.example/")
-	}, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := normalize(p, "![allowed](https://images.example/a.png)"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := normalize(p, "[link](https://images.example/a.png)"); err == nil {
-		t.Fatal("image policy authorized markdown link")
-	}
-}
-
-func TestInlineLottieResourcePolicy(t *testing.T) {
-	p := checkedProperty(t, Property{Type: String, Format: "lottie-json"})
-	for _, source := range []string{`{"v":"5.7.4","fr":30,"ip":0,"op":2,"w":8,"h":8,"layers":[]}`, `{"layers":[{"ty":4,"shapes":[]}],"assets":[]}`} {
-		if _, err := normalize(p, source); err != nil {
-			t.Errorf("vector data rejected: %v", err)
-		}
-	}
-	for _, source := range []string{
-		`{"layers":[],"assets":[{"u":"https://evil.example/","p":"image.png"}]}`,
-		`{"layers":[],"fonts":{"list":[{"fPath":"https://evil.example/font.woff"}]}}`,
-		`{"layers":[{"ty":4,"x":"fetch('https://evil.example/')"}]}`,
-		`{"layers":[{"ty":4,"ks":{"p":"data:image/svg+xml,malicious"}}]}`,
-		`{"layers":[{"ty":2}]}`,
-		`{"layers":[{"ty":5}]}`,
-		`{"layers":[{"ty":0,"refId":"external"}]}`,
-		`{"layers":[{"ty":1,"sc":"url(https://evil.example/image)"}]}`,
-		`{"layers":[],"audio":{}}`,
-		`{"layers":[],"layers":[]}`,
-		`{"layers":[],"value":1e9999}`,
-		`{"layers":[]} trailing`,
-	} {
-		if _, err := normalize(p, source); err == nil {
-			t.Errorf("resource/executable Lottie data accepted: %s", source)
-		}
-	}
-}
-
-func TestCSSCustomPropertyName(t *testing.T) {
-	p := checkedProperty(t, Property{Type: String, Format: "css-token"})
-	for _, v := range []string{"", "--bg", "--surface", "--foreground-muted", "--color1"} {
-		if _, err := normalize(p, v); err != nil {
-			t.Fatal(err)
-		}
-	}
-	for _, v := range []string{"color", "--Color", "--x; background:url(/track)", "--x:url(/track)", "--x\\31", "--"} {
-		if _, err := normalize(p, v); err == nil {
-			t.Fatalf("unsafe CSS property accepted: %q", v)
-		}
-	}
-}
-
-func TestDefinitionAssetAllowlistAndSnapshot(t *testing.T) {
-	tpl := template.Must(template.New("leaf").Parse(`text`))
-	for _, assets := range [][]string{{"https://evil.example/script.js"}, {"map", "map"}, {"javascript"}} {
-		if err := NewRegistry(tpl).Register(Definition{Name: "custom", Template: "leaf", Assets: assets}); err == nil {
-			t.Fatalf("accepted asset %v", assets)
-		}
-	}
-	assets := []string{"map"}
-	r := NewRegistry(tpl)
-	if err := r.Register(Definition{Name: "custom", Template: "leaf", Assets: assets}); err != nil {
-		t.Fatal(err)
-	}
-	assets[0] = "changed"
-	snapshot := r.Definitions()
-	if snapshot[0].Assets[0] != "map" {
-		t.Fatal("input assets not copied")
-	}
-	snapshot[0].Assets[0] = "changed"
-	if r.Definitions()[0].Assets[0] != "map" {
-		t.Fatal("snapshot assets not copied")
-	}
-}
-
-func TestReviewedRendererCapabilities(t *testing.T) {
-	r, err := DefaultRegistry()
-	if err != nil {
-		t.Fatal(err)
-	}
-	data := Property{Type: Object, Target: "Devtools", Format: "inert-data", Properties: map[string]Property{"url": {Type: String, Format: "text"}, "template": {Type: Object, Properties: map[string]Property{"name": {Type: String, Format: "text"}}}}}
-	if err := r.Register(Definition{Name: "reviewed-devtools", Chapter: "devtools", Component: "JsonViewer", Properties: map[string]Property{"data": data}}); err != nil {
-		t.Fatal(err)
-	}
-	data.Target = "Other"
-	if err := r.Register(Definition{Name: "unreviewed-devtools-target", Chapter: "devtools", Component: "JsonViewer", Properties: map[string]Property{"data": data}}); err == nil {
-		t.Fatal("inert-data escaped reviewed target")
-	}
-	data.Target = "Devtools"
-	if err := r.Register(Definition{Name: "unreviewed-canvas", Chapter: "canvas", Component: "ColorPanel", Properties: map[string]Property{"data": data}}); err == nil {
-		t.Fatal("inert-data escaped reviewed renderer")
-	}
-	htmlProperty := Property{Type: String, Target: "HTML", Format: "sandbox-html"}
-	if err := r.Register(Definition{Name: "reviewed-sandbox", Chapter: "misc", Component: "WebView", SandboxHTML: true, Properties: map[string]Property{"html": htmlProperty}}); err != nil {
-		t.Fatal(err)
-	}
-	if err := r.Register(Definition{Name: "unreviewed-sandbox", Template: "sdui-text", SandboxHTML: true, Properties: map[string]Property{"html": htmlProperty}}); err == nil {
-		t.Fatal("sandbox capability escaped renderer")
 	}
 }

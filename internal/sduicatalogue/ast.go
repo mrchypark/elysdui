@@ -2,7 +2,7 @@ package sduicatalogue
 
 import (
 	"fmt"
-	ui "github.com/mrchypark/ely-htmx"
+	ui "github.com/mrchypark/elysdui/ui/gohtmx"
 	"html/template"
 	"regexp"
 	"sort"

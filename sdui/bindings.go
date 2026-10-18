@@ -16,7 +16,7 @@ type bindingScope struct {
 	params map[string]Property
 	vars   map[string]bool
 }
-type renderScope struct {
+type resolveScope struct {
 	data     map[string]any
 	params   map[string]any
 	vars     map[string]any
@@ -116,7 +116,7 @@ func pointerParts(path string) ([]string, error) {
 	return parts, nil
 }
 
-func (ref bindingRef) lookup(scope renderScope) (any, bool, error) {
+func (ref bindingRef) lookup(scope resolveScope) (any, bool, error) {
 	var value any = scope.data
 	switch ref.domain {
 	case "params":
@@ -195,7 +195,7 @@ func resolveBinding(data map[string]any, path string) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	value, present, err := ref.lookup(renderScope{data: data})
+	value, present, err := ref.lookup(resolveScope{data: data})
 	if err != nil {
 		return nil, err
 	}

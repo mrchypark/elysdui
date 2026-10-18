@@ -6,7 +6,7 @@ import subprocess
 import wave
 
 root = Path(__file__).resolve().parents[1]
-assets = root / 'assets'
+assets = root / 'ui' / 'gohtmx' / 'assets'
 gallery = root / 'internal/gallery/assets'
 (assets / 'sample.svg').write_text('''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 360" role="img" aria-label="Geometric sample">
 <rect width="640" height="360" fill="#eef2ff"/><circle cx="470" cy="110" r="55" fill="#335cff"/>

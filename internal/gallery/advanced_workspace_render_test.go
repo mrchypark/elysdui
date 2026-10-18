@@ -9,7 +9,7 @@ import (
 
 	"golang.org/x/net/html"
 
-	ui "github.com/mrchypark/ely-htmx"
+	ui "github.com/mrchypark/elysdui/ui/gohtmx"
 )
 
 func TestWorkspaceRenderCallerState(t *testing.T) {
@@ -155,7 +155,7 @@ func TestWorkspaceRenderCallerState(t *testing.T) {
 		}
 	}
 
-	css, err := os.ReadFile("../../assets/ely-api-workspace.css")
+	css, err := os.ReadFile("../../ui/gohtmx/assets/ely-api-workspace.css")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -274,7 +274,7 @@ func TestWorkspaceWelcomeInstancesRemainParsedSiblings(t *testing.T) {
 }
 
 func TestWorkspaceFileHexSourceFixture(t *testing.T) {
-	source, err := os.ReadFile("../../assets/ely/workspace-atrium.jpg")
+	source, err := os.ReadFile("../../ui/gohtmx/assets/ely/workspace-atrium.jpg")
 	if err != nil {
 		t.Fatal(err)
 	}

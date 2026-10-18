@@ -166,7 +166,7 @@ func DecodeNativeAction(r io.Reader) (NativeActionRequest, error) {
 // conditions, parameters and stable-key repetition as HTML rendering. It does
 // not execute HTML templates. ctx.Data must not be concurrently mutated.
 // This does not authorize any action; the host must validate action contracts.
-func (p *Plan) ResolveNative(regionID string, ctx RenderContext, capabilities []string) (NativeNode, error) {
+func (p *Plan) ResolveNative(regionID string, ctx ResolveContext, capabilities []string) (NativeNode, error) {
 	if p == nil || p.root == nil {
 		return NativeNode{}, fmt.Errorf("sdui: native resolution requires a compiled plan")
 	}
@@ -184,8 +184,8 @@ func (p *Plan) ResolveNative(regionID string, ctx RenderContext, capabilities []
 		}
 		supported[value] = true
 	}
-	scope := renderScope{data: ctx.Data}
-	budget := &renderBudget{ids: map[string]bool{p.id: true}}
+	scope := resolveScope{data: ctx.Data}
+	budget := &resolveBudget{ids: map[string]bool{p.id: true}}
 	for _, use := range root.enclosingUses {
 		var err error
 		scope, err = applyParameters(use, scope, budget)
@@ -210,12 +210,12 @@ func (p *Plan) ResolveNative(regionID string, ctx RenderContext, capabilities []
 	return nodes[0], nil
 }
 
-func (p *Plan) resolveNativeNode(node *compiledNode, scope renderScope, budget *renderBudget, supported map[string]bool, depth int) ([]NativeNode, error) {
+func (p *Plan) resolveNativeNode(node *compiledNode, scope resolveScope, budget *resolveBudget, supported map[string]bool, depth int) ([]NativeNode, error) {
 	if depth > MaxDepth {
 		return nil, fmt.Errorf("sdui: native depth exceeds limit")
 	}
 	result := []NativeNode{}
-	err := forEachNodeInstance(node, scope, budget, func(instance renderScope) error {
+	err := forEachNodeInstance(node, scope, budget, func(instance resolveScope) error {
 		budget.nodes++
 		if budget.nodes > MaxNodes {
 			return fmt.Errorf("sdui: native node count exceeds limit")
@@ -281,8 +281,8 @@ func (p *Plan) resolveNativeNode(node *compiledNode, scope renderScope, budget *
 			wire := make([]any, 0, len(options))
 			for _, option := range options {
 				item, ok := option.(map[string]any)
-				value, valueOK := item["Value"].(string)
-				label, labelOK := item["Label"].(string)
+				value, valueOK := item["value"].(string)
+				label, labelOK := item["label"].(string)
 				if !ok || len(item) != 2 || !valueOK || !labelOK || value == "" || label == "" || seen[value] {
 					return fmt.Errorf("%w: invalid or duplicate select option", ErrUnsupportedNative)
 				}

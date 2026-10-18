@@ -14,10 +14,10 @@ jobs:
         with:
           node-version: '24'
           cache: npm
-      - run: node interaction_overlay_test.mjs
+      - run: node ui/gohtmx/tests/unit/interaction_overlay_test.mjs
       - run: npm ci
       - run: npx playwright install --with-deps chromium
-      - run: node scripts/overlay-contracts-browser-test.mjs
+      - run: node ui/gohtmx/tests/browser/overlay-contracts-browser-test.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:

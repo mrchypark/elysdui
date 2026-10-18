@@ -11,7 +11,7 @@ import (
 )
 
 func TestNativeSupportInventoryMatchesPlatformCapabilities(t *testing.T) {
-	data, err := os.ReadFile("../native/support-matrix.json")
+	data, err := os.ReadFile("../contracts/native/profile-v1/support-matrix.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,8 +40,8 @@ func TestNativeSupportInventoryMatchesPlatformCapabilities(t *testing.T) {
 		t.Fatalf("inventory %v does not match Go capabilities %v", names, want)
 	}
 	for _, source := range []struct{ path, pattern string }{
-		{"../native/ios/Sources/ElyNativeCore/Protocol.swift", `public static let capabilities = \[([^\]]+)\]`},
-		{"../native/android/protocol/src/main/kotlin/dev/ely/nativeprofile/Protocol.kt", `val CAPABILITIES = listOf\(([^)]+)\)`},
+		{"../adapters/ios/Sources/ElyNativeCore/Protocol.swift", `public static let capabilities = \[([^\]]+)\]`},
+		{"../adapters/android/protocol/src/main/kotlin/dev/ely/nativeprofile/Protocol.kt", `val CAPABILITIES = listOf\(([^)]+)\)`},
 	} {
 		content, err := os.ReadFile(source.path)
 		if err != nil {

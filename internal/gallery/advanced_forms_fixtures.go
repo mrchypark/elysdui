@@ -3,7 +3,7 @@ package uiexamples
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/mrchypark/ely-htmx"
+	"github.com/mrchypark/elysdui/ui/gohtmx"
 )
 
 // Unicode 17 catalogue from the upstream gallery's emojis 0.9.0 dependency.

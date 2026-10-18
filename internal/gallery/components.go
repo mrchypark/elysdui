@@ -12,7 +12,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/mrchypark/ely-htmx"
+	"github.com/mrchypark/elysdui/ui/gohtmx"
 )
 
 //go:embed templates/*.html assets/*

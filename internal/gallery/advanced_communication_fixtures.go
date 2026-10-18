@@ -3,7 +3,7 @@ package uiexamples
 import (
 	"time"
 
-	"github.com/mrchypark/ely-htmx"
+	"github.com/mrchypark/elysdui/ui/gohtmx"
 )
 
 // advancedCommunicationCases gives each communication story its own caller-owned data.

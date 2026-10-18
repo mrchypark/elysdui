@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"github.com/mrchypark/ely-htmx/internal/sduicatalogue"
+	"github.com/mrchypark/elysdui/internal/sduicatalogue"
 	"os"
 	"path/filepath"
 )
@@ -37,12 +37,12 @@ func main() {
 	for _, file := range []struct {
 		name string
 		data []byte
-	}{{"sdui/catalogue_manifest.json.gz", manifest}, {"sdui/testdata/catalogue_fixtures.json.gz", fixtures}} {
+	}{{"adapters/gohtmx/catalogue_manifest.json.gz", manifest}, {"adapters/gohtmx/testdata/catalogue_fixtures.json.gz", fixtures}} {
 		path := filepath.Join(*root, file.name)
 		if *check {
 			current, err := os.ReadFile(path)
 			if err != nil || !bytes.Equal(current, file.data) {
-				fail(fmt.Errorf("%s is stale; run go generate ./sdui", file.name))
+				fail(fmt.Errorf("%s is stale; run go generate ./adapters/gohtmx", file.name))
 			}
 		} else {
 			if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {

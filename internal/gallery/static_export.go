@@ -14,7 +14,7 @@ import (
 	"regexp"
 	"strings"
 
-	ui "github.com/mrchypark/ely-htmx"
+	ui "github.com/mrchypark/elysdui/ui/gohtmx"
 	"golang.org/x/net/html"
 )
 
@@ -30,7 +30,7 @@ type StaticExport struct {
 func ExportStatic(dir, base string) (StaticExport, error) {
 	result := StaticExport{}
 	if !strings.HasPrefix(base, "/") || strings.HasPrefix(base, "//") || strings.ContainsAny(base, "?#\\\"'<> \t\r\n") || path.Clean(base) != strings.TrimSuffix(base, "/") && base != "/" {
-		return result, fmt.Errorf("base must be a clean absolute URL path, such as /ely-htmx/")
+		return result, fmt.Errorf("base must be a clean absolute URL path, such as /elysdui/go-htmx/")
 	}
 	base = strings.TrimSuffix(base, "/") + "/"
 	result.Base = base

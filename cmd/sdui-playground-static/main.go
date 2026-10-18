@@ -3,7 +3,7 @@ package main
 
 import (
 	"flag"
-	"github.com/mrchypark/ely-htmx/internal/playground"
+	"github.com/mrchypark/elysdui/internal/playground"
 	"log"
 )
 

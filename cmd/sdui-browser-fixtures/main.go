@@ -7,8 +7,7 @@ import (
 	"compress/gzip"
 	"encoding/json"
 	"fmt"
-	ui "github.com/mrchypark/ely-htmx"
-	"github.com/mrchypark/ely-htmx/sdui"
+	sdui "github.com/mrchypark/elysdui/adapters/gohtmx"
 	"io"
 	"log"
 	"net/http"
@@ -23,7 +22,7 @@ type fixture struct {
 }
 
 func main() {
-	raw, err := os.ReadFile("sdui/testdata/catalogue_fixtures.json.gz")
+	raw, err := os.ReadFile("adapters/gohtmx/testdata/catalogue_fixtures.json.gz")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -57,7 +56,7 @@ func main() {
 		log.Fatal(err)
 	}
 	mux := http.NewServeMux()
-	if err := ui.BindAssets(mux); err != nil {
+	if err := sdui.BindAssets(mux); err != nil {
 		log.Fatal(err)
 	}
 	mux.HandleFunc("GET /manifest", func(w http.ResponseWriter, r *http.Request) {

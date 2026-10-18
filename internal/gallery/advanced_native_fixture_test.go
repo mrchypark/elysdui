@@ -10,7 +10,7 @@ import (
 
 	"golang.org/x/net/html"
 
-	ui "github.com/mrchypark/ely-htmx"
+	ui "github.com/mrchypark/elysdui/ui/gohtmx"
 )
 
 func TestNativeDeviceSourceFixtures(t *testing.T) {

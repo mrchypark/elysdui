@@ -145,7 +145,7 @@ func compileCondition(condition *Condition, scope bindingScope) (*compiledCondit
 	return compile(*condition, 1)
 }
 
-func (condition *compiledCondition) evaluate(scope renderScope) (bool, error) {
+func (condition *compiledCondition) evaluate(scope resolveScope) (bool, error) {
 	if condition == nil {
 		return true, nil
 	}

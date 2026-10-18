@@ -58,7 +58,7 @@ func TestGalleryThumbnailsArePresentationOnly(t *testing.T) {
 }
 
 func TestGalleryPlaygroundLinksRespectStaticBase(t *testing.T) {
-	for _, base := range []string{"/", "/ely-htmx/"} {
+	for _, base := range []string{"/", "/elysdui/"} {
 		output, err := staticHTML([]byte(`<html><head></head><body><a href="/playground/">Playground</a></body></html>`), base, map[string]string{"/playground/": "playground/"})
 		if err != nil {
 			t.Fatal(err)

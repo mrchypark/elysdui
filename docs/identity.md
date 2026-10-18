@@ -4,7 +4,7 @@
 
 - Write the project name **elysdui**, lowercase. Uppercase section labels may use
   `ELYSDUI / GO + HTMX` to identify the web renderer.
-- Use the single canonical [SVG mark](../assets/elysdui-mark.svg), with the
+- Use the single canonical [SVG mark](../ui/gohtmx/assets/elysdui-mark.svg), with the
   wordmark beside it when space permits. The original flat overlapping frames
   represent one definition shared across screens. Do not redraw the geometry or
   create separate renderer logos.
@@ -14,8 +14,8 @@
 ## Shared appearance
 
 Use the existing **Ely Neutral** palette, with Inter for web UI and JetBrains Mono
-for code. The shared implementation is in `assets/site-chrome.css` and
-`assets/theme.js`; component defaults are in `assets/input.css`.
+for code. The shared implementation is in `ui/gohtmx/assets/site-chrome.css` and
+`ui/gohtmx/assets/theme.js`; component defaults are in `ui/gohtmx/assets/input.css`.
 
 | Role | Light | Dark |
 | --- | --- | --- |

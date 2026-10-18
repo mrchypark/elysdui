@@ -43,7 +43,7 @@ for (const [name, [from, to]] of Object.entries(navigationMarkupMutations)) {
   failsAt(() => mutateNavigationMarkup('', name), 'mutation anchor must occur exactly once');
   failsAt(() => mutateNavigationMarkup(source + source, name), 'mutation anchor must occur exactly once');
 }
-const css = readFileSync(new URL('../assets/ely-api-data.css', import.meta.url), 'utf8');
+const css = readFileSync(new URL('../ui/gohtmx/assets/ely-api-data.css', import.meta.url), 'utf8');
 assert.equal(mutateStickyHeading(css).replace('.ely-data__virtual-table thead{position:static;', '.ely-data__virtual-table thead{position:sticky;'), css);
 
 const heading = {getBoundingClientRect: () => ({top: 101, bottom: 133, height: 32})};
@@ -75,7 +75,7 @@ try {
       ? 'echo intentional-render-failure >&2\nexit 17'
       : 'if [ "$3" = "grouped-fragment" ]; then echo intentional-render-failure >&2; exit 17; fi\nprintf "<section>fixture</section>"';
     writeFileSync(join(bin, 'go'), `#!/bin/sh\n${body}\n`, {mode: 0o755});
-    const result = spawnSync(process.execPath, [fileURLToPath(new URL('./navigation-contracts-browser-test.mjs', import.meta.url))], {
+    const result = spawnSync(process.execPath, [fileURLToPath(new URL('../ui/gohtmx/tests/browser/navigation-contracts-browser-test.mjs', import.meta.url))], {
       cwd: directory, env: {...process.env, PATH: `${bin}:${process.env.PATH}`, NAVIGATION_NEGATIVE_CONTROL: ''}, encoding: 'utf8', timeout: 15000,
     });
     assert.equal(result.status, 1, `${stage}: rendering must fail before browser startup`);

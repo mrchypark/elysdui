@@ -1,10 +1,8 @@
 package sdui
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
 	"math"
 	"math/big"
 	"net/url"
@@ -15,10 +13,6 @@ import (
 	"strings"
 	"unicode"
 	"unicode/utf8"
-
-	"github.com/yuin/goldmark"
-	"github.com/yuin/goldmark/extension"
-	"golang.org/x/net/html"
 )
 
 const (
@@ -32,10 +26,7 @@ const (
 	HardMaxObjectProperties = 1024
 )
 
-var colorValue = regexp.MustCompile(`^([A-Za-z]{1,32}|#[A-Fa-f0-9]{3}|#[A-Fa-f0-9]{4}|#[A-Fa-f0-9]{6}|#[A-Fa-f0-9]{8}|(rgb|rgba|hsl|hsla)\([0-9.+% ,/\-]{1,100}\))$`)
-var cssToken = regexp.MustCompile(`^--[a-z][a-z0-9-]{0,63}$`)
 var numericToken = regexp.MustCompile(`^-?(0|[1-9][0-9]*)(\.[0-9]+)?$`)
-var fontFamilyValue = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9 ,_-]{0,127}$`)
 
 var dataToken = regexp.MustCompile(`^([A-Za-z0-9_][A-Za-z0-9_. -]{0,127}|#[A-Fa-f0-9]{3,8})$`)
 
@@ -85,20 +76,9 @@ func propertyAllowedAt(name string, p Property, root bool) bool {
 		return false
 	}
 	key := canonicalProperty(name)
-	// This exception is granted only for the audited, closed Devtools data
-	// object rendered by ws-scene-value. It does not grant HTML/CSS/attributes.
-	if !root && p.inertData {
-		if key == "style" && p.Type == String && p.Format == "text" {
-			return false
-		}
-		if key == "template" {
-			return true
-		}
-		if key == "on" && (p.Type == Boolean || p.Type == String && p.Format == "text") {
-			return true
-		}
-		if key == "url" && p.Type == String && p.Format == "text" {
-			return true
+	if !root && p.nestedPropertyAllowed != nil && !dangerousDictionaryKey(name) {
+		if allowed, handled := p.nestedPropertyAllowed(name, p); handled {
+			return allowed
 		}
 	}
 	if !root && key == "on" && p.Type == Boolean && p.Format == "data-token" {
@@ -156,25 +136,33 @@ func propertyAllowedAt(name string, p Property, root bool) bool {
 
 // validateProperty validates a host-defined contract and takes a deep snapshot.
 // Screen parameter contracts do not grant external URLs or sandbox capabilities.
-func validateProperty(p Property) (Property, error) { return validatePropertyPolicy(p, nil, false) }
-func validatePropertyPolicy(p Property, policy URLPolicy, sandbox bool) (Property, error) {
-	return validatePropertyContext(p, policy, sandbox, false)
+func validateProperty(p Property) (Property, error) { return validatePropertyPolicy(p, nil) }
+func validatePropertyPolicy(p Property, policy URLPolicy) (Property, error) {
+	return validatePropertyContext(p, policy, nil)
 }
-func validatePropertyContext(p Property, policy URLPolicy, sandbox, inert bool) (Property, error) {
+func validatePropertyContext(p Property, policy URLPolicy, formats map[string]FormatRule) (Property, error) {
 	count := 0
-	return validatePropertyAt(p, policy, sandbox, inert, 1, &count)
+	return validatePropertyAt(p, policy, formats, nil, 1, &count)
 }
-func validatePropertyAt(p Property, policy URLPolicy, sandbox, inert bool, depth int, count *int) (Property, error) {
+func validatePropertyAt(p Property, policy URLPolicy, formats map[string]FormatRule, nested NestedPropertyPolicy, depth int, count *int) (Property, error) {
 	*count++
 	if depth > MaxValueDepth || *count > MaxValues {
 		return Property{}, fmt.Errorf("property schema exceeds complexity limit")
 	}
-	p.urlPolicy, p.sandboxHTML, p.inertData = policy, sandbox, inert
-	if inert && p.AdditionalProperties != nil {
-		return Property{}, fmt.Errorf("inert-data requires recursively closed objects")
+	p.urlPolicy, p.formats = policy, formats
+	p.formatRule = nil
+	if rule, ok := formats[p.Format]; ok {
+		if err := validateHostFormat(p, rule); err != nil {
+			return Property{}, err
+		}
+		p.formatRule = &rule
+		if rule.NestedPropertyAllowed != nil {
+			nested = rule.NestedPropertyAllowed
+		}
 	}
-	if p.Target != "" && !propertyName.MatchString(p.Target) {
-		return Property{}, fmt.Errorf("invalid property target %q", p.Target)
+	p.nestedPropertyAllowed = nested
+	if nested != nil && p.AdditionalProperties != nil {
+		return Property{}, fmt.Errorf("host nested-property policy requires recursively closed objects")
 	}
 	if p.MaxLength < 0 || p.MaxLength > HardMaxStringBytes || p.MaxItems < 0 || p.MaxItems > HardMaxArrayItems || p.MaxProperties < 0 || p.MaxProperties > HardMaxObjectProperties {
 		return Property{}, fmt.Errorf("property limit exceeds supported bounds")
@@ -188,10 +176,10 @@ func validatePropertyAt(p Property, policy URLPolicy, sandbox, inert bool, depth
 		}
 		alternatives := make([]Property, len(p.OneOf))
 		for i, alternative := range p.OneOf {
-			if alternative.Required || alternative.Default != nil || alternative.Target != "" || alternative.Nullable || len(alternative.OneOf) > 0 {
-				return Property{}, fmt.Errorf("oneOf alternatives cannot declare targets, defaults, required, nullable or nested unions")
+			if alternative.Required || alternative.Default != nil || alternative.Nullable || len(alternative.OneOf) > 0 {
+				return Property{}, fmt.Errorf("oneOf alternatives cannot declare defaults, required, nullable or nested unions")
 			}
-			q, err := validatePropertyAt(alternative, policy, sandbox, inert, depth+1, count)
+			q, err := validatePropertyAt(alternative, policy, formats, nested, depth+1, count)
 			if err != nil {
 				return Property{}, fmt.Errorf("oneOf[%d]: %w", i, err)
 			}
@@ -242,7 +230,7 @@ func validatePropertyAt(p Property, policy URLPolicy, sandbox, inert bool, depth
 		if p.Type == Array && p.Items == nil {
 			return Property{}, fmt.Errorf("array requires typed items")
 		}
-		if err := validateFormat(p, sandbox); err != nil {
+		if err := validateFormat(p); err != nil {
 			return Property{}, err
 		}
 		p.Enum = append([]string(nil), p.Enum...)
@@ -274,22 +262,22 @@ func validatePropertyAt(p Property, policy URLPolicy, sandbox, inert bool, depth
 			return Property{}, fmt.Errorf("reversed property bounds")
 		}
 		if p.Items != nil {
-			q, err := validatePropertyAt(*p.Items, policy, sandbox, inert, depth+1, count)
+			q, err := validatePropertyAt(*p.Items, policy, formats, nested, depth+1, count)
 			if err != nil {
 				return Property{}, fmt.Errorf("items: %w", err)
 			}
-			if q.Target != "" || q.Required || q.Default != nil {
-				return Property{}, fmt.Errorf("array items cannot declare targets, required or defaults")
+			if q.Required || q.Default != nil {
+				return Property{}, fmt.Errorf("array items cannot declare required or defaults")
 			}
 			p.Items = &q
 		}
 		if p.AdditionalProperties != nil {
-			q, err := validatePropertyAt(*p.AdditionalProperties, policy, sandbox, inert, depth+1, count)
+			q, err := validatePropertyAt(*p.AdditionalProperties, policy, formats, nested, depth+1, count)
 			if err != nil {
 				return Property{}, fmt.Errorf("additionalProperties: %w", err)
 			}
-			if q.Target != "" || q.Required || q.Default != nil {
-				return Property{}, fmt.Errorf("dictionary values cannot declare targets, required or defaults")
+			if q.Required || q.Default != nil {
+				return Property{}, fmt.Errorf("dictionary values cannot declare required or defaults")
 			}
 			p.AdditionalProperties = &q
 		}
@@ -302,20 +290,12 @@ func validatePropertyAt(p Property, policy URLPolicy, sandbox, inert bool, depth
 				return Property{}, fmt.Errorf("too many declared object properties")
 			}
 			properties := make(map[string]Property, len(p.Properties))
-			targets := map[string]bool{}
 			for key, child := range p.Properties {
-				child.inertData = inert
+				child.nestedPropertyAllowed = nested
 				if !propertyAllowedAt(key, child, false) {
 					return Property{}, fmt.Errorf("reserved or invalid nested property %q", key)
 				}
-				if child.Target == "" {
-					child.Target = key
-				}
-				if !propertyAllowedAt(child.Target, child, false) || targets[child.Target] {
-					return Property{}, fmt.Errorf("reserved, invalid or duplicate nested target %q", child.Target)
-				}
-				targets[child.Target] = true
-				q, err := validatePropertyAt(child, policy, sandbox, inert, depth+1, count)
+				q, err := validatePropertyAt(child, policy, formats, nested, depth+1, count)
 				if err != nil {
 					return Property{}, fmt.Errorf("property %s: %w", key, err)
 				}
@@ -368,15 +348,12 @@ func distinctObjects(a, b Property) bool {
 	return false
 }
 
-func validateFormat(p Property, sandbox bool) error {
+func validateFormat(p Property) error {
 	if p.Format == "" {
 		return nil
 	}
-	if p.Format == "inert-data" {
-		if p.inertData && p.Type == Object && p.AdditionalProperties == nil {
-			return nil
-		}
-		return fmt.Errorf("inert-data requires the audited Devtools closed-object capability")
+	if p.formatRule != nil {
+		return nil
 	}
 	if p.Format == "identifier" && p.Type == Integer {
 		return nil
@@ -393,13 +370,8 @@ func validateFormat(p Property, sandbox bool) error {
 		return fmt.Errorf("format %q requires a string", p.Format)
 	}
 	switch p.Format {
-	case "text", "url", "image-url", "media-url", "action", "identifier", "data-token", "color", "numeric-token", "font-family", "markdown-source", "lottie-json", "css-token":
+	case "field-name", "text", "url", "image-url", "media-url", "action", "identifier", "data-token", "numeric-token":
 		return nil
-	case "sandbox-html":
-		if sandbox {
-			return nil
-		}
-		return fmt.Errorf("sandbox-html requires the reviewed component capability")
 	default:
 		return fmt.Errorf("unknown semantic format %q", p.Format)
 	}
@@ -587,26 +559,12 @@ func normalizeValue(p Property, value any, budget *valueBudget, depth int) (any,
 			}
 			child, declared := p.Properties[key]
 			if !declared {
-				// A dictionary key cannot bypass a declared wire field's
-				// contract by spelling its remapped template target directly.
-				for wireKey, declaredProperty := range p.Properties {
-					target := declaredProperty.Target
-					if target == "" {
-						target = wireKey
-					}
-					if key == target {
-						return nil, fmt.Errorf("dictionary key %q conflicts with declared target", key)
-					}
-				}
 				if p.AdditionalProperties == nil {
 					return nil, fmt.Errorf("unknown property %q", key)
 				}
 				child = *p.AdditionalProperties
 			}
-			target := child.Target
-			if target == "" || !declared {
-				target = key
-			}
+			target := key
 			if err := budget.addBytes(len(target)); err != nil {
 				return nil, err
 			}
@@ -624,10 +582,7 @@ func normalizeValue(p Property, value any, budget *valueBudget, depth int) (any,
 			if seen[key] {
 				continue
 			}
-			target := child.Target
-			if target == "" {
-				target = key
-			}
+			target := key
 			if child.Default != nil {
 				if err := budget.addBytes(len(target)); err != nil {
 					return nil, err
@@ -681,20 +636,30 @@ func normalizeString(p Property, text string) (string, error) {
 			return "", fmt.Errorf("unsupported token %q", text)
 		}
 	}
-	switch p.Format {
-	case "", "text":
-	case "sandbox-html":
-		if !p.sandboxHTML {
-			return "", fmt.Errorf("sandbox-html requires the reviewed component capability")
-		}
-		safe, err := normalizeSandboxHTML(text, p.urlPolicy)
+	if p.formatRule != nil && p.formatRule.NormalizeString != nil {
+		result, err := p.formatRule.NormalizeString(text, p.urlPolicy)
 		if err != nil {
 			return "", err
 		}
-		if len(safe) > limit {
-			return "", fmt.Errorf("normalized sandbox document exceeds string limit")
+		if len(result) > limit || !utf8.ValidString(result) {
+			return "", fmt.Errorf("host format output exceeds string bounds")
 		}
-		return safe, nil
+		if len(p.Enum) > 0 {
+			found := false
+			for _, token := range p.Enum {
+				if result == token {
+					found = true
+					break
+				}
+			}
+			if !found {
+				return "", fmt.Errorf("host format output is not an enum token")
+			}
+		}
+		return result, nil
+	}
+	switch p.Format {
+	case "", "text", "field-name":
 	case "url", "image-url", "media-url":
 		if err := validatePropertyURL(p.Format, text, p.urlPolicy); err != nil {
 			return "", err
@@ -703,29 +668,9 @@ func normalizeString(p Property, text string) (string, error) {
 		if !registryKey.MatchString(text) {
 			return "", fmt.Errorf("invalid %s", p.Format)
 		}
-	case "markdown-source":
-		if err := validateMarkdownSource(text, p.urlPolicy); err != nil {
-			return "", err
-		}
-	case "lottie-json":
-		if err := validateLottieJSON(text); err != nil {
-			return "", err
-		}
-	case "css-token":
-		if text != "" && !cssToken.MatchString(text) {
-			return "", fmt.Errorf("invalid CSS custom property name")
-		}
-	case "color":
-		if !colorValue.MatchString(text) {
-			return "", fmt.Errorf("invalid color value")
-		}
 	case "numeric-token":
 		if len(text) > 128 || !numericToken.MatchString(text) {
 			return "", fmt.Errorf("invalid numeric token")
-		}
-	case "font-family":
-		if !fontFamilyValue.MatchString(text) {
-			return "", fmt.Errorf("invalid font family")
 		}
 	case "data-token":
 		if !dataToken.MatchString(text) {
@@ -734,7 +679,7 @@ func normalizeString(p Property, text string) (string, error) {
 	default:
 		return "", fmt.Errorf("unknown semantic format %q", p.Format)
 	}
-	if p.Format == "" && p.Target == "Name" && !registryKey.MatchString(text) {
+	if p.Format == "field-name" && !registryKey.MatchString(text) {
 		return "", fmt.Errorf("field name must start with a letter and use at most 128 letters, digits, dots, underscores or hyphens; leading underscores are reserved")
 	}
 	return text, nil
@@ -779,7 +724,6 @@ func validatePropertyURL(format, raw string, policy URLPolicy) error {
 func cloneDefinition(d Definition) Definition {
 	d.Properties = cloneProperties(d.Properties)
 	d.Events = append([]string(nil), d.Events...)
-	d.Assets = append([]string(nil), d.Assets...)
 	if d.Slots != nil {
 		slots := make(map[string]SlotDefinition, len(d.Slots))
 		for key, value := range d.Slots {
@@ -939,298 +883,14 @@ func exactInteger(value any) (int, error) {
 	return result, nil
 }
 
-// normalizeSandboxHTML rejects unsupported capabilities before serializing a
-// canonical inert document. The iframe sandbox is defense in depth, not a
-// substitute for the same resource-origin policy used by ordinary URL props.
-func normalizeSandboxHTML(source string, policy URLPolicy) (string, error) {
-	doc, err := html.Parse(strings.NewReader(source))
-	if err != nil {
-		return "", fmt.Errorf("invalid sandbox document: %w", err)
-	}
-	tags := map[string]bool{}
-	for _, tag := range strings.Fields("html head title body main section article aside header footer nav div span p br hr h1 h2 h3 h4 h5 h6 ul ol li dl dt dd table caption thead tbody tfoot tr th td pre code blockquote q em strong b i u s small sub sup mark a img figure figcaption details summary") {
-		tags[tag] = true
-	}
+// Normalize validates and copies a value under this property's semantic
+// contract. Properties returned by a Registry retain that host's format and URL
+// policies; arbitrary properties never acquire those capabilities implicitly.
+func (p Property) Normalize(value any) (any, error) {
 	count := 0
-	var check func(*html.Node, int) error
-	check = func(node *html.Node, depth int) error {
-		count++
-		if depth > 64 || count > MaxValues {
-			return fmt.Errorf("sandbox document exceeds complexity limit")
-		}
-		switch node.Type {
-		case html.DocumentNode, html.TextNode, html.CommentNode:
-		case html.DoctypeNode:
-			if !strings.EqualFold(node.Data, "html") || len(node.Attr) > 0 {
-				return fmt.Errorf("unsupported sandbox doctype")
-			}
-		case html.ElementNode:
-			if node.Namespace != "" || !tags[node.Data] {
-				return fmt.Errorf("sandbox document element %q is unsupported", node.Data)
-			}
-			seen := map[string]bool{}
-			for _, attr := range node.Attr {
-				if attr.Namespace != "" || seen[attr.Key] {
-					return fmt.Errorf("sandbox document attribute %q is unsupported", attr.Key)
-				}
-				seen[attr.Key] = true
-				allowed := false
-				switch attr.Key {
-				case "title", "lang":
-					allowed = true
-				case "dir":
-					allowed = attr.Val == "ltr" || attr.Val == "rtl" || attr.Val == "auto"
-				case "href":
-					allowed = node.Data == "a"
-					if allowed {
-						if err := validatePropertyURL("url", attr.Val, policy); err != nil {
-							return fmt.Errorf("sandbox href: %w", err)
-						}
-					}
-				case "src":
-					allowed = node.Data == "img"
-					if allowed {
-						if err := validatePropertyURL("image-url", attr.Val, policy); err != nil {
-							return fmt.Errorf("sandbox src: %w", err)
-						}
-					}
-				case "alt":
-					allowed = node.Data == "img"
-				case "width", "height":
-					if node.Data == "img" {
-						n, err := strconv.Atoi(attr.Val)
-						allowed = err == nil && n >= 1 && n <= 4096
-					}
-				case "colspan", "rowspan":
-					if node.Data == "td" || node.Data == "th" {
-						n, err := strconv.Atoi(attr.Val)
-						allowed = err == nil && n >= 1 && n <= 100
-					}
-				case "scope":
-					allowed = node.Data == "th" && (attr.Val == "row" || attr.Val == "col" || attr.Val == "rowgroup" || attr.Val == "colgroup")
-				case "start":
-					if node.Data == "ol" {
-						n, err := strconv.Atoi(attr.Val)
-						allowed = err == nil && n >= -100000 && n <= 100000
-					}
-				case "open":
-					allowed = node.Data == "details" && (attr.Val == "" || attr.Val == "open")
-				}
-				if !allowed {
-					return fmt.Errorf("sandbox document attribute %q on %s is unsupported", attr.Key, node.Data)
-				}
-			}
-		default:
-			return fmt.Errorf("unsupported sandbox document node")
-		}
-		for child := node.FirstChild; child != nil; child = child.NextSibling {
-			if err := check(child, depth+1); err != nil {
-				return err
-			}
-		}
-		return nil
-	}
-	if err := check(doc, 0); err != nil {
-		return "", err
-	}
-	var output bytes.Buffer
-	if err := html.Render(&output, doc); err != nil {
-		return "", fmt.Errorf("serialize sandbox document: %w", err)
-	}
-	return output.String(), nil
-}
-
-var markdownSourceValidator = goldmark.New(goldmark.WithExtensions(extension.GFM))
-
-type valueOutputBuffer struct{ bytes.Buffer }
-
-func (b *valueOutputBuffer) Write(p []byte) (int, error) {
-	if len(p) > MaxNormalizationBytes-b.Len() {
-		return 0, fmt.Errorf("formatted value exceeds output limit")
-	}
-	return b.Buffer.Write(p)
-}
-
-// The renderer uses the same GFM configuration as ui.markdownHTML. Inspecting
-// its rendered destinations handles escapes, references, entities and autolinks
-// consistently; the original source stays ordinary text for the trusted helper.
-func validateMarkdownSource(source string, policy URLPolicy) error {
-	var rendered valueOutputBuffer
-	if err := markdownSourceValidator.Convert([]byte(source), &rendered); err != nil {
-		return fmt.Errorf("invalid markdown: %w", err)
-	}
-	doc, err := html.Parse(strings.NewReader(rendered.String()))
+	validated, err := validatePropertyAt(p, p.urlPolicy, p.formats, p.nestedPropertyAllowed, 1, &count)
 	if err != nil {
-		return fmt.Errorf("invalid rendered markdown: %w", err)
+		return nil, err
 	}
-	count := 0
-	var walk func(*html.Node, int) error
-	walk = func(node *html.Node, depth int) error {
-		count++
-		if count > MaxValues || depth > 64 {
-			return fmt.Errorf("markdown exceeds complexity limit")
-		}
-		if node.Type == html.ElementNode {
-			for _, attr := range node.Attr {
-				format := ""
-				if attr.Key == "href" {
-					format = "url"
-				}
-				if attr.Key == "src" {
-					format = "image-url"
-				}
-				if format != "" {
-					if err := validatePropertyURL(format, attr.Val, policy); err != nil {
-						return fmt.Errorf("markdown %s: %w", attr.Key, err)
-					}
-				}
-			}
-		}
-		for child := node.FirstChild; child != nil; child = child.NextSibling {
-			if err := walk(child, depth+1); err != nil {
-				return err
-			}
-		}
-		return nil
-	}
-	return walk(doc, 0)
-}
-
-// Inline Lottie data is intentionally a bounded vector-only subset. External
-// assets, fonts, text, expressions, audio and precompositions are host-owned
-// integrations, not capabilities granted by an arbitrary animation string.
-func validateLottieJSON(source string) error {
-	check := json.NewDecoder(strings.NewReader(source))
-	check.UseNumber()
-	if err := checkJSONValue(check, 0); err != nil {
-		return fmt.Errorf("invalid Lottie JSON: %w", err)
-	}
-	if _, err := check.Token(); err != io.EOF {
-		return fmt.Errorf("trailing Lottie JSON")
-	}
-	decoder := json.NewDecoder(strings.NewReader(source))
-	decoder.UseNumber()
-	var root map[string]any
-	if err := decoder.Decode(&root); err != nil || root == nil {
-		return fmt.Errorf("Lottie animation must be an object")
-	}
-	if _, ok := root["layers"].([]any); !ok {
-		return fmt.Errorf("Lottie animation requires layers")
-	}
-	for key, maximum := range map[string]float64{"fr": 240, "w": 8192, "h": 8192} {
-		if value, exists := root[key]; exists {
-			number, ok := value.(json.Number)
-			if !ok {
-				return fmt.Errorf("Lottie %s must be numeric", key)
-			}
-			f, err := number.Float64()
-			if err != nil || f <= 0 || f > maximum {
-				return fmt.Errorf("Lottie %s exceeds supported bounds", key)
-			}
-		}
-	}
-	budget := newValueBudget()
-	var walk func(any, int, string) error
-	walk = func(value any, depth int, key string) error {
-		if depth > MaxValueDepth {
-			return fmt.Errorf("Lottie nesting exceeds limit")
-		}
-		if err := budget.consume(8); err != nil {
-			return err
-		}
-		switch v := value.(type) {
-		case nil, bool:
-			return nil
-		case json.Number:
-			if len(v) > 128 {
-				return fmt.Errorf("Lottie number exceeds limit")
-			}
-			number, err := v.Float64()
-			if err != nil || math.IsNaN(number) || math.IsInf(number, 0) || math.Abs(number) > 10000000 {
-				return fmt.Errorf("invalid or excessive Lottie number")
-			}
-			if key == "p" && (number < 0 || number > 256 || math.Trunc(number) != number) {
-				return fmt.Errorf("Lottie gradient stops exceed supported bounds")
-			}
-		case string:
-			if len(v) > MaxStringBytes {
-				return fmt.Errorf("Lottie string exceeds limit")
-			}
-			if err := budget.addBytes(len(v)); err != nil {
-				return err
-			}
-			if key == "x" || key == "p" {
-				return fmt.Errorf("Lottie expressions and string resource paths are unsupported")
-			}
-		case []any:
-			if len(v) > HardMaxArrayItems {
-				return fmt.Errorf("Lottie array exceeds limit")
-			}
-			for _, item := range v {
-				if err := walk(item, depth+1, key); err != nil {
-					return err
-				}
-			}
-		case map[string]any:
-			if len(v) > MaxObjectProperties {
-				return fmt.Errorf("Lottie object exceeds limit")
-			}
-			for name, item := range v {
-				if len(name) > 128 || dangerousDictionaryKey(name) {
-					return fmt.Errorf("invalid Lottie key")
-				}
-				switch strings.ToLower(name) {
-				case "assets", "fonts", "chars", "ef":
-					empty := false
-					switch collection := item.(type) {
-					case []any:
-						empty = len(collection) == 0
-					case map[string]any:
-						empty = len(collection) == 0
-					case nil:
-						empty = true
-					}
-					if !empty {
-						return fmt.Errorf("Lottie %s resources are unsupported", name)
-					}
-				case "refid", "u", "url", "href", "src", "fpath", "ffamily", "expression", "expressions", "audio":
-					return fmt.Errorf("Lottie resource or executable field %q is unsupported", name)
-				}
-				if name == "layers" {
-					layers, ok := item.([]any)
-					if !ok {
-						return fmt.Errorf("Lottie layers must be an array")
-					}
-					for _, layer := range layers {
-						object, ok := layer.(map[string]any)
-						if !ok {
-							return fmt.Errorf("Lottie layer must be an object")
-						}
-						n, err := exactInteger(object["ty"])
-						if err != nil || (n != 1 && n != 3 && n != 4) {
-							return fmt.Errorf("only Lottie solid, null and shape layers are supported")
-						}
-					}
-				}
-				if name == "ty" {
-					if shape, ok := item.(string); ok && shape == "rp" {
-						return fmt.Errorf("Lottie repeater shapes are unsupported")
-					}
-				}
-				if name == "sc" {
-					color, ok := item.(string)
-					if !ok || !colorValue.MatchString(color) {
-						return fmt.Errorf("invalid Lottie solid color")
-					}
-				}
-				if err := walk(item, depth+1, name); err != nil {
-					return err
-				}
-			}
-		default:
-			return fmt.Errorf("unsupported Lottie value")
-		}
-		return nil
-	}
-	return walk(root, 1, "")
+	return normalize(validated, value)
 }

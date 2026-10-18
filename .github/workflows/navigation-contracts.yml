@@ -15,16 +15,16 @@ jobs:
           node-version: '24'
           cache: npm
       - run: go test ./... -run 'NavigationSelection|Segmented'
-      - run: node navigation_selection_test.mjs
+      - run: node ui/gohtmx/tests/unit/navigation_selection_test.mjs
       - run: npm ci
       - run: npx playwright install --with-deps chromium
-      - run: node scripts/navigation-contracts-browser-test.mjs
-      - run: NAVIGATION_NEGATIVE_CONTROL=aria-controls node scripts/navigation-contracts-browser-test.mjs
-      - run: NAVIGATION_NEGATIVE_CONTROL=aria-labelledby node scripts/navigation-contracts-browser-test.mjs
-      - run: NAVIGATION_NEGATIVE_CONTROL=disabled-panel node scripts/navigation-contracts-browser-test.mjs
-      - run: NAVIGATION_NEGATIVE_CONTROL=repeat-radio node scripts/navigation-contracts-browser-test.mjs
-      - run: NAVIGATION_NEGATIVE_CONTROL=selection-payload node scripts/navigation-contracts-browser-test.mjs
-      - run: NAVIGATION_NEGATIVE_CONTROL=radio-keyboard node scripts/navigation-contracts-browser-test.mjs
+      - run: node ui/gohtmx/tests/browser/navigation-contracts-browser-test.mjs
+      - run: NAVIGATION_NEGATIVE_CONTROL=aria-controls node ui/gohtmx/tests/browser/navigation-contracts-browser-test.mjs
+      - run: NAVIGATION_NEGATIVE_CONTROL=aria-labelledby node ui/gohtmx/tests/browser/navigation-contracts-browser-test.mjs
+      - run: NAVIGATION_NEGATIVE_CONTROL=disabled-panel node ui/gohtmx/tests/browser/navigation-contracts-browser-test.mjs
+      - run: NAVIGATION_NEGATIVE_CONTROL=repeat-radio node ui/gohtmx/tests/browser/navigation-contracts-browser-test.mjs
+      - run: NAVIGATION_NEGATIVE_CONTROL=selection-payload node ui/gohtmx/tests/browser/navigation-contracts-browser-test.mjs
+      - run: NAVIGATION_NEGATIVE_CONTROL=radio-keyboard node ui/gohtmx/tests/browser/navigation-contracts-browser-test.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:

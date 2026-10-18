@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	ui "github.com/mrchypark/ely-htmx"
+	ui "github.com/mrchypark/elysdui/ui/gohtmx"
 )
 
 func TestExportPreservesAssetsAndDoesNotOverwrite(t *testing.T) {

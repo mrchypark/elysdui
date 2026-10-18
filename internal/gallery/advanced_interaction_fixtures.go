@@ -3,7 +3,7 @@ package uiexamples
 import (
 	"fmt"
 
-	"github.com/mrchypark/ely-htmx"
+	"github.com/mrchypark/elysdui/ui/gohtmx"
 )
 
 // advancedInteractionCases gives the gallery one caller-owned instance for every interaction primary.

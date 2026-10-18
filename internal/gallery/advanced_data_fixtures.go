@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/mrchypark/ely-htmx"
+	"github.com/mrchypark/elysdui/ui/gohtmx"
 )
 
 func uptimeSamples(count int, normal string, changedAt int, changed string) []map[string]any {

@@ -1,6 +1,6 @@
 package playground
 
-import "github.com/mrchypark/ely-htmx/sdui"
+import sdui "github.com/mrchypark/elysdui/adapters/gohtmx"
 
 type example struct {
 	ID     string         `json:"id"`
