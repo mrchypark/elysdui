@@ -34,9 +34,10 @@ assert.equal(changes.at(-1).value, '');
 let closed = false;
 const radios = ['density', 'density', 'color'].map(group => ({dataset: {interactionMenuRadio: group}, setAttribute(_name, value) { this.checked = value; }, checked: 'true'}));
 radios[1].value = 'compact';
-radios[1].closest = () => ({querySelectorAll: () => radios});
+const radioPanel = {querySelectorAll: () => radios};
+radios.forEach(radio => radio.closest = () => radioPanel);
 const radioSource = source.slice(source.indexOf('    if (radio) {'), source.indexOf('    if (checkbox) {'));
-runInNewContext(`(() => {${radioSource}})()`, {radio: radios[1], root: {}, change() {}, close(restore) { closed = restore; }});
+runInNewContext(`(() => {${radioSource}})()`, {radio: radios[1], root: {}, change() {}, menuAction() {}, event: {}, close(restore) { closed = restore; }});
 assert.deepEqual(radios.map(item => item.checked), ['false', 'true', 'true']);
 assert.ok(closed, 'radio selection closes and restores focus');
 

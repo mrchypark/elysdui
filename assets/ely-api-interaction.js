@@ -125,13 +125,34 @@ const validateOverlayForm = form => {
   if (status) status.textContent = message;
   return !message;
 };
+// Keep ordinary menus in their positioned host's coordinate system. This
+// preserves following layout movement; resize/scroll also recheck collisions.
+const placeMenu = (panel, anchor) => {
+  placeOverlay(panel, anchor);
+  const parent = panel.parentElement;
+  const box = parent.getBoundingClientRect?.();
+  if (box) Object.assign(panel.style, {position: 'absolute', left: `${parseFloat(panel.style.left) - box.left + parent.scrollLeft - parent.clientLeft}px`, top: `${parseFloat(panel.style.top) - box.top + parent.scrollTop - parent.clientTop}px`});
+};
+
+// Per-panel references disappear on close/teardown; context menus return to the
+// focus owner that existed before opening rather than their hidden trigger.
+const menuReturnFocus = new WeakMap();
+const menuGeneration = new WeakMap();
 const menu = (root, id, open, restoreFocus = false) => {
   const panel = root.querySelector(`#${CSS.escape(id)}`);
   const trigger = root.querySelector(`[data-interaction-menu="${CSS.escape(id)}"]`);
-  if (!panel || !trigger) return;
+  if (!panel || !trigger || open && (trigger.disabled || root.dataset.elyDisabled === 'true')) return;
+  menuGeneration.set(panel, (menuGeneration.get(panel) || 0) + 1);
+  const context = !trigger.closest('[role="menu"]') && trigger.closest('[data-interaction-context]');
+  if (open && panel.hidden) {
+    const previous = document.activeElement;
+    menuReturnFocus.set(panel, context && previous?.isConnected && previous !== document.body && !panel.contains(previous) ? previous : context || trigger);
+  }
   panel.hidden = !open;
   trigger.setAttribute('aria-expanded', String(open));
-  if (open && panel.hasAttribute('data-interaction-popover')) placeOverlay(panel, trigger.getBoundingClientRect());
+  if (open && (panel.hasAttribute('data-interaction-popover') || panel.closest('.ely-interaction--menus') && !panel.parentElement.matches('.ely-interaction__menu-row') && !panel.matches('.ely-interaction__pie'))) {
+    (panel.hasAttribute('data-interaction-popover') ? placeOverlay : placeMenu)(panel, (context || trigger).getBoundingClientRect());
+  }
   if (!open) panel.querySelectorAll('[data-interaction-menu]').forEach(child => menu(root, child.dataset.interactionMenu, false));
   if (open && panel.parentElement.matches('.ely-interaction__menu-row')) {
     panel.style.left = '100%'; panel.style.top = '0';
@@ -140,7 +161,19 @@ const menu = (root, id, open, restoreFocus = false) => {
     if (bounds.bottom > window.innerHeight) panel.style.top = `${Math.min(0, window.innerHeight - bounds.bottom)}px`;
   }
   if (open) (panel.querySelector('input:not(:disabled)') || [...panel.querySelectorAll(':is(button,a):not(:disabled)')].find(item => (panel.getAttribute('role') !== 'menu' || item.closest('[role="menu"]') === panel) && !item.closest('[hidden]')) || (panel.hasAttribute('tabindex') ? panel : null))?.focus();
-  else if (restoreFocus) trigger.focus();
+  else {
+    const previous = menuReturnFocus.get(panel);
+    menuReturnFocus.delete(panel);
+    if (restoreFocus) (previous?.isConnected ? previous : context || trigger).focus();
+  }
+};
+
+// Menu state and dismissal must settle before the caller runs (including a
+// synchronous DOM replacement or a rejected provider promise).
+const menuAction = (root, event, button) => {
+  if (!button?.hasAttribute('data-interaction-menu-action')) return;
+  const formData = button.form ? new FormData(button.form) : null;
+  if (!emit(root, button.dataset.elyAction, {value: button.value || button.dataset.value || '', formData, values: formData ? [...formData] : []})) event.preventDefault();
 };
 
 // Each mount owns its toast clocks. Stay=0 is persistent; hidden rows are reusable recipes.
@@ -1004,18 +1037,21 @@ register('interaction', root => {
     const checkbox = target?.closest('[data-interaction-checkbox]');
     const radio = target?.closest('[data-interaction-menu-radio]');
     if (radio) {
-      radio.closest('[role="menu"]').querySelectorAll('[data-interaction-menu-radio]').forEach(item => {
-        if (item.dataset.interactionMenuRadio === radio.dataset.interactionMenuRadio) item.setAttribute('aria-checked', String(item === radio));
+      const panel = radio.closest('[role="menu"]');
+      panel.querySelectorAll('[data-interaction-menu-radio]').forEach(item => {
+        if (item.closest('[role="menu"]') === panel && item.dataset.interactionMenuRadio === radio.dataset.interactionMenuRadio) item.setAttribute('aria-checked', String(item === radio));
       });
-      change(root, {name: radio.dataset.interactionMenuRadio, value: radio.value, checked: true});
       close(true);
+      change(root, {name: radio.dataset.interactionMenuRadio, value: radio.value, checked: true});
+      menuAction(root, event, radio);
       return;
     }
     if (checkbox) {
       const checked = checkbox.getAttribute('aria-checked') !== 'true';
       checkbox.setAttribute('aria-checked', String(checked));
-      change(root, {name: checkbox.name || '', value: checkbox.value, checked});
       if (checkbox.closest('[role="menu"]')) close(true);
+      change(root, {name: checkbox.name || '', value: checkbox.value, checked});
+      menuAction(root, event, checkbox);
       return;
     }
     const select = target?.closest('[data-interaction-select]');
@@ -1047,8 +1083,10 @@ register('interaction', root => {
       change(root, {name: 'page', value: page.value, selected: true});
       return;
     }
+    const primary = target?.closest('[data-interaction-menu-primary]');
+    if (primary) { close(); menuAction(root, event, primary); return; }
     const trigger = target?.closest('[data-interaction-menu]');
-    if (trigger) { const panel = root.querySelector(`#${CSS.escape(trigger.dataset.interactionMenu)}`); const open = Boolean(panel?.hidden); if (trigger.closest('.ely-interaction__navigation-menu, .ely-interaction__menubar') && !trigger.closest('[role="menu"]')) close(); menu(root, trigger.dataset.interactionMenu, open); return; }
+    if (trigger) { const panel = root.querySelector(`#${CSS.escape(trigger.dataset.interactionMenu)}`); const open = trigger.closest('[role="menu"]') ? true : Boolean(panel?.hidden); if (trigger.closest('.ely-interaction__navigation-menu, .ely-interaction__menubar') && !trigger.closest('[role="menu"]')) close(); menu(root, trigger.dataset.interactionMenu, open); return; }
     if (target?.closest('.ely-interaction__navigation-menu [role="menuitem"]')) { close(true); return; }
     const historyControl = target?.closest('[data-interaction-history-back], [data-interaction-history-forward], [data-interaction-history-item]');
     if (historyControl) {
@@ -1106,7 +1144,7 @@ register('interaction', root => {
     const dismiss = target?.closest('[data-interaction-dismiss]');
     if (dismiss) { dismiss.closest('.ely-interaction')?.setAttribute('hidden', ''); change(root, {name: 'dismissed', value: 'true'}); return; }
     const menuItem = target?.closest('[role="menu"] [role="menuitem"]');
-    if (menuItem) { close(true); return; }
+    if (menuItem) { close(true); menuAction(root, event, menuItem); return; }
     if (target?.closest('[data-interaction-more], [data-interaction-loading]')) { beginPending(button); return; }
     if (target?.closest('[data-interaction-refresh]')) { const host = button.closest('.ely-interaction__refresh-set'); const output = host?.querySelector('[data-interaction-refresh-live]'); button.setAttribute('aria-busy', 'true'); if (output) output.textContent = 'Refreshing'; const done = later(() => { if (output) output.textContent = 'Done'; button.setAttribute('aria-busy', 'false'); change(root, {name: 'refresh', value: 'done'}); }, 1200); host.dataset.interactionRefreshTimer = String(done); later(() => { if (output) output.textContent = 'Idle'; delete host.dataset.interactionRefreshTimer; }, 2600); change(root, {name: 'refresh', value: 'refreshing'}); return; }
     if (target?.closest('[data-interaction-ripple]')) { button.classList.add('is-rippling'); later(() => button.classList.remove('is-rippling'), 300); return; }
@@ -1195,7 +1233,18 @@ register('interaction', root => {
       if (button.dataset.interactionPendingAction === event.detail.action) settlePending(button, false);
     });
   };
+  let menuConfirmKey, menuConfirmTarget;
   const keydown = event => {
+    const menuPanel = closest(root, event.target, '.ely-interaction--menus [role="menu"]');
+    const menuControl = closest(root, event.target, '.ely-interaction--menus [role="menu"] button');
+    if (menuPanel && event.key === 'Escape') { event.stopPropagation(); event.preventDefault(); }
+    if (menuControl && ['Enter', ' '].includes(event.key)) {
+      menuConfirmKey = event.key;
+      menuConfirmTarget = event.ctrlKey || event.metaKey || event.altKey || event.shiftKey ? null : menuControl;
+      // Confirm on keyup so both phases stay inside even when a context menu
+      // hands focus to an element outside this family during its action.
+      event.stopPropagation(); event.preventDefault(); return;
+    }
     if (sourceFamily.keydown(event)) return;
     const searchField = closest(root, event.target, '[data-interaction-search-menu] input');
     if (searchField && ['ArrowDown', 'ArrowUp', 'Enter'].includes(event.key)) {
@@ -1351,6 +1400,7 @@ register('interaction', root => {
       const items = [...panel.querySelectorAll(':is(button,a):not(:disabled)')].filter(item => item.closest('[role="menu"]') === panel && !item.closest('[hidden]'));
       const index = items.indexOf(menuItem);
       const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 : (index + (event.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length;
+      panel.querySelectorAll('[data-interaction-menu]').forEach(trigger => menu(root, trigger.dataset.interactionMenu, false));
       items[next]?.focus(); return;
     }
     const reorder = closest(root, event.target, '[data-interaction-reorder] [data-interaction-draggable]');
@@ -1411,6 +1461,22 @@ register('interaction', root => {
   };
   const holdStart = event => { const button = closest(root, event.target, '[data-interaction-hold], [data-interaction-longpress]'); if (!button || button.hasAttribute('data-direct-press') || button.dataset.interactionConfirmMode === 'twice') return; const threshold = Number(button.dataset.interactionConfirmThreshold || 700); button.classList.add('is-confirming'); button.dataset.interactionTimer = String(later(() => { button.classList.remove('is-confirming'); root.querySelector('[data-interaction-status]')?.replaceChildren(document.createTextNode('confirmed')); emit(root, button.dataset.interactionLongpress || button.dataset.interactionHold || 'confirm', {value: button.value || ''}); }, threshold)); };
   const holdEnd = event => { const button = closest(root, event.target, '[data-interaction-hold], [data-interaction-longpress]'); const timer = Number(button?.dataset.interactionTimer); if (timer) { clearTimeout(timer); timers.delete(timer); delete button.dataset.interactionTimer; button.classList.remove('is-confirming'); } };
+
+  root.querySelectorAll('.ely-interaction--menus [role="menu"]').forEach(panel => {
+    if (panel.parentElement.matches('.ely-interaction__menu-row')) return;
+    const focusout = event => {
+      // During native pointer focus, activeElement can still be body at the
+      // event callback's microtask checkpoint. relatedTarget already names
+      // the destination: moving from a submenu child to its trigger stays in
+      // this menu and must not hide that trigger before its click arrives.
+      if (panel.contains(event.relatedTarget)) return;
+      queueMicrotask(() => {
+        if (root.isConnected && !panel.hidden && !panel.contains(document.activeElement)) menu(root, panel.id, false);
+      });
+    };
+    panel.addEventListener('focusout', focusout);
+    lottieCleanups.push(() => panel.removeEventListener('focusout', focusout));
+  });
   root.querySelectorAll('[data-interaction-popover]').forEach(panel => {
     const focusout = () => queueMicrotask(() => {
       if (!root.isConnected || panel.hidden) return;
@@ -1467,6 +1533,11 @@ register('interaction', root => {
     lottieCleanups.push(() => { events.forEach(type => field.removeEventListener(type, update)); toolbar.removeEventListener('pointerdown', retain); toolbar.removeEventListener('focusin', update); toolbar.removeEventListener('focusout', update); field.removeEventListener('keydown', escape); document.removeEventListener('selectionchange', update); window.removeEventListener('resize', update); window.removeEventListener('scroll', update, true); });
   });
   const repositionOverlays = () => {
+    root.querySelectorAll('.ely-interaction--menus [role="menu"]:not([hidden])').forEach(panel => {
+      if (panel.parentElement.matches('.ely-interaction__menu-row') || panel.matches('.ely-interaction__pie') || panel.style.position === 'fixed') return;
+      const trigger = root.querySelector(`[data-interaction-menu="${CSS.escape(panel.id)}"]`);
+      if (trigger) placeMenu(panel, (trigger.closest('[data-interaction-context]') || trigger).getBoundingClientRect());
+    });
     root.querySelectorAll('[data-interaction-popover]:not([hidden])').forEach(panel => {
       const trigger = root.querySelector(`[data-interaction-menu="${CSS.escape(panel.id)}"]`);
       if (trigger) placeOverlay(panel, trigger.getBoundingClientRect());
@@ -1619,8 +1690,10 @@ register('interaction', root => {
     const trigger = surface.querySelector('[data-interaction-menu]:not(:disabled)');
     if (trigger && root.dataset.elyDisabled !== 'true') {
       if (event.target.closest?.('.ely-interaction__pie:not([hidden])')) { close(true); return; }
-      close(); menu(root, trigger.dataset.interactionMenu, true);
       const panel = root.querySelector(`#${CSS.escape(trigger.dataset.interactionMenu)}`);
+      const previous = menuReturnFocus.get(panel);
+      close(); menu(root, trigger.dataset.interactionMenu, true);
+      if (previous?.isConnected) menuReturnFocus.set(panel, previous);
       const bounds = panel.getBoundingClientRect();
       panel.style.position = 'fixed';
       const centered = panel.matches('.ely-interaction__pie');
@@ -1636,7 +1709,7 @@ register('interaction', root => {
       if (!row.contains(trigger)) menu(root, trigger.dataset.interactionMenu, false);
     });
     const sub = closest(root, event.target, '.ely-interaction__menu-row > [data-interaction-menu]');
-    if (sub && !sub.disabled) { menu(root, sub.dataset.interactionMenu, true); return; }
+    if (sub && !sub.disabled && sub.getAttribute('aria-expanded') !== 'true') { menu(root, sub.dataset.interactionMenu, true); return; }
     const bar = closest(root, event.target, '.ely-interaction__menubar > .ely-interaction__menu > [data-interaction-menu]');
     if (bar && !bar.disabled && bar.closest('nav').querySelector('[aria-expanded="true"]')) { close(); menu(root, bar.dataset.interactionMenu, true); return; }
     const trigger = closest(root, event.target, '.ely-interaction__navigation-menu [data-interaction-menu]');
@@ -1667,16 +1740,55 @@ register('interaction', root => {
   root.querySelectorAll('[data-interaction-lazy]').forEach(list=>{ revealLazy(list); if(typeof ResizeObserver==='function'){const observer=new ResizeObserver(()=>revealLazy(list));observer.observe(list);lottieCleanups.push(()=>observer.disconnect());} });
   root.addEventListener('click', click); root.addEventListener('scroll', scroll, true); root.addEventListener('input', input); root.addEventListener('submit', submit); root.addEventListener('keydown', keydown); root.addEventListener('ely:result', result); root.addEventListener('ely:error', error); root.addEventListener('contextmenu', contextmenu); root.addEventListener('pointerover', pointerover);
   root.addEventListener('dragend', dragend); root.addEventListener('dragstart', dragstart); root.addEventListener('dragover', dragover); root.addEventListener('drop', drop);
-  const keyup = event => { if ([' ', 'Enter'].includes(event.key)) holdEnd(event); };
+  const keyup = event => {
+    if (menuConfirmKey === event.key) {
+      const target = menuConfirmTarget;
+      menuConfirmKey = menuConfirmTarget = undefined;
+      event.stopPropagation(); event.preventDefault();
+      if (target === event.target && root.isConnected && root.contains(target) && !target.disabled && !target.closest('[hidden]') && !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey) target.click();
+    }
+    if ([' ', 'Enter'].includes(event.key)) holdEnd(event);
+  };
   root.addEventListener('pointerdown', holdStart); root.addEventListener('pointerup', holdEnd); root.addEventListener('pointercancel', holdEnd); root.addEventListener('keyup', keyup);
   root.querySelector('[autofocus]')?.focus();
+  let menuPointerReturn;
+  const cancelMenuPointerReturn = event => {
+    if (event.type !== 'focusin' || event.target !== document.body) menuPointerReturn = undefined;
+  };
+  const restoreMenuPointerReturn = event => {
+    const pending = menuPointerReturn;
+    menuPointerReturn = undefined;
+    if (!pending || event.pointerId !== pending.pointerId) return;
+    const {panel, opener, generation} = pending;
+    // Native mousedown on nonfocusable space may blur the synchronous return
+    // performed on pointerdown. Wait for this gesture's pointerup, without
+    // suppressing its default selection/click behavior or stealing newer focus.
+    if (root.isConnected && root.dataset.elyDisabled !== 'true' && panel.isConnected && panel.hidden &&
+        menuGeneration.get(panel) === generation && opener.isConnected && !opener.disabled &&
+        document.activeElement === document.body) opener.focus({preventScroll: true});
+  };
+  const menuPointerListeners = [['pointerdown', cancelMenuPointerReturn, true], ['keydown', cancelMenuPointerReturn, true], ['focusin', cancelMenuPointerReturn, true], ['pointercancel', cancelMenuPointerReturn, true], ['pointerup', restoreMenuPointerReturn, false]];
+  menuPointerListeners.forEach(([type, handler, capture]) => document.addEventListener(type, handler, capture));
+  lottieCleanups.push(() => {
+    menuPointerReturn = undefined;
+    menuPointerListeners.forEach(([type, handler, capture]) => document.removeEventListener(type, handler, capture));
+  });
   const outside = event => {
     root.querySelectorAll('[data-interaction-popover]:not([hidden])').forEach(panel => {
       const trigger = root.querySelector(`[data-interaction-menu="${CSS.escape(panel.id)}"]`);
       if (!panel.contains(event.target) && !trigger?.contains(event.target)) menu(root, panel.id, false, true);
     });
+    root.querySelectorAll('.ely-interaction--menus [role="menu"]:not([hidden])').forEach(panel => {
+      if (panel.parentElement.matches('.ely-interaction__menu-row')) return;
+      const trigger = root.querySelector(`[data-interaction-menu="${CSS.escape(panel.id)}"]`);
+      if (!panel.contains(event.target) && !trigger?.contains(event.target)) {
+        menu(root, panel.id, false, true);
+        const opener = document.activeElement;
+        if (opener && opener !== document.body && opener !== document.documentElement && !panel.contains(opener)) menuPointerReturn = {panel, opener, pointerId: event.pointerId, generation: menuGeneration.get(panel)};
+      }
+    });
     if (!root.contains(event.target)) close();
   };
   document.addEventListener('pointerdown', outside);
-  return () => { clearReorderPreview(); timers.forEach(clearTimeout); lottieCleanups.forEach(cleanup => cleanup()); root.removeEventListener('click', click); root.removeEventListener('scroll', scroll, true); root.removeEventListener('input', input); root.removeEventListener('keydown', keydown); root.removeEventListener('ely:result', result); root.removeEventListener('ely:error', error); root.removeEventListener('contextmenu', contextmenu); root.removeEventListener('pointerover', pointerover); root.removeEventListener('dragend', dragend); root.removeEventListener('dragstart', dragstart); root.removeEventListener('dragover', dragover); root.removeEventListener('drop', drop); root.removeEventListener('pointerdown', lightboxPointerDownHandler); root.removeEventListener('pointerup', lightboxPointerUpHandler); root.removeEventListener('pointerdown', holdStart); root.removeEventListener('pointerup', holdEnd); root.removeEventListener('pointercancel', holdEnd); root.removeEventListener('keyup', keyup); document.removeEventListener('pointerdown', outside); };
+  return () => { close(); clearReorderPreview(); timers.forEach(clearTimeout); lottieCleanups.forEach(cleanup => cleanup()); root.removeEventListener('click', click); root.removeEventListener('scroll', scroll, true); root.removeEventListener('input', input); root.removeEventListener('keydown', keydown); root.removeEventListener('ely:result', result); root.removeEventListener('ely:error', error); root.removeEventListener('contextmenu', contextmenu); root.removeEventListener('pointerover', pointerover); root.removeEventListener('dragend', dragend); root.removeEventListener('dragstart', dragstart); root.removeEventListener('dragover', dragover); root.removeEventListener('drop', drop); root.removeEventListener('pointerdown', lightboxPointerDownHandler); root.removeEventListener('pointerup', lightboxPointerUpHandler); root.removeEventListener('pointerdown', holdStart); root.removeEventListener('pointerup', holdEnd); root.removeEventListener('pointercancel', holdEnd); root.removeEventListener('keyup', keyup); document.removeEventListener('pointerdown', outside); };
 });

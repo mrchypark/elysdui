@@ -56,6 +56,8 @@ function start(scope = document) {
       if (!button || button.disabled || button.getAttribute('aria-disabled') === 'true') return;
       // Clipboard controls emit once, only after the browser confirms the write.
       if (button.dataset.interactionCopy !== undefined) return;
+      // The menu family commits checked state and closes before invoking hosts.
+      if (button.dataset.interactionMenuAction !== undefined) return;
       if (button.type === 'submit' && button.form?.matches('[data-ely-submit]')) return;
       const formData = button.form ? new FormData(button.form) : null;
       const accepted = emit(root, button.dataset.elyAction, { value: button.value || button.dataset.value || '', formData, values: formData ? [...formData] : [] });
