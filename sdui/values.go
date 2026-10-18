@@ -352,6 +352,12 @@ func validateFormat(p Property) error {
 	if p.Format == "" {
 		return nil
 	}
+	if p.Format == "empty-array" {
+		if p.Type != Array {
+			return fmt.Errorf("empty-array format requires an array")
+		}
+		return nil
+	}
 	if p.formatRule != nil {
 		return nil
 	}
@@ -510,6 +516,9 @@ func normalizeValue(p Property, value any, budget *valueBudget, depth int) (any,
 				return nil, nil
 			}
 			return nil, fmt.Errorf("null is not allowed")
+		}
+		if p.Format == "empty-array" && v.Len() != 0 {
+			return nil, fmt.Errorf("expected an empty array")
 		}
 		limit := p.MaxItems
 		if limit == 0 {

@@ -333,6 +333,13 @@ func schemaFor(full Property, a *analysis, allowHTML bool) (map[string]Property,
 			return p, nil
 		}
 		if p.Type == "array" {
+			// The recursive menu analyser is deliberately bounded. At its
+			// cutoff, permit an explicit empty child without inventing an
+			// untyped row schema or exposing further nesting.
+			if ref := a.refs[path]; p.Items == nil && ref != nil && ref.formats["menu-items"] {
+				p.Format = "empty-array"
+				p.Items = &Property{Type: "object"}
+			}
 			item := Property{Type: "string"}
 			if p.Items != nil {
 				item = *p.Items

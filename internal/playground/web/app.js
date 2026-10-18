@@ -557,6 +557,7 @@
     if (property.max !== undefined && value > property.max) throw new Error(`${path} must be at most ${property.max}`);
     if (type === 'string' && property.maxLength && bytes(value) > property.maxLength) throw new Error(`${path} exceeds ${property.maxLength} bytes`);
     if (type === 'array') {
+      if (property.format === 'empty-array' && value.length !== 0) throw new Error(`${path} must be an empty array`);
       if (property.maxItems && value.length > property.maxItems) throw new Error(`${path} exceeds ${property.maxItems} items`);
       if (property.items) value.forEach((item, index) => validateValue(item, property.items, `${path}[${index}]`));
     }

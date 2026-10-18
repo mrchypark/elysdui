@@ -1,0 +1,12 @@
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+import {runInNewContext} from 'node:vm';
+const source=readFileSync('./internal/playground/web/app.js','utf8');
+const start=source.indexOf('  function validateValue('),end=source.indexOf('\n  function ',start+1);
+assert(start>=0&&end>start,'playground validator production boundaries');
+const validate=runInNewContext(source.slice(start,end)+'\nvalidateValue',{object:v=>v!==null&&typeof v==='object'&&!Array.isArray(v),own:(v,k)=>Object.hasOwn(v,k),bytes:v=>Buffer.byteLength(v)});
+const property={type:'array',format:'empty-array',items:{type:'object'}};
+validate([],property);
+for(const value of [null,false,true,'',{},[{}],['row'],[null]])assert.throws(()=>validate(value,property),/empty array|must be array|cannot be null/);
+validate([{}],{type:'array',maxItems:0,items:{type:'object'}});
+console.log('empty-array playground parity and ordinary zero-limit semantics passed');

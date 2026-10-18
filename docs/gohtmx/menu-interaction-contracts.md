@@ -153,6 +153,10 @@ replay, before any timing-dependent trial can end the control early. The positiv
 then runs all forty native trials. Actual fixed-head browser success and the
 eighth kill require CI evidence; VM success alone is not proof of native scheduling.
 
+The [explicit empty-submenu addition](menu-empty-submenu-contracts.md) separately
+covers child-array presence, empty child focus/key behavior, and its exact-source
+controls. Its local Go/VM checks do not add browser credit to this earlier suite.
+
 ## Explicitly remaining contracts
 
 These are implementation requirements, not evidence supplied by this increment:
