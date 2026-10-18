@@ -25,10 +25,11 @@ Browser JSON evidence includes the exact checkout revision.
 ## Explicit boundaries
 
 This is not full table-family parity. Non-paged DataTable, Shift multi-sort,
-column resizing/reordering, grouping, editable grids, and source-driven virtual
-windowing need separate functional units. `VirtualTable` with `TableSource=true`
-currently renders only supplied rows with a total label, without a scrolling
-window controller or a row-fetch contract. The Go rendering test checks that
-plain and virtual source tables keep escaped cells and semantic headers; it does
-not claim that virtual scrolling works. No asynchronous data request or server
-error surface is promised by this client-only paged table.
+column resizing/reordering, grouping, editable grids, and remote-source virtual
+windowing need separate functional units. Supplied-row `VirtualTable` windowing
+is covered separately by `virtual_table_test.mjs` and
+`scripts/virtual-table-browser-test.mjs`; its local-data and remote-source
+boundaries are documented in [advanced data](../../advanced-data.md#virtualtable-supplied-row-windowing).
+The table Go rendering test checks escaped cells and semantic headers; it does
+not itself prove virtual scrolling. No asynchronous data request is promised by
+this client-only paged table.
