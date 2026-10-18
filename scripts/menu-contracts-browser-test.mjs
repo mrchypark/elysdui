@@ -27,7 +27,8 @@ const traceMenuCheck = name => {
     document.addEventListener(type,listener,true);listeners.push([type,listener]);
   }
   window.resetMenuCheckTrace=trial=>{trace.trial=trial;trace.before=snapshot();trace.events=[];trace.truncated=false;};
-  window.stopMenuCheckTrace=()=>{for(const [type,listener] of listeners)document.removeEventListener(type,listener,true);trace.after=snapshot();trace.log=window.menuLog;delete window.resetMenuCheckTrace;delete window.stopMenuCheckTrace;return trace;};
+  window.readMenuCheckTrace=()=>({...trace,after:snapshot(),log:window.menuLog});
+  window.stopMenuCheckTrace=()=>{for(const [type,listener] of listeners)document.removeEventListener(type,listener,true);const result=window.readMenuCheckTrace();delete window.resetMenuCheckTrace;delete window.readMenuCheckTrace;delete window.stopMenuCheckTrace;return result;};
 };
 // Playwright 1.57's dispatchEvent map omits contextmenu and otherwise creates a
 // plain Event, which discards clientX/clientY. Keep this browser callback explicit
@@ -94,7 +95,7 @@ try {
   const check=async(name,fn)=>{
     await page.evaluate(traceMenuCheck,name);
     try {await fn();report.checks.push(name);console.log(name);}
-    finally {report.lastCheckTrace=await page.evaluate(()=>stopMenuCheckTrace());}
+    finally {report.lastCheckTrace=await page.evaluate(()=>stopMenuCheckTrace());(report.checkTraces ||= {})[name]=report.lastCheckTrace;}
   };
   const root=id=>page.locator(`#${id}`);
   const trigger=id=>root(id).locator('[data-interaction-menu]').first();
@@ -168,16 +169,22 @@ try {
     await page.keyboard.press('Escape');
   });
   await check('checkbox-menu.submenu-is-a-trigger-not-an-inherited-check',async()=>{
-    report.checkboxKeyboardTrials=[];
-    for(let trial=1;trial<=20;trial++) {
-      // Restore the caller's initial checked input between diagnostic trials;
-      // do not move the pointer or alter the native pointer/keyboard sequence.
-      await row('checks','ruler').evaluate(node=>node.setAttribute('aria-checked','true'));
-      await page.evaluate(trial=>resetMenuCheckTrace(trial),trial);
-      await open('checks');await row('checks','parent').click();assert.equal(await row('checks','parent').getAttribute('aria-expanded'),'true');await focused('#checks [value="child"]');
-      await reset();await page.keyboard.press('Enter');assert.deepEqual((await logs()).actions.map(({value})=>value),['child']);assert.equal((await logs()).changes.length,0);assert.equal(await hidden('checks'),true);
-      await open('checks');await row('checks','ruler').focus();await page.keyboard.press('Space');assert.equal(await row('checks','ruler').getAttribute('aria-checked'),'false');
-      report.checkboxKeyboardTrials.push({trial,status:'passed'});
+    report.checkboxKeyboardTrials=[];report.checkboxModeTraces={};
+    for(const mode of ['instant','held-space']) {
+      for(let trial=1;trial<=20;trial++) {
+        // Restore the caller's initial checked input between diagnostic trials;
+        // do not move the pointer. Preserve instant presses and separately allow
+        // a normal held key to span rendering/native boundary-event delivery.
+        await row('checks','ruler').evaluate(node=>node.setAttribute('aria-checked','true'));
+        await page.evaluate(checkpoint=>resetMenuCheckTrace(checkpoint),{mode,trial});
+        await open('checks');await row('checks','parent').click();assert.equal(await row('checks','parent').getAttribute('aria-expanded'),'true');await focused('#checks [value="child"]');
+        await reset();await page.keyboard.press('Enter');assert.deepEqual((await logs()).actions.map(({value})=>value),['child']);assert.equal((await logs()).changes.length,0);assert.equal(await hidden('checks'),true);
+        await open('checks');await row('checks','ruler').focus();
+        if(mode==='instant')await page.keyboard.press('Space');else await page.keyboard.press('Space',{delay:80});
+        assert.equal(await row('checks','ruler').getAttribute('aria-checked'),'false');
+        report.checkboxKeyboardTrials.push({mode,trial,status:'passed'});
+      }
+      report.checkboxModeTraces[mode]=await page.evaluate(()=>readMenuCheckTrace());
     }
   });
   await check('dropdown.hosts-primary-closes-before-host-empty-focus',async()=>{
