@@ -1,0 +1,53 @@
+name: CommandPalette query baseline
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'ui/gohtmx/**'
+      - 'adapters/gohtmx/**'
+      - 'sdui/**'
+      - 'scripts/palette-query*.mjs'
+      - 'package*.json'
+      - '.github/workflows/palette-query.yml'
+  pull_request:
+    paths:
+      - 'ui/gohtmx/**'
+      - 'adapters/gohtmx/**'
+      - 'sdui/**'
+      - 'scripts/palette-query*.mjs'
+      - 'package*.json'
+      - '.github/workflows/palette-query.yml'
+jobs:
+  palette-query:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        surface: [go-qualified, go-chapter, sdui]
+        group: [focus, preserve, adjacent]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Validate baseline source and evidence schemas
+        run: node scripts/palette-query-oracles-test.mjs && node scripts/palette-query-evidence-test.mjs && node ui/gohtmx/tests/unit/palette_query_test.mjs
+      - name: Run genuine keyboard baseline (desired failures stay red)
+        env:
+          PALETTE_QUERY_SURFACE: ${{ matrix.surface }}
+          PALETTE_QUERY_GROUP: ${{ matrix.group }}
+        run: npm run test:palette-query
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: palette-query-${{ matrix.surface }}-${{ matrix.group }}
+          path: test-results/contracts/
+          if-no-files-found: error
