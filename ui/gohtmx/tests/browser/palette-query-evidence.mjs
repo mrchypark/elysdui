@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {paletteHistorySourcePaths} from './palette-history-fixtures.mjs';
 import {verifyPaletteProductionPolicy} from './palette-query-production-policy.mjs';
 import {createHash} from 'node:crypto';
 import {isDeepStrictEqual as same} from 'node:util';
@@ -10,6 +11,7 @@ const groups = {focus: ['query.continue', 'cursor.coherence'], preserve: ['enter
 export function paletteCases(group = 'all') { assert(group === 'all' || Object.hasOwn(groups, group), 'known palette case group'); return group === 'all' ? Object.values(groups).flat() : [...groups[group]]; }
 export const paletteErrors = ['pageErrors', 'consoleErrors', 'requestFailures', 'serverErrors', 'transportErrors', 'runtimeErrors'];
 export const paletteSourcePaths = [
+  ...paletteHistorySourcePaths,
   'ui/gohtmx/tests/browser/palette-query-positive-witnesses.mjs',
   'scripts/palette-query-supplemental-schema-fixture.mjs',
   'scripts/palette-query-positive-witnesses-test.mjs',

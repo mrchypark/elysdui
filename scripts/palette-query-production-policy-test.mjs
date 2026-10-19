@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {loadPaletteHistory} from '../ui/gohtmx/tests/browser/palette-history-fixtures.mjs';
 import {execFileSync,spawnSync} from 'node:child_process';
 import {mkdtemp,readFile,rm,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
@@ -24,7 +25,7 @@ for(const policy of ['strict','activation-repair']){
   for(const report of [{},{productionPolicy:'foreign'},{productionPolicy:policy==='strict'?'activation-repair':'strict'}])assert.throws(()=>verifyPaletteProductionPolicy(report,{productionPolicy:policy}));
   assert.throws(()=>verifyPaletteProductionPolicy({productionPolicy:policy},{}));
 }
-const historical=execFileSync('git',['show','ac28651be2869bab709bc617a3f7c50bf68d50f5:ui/gohtmx/assets/ely-api-interaction.js'],{cwd:base,encoding:'utf8'});
+const historical=loadPaletteHistory(base).source('ac28651be2869bab709bc617a3f7c50bf68d50f5','ui/gohtmx/assets/ely-api-interaction.js').toString('utf8');
 const runtime=await readFile(join(base,'ui/gohtmx/assets/ely-api-interaction.js'),'utf8');
 assert.equal(paletteSHA(reentryGuardBlock),'99b8a01d26a7c7918439eaf559c1274b55275a9f14481f1896e13c307ed60363');
 assert.equal(Buffer.byteLength(reentryGuardBlock),1321);

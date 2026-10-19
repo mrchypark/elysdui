@@ -21,7 +21,9 @@ assert(browser.includes("paletteLog.actions.filter(e => ['open-command', 'option
 assert(!/dispatchEvent[^\n]+htmx:/.test(browser), 'real HTMX lifecycle, never synthetic dispatch');
 assert(observer.includes("detail.formData === null ? 'null'") && observer.includes("valuesKind: Array.isArray(detail.values)"), 'raw payload shape retained');
 assert(!/\.focus\(|\.value\s*=|setAttribute\(|\.click\(/.test(observer), 'passive observer cannot repair production DOM');
-assert(loader.includes("git(['rev-parse', paletteBaseline + '^{tree}'])"));
+assert(loader.includes("history.tree(paletteBaseline), paletteBaselineTree"));
+assert(loader.includes('history.sha256(ref, path)'));
+assert(loader.includes('history.sha256(ref, `${directory}${path}`)'));
 assert(loader.includes("'reviewed production input: ' + path"));
 assert(loader.includes('repairedProduction.has(path) ? revision : paletteBaseline'));
 assert(loader.includes("'loaded production assets pinned to reviewed source: ' + path"));

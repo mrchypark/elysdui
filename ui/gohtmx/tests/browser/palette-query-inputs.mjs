@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {loadPaletteHistory} from './palette-history-fixtures.mjs';
 import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import {mkdtemp, readFile, rm} from 'node:fs/promises';
@@ -13,7 +14,8 @@ export async function loadPaletteInputs(base, surface, {productionPolicy = 'stri
   assert(paletteSurfaces.includes(surface));
   const git = args => execFileSync('git', args, {cwd: base, encoding: 'utf8'}).trim();
   const revision = git(['rev-parse', 'HEAD']), tree = git(['rev-parse', 'HEAD^{tree}']), dirty = git(['status', '--porcelain']);
-  assert.equal(git(['rev-parse', paletteBaseline + '^{tree}']), paletteBaselineTree, 'actual-main object tree');
+  const history = loadPaletteHistory(base);
+  assert.equal(history.tree(paletteBaseline), paletteBaselineTree, 'actual-main recorded tree');
   const sourceFiles = {};
   for (const path of paletteSourcePaths) sourceFiles[path] = paletteSHA(await readFile(join(base, path)));
   // The original baseline remains immutable at paletteBaseline. This repair
@@ -26,7 +28,8 @@ export async function loadPaletteInputs(base, surface, {productionPolicy = 'stri
   }
   for (const path of paletteSourcePaths.filter(path => !/tests\/|^scripts\/|^package|^\.github/.test(path))) {
     const ref = repairedProduction.has(path) ? revision : paletteBaseline;
-    assert.equal(paletteSHA(execFileSync('git', ['show', `${ref}:${path}`], {cwd: base, maxBuffer: 8 * 1024 * 1024})), sourceFiles[path], 'reviewed production input: ' + path);
+    const expected = ref === paletteBaseline ? history.sha256(ref, path) : paletteSHA(execFileSync('git', ['show', `${ref}:${path}`], {cwd: base, maxBuffer: 8 * 1024 * 1024}));
+    assert.equal(expected, sourceFiles[path], 'reviewed production input: ' + path);
   }
   const assetBodies = await loadContextOwnerAssets(base);
   const pending = ['/assets/ely-controls.css', '/assets/ely-patterns.css', '/assets/ely-controls.js', '/assets/ely-patterns.js', ...(surface === 'sdui' ? ['/assets/sdui.css', '/assets/sdui.js'] : [])];
@@ -40,8 +43,8 @@ export async function loadPaletteInputs(base, surface, {productionPolicy = 'stri
   for (const [path, asset] of assetBodies) {
     const directory = path.startsWith('/assets/sdui') ? 'adapters/gohtmx' : 'ui/gohtmx';
     const ref = repairedProduction.has(`${directory}${path}`) ? revision : paletteBaseline;
-    const pinned = execFileSync('git', ['show', `${ref}:${directory}${path}`], {cwd: base, maxBuffer: 16 * 1024 * 1024});
-    assert.equal(paletteSHA(pinned), asset.sourceSHA256, 'loaded production assets pinned to reviewed source: ' + path);
+    const expected = ref === paletteBaseline ? history.sha256(ref, `${directory}${path}`) : paletteSHA(execFileSync('git', ['show', `${ref}:${directory}${path}`], {cwd: base, maxBuffer: 16 * 1024 * 1024}));
+    assert.equal(expected, asset.sourceSHA256, 'loaded production assets pinned to reviewed source: ' + path);
   }
   const observer = await readFile(join(base, 'ui/gohtmx/tests/browser/palette-query-observer.js'));
   assetBodies.set('/fixture-observer.js', {body: observer, sourceSHA256: paletteSHA(observer), servedSHA256: paletteSHA(observer), bytes: observer.length, contentType: 'text/javascript; charset=utf-8'});

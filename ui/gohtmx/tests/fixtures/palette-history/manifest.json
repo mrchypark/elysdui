@@ -1,0 +1,411 @@
+{
+  "schemaVersion": 1,
+  "repository": "https://github.com/mrchypark/elysdui",
+  "revisions": {
+    "0a972e071452f7bdb9bc64f6d27d50c042108885": {
+      "tree": "c400233c889a6701682ded31429a3ce0127bacf0",
+      "files": {
+        "adapters/gohtmx/assets/sdui.css": {
+          "blob": "523679e3069d8777209cfc3429e790bdb5ad8503",
+          "bytes": 1006,
+          "sha256": "c2660e6990c1cb15ceb2f138ebf7b6bb8e2245a51a11b7a8857c6e9b7429d021"
+        },
+        "adapters/gohtmx/assets/sdui.js": {
+          "blob": "393a41a6095d3de34f6473f68dfad81121beebaf",
+          "bytes": 20591,
+          "sha256": "9a35d612700c1db6b5fdf5d9cc6a9634b9ff64ab9bbfb7706d1b6c3e83658dbc"
+        },
+        "adapters/gohtmx/catalogue.go": {
+          "blob": "55ce7f7f015afd16eeeecfba033aee4feb70c0d4",
+          "bytes": 3617,
+          "sha256": "cad9f25663a8a45e1f4c443911572ae608165cde43774a0ce94779595bebf1bb"
+        },
+        "adapters/gohtmx/catalogue_manifest.json.gz": {
+          "blob": "2fbe899d676bfa1c8c3b5b8430d5050ffe23267a",
+          "bytes": 78972,
+          "sha256": "58aa7aa59a896b2b7f9c966bdc444acec7dadbaecdd9230e67d37066b7e900d8"
+        },
+        "adapters/gohtmx/registry.go": {
+          "blob": "9972908b90084f92bce7792736abb5030f2cb1e3",
+          "bytes": 11480,
+          "sha256": "2c6ad961a2f9d715c5b2544b256cdca31de17ec01593f100f1736b754c572711"
+        },
+        "adapters/gohtmx/render.go": {
+          "blob": "de1e75b8b349120965cc7e7a0773dc6f3404685c",
+          "bytes": 10050,
+          "sha256": "74c91e6ce10969359058eddfc018c1f91035e9573fc08082487563d936dc2bb5"
+        },
+        "sdui/compile.go": {
+          "blob": "bb8787efd5e1cbc36aee087327b0b2084a6b316b",
+          "bytes": 17573,
+          "sha256": "d954dc7d287e1a7e793c9cb25d0ec3a3845e4d707a95c6e52bff852a9f5e0ed9"
+        },
+        "sdui/resolve.go": {
+          "blob": "030941b6012a810580e0a29611f95a75b724a360",
+          "bytes": 5329,
+          "sha256": "5f580be475da1efdc5c98134b9451f187bde6eb4c141eb671284aa54e2f36135"
+        },
+        "sdui/schema.go": {
+          "blob": "03aa775444ba32f8ab3058fb4087287ae734abc0",
+          "bytes": 6386,
+          "sha256": "75d780c725ee2826a916dafd0283798c5a47b7a985d4e60ffe8d4d36cd9c07de"
+        },
+        "ui/gohtmx/assets/app.css": {
+          "blob": "e524a620b90d5889add73c1170668ccb6fc1977c",
+          "bytes": 44112,
+          "sha256": "bde0c302dbe8e57523a2ec10b3c73901e9d37747a4e84b392bccfd2a57e8e50f"
+        },
+        "ui/gohtmx/assets/ely-api-interaction-entry.js": {
+          "blob": "cc290239d3e2b2bb2a265a221f55210bccc53729",
+          "bytes": 133,
+          "sha256": "e78d7f459b25bc0ba81287a1605800d697bf7fafd840101f549daac6b7737206"
+        },
+        "ui/gohtmx/assets/ely-api-interaction.css": {
+          "blob": "204050c8d8e66b474926a7cd7053a7f18b5cea49",
+          "bytes": 116148,
+          "sha256": "7f42a41f53de3d7cb4aaf244725866bef90842cf31c44de8ed2cc55a14b29c56"
+        },
+        "ui/gohtmx/assets/ely-api-interaction.js": {
+          "blob": "a5fa43f6677143689ec6939925e10b01c5cda758",
+          "bytes": 170431,
+          "sha256": "73edb0f9135820be46813ea49fc6c704fa9922ca24507ae1a07978fe189b2c54"
+        },
+        "ui/gohtmx/assets/ely-api.css": {
+          "blob": "526ca7759a3ec667e0bb4c407ce094672220dba3",
+          "bytes": 2599,
+          "sha256": "58ccd548cbd21de4f43b581a6115b79ff648e2bb60bc4c2caeb0368d8e84753d"
+        },
+        "ui/gohtmx/assets/ely-api.js": {
+          "blob": "ef0256248ea3d03bbe1a250b8b8ddb4063f25d54",
+          "bytes": 10722,
+          "sha256": "76d3102718dd754ee5cc774416f5f2d891d5b744cbf7f4fdddd79cc52fefa9bc"
+        },
+        "ui/gohtmx/assets/ely-controls.css": {
+          "blob": "5e67978b25fc6e945a5d6585284d9b97161268ca",
+          "bytes": 11281,
+          "sha256": "2241c4109cdfd70288bccb4ede0a8595dddaf625dcc4406e6bbb92122ed0e4c3"
+        },
+        "ui/gohtmx/assets/ely-controls.js": {
+          "blob": "dfe46e1177d6f55c1d6ebf320121c5682be12a86",
+          "bytes": 25369,
+          "sha256": "2cbbffbc914468f34ebfacced1c486a34d7350b36c1ea1685ec66c43875200ef"
+        },
+        "ui/gohtmx/assets/ely-patterns.css": {
+          "blob": "cd4578b26f966557c77584b8d32ad2e54f5a05c2",
+          "bytes": 3316,
+          "sha256": "6f94bb6949f3ece77c4c23f771c50bdfaf2249211ffc2668a30b4287770a2b46"
+        },
+        "ui/gohtmx/assets/ely-patterns.js": {
+          "blob": "fbaa29e78ffcf23e98de47f7d67736f194765699",
+          "bytes": 6717,
+          "sha256": "93dc0f8d49596dde899ad3bd30fe6bdb6e9e0dd96e63dff7cdb1cf7c44ea8568"
+        },
+        "ui/gohtmx/assets/ely/fonts/Inter-Italic.ttf": {
+          "blob": "e7ed211d2d6052b781509fe7bf253951eac7162f",
+          "bytes": 417388,
+          "sha256": "bbc051dd204b5019a1aa0bc0ae2aa8a05ab13e7a3f979fa357631dc7feb6833a"
+        },
+        "ui/gohtmx/assets/ely/fonts/Inter-Medium.ttf": {
+          "blob": "458cd0601d28013d3817481aa2839c9bbb5ded70",
+          "bytes": 417300,
+          "sha256": "97ad806f526e41546d46365bb3a393145f75b7b1568913db74549ad8b8dba872"
+        },
+        "ui/gohtmx/assets/ely/fonts/Inter-Regular.ttf": {
+          "blob": "b7aaca8de1fe458399e17311d35d543a1fa2f984",
+          "bytes": 411640,
+          "sha256": "40d692fce188e4471e2b3cba937be967878f631ad3ebbbdcd587687c7ebe0c82"
+        },
+        "ui/gohtmx/assets/ely/fonts/Inter-SemiBold.ttf": {
+          "blob": "47f8ab1d68144fc004b310d65d95180d502b449b",
+          "bytes": 419744,
+          "sha256": "78a843fade9d4612a5567302fb595b56976eb5fcebf4fea5a5912d638bafcde3"
+        },
+        "ui/gohtmx/assets/ely/fonts/JetBrainsMono-Medium.ttf": {
+          "blob": "97671156df256e850498054fdebcd41d74a65d6b",
+          "bytes": 273860,
+          "sha256": "31c92d01a8a08528b718a43addf0ad3df0af2ca4b7b3290a452f70f358e14d3d"
+        },
+        "ui/gohtmx/assets/ely/fonts/JetBrainsMono-Regular.ttf": {
+          "blob": "dff66cc50702c75abd025dcf49f62a4dcc2d72de",
+          "bytes": 273900,
+          "sha256": "a0bf60ef0f83c5ed4d7a75d45838548b1f6873372dfac88f71804491898d138f"
+        },
+        "ui/gohtmx/assets/ely/icons/arrow-up.svg": {
+          "blob": "82e0740d95c65a42219fb8121c3528d452731741",
+          "bytes": 340,
+          "sha256": "831808f5df2f5132f9eb694214f0c0a4d9aea007f20b1e2ad841032a53418529"
+        },
+        "ui/gohtmx/assets/ely/icons/chevrons-up-down.svg": {
+          "blob": "25784268ca884f6d5b488885470bb5c302f58ba4",
+          "bytes": 352,
+          "sha256": "f9a553a941df1ce558e201a05e48608b8a8025ae980d82b1e74718aa6eeb51b1"
+        },
+        "ui/gohtmx/assets/ely/icons/eye-off.svg": {
+          "blob": "faa83a8cc747642d93f8108279fd5c289da202d5",
+          "bytes": 582,
+          "sha256": "071188b6c5b782298a5f26970404865a2bdb6b43eae5e902d5f23805af1e7453"
+        },
+        "ui/gohtmx/assets/ely/icons/eye.svg": {
+          "blob": "4d16d9d205e9d8814c0cd351b27a3ad19db79cdd",
+          "bytes": 434,
+          "sha256": "8154f830f389e14d550fe0451fa336dee579a0455133408728e0206553fab562"
+        },
+        "ui/gohtmx/assets/ely/icons/upload.svg": {
+          "blob": "cd69186cfca96d0975bab96eb9a53c22facf4919",
+          "bytes": 395,
+          "sha256": "a693df05627e8580a31771934e0c00cd2f5bb7ebaad7d9b7bcc1434d6d963046"
+        },
+        "ui/gohtmx/assets/ely/icons/x.svg": {
+          "blob": "7b9f74b076ed4bc1f2b43860b44c9f83265c4279",
+          "bytes": 332,
+          "sha256": "2b24855a933d5f929ebb10c9e8e012c150e505064e00897380ad4e25a5a60965"
+        },
+        "ui/gohtmx/assets/elysdui-mark.svg": {
+          "blob": "6301156f94e066eb606e15618841cb8cf3a38b8a",
+          "bytes": 446,
+          "sha256": "79425b07ea37f6251d25ad743ed20b417a29f6f7bac96c377e7b218504a4bf53"
+        },
+        "ui/gohtmx/assets/geist-mono.woff2": {
+          "blob": "0750682c8dd850428e3394807cf40113e94f46ca",
+          "bytes": 23128,
+          "sha256": "684ad5b531f81d43c1e8c7038262d5db7cdc1f68006e04d6c7769efa8d33c8cc"
+        },
+        "ui/gohtmx/assets/geist.woff2": {
+          "blob": "991445d78ae619a7378ff219385588c7811c88ab",
+          "bytes": 29400,
+          "sha256": "19f9c92546aa300c312235e3125af1b81394d8db9a4bc4a425cd5b641d2d54e1"
+        },
+        "ui/gohtmx/assets/htmx.min.js": {
+          "blob": "6e099f1d3bfc5362b6f419919bceb522ca80d5fa",
+          "bytes": 36716,
+          "sha256": "e484d9171a9db30a39c8f16e3d709d4137f3211c659f8e6125816635033d593f"
+        },
+        "ui/gohtmx/assets/pretendard.woff2": {
+          "blob": "49c54b5152a184a243e85f7281ed338b6569987e",
+          "bytes": 2057688,
+          "sha256": "9599f12fd42fc0bce1cd50b47a0c022e108d7aa64dd0d1bb0ed44f3282d900b4"
+        },
+        "ui/gohtmx/component.go": {
+          "blob": "aba9a6085145b983de01f201fe7c81b985a2c038",
+          "bytes": 7248,
+          "sha256": "5cea7cd3348222834506306e0ea9853d82de9573bd4028c47819e1e9e37f5ffe"
+        },
+        "ui/gohtmx/components.json": {
+          "blob": "2d1c69ef6c6a849f36c46462a5bddfb7dd283cfd",
+          "bytes": 163996,
+          "sha256": "0c96ad1eddf211efd628e07fbfc3beca6b1982586b7df97b9d148d5c5917697a"
+        },
+        "ui/gohtmx/templates/ely-api-interaction.html": {
+          "blob": "3748aa99dec3c2a58e0c02339e983740f917306c",
+          "bytes": 96610,
+          "sha256": "4b73d2cea697b3e4c1e52a7f745a3f380b971a90d6399dac88524c2afda8befc"
+        },
+        "ui/gohtmx/templates/ely-api.html": {
+          "blob": "8843d9f649b1dc7faaaa32aae820f4a399b71e83",
+          "bytes": 1673,
+          "sha256": "b552de15187969ea9c13627ab42e453b09edb33b4584f22d34c1cf40deaee99a"
+        },
+        "ui/gohtmx/templates/ui-client.html": {
+          "blob": "e1c5b750e6b32536a7b1502ed3f68e9f8b0071a4",
+          "bytes": 863,
+          "sha256": "b4d7b3fe83a062fd8d0db618d745fe79c84ef81af516984b6cd96660eeca2a9e"
+        },
+        "ui/gohtmx/ui.go": {
+          "blob": "13ccfd7cc993e27c69543f4518f96180b89f8b35",
+          "bytes": 10030,
+          "sha256": "b647a4a7ba77e55c61c4c1fd1e59dece21623912fa88e9d2e62346147c1a0f4d"
+        }
+      }
+    },
+    "ee28495c7cd6581d49d53874e831c6cea40930a4": {
+      "tree": "c2d6ed91c378f59070fde8d626df2748e9fd837c",
+      "files": {
+        "adapters/gohtmx/assets/sdui.css": {
+          "blob": "523679e3069d8777209cfc3429e790bdb5ad8503",
+          "bytes": 1006,
+          "sha256": "c2660e6990c1cb15ceb2f138ebf7b6bb8e2245a51a11b7a8857c6e9b7429d021"
+        },
+        "adapters/gohtmx/assets/sdui.js": {
+          "blob": "393a41a6095d3de34f6473f68dfad81121beebaf",
+          "bytes": 20591,
+          "sha256": "9a35d612700c1db6b5fdf5d9cc6a9634b9ff64ab9bbfb7706d1b6c3e83658dbc"
+        },
+        "ui/gohtmx/assets/app.css": {
+          "blob": "e524a620b90d5889add73c1170668ccb6fc1977c",
+          "bytes": 44112,
+          "sha256": "bde0c302dbe8e57523a2ec10b3c73901e9d37747a4e84b392bccfd2a57e8e50f"
+        },
+        "ui/gohtmx/assets/ely-api-interaction-entry.js": {
+          "blob": "cc290239d3e2b2bb2a265a221f55210bccc53729",
+          "bytes": 133,
+          "sha256": "e78d7f459b25bc0ba81287a1605800d697bf7fafd840101f549daac6b7737206"
+        },
+        "ui/gohtmx/assets/ely-api-interaction.css": {
+          "blob": "204050c8d8e66b474926a7cd7053a7f18b5cea49",
+          "bytes": 116148,
+          "sha256": "7f42a41f53de3d7cb4aaf244725866bef90842cf31c44de8ed2cc55a14b29c56"
+        },
+        "ui/gohtmx/assets/ely-api-interaction.js": {
+          "blob": "661ac9a4e83da5f2206d46247b247680b4509a84",
+          "bytes": 173168,
+          "sha256": "9aa473de4940934bebe152d88707b706479c84715090dfbf4bb7fcd1b34acc46"
+        },
+        "ui/gohtmx/assets/ely-api.css": {
+          "blob": "526ca7759a3ec667e0bb4c407ce094672220dba3",
+          "bytes": 2599,
+          "sha256": "58ccd548cbd21de4f43b581a6115b79ff648e2bb60bc4c2caeb0368d8e84753d"
+        },
+        "ui/gohtmx/assets/ely-api.js": {
+          "blob": "ef0256248ea3d03bbe1a250b8b8ddb4063f25d54",
+          "bytes": 10722,
+          "sha256": "76d3102718dd754ee5cc774416f5f2d891d5b744cbf7f4fdddd79cc52fefa9bc"
+        },
+        "ui/gohtmx/assets/ely-controls.css": {
+          "blob": "5e67978b25fc6e945a5d6585284d9b97161268ca",
+          "bytes": 11281,
+          "sha256": "2241c4109cdfd70288bccb4ede0a8595dddaf625dcc4406e6bbb92122ed0e4c3"
+        },
+        "ui/gohtmx/assets/ely-controls.js": {
+          "blob": "dfe46e1177d6f55c1d6ebf320121c5682be12a86",
+          "bytes": 25369,
+          "sha256": "2cbbffbc914468f34ebfacced1c486a34d7350b36c1ea1685ec66c43875200ef"
+        },
+        "ui/gohtmx/assets/ely-patterns.css": {
+          "blob": "cd4578b26f966557c77584b8d32ad2e54f5a05c2",
+          "bytes": 3316,
+          "sha256": "6f94bb6949f3ece77c4c23f771c50bdfaf2249211ffc2668a30b4287770a2b46"
+        },
+        "ui/gohtmx/assets/ely-patterns.js": {
+          "blob": "fbaa29e78ffcf23e98de47f7d67736f194765699",
+          "bytes": 6717,
+          "sha256": "93dc0f8d49596dde899ad3bd30fe6bdb6e9e0dd96e63dff7cdb1cf7c44ea8568"
+        },
+        "ui/gohtmx/assets/ely/fonts/Inter-Italic.ttf": {
+          "blob": "e7ed211d2d6052b781509fe7bf253951eac7162f",
+          "bytes": 417388,
+          "sha256": "bbc051dd204b5019a1aa0bc0ae2aa8a05ab13e7a3f979fa357631dc7feb6833a"
+        },
+        "ui/gohtmx/assets/ely/fonts/Inter-Medium.ttf": {
+          "blob": "458cd0601d28013d3817481aa2839c9bbb5ded70",
+          "bytes": 417300,
+          "sha256": "97ad806f526e41546d46365bb3a393145f75b7b1568913db74549ad8b8dba872"
+        },
+        "ui/gohtmx/assets/ely/fonts/Inter-Regular.ttf": {
+          "blob": "b7aaca8de1fe458399e17311d35d543a1fa2f984",
+          "bytes": 411640,
+          "sha256": "40d692fce188e4471e2b3cba937be967878f631ad3ebbbdcd587687c7ebe0c82"
+        },
+        "ui/gohtmx/assets/ely/fonts/Inter-SemiBold.ttf": {
+          "blob": "47f8ab1d68144fc004b310d65d95180d502b449b",
+          "bytes": 419744,
+          "sha256": "78a843fade9d4612a5567302fb595b56976eb5fcebf4fea5a5912d638bafcde3"
+        },
+        "ui/gohtmx/assets/ely/fonts/JetBrainsMono-Medium.ttf": {
+          "blob": "97671156df256e850498054fdebcd41d74a65d6b",
+          "bytes": 273860,
+          "sha256": "31c92d01a8a08528b718a43addf0ad3df0af2ca4b7b3290a452f70f358e14d3d"
+        },
+        "ui/gohtmx/assets/ely/fonts/JetBrainsMono-Regular.ttf": {
+          "blob": "dff66cc50702c75abd025dcf49f62a4dcc2d72de",
+          "bytes": 273900,
+          "sha256": "a0bf60ef0f83c5ed4d7a75d45838548b1f6873372dfac88f71804491898d138f"
+        },
+        "ui/gohtmx/assets/ely/icons/arrow-up.svg": {
+          "blob": "82e0740d95c65a42219fb8121c3528d452731741",
+          "bytes": 340,
+          "sha256": "831808f5df2f5132f9eb694214f0c0a4d9aea007f20b1e2ad841032a53418529"
+        },
+        "ui/gohtmx/assets/ely/icons/chevrons-up-down.svg": {
+          "blob": "25784268ca884f6d5b488885470bb5c302f58ba4",
+          "bytes": 352,
+          "sha256": "f9a553a941df1ce558e201a05e48608b8a8025ae980d82b1e74718aa6eeb51b1"
+        },
+        "ui/gohtmx/assets/ely/icons/eye-off.svg": {
+          "blob": "faa83a8cc747642d93f8108279fd5c289da202d5",
+          "bytes": 582,
+          "sha256": "071188b6c5b782298a5f26970404865a2bdb6b43eae5e902d5f23805af1e7453"
+        },
+        "ui/gohtmx/assets/ely/icons/eye.svg": {
+          "blob": "4d16d9d205e9d8814c0cd351b27a3ad19db79cdd",
+          "bytes": 434,
+          "sha256": "8154f830f389e14d550fe0451fa336dee579a0455133408728e0206553fab562"
+        },
+        "ui/gohtmx/assets/ely/icons/upload.svg": {
+          "blob": "cd69186cfca96d0975bab96eb9a53c22facf4919",
+          "bytes": 395,
+          "sha256": "a693df05627e8580a31771934e0c00cd2f5bb7ebaad7d9b7bcc1434d6d963046"
+        },
+        "ui/gohtmx/assets/ely/icons/x.svg": {
+          "blob": "7b9f74b076ed4bc1f2b43860b44c9f83265c4279",
+          "bytes": 332,
+          "sha256": "2b24855a933d5f929ebb10c9e8e012c150e505064e00897380ad4e25a5a60965"
+        },
+        "ui/gohtmx/assets/elysdui-mark.svg": {
+          "blob": "6301156f94e066eb606e15618841cb8cf3a38b8a",
+          "bytes": 446,
+          "sha256": "79425b07ea37f6251d25ad743ed20b417a29f6f7bac96c377e7b218504a4bf53"
+        },
+        "ui/gohtmx/assets/geist-mono.woff2": {
+          "blob": "0750682c8dd850428e3394807cf40113e94f46ca",
+          "bytes": 23128,
+          "sha256": "684ad5b531f81d43c1e8c7038262d5db7cdc1f68006e04d6c7769efa8d33c8cc"
+        },
+        "ui/gohtmx/assets/geist.woff2": {
+          "blob": "991445d78ae619a7378ff219385588c7811c88ab",
+          "bytes": 29400,
+          "sha256": "19f9c92546aa300c312235e3125af1b81394d8db9a4bc4a425cd5b641d2d54e1"
+        },
+        "ui/gohtmx/assets/htmx.min.js": {
+          "blob": "6e099f1d3bfc5362b6f419919bceb522ca80d5fa",
+          "bytes": 36716,
+          "sha256": "e484d9171a9db30a39c8f16e3d709d4137f3211c659f8e6125816635033d593f"
+        },
+        "ui/gohtmx/assets/pretendard.woff2": {
+          "blob": "49c54b5152a184a243e85f7281ed338b6569987e",
+          "bytes": 2057688,
+          "sha256": "9599f12fd42fc0bce1cd50b47a0c022e108d7aa64dd0d1bb0ed44f3282d900b4"
+        }
+      }
+    },
+    "ac28651be2869bab709bc617a3f7c50bf68d50f5": {
+      "tree": "a477b667c38849efcc80e5d49e9125ccdc014356",
+      "files": {
+        "ui/gohtmx/assets/ely-api-interaction.js": {
+          "blob": "661ac9a4e83da5f2206d46247b247680b4509a84",
+          "bytes": 173168,
+          "sha256": "9aa473de4940934bebe152d88707b706479c84715090dfbf4bb7fcd1b34acc46",
+          "fixture": "sources/ac28651be2869bab709bc617a3f7c50bf68d50f5/ui/gohtmx/assets/ely-api-interaction.js"
+        },
+        "ui/gohtmx/tests/browser/palette-activation-browser-test.mjs": {
+          "blob": "55d10f8d1ddfe1c837156a393ed500052df6358f",
+          "bytes": 8793,
+          "sha256": "60d0aec27297f901cf9e2b56653ea8640b4b15e07d19947faf580836aeb76084",
+          "fixture": "sources/ac28651be2869bab709bc617a3f7c50bf68d50f5/ui/gohtmx/tests/browser/palette-activation-browser-test.mjs"
+        },
+        "ui/gohtmx/tests/browser/palette-activation-evidence.mjs": {
+          "blob": "dd05d90ddc5983345a8234ce8116c2049894c1a9",
+          "bytes": 35842,
+          "sha256": "51714f4d0ea82c56aad98ed3bc73d73e393f2c3d40a8025ea66e43c5eee83b54",
+          "fixture": "sources/ac28651be2869bab709bc617a3f7c50bf68d50f5/ui/gohtmx/tests/browser/palette-activation-evidence.mjs"
+        },
+        "ui/gohtmx/tests/browser/palette-activation-observer.js": {
+          "blob": "8c294ff5599f039ee13ab29561446e550ac78c93",
+          "bytes": 7378,
+          "sha256": "75a4f216fe84db37dd2434ae724634039cd498fd2e861c30858674547f8dc2b0",
+          "fixture": "sources/ac28651be2869bab709bc617a3f7c50bf68d50f5/ui/gohtmx/tests/browser/palette-activation-observer.js"
+        }
+      }
+    },
+    "4ba625b64cd991cf3874639aace590eae70f279d": {
+      "tree": "52e904d3926ff01682913f0b38ee5ef16c29ada1",
+      "files": {
+        "ui/gohtmx/tests/browser/palette-query-evidence.mjs": {
+          "blob": "ee103f46bb3b7de9ab3d3cb5efa8ce740e224147",
+          "bytes": 38856,
+          "sha256": "914e91e84c580153573237eae8e1a131c4942bd4a9825b029d8344d0f698057b",
+          "fixture": "sources/4ba625b64cd991cf3874639aace590eae70f279d/ui/gohtmx/tests/browser/palette-query-evidence.mjs"
+        }
+      }
+    }
+  }
+}

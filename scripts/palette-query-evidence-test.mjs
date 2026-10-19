@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {fileURLToPath, pathToFileURL} from 'node:url';
-import {execFileSync} from 'node:child_process';
+import {loadPaletteHistory} from '../ui/gohtmx/tests/browser/palette-history-fixtures.mjs';
 import {readFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {
@@ -540,8 +540,8 @@ const historicalTransportValidator = Object.freeze({
   sha256: '914e91e84c580153573237eae8e1a131c4942bd4a9825b029d8344d0f698057b',
 });
 export async function runPaletteTransportActualReportRegression(root) {
-  const source = execFileSync('git', ['show', historicalTransportValidator.revision + ':' + historicalTransportValidator.path],
-    {cwd: fileURLToPath(new URL('../', import.meta.url)), maxBuffer: 2 * 1024 * 1024});
+  const source = loadPaletteHistory(fileURLToPath(new URL('../', import.meta.url)))
+    .source(historicalTransportValidator.revision, historicalTransportValidator.path);
   assert.equal(sha(source), historicalTransportValidator.sha256, 'fixed historical transport validator bytes');
   const historical = await import('data:text/javascript;base64,' + source.toString('base64'));
   const results = [];

@@ -1,6 +1,7 @@
 // Synthetic raw observations joined to current independently compiled source.
 // No browser/server, native behavior or successful causal kill is inferred here.
 import assert from 'node:assert/strict';
+import {loadPaletteHistory} from '../ui/gohtmx/tests/browser/palette-history-fixtures.mjs';
 import {execFileSync,spawnSync} from 'node:child_process';
 import {mkdtemp,writeFile,rm,readFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
@@ -35,7 +36,7 @@ export function bindActivationMetadata(fixture,metadata){
 export async function runActivationRepairEvidenceTests(){
  const base=fileURLToPath(new URL('../',import.meta.url));assert.equal(execFileSync('git',['status','--porcelain'],{cwd:base,encoding:'utf8'}).trim(),'','exact committed current-source repair replay');
  const historical='ac28651be2869bab709bc617a3f7c50bf68d50f5';
- const historicalText=path=>execFileSync('git',['show',historical+':'+path],{cwd:base,encoding:'utf8',maxBuffer:8*1024*1024});
+ const history=loadPaletteHistory(base),historicalText=path=>history.source(historical,path).toString('utf8');
  const between=(text,start,end)=>text.slice(text.indexOf(start),text.indexOf(end));
  for(const [path,start,end]of [
   ['ui/gohtmx/tests/browser/palette-activation-evidence.mjs','export function activationOracles','export const activationBrowserPaths'],
