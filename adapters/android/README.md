@@ -198,3 +198,20 @@ Run the helper controls with:
 Run both real dialog counterexamples and the unchanged real Go lifecycle with the
 normal connected Android instrumentation workflow. JVM success alone does not
 establish the device behavior.
+
+The shared observation budget can expire either in the worker or in the outer
+future wait. Only the typed internal budget-exhaustion cause is translated into
+the same failed-readiness assertion as the outer deadline, with its original
+cause retained. Other worker exceptions, interruption and cancellation remain
+hard failures. Diagnostics distinguish budget exhaustion before posting a
+main-thread probe from exhaustion after posting; neither alone establishes that
+the main thread was unresponsive. No deadline is extended or retried.
+
+`python3 scripts/ci/native/focus-budget-controls.py` runs deterministic JVM
+classification checks, then reverses only the typed classification and requires
+its designated test to fail. The Native workflow retains both reports. Existing
+bounded test-owned `baseline`, `persistent-dialog` and `transient-dialog`
+window/activity/last-ANR diagnostics are copied from the debug app cache into the
+Android artifact, with a three-second limit per file. Unbounded active-window
+root text is excluded. Copy failures are recorded and do not replace the native
+test result.
