@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {loadPaletteHistory} from './palette-history-fixtures.mjs';
 import {execFileSync} from 'node:child_process';
 import {mkdtemp,readFile,rm,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
@@ -18,11 +19,11 @@ export const activationSourcePaths=[
  '.github/workflows/palette-activation.yml','ui/gohtmx/tests/browser/diagnostics/palette-activation.md',
 ];
 export async function loadActivationInputs(base,surface,options={}){
- const selected=activationSelection(options),inputs=await loadPaletteInputs(base,surface,selected.mode==='repaired'?{productionPolicy:'activation-repair'}:{}),git=args=>execFileSync('git',args,{cwd:base,maxBuffer:16*1024*1024});
- assert.equal(git(['rev-parse',activationBaseline+'^{tree}']).toString().trim(),activationBaselineTree);
+ const selected=activationSelection(options),inputs=await loadPaletteInputs(base,surface,selected.mode==='repaired'?{productionPolicy:'activation-repair'}:{}),history=loadPaletteHistory(base);
+ assert.equal(history.tree(activationBaseline),activationBaselineTree);
  // Baseline is immutable; repaired mode admits only the two fixed JS assets.
  // The actual template is independently pinned by the mutation definition.
- for(const [path,entry]of inputs.assetBodies){if(!path.startsWith('/assets/'))continue;if(selected.mode==='repaired'&&['/assets/ely-api.js','/assets/ely-api-interaction.js'].includes(path))continue;const dir=path.startsWith('/assets/sdui')?'adapters/gohtmx':'ui/gohtmx';assert.equal(sha(git(['show',activationBaseline+':'+dir+path])),entry.sourceSHA256);}
+ for(const [path,entry]of inputs.assetBodies){if(!path.startsWith('/assets/'))continue;if(selected.mode==='repaired'&&['/assets/ely-api.js','/assets/ely-api-interaction.js'].includes(path))continue;const dir=path.startsWith('/assets/sdui')?'adapters/gohtmx':'ui/gohtmx';assert.equal(history.sha256(activationBaseline,dir+path),entry.sourceSHA256);}
  inputs.activationPolicy=activationPolicy(selected);inputs.activationRepairSourceFiles={};inputs.activationRenderMutation={};
  let transformed;
  if(selected.mode==='repaired'){
