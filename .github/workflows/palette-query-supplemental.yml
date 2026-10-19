@@ -30,6 +30,7 @@ jobs:
         with:
           node-version: '24'
       - run: node scripts/palette-query-supplemental-evidence-test.mjs
+      - run: node scripts/palette-query-causal-controls-test.mjs
   supplemental:
     needs: schema
     runs-on: ubuntu-latest
@@ -53,11 +54,11 @@ jobs:
       - name: Validate independent fixture sources
         run: |
           go test ./ui/gohtmx/tests/fixtures/palettesupplemental ./ui/gohtmx/tests/fixtures/palette-supplemental ./adapters/gohtmx/tests/fixtures/palette-supplemental
-      - name: Native supplemental evidence (causal raw failures remain red)
+      - name: Native supplemental evidence with strict causal aggregation
         env:
           PALETTE_QUERY_SURFACE: ${{ matrix.surface }}
           PALETTE_SUPPLEMENTAL_MODE: ${{ matrix.mode }}
-        run: node scripts/palette-query-supplemental-run.mjs
+        run: node scripts/palette-query-causal-controls.mjs supplemental
       - uses: actions/upload-artifact@v4
         if: always()
         with:

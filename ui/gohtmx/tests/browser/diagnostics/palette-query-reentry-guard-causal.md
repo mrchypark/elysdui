@@ -33,10 +33,12 @@ normal remount subsequently restores the live selection and reference.
 
 A causal report is accepted only when every prerequisite passes and both
 source-owned designated safety assertions fail. A surviving reversal is rejected.
-The raw browser exit remains nonzero, so causal matrix jobs deliberately remain
-red. There is no pass inversion or expected-red exemption. Ordinary control
-regressions also remain red. Infrastructure, inventory and source errors cannot
-masquerade as causal failures.
+The raw browser exit remains nonzero. Earlier raw-runner matrix jobs deliberately
+remained red; those records are retained. Current jobs use the separate
+[causal aggregation gate](palette-query-causal-aggregation.md), which succeeds
+only after fresh invocation, exact raw failure inventory and all prerequisite
+checks pass. Ordinary control regressions remain red. Infrastructure, inventory
+and source errors cannot masquerade as causal failures.
 
 Run the offline source/schema controls with:
 

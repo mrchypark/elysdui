@@ -35,6 +35,9 @@ peer option ID, incorrect option/list roles, peer controlled-list reference, wro
 The current source bytes and changed served bytes are separately hashed. Every
 control retains raw exit 1 and must kill a named desired assertion. Control
 failures are never relabeled pass. The ordinary repaired-source run is separate.
+The [causal aggregation gate](palette-query-causal-aggregation.md) now gives CI
+success only to validated green controls and the exact complete source-owned
+mutant failure inventories, while retaining every raw exit and report.
 
 The workflow runs all three rendering surfaces. Each report has independently
 written pre-browser invocation and exit records, an exact two-case/raw-step

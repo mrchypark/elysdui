@@ -30,11 +30,11 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - name: Validate synthetic replay and corruption controls
         run: node scripts/palette-query-reentry-evidence-test.mjs && node scripts/palette-query-reentry-guard-evidence-test.mjs && node scripts/palette-query-reentry-replay-test.mjs
-      - name: Native focus reentry probe (causal failures stay red)
+      - name: Native focus reentry probe with strict causal aggregation
         env:
           PALETTE_QUERY_SURFACE: ${{ matrix.surface }}
           PALETTE_QUERY_REENTRY_MODE: ${{ matrix.mode }}
-        run: node scripts/palette-query-reentry-run.mjs
+        run: node scripts/palette-query-causal-controls.mjs reentry
       - uses: actions/upload-artifact@v4
         if: always()
         with:
