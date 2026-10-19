@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {verifyPaletteProductionPolicy} from './palette-query-production-policy.mjs';
 import {isDeepStrictEqual as same} from 'node:util';
 import {paletteSurfaces, paletteOwner, paletteRows, paletteSourcePaths, paletteRequiredBrowserPaths, paletteErrors} from './palette-query-evidence.mjs';
 import {reentryModes, reentryRuntimePath, reentryRuntimeSourcePath, reentryMutationMetadata, reentryGuardKills} from './palette-query-reentry-mutants.mjs';
@@ -159,6 +160,7 @@ export function reentryOracles(raw, surface) {
   return out;
 }
 export function verifyReentryEvidence(report, trusted, exitCode) {
+  verifyPaletteProductionPolicy(report, trusted);
   assert.equal(report.suite,'palette-query-reentry'); assert.equal(report.classification,reentryClassification); assert.equal(report.stage,'checks');
   assert(paletteSurfaces.includes(trusted.surface));
   for (const key of ['surface','revision','tree','runToken','mode']) assert.equal(report[key],trusted[key],'independent '+key);
@@ -168,7 +170,7 @@ export function verifyReentryEvidence(report, trusted, exitCode) {
   for(const key of ['sourceFiles','reentrySourceFiles','assets','fixtures','fixtureManifest','standaloneDependencyProof','toolchain']) assert.deepEqual(report[key],trusted[key],'independent '+key);
   for(const value of [...Object.values(trusted.sourceFiles),...Object.values(trusted.reentrySourceFiles)]) assert(hash(value));
   assert(reentryModes.includes(trusted.mode));
-  const mutation = reentryMutationMetadata(trusted.mode);
+  const mutation = reentryMutationMetadata(trusted.mode, trusted.productionPolicy);
   assert.deepEqual(trusted.mutation, mutation, 'source-owned causal metadata');
   assert.deepEqual(report.mutation, mutation, 'independent causal metadata');
   assert.equal(trusted.sourceFiles[reentryRuntimeSourcePath], mutation.sourceSHA256);
@@ -208,5 +210,5 @@ export function verifyReentryEvidence(report, trusted, exitCode) {
   const failed=oracles.filter(oracle=>!oracle.pass).map(oracle=>oracle.id);
   const causalKills=trusted.mode==='guard-removed'?reentryGuardKills.filter(id=>failed.includes(id)):[];
   if(trusted.mode==='guard-removed') assert.deepEqual(causalKills,reentryGuardKills,'every designated guard reversal kill must be observed');
-  return {status,surface:trusted.surface,mode:trusted.mode,revision:trusted.revision,failed,causalKills};
+  return {productionPolicy:trusted.productionPolicy,status,surface:trusted.surface,mode:trusted.mode,revision:trusted.revision,failed,causalKills};
 }

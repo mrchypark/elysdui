@@ -9,18 +9,18 @@ import {spawnSync} from 'node:child_process';
 // The entire mutated core runs in the same VM as its designated positive test.
 const source = readFileSync('ui/gohtmx/assets/ely-api.js', 'utf8');
 const test = 'ui/gohtmx/tests/unit/initializer_cleanup_test.mjs';
-const registration = 'registerCleanup(initialize(root, registerCleanup));';
+const registration = 'registerCleanup(initialize(root, registerCleanup, ownerContext));';
 const dedupe = "if (typeof cleanup !== 'function' || registeredCleanups.has(cleanup)) return;";
 const identity = 'if (mounted.get(root) === cleanups) cleanups.push(cleanup);';
 const isolation = 'function dispose(root, cleanup) {\n  try { cleanup(); }\n  catch (error) {';
 const controls = [
   {
-    name: 'legacy-return', from: registration, to: 'initialize(root, registerCleanup);',
+    name: 'legacy-return', from: registration, to: 'initialize(root, registerCleanup, ownerContext);',
     check: 'I1.one-argument initializers retain returned-cleanup compatibility',
     oracle: 'legacy returned cleanup runs on stop',
   },
   {
-    name: 'initializer-registrar', from: registration, to: 'registerCleanup(initialize(root));',
+    name: 'initializer-registrar', from: registration, to: 'registerCleanup(initialize(root, undefined, ownerContext));',
     check: 'I2.registered and returned functions dispose once, including after stop',
     oracle: 'initializer receives registerCleanup',
   },
@@ -52,7 +52,7 @@ const controls = [
   },
   {
     name: 'returned-cleanup-routing', from: registration,
-    to: "const cleanup = initialize(root, registerCleanup);\n      if (typeof cleanup === 'function') cleanups.push(cleanup);",
+    to: "const cleanup = initialize(root, registerCleanup, ownerContext);\n      if (typeof cleanup === 'function') cleanups.push(cleanup);",
     check: 'I6.legacy return after synchronous stop is disposed immediately',
     oracle: 'legacy late return routes through registration',
   },

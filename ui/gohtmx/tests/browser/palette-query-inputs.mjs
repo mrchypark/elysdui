@@ -6,8 +6,10 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {loadContextOwnerAssets, productionContentType, productionCSSReferences} from './context-owner-assets.mjs';
 import {paletteSourcePaths, paletteSurfaces, paletteBaseline, paletteBaselineTree} from './palette-query-evidence.mjs';
+import {paletteProductionPolicy, paletteProductionPaths, paletteActivationRepairPins} from './palette-query-production-policy.mjs';
 export const paletteSHA = value => createHash('sha256').update(value).digest('hex');
-export async function loadPaletteInputs(base, surface) {
+export async function loadPaletteInputs(base, surface, {productionPolicy = 'strict'} = {}) {
+  paletteProductionPolicy(productionPolicy);
   assert(paletteSurfaces.includes(surface));
   const git = args => execFileSync('git', args, {cwd: base, encoding: 'utf8'}).trim();
   const revision = git(['rev-parse', 'HEAD']), tree = git(['rev-parse', 'HEAD^{tree}']), dirty = git(['status', '--porcelain']);
@@ -18,11 +20,10 @@ export async function loadPaletteInputs(base, surface) {
   // changes only the reviewed CommandPalette runtime/template and its generated
   // catalogue fingerprint. Pin those bytes to the independently identified
   // clean HEAD; every other production input remains byte-equal to baseline.
-  const repairedProduction = new Set([
-    'ui/gohtmx/assets/ely-api-interaction.js',
-    'ui/gohtmx/templates/ely-api-interaction.html',
-    'adapters/gohtmx/catalogue_manifest.json.gz',
-  ]);
+  const repairedProduction = new Set(paletteProductionPaths(productionPolicy));
+  if (productionPolicy === 'activation-repair') for (const [path, expected] of Object.entries(paletteActivationRepairPins)) {
+    assert.equal(sourceFiles[path], expected, 'fixed activation-repair production input: ' + path);
+  }
   for (const path of paletteSourcePaths.filter(path => !/tests\/|^scripts\/|^package|^\.github/.test(path))) {
     const ref = repairedProduction.has(path) ? revision : paletteBaseline;
     assert.equal(paletteSHA(execFileSync('git', ['show', `${ref}:${path}`], {cwd: base, maxBuffer: 8 * 1024 * 1024})), sourceFiles[path], 'reviewed production input: ' + path);
@@ -61,7 +62,7 @@ export async function loadPaletteInputs(base, surface) {
     }
   } finally { await rm(temp, {recursive: true, force: true}); }
   for (const entry of fixtureManifest.sourceFiles) assert.equal(entry.sha256, paletteSHA(await readFile(join(base, entry.path))), 'manifest source rehash: ' + entry.path);
-  return {revision, tree, dirty, sourceFiles, assets, fixtures, fixtureManifest, assetBodies, fixtureBodies,
+  return {productionPolicy, revision, tree, dirty, sourceFiles, assets, fixtures, fixtureManifest, assetBodies, fixtureBodies,
     standaloneDependencyProof: {SHA256: paletteSHA(deps.join('\n')), forbiddenImports: []},
     toolchain: {node: process.version, go: execFileSync(go, ['version'], {cwd: base, encoding: 'utf8'}).trim(), playwright: JSON.parse(await readFile(join(base, 'node_modules/playwright/package.json'), 'utf8')).version}};
 }

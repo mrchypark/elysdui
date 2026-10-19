@@ -17,9 +17,9 @@ export const supplementalSourcePaths = [
  'ui/gohtmx/tests/fixtures/palette-supplemental/main.go','ui/gohtmx/tests/fixtures/palette-supplemental/main_test.go',
  'adapters/gohtmx/tests/fixtures/palette-supplemental/main.go','adapters/gohtmx/tests/fixtures/palette-supplemental/main_test.go',
 ];
-export async function loadSupplementalInputs(base,surface,mode='control') {
+export async function loadSupplementalInputs(base,surface,mode='control',options={}) {
  assert(supplementalModes.includes(mode));
- const inputs=await loadPaletteInputs(base,surface), {assetBodies}=inputs;
+ const inputs=await loadPaletteInputs(base,surface,options), {assetBodies}=inputs;
  for(const path of supplementalSourcePaths)inputs.sourceFiles[path]=sha(await readFile(join(base,path)));
  const observer=await readFile(join(base,'ui/gohtmx/tests/browser/palette-query-supplemental-observer.js'));
  assetBodies.set('/supplemental-observer.js',{body:observer,sourceSHA256:sha(observer),servedSHA256:sha(observer),bytes:observer.length,contentType:'text/javascript; charset=utf-8'});

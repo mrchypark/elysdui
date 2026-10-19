@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {paletteProductionPolicy} from '../ui/gohtmx/tests/browser/palette-query-production-policy.mjs';
 import {readFileSync} from 'node:fs';
 import {pathToFileURL} from 'node:url';
 import {buildReentrySchemaFixture} from './palette-query-reentry-evidence-test.mjs';
@@ -16,13 +17,14 @@ export function buildReentryGuardSchemaFixture(surface='go-qualified',mode='cont
   return f;
 }
 export function runReentryGuardSchemaTests() {
+  const productionPolicy=paletteProductionPolicy(process.env.PALETTE_QUERY_PRODUCTION_POLICY||'strict');
   const runtime=readFileSync(new URL('../ui/gohtmx/assets/ely-api-interaction.js',import.meta.url),'utf8');
-  assert.equal(reentryMutation(runtime,'control'),runtime);
-  const reversed=reentryMutation(runtime,'guard-removed');
+  assert.equal(reentryMutation(runtime,'control',productionPolicy),runtime);
+  const reversed=reentryMutation(runtime,'guard-removed',productionPolicy);
   assert.equal(reversed,runtime.replace(reentryGuardBlock,''));
   assert(reversed.includes('queryField.focus({preventScroll: true});\n        syncCommandPalette(dialog, options[next], true);'));
-  for(const bad of [runtime+' ',runtime.replace(reentryGuardBlock,''),runtime+reentryGuardBlock,runtime.replace("root.dataset.elyReady !== 'true'","root.dataset.elyReady !== 'false'")]) assert.throws(()=>reentryMutation(bad,'guard-removed'));
-  assert.throws(()=>reentryMutation(runtime,'foreign'));
+  for(const bad of [runtime+' ',runtime.replace(reentryGuardBlock,''),runtime+reentryGuardBlock,runtime.replace("root.dataset.elyReady !== 'true'","root.dataset.elyReady !== 'false'")]) assert.throws(()=>reentryMutation(bad,'guard-removed',productionPolicy));
+  assert.throws(()=>reentryMutation(runtime,'foreign',productionPolicy));
   let desired=0,causal=0,rejected=5;
   for(const surface of ['go-qualified','go-chapter','sdui']) for(const mode of reentryModes) {
     const fixture=buildReentryGuardSchemaFixture(surface,mode), verdict=verifyReentryEvidence(fixture.report,fixture.trusted,fixture.exit);

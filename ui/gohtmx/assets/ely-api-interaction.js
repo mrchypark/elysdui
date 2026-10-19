@@ -621,7 +621,7 @@ const copyFeedback = (root, notify, action) => {
   }};
 };
 
-register('interaction', (root, registerCleanup) => {
+register('interaction', (root, registerCleanup, ownerContext) => {
   const timers = new Set();
   const lottieCleanups = [];
   const clipboard = copyFeedback(root, detail => change(root, detail), (action, detail) => emit(root, action, detail));
@@ -667,6 +667,42 @@ register('interaction', (root, registerCleanup) => {
     if (dialog.open) dialog.close();
     else dialog.hidden = true;
     restoreDialogFocus(dialog, ownedFocus);
+  };
+  const activateCommandPalette = (event, option) => {
+    const dialog = closest(root, option, 'dialog[data-interaction-palette]');
+    const results = closest(root, option, '[data-interaction-palette-results]');
+    const query = dialog?.querySelector('[data-interaction-filter]');
+    const owns = ownerContext?.captureOwner();
+    const current = () => owns?.() && paletteNavigationActive && root.dataset.elyReady === 'true' &&
+      root.id === paletteNavigationOwner.id && root.dataset.elyComponent === paletteNavigationOwner.component &&
+      root.dataset.elyFamily === 'interaction' && root.dataset.elyKind === 'CommandPalette' && root.dataset.elyDisabled !== 'true' &&
+      dialog?.isConnected && dialog.closest('[data-ely-family]') === root &&
+      results?.isConnected && dialog.querySelector('[data-interaction-palette-results]') === results &&
+      query?.isConnected && !query.disabled && query.closest('[data-ely-family]') === root &&
+      dialog.querySelector('[data-interaction-filter]') === query &&
+      option.isConnected && option.closest('[data-ely-family]') === root &&
+      option.closest('[data-interaction-palette-results]') === results && option.closest('dialog') === dialog &&
+      !option.disabled && option.getAttribute('aria-disabled') !== 'true' && !option.closest('[hidden]');
+    if (!current() || !dialog.open) { event.preventDefault(); return; }
+    const action = option.dataset.elyAction, selectionValue = option.value;
+    const value = option.value || option.dataset.value || '';
+    const formData = option.form ? new FormData(option.form) : null;
+    const detail = {value, formData, values: formData ? [...formData] : []};
+    // FormData can synchronously run caller code too.
+    if (!current() || !dialog.open) { event.preventDefault(); return; }
+    results.querySelectorAll('[data-interaction-palette-option]').forEach(row => {
+      if (row.closest('[data-ely-family]') === root) row.setAttribute('aria-selected', String(row === option));
+    });
+    syncCommandPalette(dialog, option);
+    closeDialog(dialog);
+    // Native close may synchronously focus a host control that rebinds/remounts
+    // this same physical root. Never deliver the old command to its new owner.
+    if (!current() || dialog.open || option.getAttribute('aria-selected') !== 'true') { event.preventDefault(); return; }
+    if (!emit(root, action, detail)) event.preventDefault();
+    // A callback may reopen, replace, or rebind. Do no trailing presentation
+    // writes and omit a notification belonging to the superseded transaction.
+    if (!current() || dialog.open || option.getAttribute('aria-selected') !== 'true') return;
+    change(root, {name: 'palette', value: selectionValue, selected: true});
   };
   const showTourStep = (dialog, index, notify = true) => {
     const steps = [...dialog.querySelectorAll('[data-interaction-tour-step]')];
@@ -1186,6 +1222,9 @@ register('interaction', (root, registerCleanup) => {
     }
     const opener = target?.closest('[data-interaction-dialog]');
     if (opener) { const dialog = root.querySelector(`#${CSS.escape(opener.dataset.interactionDialog)}`); if (dialog) dialogOpeners.set(dialog, opener); if (dialog?.showModal && !dialog.open) dialog.showModal(); else if (dialog && !dialog.open) dialog.hidden = false; (dialog?.querySelector('input:not(:disabled)') || dialog?.querySelector('[data-ely-action]:not(:disabled), [data-interaction-close]:not(:disabled)'))?.focus(); return; }
+    const ownedPaletteOption = closest(root, event.target, '[data-interaction-palette-action]');
+    if (ownedPaletteOption) { activateCommandPalette(event, ownedPaletteOption); return; }
+    if (target?.closest('[data-interaction-palette-action]')) return;
     const paletteOption = target?.closest('[data-interaction-palette-option]');
     if (paletteOption) {
       const results = paletteOption.closest('[data-interaction-palette-results]');
@@ -1456,6 +1495,12 @@ register('interaction', (root, registerCleanup) => {
     const paletteHost = closest(root, event.target, '[data-interaction-palette], [data-interaction-palette-results], [data-interaction-palette-option]');
     const palette = paletteHost?.matches('[data-interaction-palette-results]') ? paletteHost : paletteHost?.closest('[data-interaction-palette]')?.querySelector('[data-interaction-palette-results]');
     if (palette && ['ArrowDown', 'ArrowUp', 'Home', 'End', 'Enter'].includes(event.key)) {
+      // Plain query confirmation is consumed even when filtering leaves no row.
+      // Explicit form submission and modified/composing Enter keep their paths.
+      const confirmationDialog = palette.closest('dialog[data-interaction-palette]');
+      if (root.dataset.elyKind === 'CommandPalette' && event.key === 'Enter' &&
+          !event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey && !event.isComposing && event.keyCode !== 229 &&
+          confirmationDialog?.open && confirmationDialog.querySelector('[data-interaction-filter]') === event.target) event.preventDefault();
       const options = [...palette.querySelectorAll('[data-interaction-palette-option]:not(:disabled):not([hidden])')].filter(option => !option.closest('li').hidden);
       if (!options.length) return;
       const selected = options.findIndex(option => option.getAttribute('aria-selected') === 'true');

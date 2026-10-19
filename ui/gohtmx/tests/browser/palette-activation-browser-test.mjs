@@ -5,6 +5,7 @@ import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {chromium} from 'playwright';
 import {loadActivationInputs} from './palette-activation-inputs.mjs';
+import {activationEnvironment} from './palette-activation-policy.mjs';
 import {paletteSHA as sha} from './palette-query-inputs.mjs';
 import {paletteSurfaces,paletteErrors} from './palette-query-evidence.mjs';
 import {activationCases,activationClassification,activationPage,activationQuery,activationReportName,activationOracles} from './palette-activation-evidence.mjs';
@@ -20,7 +21,7 @@ const open=async()=>{await page.mouse.move(1,1);await page.locator('#palette-pri
 const drain=async()=>{await settle();if(surface==='sdui')await page.waitForFunction(()=>activationLog.filter(e=>e.type==='bridge-success').length===activationLog.filter(e=>e.type==='request-start').length);await Promise.all(pending);};
 try{
  assert.equal(process.env.CI,'true','browser execution is restricted to CI');assert(paletteSurfaces.includes(surface));assert(report.runToken);
- inputs=await loadActivationInputs(base,surface);const {assetBodies,fixtureBodies,...metadata}=inputs;Object.assign(report,metadata);assert.equal(report.dirty,'','clean committed baseline required');
+ inputs=await loadActivationInputs(base,surface,activationEnvironment());const {assetBodies,fixtureBodies,...metadata}=inputs;Object.assign(report,metadata);assert.equal(report.dirty,'','clean committed baseline required');
  server=createServer(async(req,res)=>{
   const path=new URL(req.url,'http://localhost').pathname,entry={check:current?.name||null,path,method:req.method,htmx:req.headers['hx-request']||null};report.requests.push(entry);
   try{let body=assetBodies.get(path)?.body||fixtureBodies.get(path),contentType=assetBodies.get(path)?.contentType||'text/html; charset=utf-8';

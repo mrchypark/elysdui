@@ -17,6 +17,8 @@ on:
       - 'scripts/palette-query*.mjs'
       - 'package*.json'
       - '.github/workflows/palette-query.yml'
+env:
+  PALETTE_QUERY_PRODUCTION_POLICY: activation-repair
 jobs:
   palette-query:
     runs-on: ubuntu-latest

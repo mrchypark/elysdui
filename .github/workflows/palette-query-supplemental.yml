@@ -19,6 +19,8 @@ on:
       - 'package*.json'
 permissions:
   contents: read
+env:
+  PALETTE_QUERY_PRODUCTION_POLICY: activation-repair
 jobs:
   schema:
     runs-on: ubuntu-latest

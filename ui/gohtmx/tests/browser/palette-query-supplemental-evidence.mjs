@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {verifyPaletteProductionPolicy} from './palette-query-production-policy.mjs';
 import {isDeepStrictEqual as same} from 'node:util';
 import {paletteOwner,paletteRows,paletteExpectedAction,paletteTyping,paletteRequiredBrowserPaths,paletteSurfaces,paletteErrors,paletteSourcePaths} from './palette-query-evidence.mjs';
 import {supplementalSourcePaths} from './palette-query-supplemental-inputs.mjs';
@@ -129,6 +130,7 @@ export function supplementalOracles(check,surface){
 }
 const hash=value=>typeof value==='string'&&/^[a-f0-9]{64}$/.test(value);
 export function verifySupplementalEvidence(report,trusted,exitCode){
+  verifyPaletteProductionPolicy(report, trusted);
  const {surface,mode,revision,tree,runToken,assets,fixtures}=trusted;
  assert(paletteSurfaces.includes(surface));assert(supplementalModes.includes(mode));assert.equal(report.suite,'palette-query-supplemental');assert.equal(report.stage,'checks');
  for(const [k,v]of Object.entries({surface,mode,revision,tree,runToken}))assert.equal(report[k],v,'independent '+k);
@@ -167,5 +169,5 @@ export function verifySupplementalEvidence(report,trusted,exitCode){
  const status=report.checks.every(c=>c.status==='passed')?'passed':'failed';assert.equal(report.status,status);assert.equal(exitCode,status==='passed'?0:1,'retain raw nonzero');
  const causalKills=mode==='control'?[]:supplementalMutants[mode].kills.filter(id=>report.checks.some(c=>c.oracles.some(o=>o.id===id&&!o.pass)));
  if(mode!=='control'){assert.equal(status,'failed','causal mutant must retain raw failure');assert.deepEqual(causalKills,supplementalMutants[mode].kills,'every designated source-owned causal kill required');}
- return {status,surface,mode,revision,tree,failed:report.checks.filter(c=>c.status==='failed').map(c=>c.name),causalKills};
+ return {productionPolicy:trusted.productionPolicy,status,surface,mode,revision,tree,failed:report.checks.filter(c=>c.status==='failed').map(c=>c.name),causalKills};
 }

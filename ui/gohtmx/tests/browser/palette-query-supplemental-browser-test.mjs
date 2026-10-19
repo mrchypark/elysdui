@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import {paletteProductionPolicy} from './palette-query-production-policy.mjs';
+const productionPolicy = paletteProductionPolicy(process.env.PALETTE_QUERY_PRODUCTION_POLICY || 'strict');
 import {mkdir, writeFile} from 'node:fs/promises';
 import {createServer} from 'node:http';
 import {join} from 'node:path';
@@ -56,7 +58,7 @@ async function runCase(name) {
 try {
   assert.equal(process.env.CI, 'true', 'browser execution is restricted to CI');
   assert(paletteSurfaces.includes(surface)); assert(report.runToken, 'fresh wrapper token required');
-  inputs = await loadSupplementalInputs(base, surface, mode);
+  inputs = await loadSupplementalInputs(base, surface, mode, {productionPolicy});
   const {assetBodies, fixtureBodies, ...metadata} = inputs; Object.assign(report, metadata);
   assert.equal(report.dirty, '', 'browser evidence requires a clean committed checkout');
   server = createServer(async (req, res) => {

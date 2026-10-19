@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {verifyPaletteProductionPolicy} from './palette-query-production-policy.mjs';
 import {createHash} from 'node:crypto';
 import {isDeepStrictEqual as same} from 'node:util';
 export const paletteBaseline = '0a972e071452f7bdb9bc64f6d27d50c042108885';
@@ -10,6 +11,9 @@ export function paletteCases(group = 'all') { assert(group === 'all' || Object.h
 export const paletteErrors = ['pageErrors', 'consoleErrors', 'requestFailures', 'serverErrors', 'transportErrors', 'runtimeErrors'];
 export const paletteSourcePaths = [
   'ui/gohtmx/tests/browser/diagnostics/palette-query-baseline.md',
+  'ui/gohtmx/tests/browser/palette-query-production-policy.mjs',
+  'scripts/palette-query-production-policy-test.mjs',
+  'ui/gohtmx/tests/browser/diagnostics/palette-query-production-policy.md',
   'ui/gohtmx/tests/browser/palette-query-browser-test.mjs', 'ui/gohtmx/tests/browser/palette-query-observer.js',
   'ui/gohtmx/tests/browser/palette-query-evidence.mjs', 'ui/gohtmx/tests/browser/palette-query-inputs.mjs',
   'scripts/palette-query-run.mjs', 'scripts/palette-query-replay.mjs', 'scripts/palette-query-evidence-test.mjs', 'scripts/palette-query-oracles-test.mjs',
@@ -271,6 +275,7 @@ function assertPaletteTransportInventory(report, surface, assets, fixtures, inve
   }
 }
 export function verifyPaletteEvidence(report, trusted, exitCode) {
+  verifyPaletteProductionPolicy(report, trusted);
   const {surface, group, revision, tree, runToken, sourceFiles, assets, fixtures} = trusted;
   assert(paletteSurfaces.includes(surface));
   assert.equal(report.suite, 'palette-query'); assert.equal(report.stage, 'checks');
@@ -339,5 +344,5 @@ export function verifyPaletteEvidence(report, trusted, exitCode) {
   }
   const status = report.checks.every(check => check.status === 'passed') ? 'passed' : 'failed';
   assert.equal(report.status, status); assert.equal(exitCode, status === 'passed' ? 0 : 1, 'nonzero contract exit preserved');
-  return {status, surface, group, revision, tree, failed: report.checks.filter(c => c.status === 'failed').map(c => c.name)};
+  return {productionPolicy:trusted.productionPolicy,status, surface, group, revision, tree, failed: report.checks.filter(c => c.status === 'failed').map(c => c.name)};
 }

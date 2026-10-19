@@ -92,7 +92,7 @@ func Manifest(w io.Writer, surface string, extra map[string]any) error {
 	extra["classification"] = "supplemental activation and empty-confirmation baseline; close-rebind cancellation is added web ownership policy, not native parity"
 	extra["activationBaselineCommit"] = BaseCommit
 	extra["activationBaselineTree"] = BaseTree
-	extra["productionMutation"] = "none relative to activation baseline"
+	extra["productionReference"] = "activation baseline is immutable; current source and served policy are recorded by the loader"
 	extra["activationObserverURL"] = "/activation-observer.js"
 	extra["variants"] = map[string]any{"full": Props(palettefixture.Primary("original"), "full")["Items"], "initial": Props(palettefixture.Primary("original"), "initial")["Items"], "disabled": Props(palettefixture.Primary("original"), "disabled")["Items"]}
 	return palettefixture.WriteManifest(w, surface, extra)

@@ -9,7 +9,7 @@ labeled and is not trusted keyboard evidence.
 
 The collection source pin is the guarded head
 ee28495c7cd6581d49d53874e831c6cea40930a4, tree
-c2d6ed91c378f59070fde8d626df2748e9fd837c. Every production asset must match
+c2d6ed91c378f59070fde8d626df2748e9fd837c. In baseline mode, every production asset must match
 that reachable remote pin; pointer/plain-Enter fixtures execute the guarded
 runtime unchanged. The inherited transport-hardening code is test-only and is
 pinned by the exact clean-head source inventory, not an unpublished base object.
@@ -63,3 +63,74 @@ The six original archives, errors and nonzero exits remain invalid evidence.
 Synthetic derived diagnostics and corruption regressions cannot repair their
 missing collector assertions or grant retrospective browser credit. Fresh CI
 collection and exact-current-source replay are required.
+
+## Repair source policies and causal collection
+
+The corrected native baseline at ac28651be2869bab709bc617a3f7c50bf68d50f5
+retains all eight cases as valid failing evidence on all three renderers in both
+push and pull-request runs. The desired oracles, observer, and eight native case
+bodies are unchanged by the repair. Historical replay uses that exact checkout;
+its production equality policy is not replaced with a blanket bypass.
+
+The default loader policy remains baseline. Repaired collection must independently
+select mode `repaired` and one fixed mutation in the runner and replay CLI. Its
+core, interaction runtime and template have fixed reviewed source hashes. Every
+other production asset remains equal to the immutable baseline. The original
+source inventory is retained, with a separate exact repair-source inventory.
+Source hashes are never overwritten with served hashes. Unknown modes, wrong
+external selections, changed mutation definitions/counts, forged source hashes,
+missing requests and missing response proofs reject replay.
+
+The family marker suppresses only generic CommandPalette row dispatch. A private
+initializer context captures the exact mounted generation and present or absent
+host binding before FormData creation. The transaction commits selection, closes
+synchronously, revalidates ownership, and emits once. Callback reopen or outside
+focus has no trailing presentation writes; a superseded transaction cannot send
+its selection notification. Public event cancellation still prevents the
+originating click and does not roll back committed close/selection. Explicit
+requestSubmit still follows the ordinary validated form path. Plain unmodified,
+non-composing query Enter consumes its default even when no option remains.
+Modifier/composition behavior is outside native acceptance for this repair.
+
+The fourteen-job matrix includes three repaired renderer controls, eight exact
+one-site reversals on qualified Go, marker omission additionally on chapter Go
+and SDUI, and post-close ownership bypass additionally on SDUI. Every variant
+runs the same eight cases. The fixed causal control checker requires the
+unchanged raw verifier, all prerequisites, raw exit 1, and each designated desired
+failure; a collector/schema/transport failure cannot stand in for a kill.
+The post-close reversal additionally requires the original payload to reach the
+replacement host after the trusted binding transition, with the matching real
+POST on SDUI. The baseline itself emitted before rebind and did not show that
+cross-generation routing.
+
+The marker reversal uses an actual Go build overlay of exactly one template
+source marker. Independently compiled qualified, chapter and SDUI fixture bytes
+must equal the original compilation with exactly 10, 5 and 10 markers removed
+from full, initially empty and disabled-only pages; response fragments have zero.
+An ignored overlay, arbitrary DOM rewrite, changed row contract or extra source
+change rejects preparation. The original and transformed template hashes, exact
+source replacement, rendered source/served hashes, and compiler policy are kept.
+
+Whole-runtime unit tests execute the real core and interaction modules with
+bounded DOM/event doubles. They cover legacy initializer compatibility,
+absent/current host bindings, current/stale disposers, retained-root initializer
+restart, FormData reentry, callbacks, event cancellation, adjacent unmarked
+palettes, and explicit submit preservation. These do not certify native focus or
+implicit submission. In particular, close-time initializer teardown/remount is
+unit-verified only; native close-time binding replacement is a separate case.
+The existing 1,321-byte query post-focus guard remains byte-identical.
+
+Local current-source JSON/CLI regressions use clearly synthetic observations.
+They prove provenance and replay integrity, not runtime behavior. Repair and
+causal native results require fresh exact-head CI artifacts and independent
+source/API/archive/log replay before a behavioral claim.
+
+Mutant replay independently recomputes the causal witness after current-source
+and raw validation. A raw-valid report that misses the intended witness prints
+`evidenceValidation: valid-replay` and `causalValidation: failed`, preserves the
+raw child exit and desired failures, and exits nonzero. This is distinct from
+malformed source, transport or prerequisite evidence. Repaired-control behavior
+that remains red still replays as valid raw failing evidence. Duplicate generic
+dispatch is collected natively on qualified Go only; SDUI may suppress a repeated
+request while the same source is busy, so duplicate callbacks do not imply two
+POSTs. Synthetic transport-admissibility traces are not native predictions.

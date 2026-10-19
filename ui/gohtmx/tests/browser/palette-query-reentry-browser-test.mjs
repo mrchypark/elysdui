@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import {paletteProductionPolicy} from './palette-query-production-policy.mjs';
+const productionPolicy = paletteProductionPolicy(process.env.PALETTE_QUERY_PRODUCTION_POLICY || 'strict');
 import {mkdir, writeFile} from 'node:fs/promises';
 import {createServer} from 'node:http';
 import {join} from 'node:path';
@@ -17,7 +19,7 @@ let inputs, server, browser, page, phase='preflight', check;
 const settle = () => page.evaluate(()=>new Promise(resolve=>setTimeout(()=>requestAnimationFrame(()=>requestAnimationFrame(resolve)),30)));
 try {
   assert.equal(process.env.CI,'true','browser execution is restricted to CI'); assert(paletteSurfaces.includes(surface)); assert(report.runToken);
-  inputs = await loadReentryInputs(base,surface,mode); const {assetBodies,fixtureBodies,...metadata}=inputs; Object.assign(report,metadata);
+  inputs = await loadReentryInputs(base,surface,mode, {productionPolicy}); const {assetBodies,fixtureBodies,...metadata}=inputs; Object.assign(report,metadata);
   assert.equal(report.dirty,'','browser evidence requires clean committed source');
   server=createServer((req,res)=>{
     const path=new URL(req.url,'http://localhost').pathname, entry={phase,path,method:req.method,htmx:req.headers['hx-request']||null}; report.requests.push(entry);

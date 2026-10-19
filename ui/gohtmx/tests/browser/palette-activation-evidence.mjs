@@ -1,3 +1,4 @@
+import {verifyActivationPolicy} from './palette-activation-policy.mjs';
 import assert from 'node:assert/strict';
 import {isDeepStrictEqual as same} from 'node:util';
 import {paletteOwner,paletteRows,paletteSourcePaths,paletteSurfaces,paletteRequiredBrowserPaths,paletteOptionalBrowserPaths,paletteErrors,paletteTyping} from './palette-query-evidence.mjs';
@@ -184,7 +185,8 @@ export function verifyActivationEvidence(report,trusted,exitCode){
  assert.deepEqual(Object.keys(trusted.sourceFiles),paletteSourcePaths);assert.deepEqual(Object.keys(trusted.activationSourceFiles),activationSourcePaths);
  for(const key of ['sourceFiles','activationSourceFiles','assets','fixtures','fixtureManifest','standaloneDependencyProof','toolchain'])assert.deepEqual(report[key],trusted[key]);
  for(const h of [...Object.values(trusted.sourceFiles),...Object.values(trusted.activationSourceFiles)])assert(hash(h));
- for(const entry of Object.values({...trusted.assets,...trusted.fixtures})){assert(hash(entry.sourceSHA256));assert.equal(entry.sourceSHA256,entry.servedSHA256);assert(entry.bytes>0);}
+ verifyActivationPolicy(report,trusted);
+ for(const entry of Object.values({...trusted.assets,...trusted.fixtures})){assert(hash(entry.sourceSHA256));assert(hash(entry.servedSHA256));assert(entry.bytes>0);}
  assert(hash(report.standaloneDependencyProof.SHA256));assert.deepEqual(report.standaloneDependencyProof.forbiddenImports,[]);
  for(const k of ['node','go','playwright'])assert(typeof report.toolchain[k]==='string'&&report.toolchain[k]);assert(typeof report.browserVersion==='string'&&report.browserVersion);
  for(const k of paletteErrors)assert.deepEqual(report[k],[]);assert.deepEqual(report.caseInventory,activationCases);assert.deepEqual(report.checks.map(c=>c.name),activationCases);
@@ -219,5 +221,5 @@ export function verifyActivationEvidence(report,trusted,exitCode){
    assert.deepEqual(Object.fromEntries(posts[i].fields),fields,'raw HTTP/request-start packet join');assert.equal(posts[i].fields.length,start.fields.length);assert.equal(posts[i].responseFixture,'/sdui-response-primary');assert.equal(proofs[i].responseFixture,'/sdui-response-primary');assert.deepEqual([success[i].action,success[i].target,success[i].status,success[i].requestId],[fields._action,fields._target,200,fields._request]);
   });
  }
- const status=report.checks.every(c=>c.status==='passed')?'passed':'failed';assert.equal(report.status,status);assert.equal(exitCode,status==='passed'?0:1,'raw nonzero contract exit preserved');return {status,surface:trusted.surface,revision:trusted.revision,failed:report.checks.filter(c=>c.status==='failed').map(c=>c.name)};
+ const status=report.checks.every(c=>c.status==='passed')?'passed':'failed';assert.equal(report.status,status);assert.equal(exitCode,status==='passed'?0:1,'raw nonzero contract exit preserved');return {status,surface:trusted.surface,revision:trusted.revision,productionPolicy:trusted.productionPolicy,mode:trusted.activationPolicy.mode,mutation:trusted.activationPolicy.mutation,failed:report.checks.filter(c=>c.status==='failed').map(c=>c.name)};
 }

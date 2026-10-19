@@ -1,4 +1,4 @@
-name: CommandPalette activation supplemental baseline
+name: CommandPalette activation repair and causal controls
 on:
   workflow_dispatch:
   push:
@@ -11,7 +11,25 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        surface: [go-qualified, go-chapter, sdui]
+        include:
+          - {surface: go-qualified, mutation: control}
+          - {surface: go-chapter, mutation: control}
+          - {surface: sdui, mutation: control}
+          - {surface: go-qualified, mutation: core-skip-removed}
+          - {surface: go-qualified, mutation: template-marker-omitted}
+          - {surface: go-qualified, mutation: family-emit-omitted}
+          - {surface: go-qualified, mutation: close-after-action}
+          - {surface: go-qualified, mutation: post-close-owner-bypassed}
+          - {surface: go-qualified, mutation: trailing-notification-guard-removed}
+          - {surface: go-qualified, mutation: empty-enter-fallthrough}
+          - {surface: go-qualified, mutation: blanket-palette-submit-prevention}
+          - {surface: go-chapter, mutation: template-marker-omitted}
+          - {surface: sdui, mutation: template-marker-omitted}
+          - {surface: sdui, mutation: post-close-owner-bypassed}
+    env:
+      PALETTE_QUERY_SURFACE: ${{ matrix.surface }}
+      PALETTE_ACTIVATION_MODE: repaired
+      PALETTE_ACTIVATION_MUTATION: ${{ matrix.mutation }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -27,13 +45,15 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - name: Validate synthetic replay and corruption controls
         run: node scripts/palette-activation-evidence-test.mjs
-      - name: Activation and explicit-submit controls (raw failures stay red)
-        env:
-          PALETTE_QUERY_SURFACE: ${{ matrix.surface }}
+      - name: Repaired activation and explicit-submit controls
+        if: matrix.mutation == 'control'
         run: node scripts/palette-activation-run.mjs
+      - name: Exact served causal reversal (raw failure retained)
+        if: matrix.mutation != 'control'
+        run: node scripts/palette-activation-controls.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: palette-activation-${{ matrix.surface }}
+          name: palette-activation-${{ matrix.surface }}-${{ matrix.mutation }}
           path: test-results/contracts/
           if-no-files-found: error

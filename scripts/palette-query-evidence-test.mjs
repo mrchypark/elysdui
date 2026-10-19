@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
-import {pathToFileURL} from 'node:url';
+import {fileURLToPath, pathToFileURL} from 'node:url';
+import {execFileSync} from 'node:child_process';
 import {readFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {
@@ -180,7 +181,7 @@ export function buildPaletteSchemaFixture(surface = 'go-qualified', group = 'all
     sourceFiles: Object.entries(sourceFiles).map(([path, sha256]) => ({path, sha256, bytes: Buffer.byteLength('synthetic schema source: ' + path)})),
     identities: ['primary', 'peer'].map(slot => ({ownerID: `palette-${slot}`, nodeID: `palette-${slot}-component`, familyID: owner(surface, slot), dialogID: owner(surface, slot) + '-palette', ...(surface === 'sdui' ? {screenID: `palette-${slot}-screen`, resultID: `palette-${slot}-result`} : {})})),
     label: 'Command search', placeholder: 'Type a command', group: 'Commands', rowCount: 5, initialQuery: '', observerURL: '/fixture-observer.js', hostResultID: 'palette-owner-result'};
-  const report = {suite: 'palette-query', stage: 'checks', surface, group, caseInventory: cases(group),
+  const report = {productionPolicy: 'strict', suite: 'palette-query', stage: 'checks', surface, group, caseInventory: cases(group),
     revision: '1'.repeat(40), tree: '2'.repeat(40), runToken: 'synthetic-schema-token-no-browser-proof', dirty: '', actualMainBaseline: baseline, sourcePins: copy(pins),
     scope: 'Synthetic schema fixture only; no browser or implementation conformance claim.',
     browserVersion: 'synthetic-schema-no-browser', toolchain: {node: 'synthetic-schema-node', go: 'synthetic-schema-go', playwright: 'synthetic-schema-playwright'},
@@ -202,7 +203,7 @@ export function buildPaletteSchemaFixture(surface = 'go-qualified', group = 'all
       }
     }
   }
-  const trusted = copy(Object.fromEntries(['surface', 'group', 'revision', 'tree', 'runToken', 'sourceFiles', 'assets', 'fixtures', 'fixtureManifest', 'toolchain', 'standaloneDependencyProof'].map(key => [key, report[key]])));
+  const trusted = copy(Object.fromEntries(['productionPolicy', 'surface', 'group', 'revision', 'tree', 'runToken', 'sourceFiles', 'assets', 'fixtures', 'fixtureManifest', 'toolchain', 'standaloneDependencyProof'].map(key => [key, report[key]])));
   return refresh({report, trusted, exit: 0});
 }
 
@@ -335,11 +336,11 @@ export function runPaletteEvidenceSchemaTests() {
 
 // These tests exercise transport accounting only. No desired behavioral oracle
 // or captured observation is rewritten to satisfy a transport expectation.
-function exercisePaletteTransport(fixture) {
+function exercisePaletteTransport(fixture, verifier = verifyPaletteEvidence) {
   const {report, trusted, exit} = fixture, name = report.checks[0].name;
   const runtime = '/assets/ely-api-interaction.js', font = '/assets/ely/fonts/Inter-Regular.ttf';
   const matches = (entry, path) => entry.check === name && entry.path === path;
-  const baseline = verifyPaletteEvidence(report, trusted, exit);
+  const baseline = verifier(report, trusted, exit);
   assert(report.requests.some(entry => matches(entry, font)), 'transport test has an observed optional font');
   const corruptions = [
     ['mandatory runtime request omitted', r => { r.requests = r.requests.filter(entry => !matches(entry, runtime)); }],
@@ -367,14 +368,14 @@ function exercisePaletteTransport(fixture) {
   ];
   for (const [label, mutate] of corruptions) {
     const altered = copy(report); mutate(altered);
-    assert.throws(() => verifyPaletteEvidence(altered, trusted, exit), undefined, report.surface + '/' + report.group + ': ' + label);
+    assert.throws(() => verifier(altered, trusted, exit), undefined, report.surface + '/' + report.group + ': ' + label);
   }
   // Font usage is optional, not a mandatory behavior. A missing pair must not
   // cause the test to invent a fetch. A one-sided or inconsistent pair is bad.
   const absent = copy(report);
   absent.requests = absent.requests.filter(entry => !matches(entry, font));
   absent.browserResponses = absent.browserResponses.filter(entry => !matches(entry, font));
-  assert.deepEqual(verifyPaletteEvidence(absent, trusted, exit), baseline, 'optional absent pair preserves raw behavioral verdict');
+  assert.deepEqual(verifier(absent, trusted, exit), baseline, 'optional absent pair preserves raw behavioral verdict');
   return {rejected: corruptions.map(([name]) => name), optionalAbsentStatus: baseline.status};
 }
 function runPaletteTransportSchemaTests() {
@@ -529,7 +530,20 @@ const actualTransportReceipts = [
     "3c556bbe6c1f1484014a5a29b85adef49e9fd726b21124ae3e49903ec6d7ce71"
   ]
 ];
+// This immutable ancestor already contains the transport hardening, but predates
+// the explicit production-policy schema. Loading its exact hash avoids inventing
+// current policy/source metadata for old records. The default/current verifier
+// above continues to require the independently selected current policy.
+const historicalTransportValidator = Object.freeze({
+  revision: '4ba625b64cd991cf3874639aace590eae70f279d',
+  path: 'ui/gohtmx/tests/browser/palette-query-evidence.mjs',
+  sha256: '914e91e84c580153573237eae8e1a131c4942bd4a9825b029d8344d0f698057b',
+});
 export async function runPaletteTransportActualReportRegression(root) {
+  const source = execFileSync('git', ['show', historicalTransportValidator.revision + ':' + historicalTransportValidator.path],
+    {cwd: fileURLToPath(new URL('../', import.meta.url)), maxBuffer: 2 * 1024 * 1024});
+  assert.equal(sha(source), historicalTransportValidator.sha256, 'fixed historical transport validator bytes');
+  const historical = await import('data:text/javascript;base64,' + source.toString('base64'));
   const results = [];
   for (const [event, name, reportSHA256, invocationSHA256, exitSHA256] of actualTransportReceipts) {
     const path = join(root, event, 'original', name, name + '.json');
@@ -542,9 +556,9 @@ export async function runPaletteTransportActualReportRegression(root) {
     }
     assert.equal(report.revision, event === 'push' ? '80560c7218b171f72dabe91bd513d19e12a1d80e' : 'de94a891f72737953f803efee2edae0ecb445ab1');
     assert.equal(report.tree, 'f775624923f634fce976178c8612d7fc3563dd9d');
-    results.push({event, name, ...exercisePaletteTransport({report, trusted, exit: exit.exitCode})});
+    results.push({event, name, ...exercisePaletteTransport({report, trusted, exit: exit.exitCode}, historical.verifyPaletteEvidence)});
   }
-  console.log(JSON.stringify({kind: 'immutable old-head actual-report validator regression; no new native run', archivedReports: results.length,
+  console.log(JSON.stringify({kind: 'immutable archived-report compatibility with fixed historical validator; no candidate or new native certification', historicalTransportValidator, archivedReports: results.length,
     rejected: results.reduce((sum, r) => sum + r.rejected.length, 0), optionalAbsentStatuses: results.map(r => r.optionalAbsentStatus), results}));
   return results;
 }

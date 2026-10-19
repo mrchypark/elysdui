@@ -5,6 +5,8 @@ on:
     paths: ['ui/gohtmx/**', 'adapters/gohtmx/**', 'sdui/**', 'scripts/palette-query*.mjs', 'package*.json', '.github/workflows/palette-query-reentry.yml']
   pull_request:
     paths: ['ui/gohtmx/**', 'adapters/gohtmx/**', 'sdui/**', 'scripts/palette-query*.mjs', 'package*.json', '.github/workflows/palette-query-reentry.yml']
+env:
+  PALETTE_QUERY_PRODUCTION_POLICY: activation-repair
 jobs:
   reentry:
     runs-on: ubuntu-latest
