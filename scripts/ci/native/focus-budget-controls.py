@@ -14,8 +14,11 @@ RESULTS = ROOT / "test-results/android-native/focus-budget-controls"
 SOURCE = Path("test-support/dev/ely/nativeprofile/FocusObservationBudget.kt")
 SUITE = "dev.ely.nativeprofile.FocusObservationBudgetTest"
 DESIGNATED = "innerBudgetExhaustionIsReadinessFailureWithOriginalCause"
-ANCHOR = "if (cause is FocusObservationBudgetExceeded) {"
-REPLACEMENT = "if (false && cause is FocusObservationBudgetExceeded) {"
+ANCHOR = """        if (cause is FocusObservationBudgetExceeded) {
+            throw AssertionError("Window focus observation exceeded ${timeoutMillis}ms: ${cause.phase}", cause)
+        }
+"""
+REPLACEMENT = ""  # Retain the original ExecutionException; remove only its typed normalization.
 EXPECTED = {
     DESIGNATED, "zeroBudgetBeforePostingIsDistinctFromAnUnansweredPostedProbe",
     "outerDeadlineIsReadinessFailureAndRetainsTimeoutCause", "unrelatedWorkerFailureRemainsExecutionFailure",
@@ -41,16 +44,19 @@ def main():
             (checkout / SOURCE).write_text(body)
             selected = SUITE if mode == "control" else f"{SUITE}.{DESIGNATED}"
             command = [str(checkout / "gradlew"), "--no-daemon", "-PprotocolOnly", ":protocol:test", "--tests", selected, "--rerun-tasks"]
+            report = checkout / f"protocol/build/test-results/test/TEST-{SUITE}.xml"
+            report.unlink(missing_ok=True)
             result = subprocess.run(command, cwd=checkout, capture_output=True, timeout=600)
             out = RESULTS / mode
             out.mkdir(exist_ok=True)
             (out / "stdout.log").write_bytes(result.stdout)
             (out / "stderr.log").write_bytes(result.stderr)
             (out / "exit.json").write_text(json.dumps({"exit": result.returncode, "command": command}) + "\n")
-            report = checkout / f"protocol/build/test-results/test/TEST-{SUITE}.xml"
             shutil.copy2(report, out / "tests.xml")
             suite = ET.parse(report).getroot()
             cases = suite.findall("testcase")
+            assert suite.attrib["name"] == SUITE
+            assert all(case.attrib["classname"] == SUITE for case in cases)
             assert len(cases) == (len(EXPECTED) if mode == "control" else 1)
             assert int(suite.attrib["tests"]) == len(cases)
             assert {c.attrib["name"] for c in cases} == (EXPECTED if mode == "control" else {DESIGNATED})
