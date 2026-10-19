@@ -6,9 +6,12 @@ previously reviewed interaction runtime/template and catalogue fingerprint may
 equal clean HEAD; all other production sources and loaded assets must equal the
 historical actual-main baseline.
 
-The finite `activation-repair` policy additionally permits only `ely-api.js` and
-requires fixed SHA-256 values for all four approved production files. It does not
-authorize arbitrary HEAD production or CSS bytes. Selection is explicit in the
+The finite `activation-repair` policy additionally permits `ely-api.js` and the
+reviewed `ely-api-interaction.css` CopyButton repair and its newly loaded
+`ely/icons/check.svg` dependency (unchanged from the prior main source). It
+requires fixed SHA-256 values for all six approved production files. The historical strict policy
+does not admit that CSS change. Neither policy authorizes arbitrary HEAD
+production or CSS bytes. Selection is explicit in the
 three workflows, the parent runner, the browser child, and offline replay. A
 report cannot select its own policy. Invocation, report and exit records retain
 the policy; offline CLI defaults to strict. A candidate invocation must supply

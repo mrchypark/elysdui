@@ -17,7 +17,9 @@ const base=fileURLToPath(new URL('../',import.meta.url)),surface='go-qualified';
 const productionPolicy=paletteProductionPolicy(process.env.PALETTE_QUERY_PRODUCTION_POLICY||'strict');
 assert.equal(paletteProductionPolicy(),'strict');
 assert.deepEqual(paletteProductionPaths(),paletteReviewedProduction);
-assert.deepEqual(paletteProductionPaths('activation-repair'),[...paletteReviewedProduction,'ui/gohtmx/assets/ely-api.js']);
+assert.deepEqual(paletteProductionPaths('activation-repair'),[...paletteReviewedProduction,'ui/gohtmx/assets/ely-api.js','ui/gohtmx/assets/ely-api-interaction.css','ui/gohtmx/assets/ely/icons/check.svg']);
+assert(!paletteReviewedProduction.includes('ui/gohtmx/assets/ely-api-interaction.css'), 'strict historical policy must not admit repaired CSS');
+assert(!paletteReviewedProduction.includes('ui/gohtmx/assets/ely/icons/check.svg'), 'strict historical inventory stays immutable');
 assert.deepEqual(Object.keys(paletteActivationRepairPins).sort(),paletteProductionPaths('activation-repair').sort());
 for(const bad of ['foreign','HEAD','',null,{},true])assert.throws(()=>paletteProductionPolicy(bad),/source-owned production policy/);
 for(const policy of ['strict','activation-repair']){
@@ -42,6 +44,33 @@ await assert.rejects(loadPaletteInputs(base,surface,{productionPolicy:'foreign'}
 assert.equal(execFileSync('git',['status','--porcelain'],{cwd:base,encoding:'utf8'}).trim(),'','source-built policy replay requires clean committed source');
 const temp=await mkdtemp(join(tmpdir(),'palette-production-policy-'));let positives=0,negatives=0;
 try{
+  if(productionPolicy==='activation-repair'){
+    // Exercise the real loader against disposable source bytes, not a cached
+    // hash comparison. These failures occur before fixture compilation.
+    const tampered=join(temp,'tampered-source');
+    execFileSync('git',['clone','--shared','--quiet',base,tampered],{stdio:'pipe'});
+    const cssPath='ui/gohtmx/assets/ely-api-interaction.css';
+    const css=await readFile(join(tampered,cssPath));
+    const changed=Buffer.from(css);changed[0]=changed[0]===32?9:32;
+    assert.equal(changed.length,css.length);assert.notDeepEqual(changed,css);
+    await writeFile(join(tampered,cssPath),changed);
+    await assert.rejects(loadPaletteInputs(tampered,surface,{productionPolicy}),/fixed activation-repair production input: ui\/gohtmx\/assets\/ely-api-interaction.css/);
+    negatives++;
+    await writeFile(join(tampered,cssPath),css);
+    const iconPath='ui/gohtmx/assets/ely/icons/check.svg';
+    const icon=await readFile(join(tampered,iconPath)),iconChanged=Buffer.from(icon);
+    iconChanged[0]=iconChanged[0]===32?9:32;
+    await writeFile(join(tampered,iconPath),iconChanged);
+    await assert.rejects(loadPaletteInputs(tampered,surface,{productionPolicy}),/fixed activation-repair production input: ui\/gohtmx\/assets\/ely\/icons\/check.svg/);
+    negatives++;
+    await writeFile(join(tampered,iconPath),icon);
+    const otherPath='ui/gohtmx/assets/ely-patterns.js';
+    const other=await readFile(join(tampered,otherPath)),otherChanged=Buffer.from(other);
+    otherChanged[0]=otherChanged[0]===32?9:32;
+    await writeFile(join(tampered,otherPath),otherChanged);
+    await assert.rejects(loadPaletteInputs(tampered,surface,{productionPolicy}),/reviewed production input: ui\/gohtmx\/assets\/ely-patterns.js/);
+    negatives++;
+  }
   for(const suite of ['original','supplemental']){
     const {assetBodies,fixtureBodies,...metadata}=suite==='original'?await loadPaletteInputs(base,surface,{productionPolicy}):await loadSupplementalInputs(base,surface,'control',{productionPolicy});
     assert.deepEqual(JSON.parse(JSON.stringify(metadata)),metadata,'serialized trusted inputs');

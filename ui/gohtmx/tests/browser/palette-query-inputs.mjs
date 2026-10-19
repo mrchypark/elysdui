@@ -19,9 +19,9 @@ export async function loadPaletteInputs(base, surface, {productionPolicy = 'stri
   const sourceFiles = {};
   for (const path of paletteSourcePaths) sourceFiles[path] = paletteSHA(await readFile(join(base, path)));
   // The original baseline remains immutable at paletteBaseline. This repair
-  // changes only the reviewed CommandPalette runtime/template and its generated
-  // catalogue fingerprint. Pin those bytes to the independently identified
-  // clean HEAD; every other production input remains byte-equal to baseline.
+  // admits only the policy's explicitly reviewed runtime/template/catalogue
+  // and asset bytes. Candidate pins are fixed below and joined to clean HEAD;
+  // every other production input remains byte-equal to baseline.
   const repairedProduction = new Set(paletteProductionPaths(productionPolicy));
   if (productionPolicy === 'activation-repair') for (const [path, expected] of Object.entries(paletteActivationRepairPins)) {
     assert.equal(sourceFiles[path], expected, 'fixed activation-repair production input: ' + path);

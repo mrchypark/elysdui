@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import {copyCases, copyCaseIDs, copyValue, copyRequiredSources, copyRequiredBrowserPaths, copyLimitations} from './copybutton-complete-cases.mjs';
+import {verifyCopyMutation} from './copybutton-complete-mutants.mjs';
 export const copySchema = 'copybutton-complete-v1';
 const same = (a,b) => JSON.stringify(a) === JSON.stringify(b);
 const keys = (object, expected, label) => assert.deepEqual(Object.keys(object).sort(), [...expected].sort(), label);
@@ -86,7 +87,7 @@ export function copyOracles(check) {
     add(name+'.temporary-unavailable',b?.ariaDisabled==='true'&&b?.disabled===false);
   };
   const checkAnimation=(name,reduced=false)=>{
-    const b=button(name),owner=root(name),ownCall=[...calls(name)].reverse().find(c=>c.control===b?.token&&c.root===owner?.token&&settlements.some(r=>r.call===c.sequence&&r.outcome==='resolve'&&r.sequence<snap(name).sequence));
+    const b=button(name),owner=root(name),ownCall=[...calls(name)].reverse().find(c=>c.control===b?.token&&c.root===owner?.token&&(name!=='replayed'||c.sequence>snap('deadline').sequence&&c.time>=snap('deadline').time)&&settlements.some(r=>r.call===c.sequence&&r.outcome==='resolve'&&r.sequence<snap(name).sequence));
     const starts=until(name).filter(r=>r.type==='animation'&&r.event==='animationstart'&&r.icon==='check'&&r.control===b?.token&&r.root===owner?.token&&r.call===ownCall?.sequence&&settlements.some(s=>s.call===r.call&&s.outcome==='resolve'&&s.sequence<r.sequence));
     const animations=name==='replayed'?starts.flatMap(r=>r.animations):[...(icon(name,'check')?.animations||[]),...starts.flatMap(r=>r.animations)];
     const a=animations.find(a=>a.frames?.length>=2),duration=Number(a?.timing?.duration);
@@ -97,6 +98,12 @@ export function copyOracles(check) {
     add(name+'.cubic-ease-out',(reduced&&!a)||cubic&&close(cubic[0],1/3,.001)&&cubic[1]===1&&close(cubic[2],2/3,.001)&&cubic[3]===1);
   };
   if(spec.id.startsWith('appearance-')) {
+    for(const name of ['idle','hover','pressed','focus']) {
+      const s=snap(name),previous=spec.checkpoints.indexOf(name)>0?snap(spec.checkpoints[spec.checkpoints.indexOf(name)-1]).sequence:0;
+      const rows=log.filter(r=>r.type==='operation'&&r.name==='appearance-transitions'&&r.checkpoint===name&&r.sequence>previous&&r.sequence<s.sequence);
+      const final=rows.slice(-3);
+      add(name+'.real-transitions-settled',same(final.map(r=>r.phase),['observed','observed','settled'])&&final.every(r=>r.control===button(name).token&&r.root===root(name).token&&r.transitions.length===0),true);
+    }
     add('default-type-and-name',initial.type==='button'&&initial.pressed===null&&raw.aria.idle.includes('button "Copy"')&&(initial.ariaLabel||initial.text||initial.title||'').trim()==='Copy');
     add('default-icon-only',initial.visibleText===''); add('default-square',close(initial.rect.width,24)&&close(initial.rect.height,24));
     add('default-radius',close(parseFloat(initial.style.borderRadius),6)); add('default-nonshrinking',initial.style.flexShrink==='0');
@@ -238,12 +245,12 @@ export function validateCopyRaw(check) {
   assert.deepEqual(Object.keys(raw.screenshots),spec.checkpoints,'exact screenshot inventory');
   assert(Array.isArray(raw.log)&&raw.log.length,'raw log required');assert.deepEqual(raw.errors,[],'unexpected browser diagnostics invalidate evidence');
   keys(raw.environment,['clock','reducedMotion','theme','zoom','viewport'],'exact environment');
-  const rowFields={mode:['value'],input:['event','trusted','key','button','target','targetID','rootID','root','control','active','defaultPrevented'],event:['event','rootID','target','detail','tasks'],'clipboard-call':['value','input','control','rootID','root','active','mode'],'clipboard-settle':['call','outcome'],checkpoint:['name'],animation:['event','control','root','call','pseudo','icon','animations']};
+  const rowFields={timer:['event','timer','delay','call','control','root','currentRoot','copied'],mode:['value'],input:['event','trusted','key','button','target','targetID','rootID','root','control','active','defaultPrevented'],event:['event','rootID','target','detail','tasks'],'clipboard-call':['value','input','control','rootID','root','active','mode'],'clipboard-settle':['call','outcome'],checkpoint:['name'],animation:['event','control','root','call','pseudo','icon','animations']};
   const operationFields={
     'change-payload':['beforeValue','beforeAction','afterValue','afterAction'],'cancel-action':['defaultPrevented'],rebind:['before','after','connected'],
     moved:['oldControl','newControl','beforeParent','afterParent','connected'],replaced:['oldControl','newControl','beforeParent','afterParent','connected'],
     'move-copied':['control','beforeParent','afterParent','connected'],remount:['token','connected'],'repeat-start':['root'],'real-read':['value','secure'],
-    'icon-route-abort':['path'],'icon-request-failed':['path','error'],'fonts-ready':['status'],
+    'icon-route-abort':['path'],'icon-request-failed':['path','error'],'fonts-ready':['status'],'appearance-transitions':['checkpoint','control','root','phase','transitions'],
   };
   for(const [i,row] of raw.log.entries()) {
     assert.equal(row.sequence,i+1,'unbroken raw sequence');assert(finite(row.time));if(i)assert(row.time>=raw.log[i-1].time,'monotonic raw observation time');
@@ -251,7 +258,23 @@ export function validateCopyRaw(check) {
     if(row.type==='operation'){assert(operationFields[row.name],'known operation');fields=['name',...operationFields[row.name]];}
     if(row.type==='host'){assert(['throw','teardown','rebind','old-action','new-action','new-change'].includes(row.name),'known host observation');fields=['name',...(['new-action','new-change'].includes(row.name)?['value']:[])];}
     assert(fields,'known raw event');keys(row,['sequence','time','type',...fields],'exact raw event fields');
+    if(row.type==='operation'&&row.name==='appearance-transitions') {
+      assert(spec.id.startsWith('appearance-')&&['idle','hover','pressed','focus'].includes(row.checkpoint),'appearance transition scope');
+      assert(finite(row.control)&&row.control>0&&finite(row.root)&&row.root>0);
+      assert(['observed','completed','settled'].includes(row.phase)&&Array.isArray(row.transitions));
+      if(row.phase==='settled')assert.equal(row.transitions.length,0);
+      for(const transition of row.transitions) {
+        keys(transition,['target','pseudo','property','playState','currentTime','duration','outcome','error'],'transition observation');
+        assert(finite(transition.target)&&transition.target>0&&typeof transition.pseudo==='string'&&typeof transition.property==='string');
+        assert(['idle','running','paused'].includes(transition.playState));
+        assert(transition.currentTime===null||finite(transition.currentTime));assert(finite(transition.duration));
+        assert(row.phase==='completed'?['finished','cancelled'].includes(transition.outcome):transition.outcome===null);
+        if(transition.outcome==='cancelled'){keys(transition.error,['name','message'],'transition cancellation');assert.equal(transition.error.name,'AbortError');assert(typeof transition.error.message==='string');}
+        else assert.equal(transition.error,null);
+      }
+    }
     if(row.type==='animation'){assert(['animationstart','animationend'].includes(row.event));assert(finite(row.control)&&finite(row.root)&&(row.call===null||finite(row.call)));assert(typeof row.pseudo==='string'&&typeof row.icon==='string'&&Array.isArray(row.animations));for(const animation of row.animations){keys(animation,['id','currentTime','playState','timing','frames'],'animation start fields');assert(Array.isArray(animation.frames));}}
+    if(row.type==='timer'){assert(['scheduled','cancelled','fired','completed'].includes(row.event));assert(Number.isInteger(row.timer)&&row.timer>0&&row.delay===1400&&Number.isInteger(row.call)&&row.call>0&&Number.isInteger(row.control)&&row.control>0&&Number.isInteger(row.root)&&row.root>0);assert(row.currentRoot===null||Number.isInteger(row.currentRoot));assert(row.copied===null||row.copied==='true');}
     if(row.type==='input')assert(typeof row.trusted==='boolean'&&typeof row.rootID==='string');
     if(row.type==='event'){keys(row.detail,['id','component','action','name','value','copied','error'],'event detail fields');assert(Array.isArray(row.tasks));for(const task of row.tasks)keys(task,['target','style'],'HTMX task');}
   }
@@ -276,10 +299,11 @@ export function validateCopyRaw(check) {
   }
 }
 export function verifyCopyEvidence(report,trusted,exitCode) {
-  keys(report,['schema','runToken','revision','tree','dirty','sourceFiles','assets','fixtures','toolchain','dependencyProof','caseInventory','limitations','browserVersion','checks','responses','errors','status','stage'],'report schema');
+  keys(report,['schema','runToken','revision','tree','dirty','mode','mutation','sourceFiles','assets','fixtures','toolchain','dependencyProof','caseInventory','limitations','browserVersion','checks','responses','errors','status','stage'],'report schema');
   assert.equal(report.schema,copySchema);assert.equal(report.stage,'complete','no early exit');
   assert(/^[0-9a-f-]{36}$/.test(trusted.runToken),'independent run token required');
-  for(const key of ['runToken','revision','tree','dirty','sourceFiles','assets','fixtures','toolchain','dependencyProof'])assert.deepEqual(report[key],trusted[key],'current-source/run binding '+key);
+  for(const key of ['runToken','revision','tree','dirty','mode','mutation','sourceFiles','assets','fixtures','toolchain','dependencyProof'])assert.deepEqual(report[key],trusted[key],'current-source/run binding '+key);
+  verifyCopyMutation(trusted, trusted.mode);
   assert.equal(report.dirty,'','clean source required');assert(/^[a-f0-9]{40}$/.test(report.revision)&&/^[a-f0-9]{40}$/.test(report.tree));
   for(const path of copyRequiredSources)assert(/^[a-f0-9]{64}$/.test(trusted.sourceFiles[path]||''),'mandatory source '+path);
   assert.deepEqual(report.caseInventory,copyCaseIDs);assert.deepEqual(report.checks.map(c=>c.id),copyCaseIDs,'no missing duplicate foreign or reordered cases');
@@ -307,5 +331,5 @@ export function verifyCopyEvidence(report,trusted,exitCode) {
   assert.equal(report.status,status,'cached aggregate status');assert.equal(exitCode,status==='passed'?0:1,'raw process exit');
   return {schema:copySchema,status,failedAssertions:failed,cases:report.checks.length,assertions:oracles.length,limitations:copyLimitations};
 }
-// No causal acceptance path exists in this baseline. Future controls must pass
-// verifyCopyEvidence first and use a fixed source-owned intended-failure list.
+// Causal classification additionally requires scripts/copybutton-complete-controls.mjs.
+// This same strict evidence gate remains mandatory for every mode.

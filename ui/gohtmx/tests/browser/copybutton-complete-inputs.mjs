@@ -5,6 +5,7 @@ import {mkdtemp, readFile, rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {loadContextOwnerAssets, productionContentType, productionCSSReferences} from './context-owner-assets.mjs';
+import {copyMode, copyMutants, transformCopySource, verifyCopyMutation} from './copybutton-complete-mutants.mjs';
 import {copyCases, copyRequiredSources, copyRequiredBrowserPaths} from './copybutton-complete-cases.mjs';
 
 export const copySHA = value => createHash('sha256').update(value).digest('hex');
@@ -25,7 +26,8 @@ const assetMetadata = body => ({sourceSHA256: copySHA(body), servedSHA256: copyS
 // pinned old production file is part of input admission. The caller anchors
 // these exact source, fixture and asset bytes before spawning the browser and
 // independently rebuilds them after the child has exited.
-export async function loadCopyInputs(base) {
+export async function loadCopyInputs(base, externalMode = 'control') {
+  const mode = copyMode(externalMode);
   const git = args => execFileSync('git', args, {cwd: base, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024});
   const revision = git(['rev-parse', 'HEAD']).trim();
   const tree = git(['rev-parse', 'HEAD^{tree}']).trim();
@@ -61,10 +63,18 @@ export async function loadCopyInputs(base) {
     assetBodies.set(path, {...assetMetadata(body), body, contentType: productionContentType(path)});
     if (path.endsWith('.css')) pending.push(...productionCSSReferences(body.toString('utf8'), path));
   }
+  let mutation = null;
+  if (mode !== 'control') {
+    const spec = copyMutants[mode], asset = assetBodies.get(spec.asset);
+    assert(asset, 'source-owned mutation asset must exist');
+    const transformed = transformCopySource(asset.body, mode);
+    mutation = transformed.mutation;
+    asset.body = transformed.body; asset.servedSHA256 = copySHA(asset.body); asset.bytes = asset.body.length;
+  }
   for (const [path, asset] of assetBodies) {
     assert.equal(sourceFiles[assetSourcePath(path)], asset.sourceSHA256, 'served asset is joined to current production source: ' + path);
     assert.equal(copySHA(asset.body), asset.servedSHA256, 'served asset bytes: ' + path);
-    assert.equal(asset.sourceSHA256, asset.servedSHA256, 'baseline serves unmodified production bytes: ' + path);
+    if (path !== mutation?.asset) assert.equal(asset.sourceSHA256, asset.servedSHA256, 'nonmutated production bytes: ' + path);
   }
   const observerPath = 'ui/gohtmx/tests/browser/copybutton-complete-observer.js';
   const observer = await readFile(join(base, observerPath));
@@ -104,5 +114,7 @@ export async function loadCopyInputs(base) {
     go: execFileSync(go, ['version'], {cwd: base, encoding: 'utf8'}).trim(),
     playwright,
   };
-  return {revision, tree, dirty, sourceFiles, assets, fixtures, toolchain, dependencyProof, assetBodies, fixtureBodies};
+  const trusted = {revision, tree, dirty, mode, mutation, sourceFiles, assets, fixtures, toolchain, dependencyProof};
+  verifyCopyMutation(trusted, externalMode);
+  return {...trusted, assetBodies, fixtureBodies};
 }

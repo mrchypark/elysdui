@@ -6,6 +6,7 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {loadPaletteInputs,paletteSHA as sha} from './palette-query-inputs.mjs';
 import {activationSelection,activationPolicy,activationRepairSourcePaths,activationTemplateMarkerCounts} from './palette-activation-policy.mjs';
+import {paletteActivationRepairPins} from './palette-query-production-policy.mjs';
 import {applyActivationMutation} from './palette-activation-mutants.mjs';
 export const activationBaseline='ee28495c7cd6581d49d53874e831c6cea40930a4';
 export const activationBaselineTree='c2d6ed91c378f59070fde8d626df2748e9fd837c';
@@ -21,9 +22,17 @@ export const activationSourcePaths=[
 export async function loadActivationInputs(base,surface,options={}){
  const selected=activationSelection(options),inputs=await loadPaletteInputs(base,surface,selected.mode==='repaired'?{productionPolicy:'activation-repair'}:{}),history=loadPaletteHistory(base);
  assert.equal(history.tree(activationBaseline),activationBaselineTree);
- // Baseline is immutable; repaired mode admits only the two fixed JS assets.
- // The actual template is independently pinned by the mutation definition.
- for(const [path,entry]of inputs.assetBodies){if(!path.startsWith('/assets/'))continue;if(selected.mode==='repaired'&&['/assets/ely-api.js','/assets/ely-api-interaction.js'].includes(path))continue;const dir=path.startsWith('/assets/sdui')?'adapters/gohtmx':'ui/gohtmx';assert.equal(history.sha256(activationBaseline,dir+path),entry.sourceSHA256);}
+ // Baseline is immutable. Repaired assets must match explicit reviewed pins;
+ // neither arbitrary HEAD bytes nor an unpinned CSS change is admitted.
+ for(const [path,entry]of inputs.assetBodies){
+  if(!path.startsWith('/assets/'))continue;
+  const dir=path.startsWith('/assets/sdui')?'adapters/gohtmx':'ui/gohtmx',sourcePath=dir+path;
+  if(selected.mode==='repaired'&&['/assets/ely-api.js','/assets/ely-api-interaction.js','/assets/ely-api-interaction.css','/assets/ely/icons/check.svg'].includes(path)){
+   assert.equal(entry.sourceSHA256,paletteActivationRepairPins[sourcePath],'fixed activation repaired asset: '+path);
+   continue;
+  }
+  assert.equal(history.sha256(activationBaseline,sourcePath),entry.sourceSHA256);
+ }
  inputs.activationPolicy=activationPolicy(selected);inputs.activationRepairSourceFiles={};inputs.activationRenderMutation={};
  let transformed;
  if(selected.mode==='repaired'){

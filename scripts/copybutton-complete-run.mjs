@@ -7,6 +7,7 @@ import {join} from 'node:path';
 import {fileURLToPath, pathToFileURL} from 'node:url';
 import {loadCopyInputs, copySHA} from '../ui/gohtmx/tests/browser/copybutton-complete-inputs.mjs';
 import {verifyCopyEvidence} from '../ui/gohtmx/tests/browser/copybutton-complete-evidence.mjs';
+import {copyMode, copyOutputPath, verifyCopyMutation} from '../ui/gohtmx/tests/browser/copybutton-complete-mutants.mjs';
 import {copyCases} from '../ui/gohtmx/tests/browser/copybutton-complete-cases.mjs';
 
 const captureLimit = 16 * 1024 * 1024;
@@ -37,6 +38,7 @@ export function verifyProcessEvidence({reportBytes, stdout, stderr, exit}, invoc
   assert.equal(exit.truncated, false, 'browser child capture must be complete');
   assert([0, 1].includes(exit.status), 'browser child must exit normally with raw contract status');
   const report = JSON.parse(reportData.text);
+  assert.equal(report.mode, invocation.mode, 'process externally selected mode');
   for (const key of ['runToken', 'revision', 'tree']) assert.equal(report[key], invocation[key], 'report process binding ' + key);
   assert.equal(report.stage, 'complete', 'completion requires a complete saved report');
   assert(['passed', 'failed'].includes(report.status), 'raw desired-contract report status');
@@ -85,8 +87,9 @@ export async function verifyCopyScreenshots(report, readScreenshot) {
   return {screenshots: entries.length, digestSHA256: copySHA(JSON.stringify(entries))};
 }
 
-async function loadTrusted(base) {
-  const {assetBodies, fixtureBodies, ...trusted} = await loadCopyInputs(base);
+async function loadTrusted(base, mode) {
+  const {assetBodies, fixtureBodies, ...trusted} = await loadCopyInputs(base, mode);
+  verifyCopyMutation(trusted, mode);
   assert.equal(trusted.dirty, '', 'committed clean source required for browser evidence');
   return trusted;
 }
@@ -126,19 +129,20 @@ async function captureBrowser(base, environment, output) {
   }
 }
 
-export async function runCopyEvidence(base) {
+export async function runCopyEvidence(base, externalMode = 'control') {
+  const mode = copyMode(externalMode);
   // This guard runs before schema execution, Go builds, output replacement and
   // any browser/server spawn. Importing this module never runs the workflow.
   assert.equal(process.env.CI, 'true', 'browser execution is restricted to CI');
   execFileSync(process.execPath, ['scripts/copybutton-complete-evidence-test.mjs'], {cwd: base, env: process.env, stdio: 'inherit'});
-  const trusted = await loadTrusted(base);
+  const trusted = await loadTrusted(base, mode);
   const runToken = randomUUID(), invocation = {...trusted, runToken};
-  const output = join(base, 'test-results/copybutton-complete');
+  const output = join(base, copyOutputPath(mode));
   await mkdir(output, {recursive: true});
   for (const file of ['report.json', 'exit.json', 'validation.json']) await rm(join(output, file), {force: true});
   const invocationBytes = JSON.stringify(invocation, null, 2) + '\n';
   await writeFile(join(output, 'invocation.json'), invocationBytes);
-  const child = await captureBrowser(base, {...process.env, COPYBUTTON_RUN_TOKEN: runToken, COPYBUTTON_INVOCATION_PATH: join(output, 'invocation.json')}, output);
+  const child = await captureBrowser(base, {...process.env, COPYBUTTON_COMPLETE_MODE: mode, COPYBUTTON_RUN_TOKEN: runToken, COPYBUTTON_INVOCATION_PATH: join(output, 'invocation.json')}, output);
   const exit = {schema: 'copybutton-process-exit-v1', runToken, revision: trusted.revision, tree: trusted.tree, status: child.status, signal: child.signal, error: child.error, truncated: child.truncated};
   const exitBytes = JSON.stringify(exit, null, 2) + '\n';
   await writeFile(join(output, 'exit.json'), exitBytes);
@@ -152,7 +156,7 @@ export async function runCopyEvidence(base) {
     } catch (failure) { reportReadFailure = failure; }
     // No report, receipt or child-authored metadata supplies this second source
     // snapshot. The actual current checkout and compiler rebuild it afresh.
-    const current = await loadTrusted(base);
+    const current = await loadTrusted(base, mode);
     assert.deepEqual(current, trusted, 'current source, generated fixtures, assets and toolchain unchanged after child');
     if (reportReadFailure) throw reportReadFailure;
     assert.equal(await readFile(join(output, 'invocation.json'), 'utf8'), invocationBytes, 'pre-spawn invocation cannot be rewritten by child');
@@ -170,7 +174,7 @@ export async function runCopyEvidence(base) {
     console.log(JSON.stringify({copybuttonEvidenceValidation: 'valid', runToken, status: report.status, rawExit: child.status, digestSHA256: receipt.digestSHA256}));
     // A structurally valid red desired baseline is still red CI. No broad
     // expected-failure conversion, skipped assertion, or mutant aggregation.
-    return {status: child.status, receipt};
+    return {status: child.status, receipt, report, invocation};
   } catch (failure) {
     const receipt = {schema: 'copybutton-validation-v1', valid: false, revision: trusted.revision, tree: trusted.tree, runToken, rawExit: child.status, hashes, error: String(failure.stack || failure)};
     receipt.digestSHA256 = copySHA(JSON.stringify(receipt));
@@ -181,7 +185,7 @@ export async function runCopyEvidence(base) {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
-    const result = await runCopyEvidence(fileURLToPath(new URL('../', import.meta.url)));
+    const result = await runCopyEvidence(fileURLToPath(new URL('../', import.meta.url)), copyMode(process.env.COPYBUTTON_COMPLETE_MODE || 'control'));
     process.exitCode = result.status;
   } catch (failure) {
     console.error(failure.stack || failure);

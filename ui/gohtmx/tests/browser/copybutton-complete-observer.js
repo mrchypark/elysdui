@@ -1,7 +1,35 @@
+// Pure observation wrapper. Native handles, receivers, callback arguments,
+// callback results/errors and cancellation calls retain their original semantics.
+function installCopyTimerTrace(host, describe, record) {
+  const originalSet = host.setTimeout, originalClear = host.clearTimeout;
+  const timers = new Map(); let nextTimer = 0;
+  host.setTimeout = function(callback, delay, ...args) {
+    const owner = typeof callback === 'function' && delay === 1400 ? describe() : null;
+    if (!owner) return Reflect.apply(originalSet, this, [callback, delay, ...args]);
+    const timer = ++nextTimer;
+    let handle;
+    const observe = event => record('timer', {event, timer, delay, ...owner.binding, ...owner.state()});
+    const wrapped = function(...callbackArgs) {
+      timers.delete(handle); observe('fired');
+      try { return Reflect.apply(callback, this, callbackArgs); }
+      finally { observe('completed'); }
+    };
+    handle = Reflect.apply(originalSet, this, [wrapped, delay, ...args]);
+    timers.set(handle, observe); owner.scheduled(); observe('scheduled');
+    return handle;
+  };
+  host.clearTimeout = function(handle, ...args) {
+    const result = Reflect.apply(originalClear, this, [handle, ...args]);
+    const observe = timers.get(handle);
+    if (observe) { timers.delete(handle); observe('cancelled'); }
+    return result;
+  };
+}
+// End pure timer observation wrapper.
 // Observes production behavior only. No presentation, state or owner repairs.
 (() => {
-  const nodes = new WeakMap(); let nextNode = 0, sequence = 0;
-  const token = node => node ? (nodes.has(node) ? nodes.get(node) : (nodes.set(node, ++nextNode), nextNode)) : null;
+  const nodes = new WeakMap(), observedNodes = new Map(); let nextNode = 0, sequence = 0;
+  const token = node => node ? (nodes.has(node) ? nodes.get(node) : (nodes.set(node, ++nextNode), observedNodes.set(nextNode, node), nextNode)) : null;
   const log = [], pending = [], errors = [];
   const record = (type, data = {}) => { const row = {sequence: ++sequence, time: performance.now(), type, ...data}; log.push(row); return row; };
   let mode = 'success', lastInput = null;
@@ -27,6 +55,23 @@
   const realClipboard = navigator.clipboard;
   const setMode = value => { mode = value; Object.defineProperty(navigator, 'clipboard', {configurable: true, value: value === 'missing' ? undefined : mock}); record('mode', {value}); };
   setMode('success');
+  const scheduledCalls = new Set();
+  installCopyTimerTrace(window, () => {
+    // Join a unique resolved write to its actual copied physical control and
+    // live root. Never attribute a timer to an arbitrary nearest settlement.
+    const candidates = log.filter(call => {
+      if (call.type !== 'clipboard-call' || scheduledCalls.has(call.sequence)) return false;
+      const node = observedNodes.get(call.control);
+      return node?.isConnected && node.dataset.interactionCopied === 'true' &&
+        token(node.closest('[data-ely-family]')) === call.root &&
+        log.some(row => row.type === 'clipboard-settle' && row.call === call.sequence && row.outcome === 'resolve');
+    });
+    if (candidates.length !== 1) return null;
+    const call = candidates[0], node = observedNodes.get(call.control);
+    return {binding: {call: call.sequence, control: call.control, root: call.root},
+      state: () => ({currentRoot: token(node.closest('[data-ely-family]')), copied: node.dataset.interactionCopied ?? null}),
+      scheduled: () => scheduledCalls.add(call.sequence)};
+  }, record);
   const visible = node => !!node && node.getClientRects().length > 0 && getComputedStyle(node).visibility !== 'hidden' && getComputedStyle(node).display !== 'none';
   const rect = node => { const r = node.getBoundingClientRect(); return {x:r.x,y:r.y,width:r.width,height:r.height}; };
   const style = node => { const s = getComputedStyle(node); return Object.fromEntries(['color','backgroundColor','borderColor','borderWidth','borderRadius','outlineColor','outlineWidth','outlineStyle','opacity','cursor','flexShrink','display','width','height','transform','animationName','animationDuration','animationTimingFunction','transitionDuration','boxShadow','alignItems','justifyContent','justifyItems','fontSize','maskImage','content'].map(key => [key, s[key]])); };

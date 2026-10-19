@@ -1,9 +1,9 @@
-# CopyButton complete-contract baseline
+# CopyButton complete contract and finite repair controls
 
 This finite baseline covers only `buttons/CopyButton`, rendered by the standalone
 Go template and one real SDUI adapter specimen. It does not cover Share, Close,
-Back, More, other IconButton builders, or the generic button matrix. No production
-behavior is changed by this baseline.
+Back, More, other IconButton builders, or the generic button matrix. The original baseline is retained separately. The repair restores this bounded
+contract in shared production templates and assets.
 
 ## Reference and observable contract
 
@@ -53,7 +53,16 @@ web overrides; only the minimal Value-only default is icon-only.
 
 Copy/Copied tooltips must be visible on hover and keyboard focus. This harness
 allows 450ms before taking its hover/focus observation; the separate native
-TooltipTrigger's 400ms default is not a CopyButton requirement. The copied
+TooltipTrigger's 400ms default is not a CopyButton requirement. That JS clock
+advance does not establish CSS transition completion. After same-case font
+readiness, appearance idle (including theme setup), hover, pressed and focus
+observations flush layout and await actual `CSSTransition.finished` on the tested
+control, its descendants/pseudos and containing theme surfaces. Two empty
+observations separated by a real Node-time render window establish settlement,
+under one five-second real deadline. Cancellation is recorded and re-observed;
+paused/nonfinishing transitions time out and unrelated failures remain raw errors.
+A checkpoint/control/root-bound settlement witness is required before capture.
+This does not wait for or change the independent check `CSSAnimation`. The copied
 confirmation observation requires an immediately updated tooltip on an already
 active trigger. Tooltip position is a web policy. Cubic easing is tested as the
 linear-x cubic Bezier `(1/3, 1, 2/3, 1)`, equivalent to `1-(1-t)^3`, with .001
@@ -63,8 +72,11 @@ of real time before observing the endpoint, separately from the controlled JS
 clock used for the exact 1399/1400ms confirmation boundary. A real CSS start
 sample is retained for the same physical control and successful clipboard cycle,
 so a completed `fill:none` animation is not lost during the font-readiness wait.
-Replay requires its own start witness; a retained finished first-cycle animation
-cannot certify a fresh cycle.
+Replay requires its own resolved clipboard call after the source-owned deadline
+checkpoint and its own subsequent start witness on the same physical control
+and root. Sequence is strictly later; the controlled clock may remain equal. A
+retained finished first-cycle animation cannot certify a fresh cycle, including
+when an unresolved copied-phase repeat prevents the replay write.
 
 Only standard density is claimed here. Compact/comfortable density and global
 font/radius scaling are outside this standard-density constructor-parity claim;
@@ -91,12 +103,14 @@ Offline checks:
 go test ./ui/gohtmx/tests/fixtures/copybutton-complete
 node ui/gohtmx/tests/unit/copy_feedback_test.mjs
 node scripts/copybutton-complete-evidence-test.mjs
+node scripts/copybutton-complete-timers-test.mjs
+node scripts/copybutton-complete-controls-test.mjs
 ```
 
 Full fixture/server/browser execution is restricted to GitHub CI:
 
 ```sh
-node scripts/copybutton-complete-run.mjs
+node scripts/copybutton-complete-controls.mjs
 ```
 
 The focused [workflow](../../.github/workflows/copybutton-complete.yml) retains
@@ -118,11 +132,53 @@ not a useful baseline failure. All acceptance goes through the same strict gate.
 
 The existing helper/browser CopyButton suite and its two historical controls run
 unchanged for continuity. Their historical weak reports do not close any new
-case. No new causal mutant is admitted yet. When repair-specific controls are
-added, they must pass the complete evidence gate and a source-owned exact
-intended-failure list with every positive prerequisite. Their raw exit remains 1;
-a strict aggregator may classify that exact kill as successful control evidence.
-Unconditionally failing every mutant job is not an acceptance strategy.
+case. Seven repair-specific controls are defined in
+[copybutton-complete-mutants.mjs](../../ui/gohtmx/tests/browser/copybutton-complete-mutants.mjs):
+
+- copied-lockout: allow repeated copied-phase activation, retain pending deduplication
+- captured-action: reread the action at completion, retaining the captured payload
+- completion-owner: bypass the stale pending completion ownership guard
+- stale-timer-defenses: jointly remove the retained cancellation handle and clear the
+  marker before record ownership; this does not certify either protection independently
+- default-radius: change only the default 6px radius to 7px
+- check-color: change only the success check color to the foreground color
+- motion-duration: change only normal-motion duration from 120ms to 121ms
+
+Each mode runs every one of the same 41 cases, with all desired oracles, positive
+prerequisites, exact process completion, source/served byte hashes and saved PNGs.
+The external mode is bound before browser spawn and source inputs are rebuilt
+after it; the report cannot choose an acceptance policy. Only one exact in-memory
+source replacement is allowed per mutant. Committed production files are never
+modified by a control. The exact designated failure sets and independent positive
+controls live in
+[copybutton-complete-controls.mjs](../../scripts/copybutton-complete-controls.mjs).
+Every non-designated desired assertion must pass. No unrelated passive diagnostic
+equality is required. The raw mutant child exit remains 1; the aggregate is green
+only after the clean control and all seven exact kills pass the same strict gate.
+Missing, duplicate or foreign cases, omissions, browser errors, early exits,
+stale passes and unexpected failures remain red.
+
+The observational timer trace preserves native handles, callback receivers,
+arguments, results, thrown errors and cancellation semantics. It associates a
+1400ms timer only with a unique resolved clipboard call whose actual physical
+control is currently copied in that call's root. The stale-timer control requires
+old and new success-linked schedules, a moved physical control, the old deadline
+firing and clearing the new marker, and a later new deadline. Trace observations
+do not repair state. Synthetic wrapper and corruption tests are schema tests,
+not browser evidence. Radius and color controls make no separate icon-only or
+check-glyph sensitivity claim.
+
+After downloading fresh CI artifacts, check out that exact clean CI revision and
+run the actual report corruption replay for each externally selected mode:
+
+```sh
+node scripts/copybutton-complete-controls-test.mjs --artifacts /path/to/mode-artifacts --mode control
+```
+
+Use each of the seven mode names for its own artifact directory. The replay
+independently rebuilds source, fixtures and asset hashes, checks the actual
+stdout/stderr, exit and PNG files, and corrupts the full report inventory and
+causal admission. A source or toolchain mismatch is a failed replay, not a pass.
 
 A completeness claim requires evidence for every in-scope U/W item on one exact
 final tree, explicit accepted adaptations, and named unresolved blockers. Actual

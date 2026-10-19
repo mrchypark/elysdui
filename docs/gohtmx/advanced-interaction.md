@@ -36,6 +36,49 @@ All text props are escaped. `Items` is caller data: each item may have `Value`, 
 
 `ely:action` is a bubbling, cancelable event. Base handling sends `id`, `component`, `action`, button `value`, and native `formData` plus `values` for a `data-ely-submit` form. The family module emits `ely:change` for its local selections and state. Host provider work belongs in `ui.mount`; local controls never claim provider completion.
 
+## CopyButton
+
+The minimal `buttons/CopyButton` takes an instance `ID` and exact `Value`,
+including an empty string. It renders a 24px ghost icon-only button with a 12px
+copy glyph and the accessible name “Copy”. `ActionLabel`, `Label` and `Title`
+remain visible-label overrides, in that precedence order; `AriaLabel` can provide
+an explicit accessible name. `IconOnly: true` intentionally hides a supplied
+visible label once its icon loads. Omitted size follows label presence: a supplied
+label keeps the shared default size even with `IconOnly`, unless `Size` is set.
+Explicit `Size` and `ButtonVariant` retain the
+shared button sizing and tone. Items use the same defaults and independent,
+deterministic control and tooltip IDs. Root and item `Disabled` stay native.
+
+An activation captures its exact value and action, writes to the Clipboard API,
+and waits for the write to succeed before emitting one `ely:action`, followed by
+one `ely:change` with `name: "copy"` and `copied: true`. The action is a post-copy
+notification; cancellation or a host callback error cannot undo the write.
+Failure leaves an accessible “Copy failed” status, emits only a copied-false
+change, and permits retry. No fallback clipboard technique is attempted.
+
+Pending and copied controls retain the same native button, stable name and tab
+stop, with temporary `aria-disabled` and JavaScript activation suppression.
+Pending additionally sets `aria-busy`. The success-colored 14px check lasts
+1400ms after resolution; additional activation cannot restart that deadline.
+Its -0.6rad-to-zero rotation takes 120ms with cubic ease-out, or 1ms with reduced
+motion. Hover and focus show a Copy/Copied tooltip, and one visually hidden
+polite status announces the result. If the copy icon fails to load, its text
+fallback remains available. Reset never changes caller `disabled` or moves focus.
+
+Each operation belongs to its physical control, controller and captured host.
+Rebinding, moving, replacing or remounting invalidates stale callbacks; current
+owner input can release stale temporary lockout. Old promises, cleanup and
+reset timers cannot clear a newer operation. Reinitializing the same live
+instance preserves its state. New DOM instances start fresh.
+
+These defaults use standard CSS density. The adapter shares the value, label
+and disabled path; standalone `Action`, `Icon` and `IconOnly` are not currently
+adapter schema properties. Native global density/font/radius scaling and the
+expanded standalone extension API are outside this mapping. See the
+[finite CopyButton contract](copybutton-complete-contract.md) for automated
+Chromium evidence requirements and the still-required real assistive-technology
+session; DOM/ARIA tests alone do not establish screen-reader announcements.
+
 | Chapter / primary | Props used beyond the common props | Host actions |
 | --- | --- | --- |
 | buttons/Button | `ButtonVariant`, `Action` | `Action` or `press` |

@@ -4,6 +4,7 @@ import {copyCases, copyCaseIDs, copyValue, copyRequiredSources, copyRequiredBrow
 import {copySchema, copyOracles, validateCopyRaw, verifyCopyEvidence} from '../ui/gohtmx/tests/browser/copybutton-complete-evidence.mjs';
 import {copySHA} from '../ui/gohtmx/tests/browser/copybutton-complete-inputs.mjs';
 import {verifyProcessEvidence, verifyCopyScreenshots} from './copybutton-complete-run.mjs';
+import {testCopyTransitions} from './copybutton-complete-transitions-test.mjs';
 
 // These source-owned, explicitly synthetic examples exercise report admission.
 // They never launch a browser, server, Go build or external process, read a real
@@ -64,6 +65,15 @@ function buildCase(spec) {
       row('animation',{event:'animationstart',control:b().token,root:r().token,call:call.sequence,pseudo:'',icon:'check',animations:[animation(false)]});
     }
     row('operation',{name:'fonts-ready',status:'loaded'});
+    if(spec.id.startsWith('appearance-')&&['idle','hover','pressed','focus'].includes(name)) {
+      const observe=(phase,transitions=[])=>row('operation',{name:'appearance-transitions',checkpoint:name,control:b().token,root:r().token,phase,transitions});
+      if(name==='idle') {
+        const transition={target:b().token,pseudo:'',property:'background-color',playState:'running',currentTime:0,duration:150,outcome:null,error:null};
+        observe('observed',[transition]);observe('completed',[{...transition,outcome:'cancelled',error:{name:'AbortError',message:'Synthetic transition cancellation'}}]);
+        observe('observed',[transition]);observe('completed',[{...transition,outcome:'finished'}]);
+      }
+      for(const phase of ['observed','observed','settled'])observe(phase);
+    }
     const witness=row('checkpoint',{name});raw.snapshots.push({name,sequence:witness.sequence,time,active,activeID,scrollY:0,roots:clone(roots)});
     const accessibleName=spec.id==='explicit-override'?'Copy the override value':spec.id==='adapter'?'Copy adapter text':'Copy';raw.aria[name]=`- button "${accessibleName}"`;
     // Hashes identify synthetic labels, not PNG bytes or browser captures.
@@ -170,7 +180,7 @@ export function buildCopySchemaFixture() {
   const sourceFiles=Object.fromEntries([...copyRequiredSources,...productionSources,'go.mod','go.sum','package.json','package-lock.json'].map(path=>[path,copySHA('SYNTHETIC-SOURCE '+path)]));
   const assets=Object.fromEntries([...copyRequiredBrowserPaths.filter(path=>path!=='/'),'/assets/ely/icons/copy.svg'].map(path=>[path,metadata(path,path.endsWith('.css')?'text/css; charset=utf-8':'text/javascript; charset=utf-8')]));
   const fixtures=Object.fromEntries(['/','/fragment/root','/fragment/control','/fragment/inner','/manifest.json'].map(path=>[path,metadata(path,path.endsWith('.json')?'application/json; charset=utf-8':'text/html; charset=utf-8')]));
-  const trusted={runToken:'00000000-0000-4000-8000-000000000001',revision:'1'.repeat(40),tree:'2'.repeat(40),dirty:'',sourceFiles,assets,fixtures,toolchain:{node:'synthetic-schema-only',go:'synthetic-schema-only',playwright:'synthetic-schema-only'},dependencyProof:{package:'./ui/gohtmx',SHA256:copySHA('synthetic public UI dependencies'),forbiddenImports:[]}};
+  const trusted={runToken:'00000000-0000-4000-8000-000000000001',revision:'1'.repeat(40),tree:'2'.repeat(40),dirty:'',mode:'control',mutation:null,sourceFiles,assets,fixtures,toolchain:{node:'synthetic-schema-only',go:'synthetic-schema-only',playwright:'synthetic-schema-only'},dependencyProof:{package:'./ui/gohtmx',SHA256:copySHA('synthetic public UI dependencies'),forbiddenImports:[]}};
   for(const [path,meta] of Object.entries(assets))sourceFiles[path==='/copybutton-observer.js'?'ui/gohtmx/tests/browser/copybutton-complete-observer.js':'ui/gohtmx'+path]=meta.sourceSHA256;
   const checks=copyCases.map(buildCase);
   // One deliberate desired-contract failure remains red after raw rederivation.
@@ -218,7 +228,7 @@ export async function testCopySchemaEvidence() {
       reject(id+': missing checkpoint '+name,r=>{check(r,id).raw.snapshots=check(r,id).raw.snapshots.filter(s=>s.name!==name);});
       reject(id+': missing accessibility '+name,r=>{delete check(r,id).raw.aria[name];});
       reject(id+': missing screenshot '+name,r=>{delete check(r,id).raw.screenshots[name];});
-      witness(id,'missing font settlement before '+name,c=>{const snapshot=c.raw.snapshots.find(s=>s.name===name),row=c.raw.log.find(r=>r.sequence===snapshot.sequence-1),sequence=row.sequence,time=row.time;assert.equal(row.name,'fonts-ready');for(const key of Object.keys(row))delete row[key];Object.assign(row,{sequence,time,type:'mode',value:'success'});});
+      witness(id,'missing font settlement before '+name,c=>{const snapshot=c.raw.snapshots.find(s=>s.name===name),row=c.raw.log.findLast(r=>r.sequence<snapshot.sequence&&r.type==='operation'&&r.name==='fonts-ready'),sequence=row.sequence,time=row.time;assert.equal(row.name,'fonts-ready');for(const key of Object.keys(row))delete row[key];Object.assign(row,{sequence,time,type:'mode',value:'success'});});
     }
   }
   for(const path of [...copyRequiredSources,...productionSources]) {
@@ -274,6 +284,9 @@ export async function testCopySchemaEvidence() {
   witness('appearance-light','checkpoint time mismatch',c=>{c.raw.snapshots.find(s=>s.name==='hover').time+=1;});
   witness('appearance-light','missing mounted root',c=>{c.raw.snapshots[0].roots['#copy-a'].ready=null;});
   witness('appearance-light','detached initial control',c=>{c.raw.snapshots[0].roots['#copy-a'].controls[0].connected=false;});
+  for(const name of ['idle','hover','pressed','focus'])for(const field of ['phase','control','root','checkpoint'])witness('appearance-light','transition settlement '+name+' '+field,c=>{const row=c.raw.log.find(r=>r.name==='appearance-transitions'&&r.checkpoint===name&&r.phase==='settled');row[field]=field==='phase'?'observed':field==='checkpoint'?(name==='hover'?'idle':'hover'):0;});
+  witness('appearance-light','missing real-frame re-observation',c=>{c.raw.log.findLast(r=>r.name==='appearance-transitions'&&r.checkpoint==='idle'&&r.phase==='observed').phase='completed';});
+  witness('appearance-light','new active transition after earlier empty observations',c=>{const rows=c.raw.log.filter(r=>r.name==='appearance-transitions'&&r.checkpoint==='idle'),transition=clone(rows[0].transitions[0]);rows[0].transitions=[];rows.findLast(r=>r.phase==='observed').transitions=[transition];});
   witness('real-clock','wrong clock',c=>{c.raw.environment.clock='playwright-controlled';});
   witness('appearance-light','wrong controlled clock',c=>{c.raw.environment.clock='browser-real';});
 
@@ -337,6 +350,9 @@ export async function testCopySchemaEvidence() {
   const rowExamples=new Map();
   for(const c of report.checks)for(const row of c.raw.log){const shape=row.type+(['host','operation'].includes(row.type)?':'+row.name:'');if(!rowExamples.has(shape))rowExamples.set(shape,{id:c.id,sequence:row.sequence});}
   for(const [shape,{id,sequence}] of rowExamples)exactObject(id,'raw row '+shape,c=>c.raw.log.find(r=>r.sequence===sequence));
+  exactObject('appearance-light','transition',c=>c.raw.log.find(r=>r.name==='appearance-transitions'&&r.transitions.length).transitions[0]);
+  exactObject('appearance-light','transition cancellation',c=>c.raw.log.find(r=>r.name==='appearance-transitions'&&r.phase==='completed').transitions[0].error);
+  for(const [field,value] of [['target',null],['duration',NaN],['playState','finished'],['outcome','finished'],['error',{}]])rejectRaw('appearance-light','invalid observed transition '+field,c=>{c.raw.log.find(r=>r.name==='appearance-transitions'&&r.transitions.length).transitions[0][field]=value;});
   exactObject('appearance-light','event detail',c=>c.raw.log.find(r=>r.type==='event').detail);
   exactObject('htmx-root-pending','HTMX swap task',c=>c.raw.log.find(r=>r.type==='event'&&r.event==='htmx:before:swap').tasks[0]);
   rejectRaw('appearance-light','unexpected browser diagnostic',c=>c.raw.errors.push('unrelated browser failure'));
@@ -487,4 +503,4 @@ export async function testCopyScreenshotEvidence(schemaReport=buildCopySchemaFix
   return {sourceOnly,classification:'synthetic PNG bytes only; no browser screenshots',screenshots:positive.screenshots,rejectedCorruptions:rejected};
 }
 
-if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href)console.log(JSON.stringify(await testCopySchemaEvidence()));
+if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href){console.log(JSON.stringify(await testCopyTransitions()));console.log(JSON.stringify(await testCopySchemaEvidence()));}

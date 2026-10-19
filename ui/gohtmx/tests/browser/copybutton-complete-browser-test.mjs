@@ -6,13 +6,17 @@ import {join} from 'node:path';
 import {chromium} from 'playwright';
 import {copyCases,copyCaseIDs,copyLimitations} from './copybutton-complete-cases.mjs';
 import {copySchema,copyOracles} from './copybutton-complete-evidence.mjs';
+import {copyMode,copyOutputPath} from './copybutton-complete-mutants.mjs';
 import {loadCopyInputs,copySHA} from './copybutton-complete-inputs.mjs';
+import {settleCopyAppearance} from './copybutton-complete-transitions.mjs';
 assert.equal(process.env.CI,'true','full browser execution is CI-only');
 const base=fileURLToPath(new URL('../../../../',import.meta.url));
-const output=join(base,'test-results/copybutton-complete');await mkdir(join(output,'screenshots'),{recursive:true});
-const inputs=await loadCopyInputs(base), {assetBodies,fixtureBodies,...binding}=inputs;
+const externalMode=copyMode(process.env.COPYBUTTON_COMPLETE_MODE||'control');
+const output=join(base,copyOutputPath(externalMode));await mkdir(join(output,'screenshots'),{recursive:true});
+const inputs=await loadCopyInputs(base,externalMode), {assetBodies,fixtureBodies,...binding}=inputs;
 const invocation=JSON.parse(await readFile(process.env.COPYBUTTON_INVOCATION_PATH,'utf8'));
 assert.equal(process.env.COPYBUTTON_RUN_TOKEN,invocation.runToken);
+assert.equal(invocation.mode,externalMode,'invocation mode must match external selection');
 for(const key of Object.keys(binding))assert.deepEqual(binding[key],invocation[key],'child current input '+key);
 const report={schema:copySchema,runToken:invocation.runToken,...binding,caseInventory:copyCaseIDs,limitations:copyLimitations,browserVersion:'',checks:[],responses:[],errors:[],status:'failed',stage:'starting'};
 let browser,server;
@@ -52,6 +56,7 @@ try {
     const fontsReady=async()=>{let deadline;try{const status=await Promise.race([page.evaluate(async()=>{document.body.getBoundingClientRect();await document.fonts.ready;return document.fonts.status;}),new Promise((_,reject)=>{deadline=setTimeout(()=>reject(new Error('Same-case font readiness deadline exceeded')),5000);})]);assert.equal(status,'loaded');await page.evaluate(status=>copyProbe.record('operation',{name:'fonts-ready',status}),status);}finally{clearTimeout(deadline);}};
     const snap=async name=>{
       await fontsReady();
+      if(spec.id.startsWith('appearance-')&&['idle','hover','pressed','focus'].includes(name))await settleCopyAppearance(page,name);
       raw.snapshots.push(await page.evaluate(name=>copyProbe.capture(name),name));
       const ariaKey=spec.id==='empty-value'?'empty':spec.id==='explicit-override'?'override':spec.id==='adapter'?'adapter':'a';raw.aria[name]=await page.locator(selector(ariaKey)).ariaSnapshot();
       const path=`screenshots/${spec.id}-${name}.png`,bytes=await page.screenshot({animations:'allow',caret:'initial',timeout:10000});await writeFile(join(output,path),bytes);

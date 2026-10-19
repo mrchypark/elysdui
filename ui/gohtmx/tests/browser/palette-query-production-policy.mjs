@@ -12,14 +12,16 @@ export const paletteReviewedProduction = [
   'adapters/gohtmx/catalogue_manifest.json.gz',
 ];
 export const paletteActivationRepairPins = {
+  'ui/gohtmx/assets/ely/icons/check.svg': 'e4bab3ed87dca8961e94a4e72ce23c17a674bebcb72bbbbe5eff4ef41532aa83',
+  'ui/gohtmx/assets/ely-api-interaction.css': 'abecc707408f8987111997910a2e50fc900c00a6b7e15bdbb0183d67eb12c94e',
   'ui/gohtmx/assets/ely-api.js': '6039000e8e983d7ebe55cd733cb4012810d2f15f949a2e1286f605966ad12116',
-  'ui/gohtmx/assets/ely-api-interaction.js': '56ff8caa36d306b55e7cf0e36db297fd36648f40edd3186844d726c7eb1048e1',
-  'ui/gohtmx/templates/ely-api-interaction.html': '9d24e3421c90615f702a1416b5b8819bc93e0947e18dd370eb22c99c18614e12',
-  'adapters/gohtmx/catalogue_manifest.json.gz': 'bfad96d831edde876dd2daab0e9b4c8b4fb9287ab6d02ff7ad49ad2ae57393a8',
+  'ui/gohtmx/assets/ely-api-interaction.js': '53f29f4c6232ee96c7e8fa45a61dba5a900a6bb7544f56c163c72052b2f3f5f6',
+  'ui/gohtmx/templates/ely-api-interaction.html': '04bb573b7f95b8517d444722efad5aea5c7fa63fe5ece31ebc7bfb3db6b04fec',
+  'adapters/gohtmx/catalogue_manifest.json.gz': 'b20ca87a4f602f3ba5519d66cf25ed20696a4b06071e5289bb6e4f75f202e96b',
 };
 export function paletteProductionPaths(policy = 'strict') {
   paletteProductionPolicy(policy);
-  return [...paletteReviewedProduction, ...(policy === 'activation-repair' ? ['ui/gohtmx/assets/ely-api.js'] : [])];
+  return [...paletteReviewedProduction, ...(policy === 'activation-repair' ? ['ui/gohtmx/assets/ely-api.js', 'ui/gohtmx/assets/ely-api-interaction.css', 'ui/gohtmx/assets/ely/icons/check.svg'] : [])];
 }
 export function verifyPaletteProductionPolicy(report, trusted) {
   assert(Object.hasOwn(trusted, 'productionPolicy'), 'independent production policy required');

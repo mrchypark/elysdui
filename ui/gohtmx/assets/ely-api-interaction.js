@@ -576,55 +576,101 @@ const feedbackBoundaryLog = (boundary, id, report = (...args) => console.error(.
 
 // Clipboard completion is local UI state, not a host action until the write succeeds.
 // Ignore promises after teardown and cancel the transient confirmation on remount.
-const copyFeedback = (root, notify, action) => {
-  let active = true, latest = 0;
-  const pending = new Set(), resets = new Map(), touched = new Set();
-  const copy = button => {
-    if (!active || pending.has(button) || button.disabled) return;
-    const ticket = ++latest, value = button.value || '';
-    const status = root.querySelector('[data-interaction-copy-status]');
-    clearTimeout(resets.get(button)); resets.delete(button);
-    delete button.dataset.interactionCopied;
-    if (status) status.textContent = '';
-    touched.add(button); pending.add(button); button.setAttribute('aria-busy', 'true');
-    const finish = success => {
-      if (!active) return;
-      pending.delete(button);
-      button.removeAttribute('aria-busy');
-      if (!active || !root.isConnected || !button.isConnected) return;
-      if (!success) {
-        if (status && latest === ticket) status.textContent = 'Copy failed';
-        notify({name: 'copy', value, copied: false, error: 'clipboard-unavailable'});
-        return;
-      }
-      button.dataset.interactionCopied = 'true';
-      if (status && latest === ticket) status.textContent = 'Copied';
-      resets.set(button, setTimeout(() => {
-        resets.delete(button); delete button.dataset.interactionCopied;
-        if (active && status && latest === ticket) status.textContent = '';
-      }, 1400));
-      action(button.dataset.elyAction || 'copy', {value});
-      if (active && root.isConnected && button.isConnected) notify({name: 'copy', value, copied: true});
+const copyFeedback = (() => {
+  // Physical controls can move between live roots. Only their current record
+  // may clear presentation; a former owner's promise or timer must not do so.
+  const controls = new WeakMap(), statuses = new WeakMap();
+  return (root, notify, action, ownerContext) => {
+    let active = true;
+    const records = new Set(), controller = {};
+    const identity = {id: root.id, component: root.dataset.elyComponent};
+    const belongs = button => root.isConnected && button.isConnected &&
+      button.closest('[data-ely-family]') === root;
+    const tooltip = button => {
+      const next = button.nextElementSibling;
+      return next?.matches('[data-interaction-copy-tooltip]') ? next : null;
     };
-    try {
-      if (!navigator.clipboard?.writeText) { finish(false); return; }
-      Promise.resolve(navigator.clipboard.writeText(value)).then(() => finish(true), () => finish(false));
-    } catch { finish(false); }
+    const clearStatus = record => {
+      if (statuses.get(root) !== record) return;
+      statuses.delete(root);
+      if (record.status && record.status === root.querySelector('[data-interaction-copy-status]')) record.status.textContent = '';
+    };
+    const retire = record => {
+      clearTimeout(record.reset);
+      records.delete(record);
+      if (controls.get(record.button) === record) {
+        controls.delete(record.button);
+        record.button.removeAttribute('aria-busy');
+        record.button.removeAttribute('aria-disabled');
+        delete record.button.dataset.interactionCopied;
+        const tip = tooltip(record.button);
+        if (tip) tip.textContent = 'Copy';
+      }
+      clearStatus(record);
+    };
+    const copy = button => {
+      if (!active || !belongs(button) || button.disabled || root.dataset.elyDisabled === 'true') return;
+      const previous = controls.get(button);
+      if (previous?.current() && previous.phase !== 'failed') return;
+      // Rebinding need not replace the DOM or initializer. Release an obsolete
+      // record on current-owner input, even while its old write is pending.
+      previous?.retire();
+      const owns = ownerContext?.captureOwner() || (() => true);
+      if (!owns()) return;
+      const value = button.value || '', actionName = button.dataset.elyAction || 'copy';
+      const record = {button, controller, phase: 'pending', status: root.querySelector('[data-interaction-copy-status]')};
+      record.current = () => active && controls.get(button) === record && owns() && belongs(button) &&
+        root.id === identity.id && root.dataset.elyComponent === identity.component;
+      record.retire = () => retire(record);
+      controls.set(button, record); records.add(record); statuses.set(root, record);
+      const status = text => {
+        if (statuses.get(root) === record && record.status === root.querySelector('[data-interaction-copy-status]') && record.status) record.status.textContent = text;
+      };
+      status('');
+      button.setAttribute('aria-busy', 'true'); button.setAttribute('aria-disabled', 'true');
+      const finish = success => {
+        if (!record.current()) { retire(record); return; }
+        button.removeAttribute('aria-busy');
+        if (!success) {
+          record.phase = 'failed'; button.removeAttribute('aria-disabled');
+          status('Copy failed');
+          notify({name: 'copy', value, copied: false, error: 'clipboard-unavailable'});
+          return;
+        }
+        record.phase = 'copied'; button.dataset.interactionCopied = 'true';
+        const tip = tooltip(button);
+        if (tip) tip.textContent = 'Copied';
+        status('Copied');
+        // The clock starts after the actual clipboard write, independently for
+        // each control. Copied-phase activation never restarts this deadline.
+        record.reset = setTimeout(() => retire(record), 1400);
+        try { action(actionName, {value}); }
+        catch { /* A host callback cannot turn a completed write into failure. */ }
+        // The action callback may synchronously rebind, move or remount and
+        // even start another write. Retire only this exact superseded record.
+        if (record.current()) notify({name: 'copy', value, copied: true});
+        else retire(record);
+      };
+      let write;
+      try {
+        if (!navigator.clipboard?.writeText) { finish(false); return; }
+        write = navigator.clipboard.writeText(value);
+      } catch { finish(false); return; }
+      Promise.resolve(write).then(() => finish(true), () => finish(false));
+    };
+    return {copy, destroy() {
+      active = false;
+      records.forEach(retire);
+      const record = statuses.get(root);
+      if (record?.controller === controller) clearStatus(record);
+    }};
   };
-  return {copy, destroy() {
-    active = false;
-    resets.forEach(clearTimeout); resets.clear();
-    touched.forEach(button => { button.removeAttribute('aria-busy'); delete button.dataset.interactionCopied; });
-    const status = root.querySelector('[data-interaction-copy-status]');
-    if (status) status.textContent = '';
-    touched.clear(); pending.clear();
-  }};
-};
+})();
 
 register('interaction', (root, registerCleanup, ownerContext) => {
   const timers = new Set();
   const lottieCleanups = [];
-  const clipboard = copyFeedback(root, detail => change(root, detail), (action, detail) => emit(root, action, detail));
+  const clipboard = copyFeedback(root, detail => change(root, detail), (action, detail) => emit(root, action, detail), ownerContext);
   lottieCleanups.push(() => clipboard.destroy());
   const sourceFamily = bindSourceFamily(root);
   const loadingFamily = bindLoadingFamily(root);
