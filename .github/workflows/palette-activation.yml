@@ -1,0 +1,39 @@
+name: CommandPalette activation supplemental baseline
+on:
+  workflow_dispatch:
+  push:
+    paths: ['ui/gohtmx/**', 'adapters/gohtmx/**', 'sdui/**', 'scripts/palette-*.mjs', 'package*.json', '.github/workflows/palette-activation.yml']
+  pull_request:
+    paths: ['ui/gohtmx/**', 'adapters/gohtmx/**', 'sdui/**', 'scripts/palette-*.mjs', 'package*.json', '.github/workflows/palette-activation.yml']
+jobs:
+  activation:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        surface: [go-qualified, go-chapter, sdui]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Validate synthetic replay and corruption controls
+        run: node scripts/palette-activation-evidence-test.mjs
+      - name: Activation and explicit-submit controls (raw failures stay red)
+        env:
+          PALETTE_QUERY_SURFACE: ${{ matrix.surface }}
+        run: node scripts/palette-activation-run.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: palette-activation-${{ matrix.surface }}
+          path: test-results/contracts/
+          if-no-files-found: error

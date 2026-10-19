@@ -104,3 +104,30 @@ Default `npm test` includes exact source-owned case/snapshot inventories and
 schema-corruption tests. Synthetic schema fixtures prove validator behavior;
 the Node handler probe proves only unchanged handler state transitions. Neither
 is browser typing, layout, focus-return or implicit-submission evidence.
+
+## Transport inventory regression
+
+The validator requires the exact preflight GET inventory and pairs every
+mandatory per-case static request with its source-hashed browser response.
+Only the source-owned core paths, the replacement fragment in its own case,
+and two optional font paths are allowed. Inter Regular and SemiBold loading
+is optional: an observed font request and response must be paired and agree
+with source bytes, but an absent pair is allowed. A preflight-only asset does
+not authorize an extra browser fetch. Routed SDUI POST accounting remains
+separate and exact. Behavioral oracles and raw desired assertions are unchanged.
+
+Default schema tests include missing core/preflight requests, invented case
+fetches, cross-case ownership, unpaired or inconsistent font records, duplicate
+pairs and optional-absence controls. An additional named regression uses the
+immutable original reports from head `80560c7218b171f72dabe91bd513d19e12a1d80e`
+and PR merge `de94a891f72737953f803efee2edae0ecb445ab1`. The report, invocation
+and exit file hashes are pinned from the independently verified artifact ZIPs:
+
+```sh
+node scripts/palette-query-evidence-test.mjs --actual-transport-root IMMUTABLE_ORIGINAL_ARTIFACT_ROOT
+```
+
+That command validates unchanged archived observations and rejects transport
+mutations. It is an old-report validator compatibility regression, not a native
+run or source-provenance claim for the current checkout. It never rewrites the
+archived files or turns their adjacent behavioral failures green.

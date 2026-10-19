@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {pathToFileURL} from 'node:url';
+import {readFile} from 'node:fs/promises';
+import {join} from 'node:path';
 import {
   paletteBaseline, paletteBaselineTree, paletteSourcePins, paletteSurfaces, paletteCases,
-  paletteErrors, paletteSourcePaths, paletteRequiredBrowserPaths, paletteRawKeys,
+  paletteErrors, paletteSourcePaths, paletteRequiredBrowserPaths, paletteOptionalBrowserPaths, paletteRawKeys,
   paletteOracles, paletteDiagnostics, verifyPaletteEvidence,
 } from '../ui/gohtmx/tests/browser/palette-query-evidence.mjs';
 
@@ -330,5 +332,230 @@ export function runPaletteEvidenceSchemaTests() {
   console.log(`CommandPalette pure evidence schema tests passed: ${accepted} desired schema fixtures, ${red} valid-red schema fixtures, ${rejected} corruptions rejected. Synthetic records only; browser behavior unverified.`);
   return {accepted, red, rejected};
 }
+
+// These tests exercise transport accounting only. No desired behavioral oracle
+// or captured observation is rewritten to satisfy a transport expectation.
+function exercisePaletteTransport(fixture) {
+  const {report, trusted, exit} = fixture, name = report.checks[0].name;
+  const runtime = '/assets/ely-api-interaction.js', font = '/assets/ely/fonts/Inter-Regular.ttf';
+  const matches = (entry, path) => entry.check === name && entry.path === path;
+  const baseline = verifyPaletteEvidence(report, trusted, exit);
+  assert(report.requests.some(entry => matches(entry, font)), 'transport test has an observed optional font');
+  const corruptions = [
+    ['mandatory runtime request omitted', r => { r.requests = r.requests.filter(entry => !matches(entry, runtime)); }],
+    ['mandatory runtime pair omitted', r => { r.requests = r.requests.filter(entry => !matches(entry, runtime)); r.browserResponses = r.browserResponses.filter(entry => !matches(entry, runtime)); }],
+    ['preflight runtime request omitted', r => { r.requests = r.requests.filter(entry => !(entry.check === null && entry.path === runtime)); }],
+    ['preflight request branch omitted', r => { r.requests = r.requests.filter(entry => entry.check !== null); }],
+    ['duplicate mandatory runtime request', r => r.requests.push(copy(r.requests.find(entry => matches(entry, runtime))))],
+    ['mandatory request moved to another case', r => { r.requests.find(entry => matches(entry, runtime)).check = report.checks[1].name; }],
+    ['known fixture cannot invent a case fetch', r => {
+      const entry = r.fixtures['/fragment'];
+      r.requests.push({check: name, path: '/fragment', method: 'GET', htmx: 'true', status: 200, responseSHA256: entry.servedSHA256, responseBytes: entry.bytes});
+      r.browserResponses.push({check: name, path: '/fragment', status: 200, expectedSHA256: entry.servedSHA256, receivedSHA256: entry.servedSHA256, bytes: entry.bytes});
+    }],
+    ['runtime request forged HTMX flag', r => { r.requests.find(entry => matches(entry, runtime)).htmx = 'true'; }],
+    ['browser proof lost case ownership', r => { delete r.browserResponses.find(entry => matches(entry, runtime)).check; }],
+    ['preflight proof acquired browser ownership', r => { r.httpAssetProof[0].check = name; }],
+    ['optional font request omitted alone', r => { r.requests = r.requests.filter(entry => !matches(entry, font)); }],
+    ['optional font response omitted alone', r => { r.browserResponses = r.browserResponses.filter(entry => !matches(entry, font)); }],
+    ['optional font coordinated wrong hashes', r => {
+      r.requests.find(entry => matches(entry, font)).responseSHA256 = sha('foreign transport bytes');
+      const proof = r.browserResponses.find(entry => matches(entry, font)); proof.expectedSHA256 = proof.receivedSHA256 = sha('foreign transport bytes');
+    }],
+    ['duplicate optional font pair', r => { r.requests.push(copy(r.requests.find(entry => matches(entry, font)))); r.browserResponses.push(copy(r.browserResponses.find(entry => matches(entry, font)))); }],
+    ['unexpected static request fields', r => { r.requests.find(entry => matches(entry, runtime)).fields = []; }],
+  ];
+  for (const [label, mutate] of corruptions) {
+    const altered = copy(report); mutate(altered);
+    assert.throws(() => verifyPaletteEvidence(altered, trusted, exit), undefined, report.surface + '/' + report.group + ': ' + label);
+  }
+  // Font usage is optional, not a mandatory behavior. A missing pair must not
+  // cause the test to invent a fetch. A one-sided or inconsistent pair is bad.
+  const absent = copy(report);
+  absent.requests = absent.requests.filter(entry => !matches(entry, font));
+  absent.browserResponses = absent.browserResponses.filter(entry => !matches(entry, font));
+  assert.deepEqual(verifyPaletteEvidence(absent, trusted, exit), baseline, 'optional absent pair preserves raw behavioral verdict');
+  return {rejected: corruptions.map(([name]) => name), optionalAbsentStatus: baseline.status};
+}
+function runPaletteTransportSchemaTests() {
+  assert.deepEqual(paletteOptionalBrowserPaths, ['/assets/ely/fonts/Inter-Regular.ttf', '/assets/ely/fonts/Inter-SemiBold.ttf']);
+  let rejected = 0;
+  for (const surface of ['go-qualified', 'go-chapter', 'sdui']) for (const group of ['focus', 'preserve', 'adjacent', 'all']) {
+    const f = buildPaletteSchemaFixture(surface, group), path = '/assets/ely/fonts/Inter-Regular.ttf';
+    // Original synthetic fixtures contain no optional font use and pass above.
+    // Add one explicitly synthetic observed pair and its preflight source bytes.
+    const bytes = Buffer.from('synthetic optional font bytes; no browser claim');
+    const entry = {sourceSHA256: sha(bytes), servedSHA256: sha(bytes), bytes: bytes.length, contentType: 'font/ttf'};
+    f.report.assets[path] = copy(entry); f.trusted.assets[path] = copy(entry);
+    const proof = {path, status: 200, expectedSHA256: entry.servedSHA256, receivedSHA256: entry.servedSHA256, bytes: entry.bytes};
+    const request = {check: null, path, method: 'GET', htmx: null, status: 200, responseSHA256: entry.servedSHA256, responseBytes: entry.bytes};
+    f.report.httpAssetProof.splice(Object.keys(f.report.assets).length - 1, 0, copy(proof));
+    f.report.requests.push(copy(request));
+    f.report.browserResponses.push({check: f.report.checks[0].name, ...proof});
+    f.report.requests.push({...request, check: f.report.checks[0].name});
+    rejected += exercisePaletteTransport(f).rejected.length;
+  }
+  console.log(`CommandPalette transport schema regression passed: ${rejected} rejected corruptions, 12 optional-absence controls. Synthetic records only.`);
+}
+
+// Immutable report/invocation/exit byte hashes copied from the independently
+// API/ZIP-verified 80560c72 push and de94a891 PR artifact manifest. These are
+// archived-report validator regressions, not native evidence at this new HEAD.
+const actualTransportReceipts = [
+  [
+    "push",
+    "palette-query-go-qualified-adjacent",
+    "6fa1743c7398ba5dba61d0ebc8c3292a30ce6b9cecadcaf739ca3f35d45cf8c4",
+    "79a82bd632a593632bfe20eff9666082912ade4c0fac43d5fca8c693965872b0",
+    "3c8378396c3477afb2210d91613bea020c122203c0c4e1842be7efb47451d861"
+  ],
+  [
+    "push",
+    "palette-query-go-chapter-adjacent",
+    "8f4a21209c77cf2987867c69a7e5c52152c2fe3996185de88e7cb3b07c018567",
+    "81e74d00a1edeecf71a0defd2869a7609c449436f67d57df860f7febdfb929a2",
+    "7eee90650adcd775c0361e6cdeb9044ab471fe054f44f95074cbb6c226b9d73d"
+  ],
+  [
+    "push",
+    "palette-query-go-qualified-focus",
+    "423ac2af3a69e68b5f800d39330d1ecacd43b8375b6d2a37f8fcb50b02061fc5",
+    "b05ada7df56cf29717d410b91f5276c001152579a913a92609e4e8d416e3c7ff",
+    "a2db98cb66ea991c4d43630905ba5d7490c7b89c0ad453b4ab33c1e11024e3a6"
+  ],
+  [
+    "push",
+    "palette-query-sdui-preserve",
+    "eb3ca41eaf1866cbc6c91a99165459b7d84fa8b33662ec32a83f887b9515c22a",
+    "e5865c527d29a422113f77bdb1d95aeae2a82cecc155ed6eb5273d82e93c58b2",
+    "b080d5158acd69e73832010bff2dbc5534993e0a2598e902cf1ad2caac871430"
+  ],
+  [
+    "push",
+    "palette-query-go-chapter-focus",
+    "280df169a346ce951777e24f7382208892de82e01dda2710fda6610e4a79dc52",
+    "4dafe3ec5014c7d01cdea26aad319f89f813969418444c7958206a4c9c9da938",
+    "0a9d7a0479ec999619b3d77c2829ec9f0e9b4c8a5d348b0d807fd42ade67fb1f"
+  ],
+  [
+    "push",
+    "palette-query-go-chapter-preserve",
+    "8b0dca9deae910a50fc75c7e4f44f59042e9916b7ff8bedae41cf5863dd5d8af",
+    "e42d2c15aef2f5cfad8318fffcfaef592f4f3a7dfeefd132deb56878365a0e7f",
+    "961fbf8a0abc4e84678e76bae6982b9e774ce683fd3bda4741f6d29ad99ede49"
+  ],
+  [
+    "push",
+    "palette-query-sdui-focus",
+    "c97acf78841986096adbaecaa99f48bed55e1641ba9626953a498ea4a8089254",
+    "5b4d7c68e8bfe6018bce1ff63bca79c377983c585329d9f026f9d3ced28d26c9",
+    "88951e5b8917cfc86e4b285a8efe93aed6dacbb5a30ccecb949b095bba773d9d"
+  ],
+  [
+    "push",
+    "palette-query-sdui-adjacent",
+    "6a0ee533dabab5659f8feaf25d6f3ab25ab2bd18b88e97b788d669dc6bcb2124",
+    "02bcef0495e681c231d8f4d13ec1394b43dabecabae40e8a73f69ed2940666cb",
+    "e709956dc2f5086e4bb50555d60124dd33409680d9ba9ea04a88b9e19bfde644"
+  ],
+  [
+    "push",
+    "palette-query-go-qualified-preserve",
+    "51656a6f72e30b12eb2255c9a2555ce68a11eff70b7fda9a74052185b312051f",
+    "cdb74c869bd7d9736a8c6d42e5e4d91d7a02a472db4abf5b24f3311032eb5575",
+    "365989f0e75011203d5ceae0c8830d6fc53c6e7040a5efeca08f886c8ec5b0e6"
+  ],
+  [
+    "pr",
+    "palette-query-go-qualified-preserve",
+    "5f54fb35924954256d2c698176b7f777333d0458708307559f9fdba0172e8c0b",
+    "bb1a8479b63ce59e44c791f2ed08be1d7ef193711ce954d13e5ed48502c7723a",
+    "b39092c5d52fa437db308d3de329750a3aa70604dd480c21bbdec15aaf0941cc"
+  ],
+  [
+    "pr",
+    "palette-query-go-qualified-adjacent",
+    "7326261e16676cd0aa5a3efbcc9f0c274cb4a2b30aec2ac04eba1e1ae5246f2e",
+    "c11af2402c3a3aa7784b968534144cc90e9799f1a2e17f8c747c8728123a9b60",
+    "e32d97037528a2dca4b814d046f05925d4e5b81ee57addebd0d49e3856a0a6b3"
+  ],
+  [
+    "pr",
+    "palette-query-go-chapter-focus",
+    "758e5b4b41d2bfae5878bec313d6b09fffcea8502b50bc90e94ee80d29fe5641",
+    "f900bd4ad8dbd8298aa6e7b7687c21d3675c073a2eb3bf068943b980f1c082e1",
+    "924250eb5b07d799d0e4c509e0cab28982df4f49394eee6da4cfdce584e0cf5d"
+  ],
+  [
+    "pr",
+    "palette-query-go-chapter-adjacent",
+    "3d09f349c90e0edfa2ef2310af40ca55e83d00d8ad9af0f37b86998a77a9a27f",
+    "608e7874311de5ab4482e93d3532b45ab66f85234b8b184cdbc0413e04f45816",
+    "4f1b5099d71445a1d1a467683523763f1df974c834412c3407afdd4b09d2d0ae"
+  ],
+  [
+    "pr",
+    "palette-query-sdui-preserve",
+    "bd319aecc63871d93cff49d4ba773b33bc9ab1f165d72fd66ac68e2fd2536f52",
+    "cf52b6f209842fbcaac507f0c5705221a9fbfe68f22a65ab3ef3bb3ff7171904",
+    "2dab0d02e7902c631bb3cd5dd403d4b72b1f802f4f3e63d5f4bc3202aa6f5d2f"
+  ],
+  [
+    "pr",
+    "palette-query-sdui-focus",
+    "741ace84f67e1c8730b9bd3480e50f9a7cfc6eb6af87878877cf335c72ef7645",
+    "57ef01894f50fb8b19f03ebbff55cb6992b984dc43f3f8b8ab35077711473a9d",
+    "a021d3b9a324e27be3efe7267894d0bc932e63c8f39fcd844be49651fb86760e"
+  ],
+  [
+    "pr",
+    "palette-query-sdui-adjacent",
+    "2e2052146a3cf6d523446e28bfbd3f186947bae72b557d430ccc10f5ede26fb2",
+    "0fc9cc1046300e9fc455ea21ad76f58e0eb74a5f9198013eae620696ecbc3b04",
+    "080b1f76390d87a3a9f3c61421ec2598e5af01471238e16c59cfde1d2a117b5f"
+  ],
+  [
+    "pr",
+    "palette-query-go-qualified-focus",
+    "a646d4db1693179d728fd2b658f1850be760d8b6af5ceae650ed9a4f13a8068f",
+    "ef02311dfb2a1739b23d92c7d7b36d6d3bd7d82656d30bce9e23263a96468536",
+    "ab4875f9660a53806a0ccfa23d032ac07b8ce33f464a33ffc376d6c8e592b62c"
+  ],
+  [
+    "pr",
+    "palette-query-go-chapter-preserve",
+    "9073d340fc288b3f3f46816534e4ee43058014ccd00a9672ff4fcc5ee5e3eac6",
+    "9993264d47dff310fc386d2d22dd9dbb76aef33bb473ce4528aad030436d915f",
+    "3c556bbe6c1f1484014a5a29b85adef49e9fd726b21124ae3e49903ec6d7ce71"
+  ]
+];
+export async function runPaletteTransportActualReportRegression(root) {
+  const results = [];
+  for (const [event, name, reportSHA256, invocationSHA256, exitSHA256] of actualTransportReceipts) {
+    const path = join(root, event, 'original', name, name + '.json');
+    const bytes = await Promise.all([path, path + '.invocation.json', path + '.exit.json'].map(path => readFile(path)));
+    assert.deepEqual(bytes.map(sha), [reportSHA256, invocationSHA256, exitSHA256], 'independent immutable archived receipt bytes: ' + event + '/' + name);
+    const [report, trusted, exit] = bytes.map(bytes => JSON.parse(bytes));
+    for (const key of ['revision', 'tree', 'runToken', 'surface', 'group']) {
+      assert.equal(report[key], trusted[key]);
+      if (['revision', 'tree', 'runToken'].includes(key)) assert.equal(exit[key], trusted[key]);
+    }
+    assert.equal(report.revision, event === 'push' ? '80560c7218b171f72dabe91bd513d19e12a1d80e' : 'de94a891f72737953f803efee2edae0ecb445ab1');
+    assert.equal(report.tree, 'f775624923f634fce976178c8612d7fc3563dd9d');
+    results.push({event, name, ...exercisePaletteTransport({report, trusted, exit: exit.exitCode})});
+  }
+  console.log(JSON.stringify({kind: 'immutable old-head actual-report validator regression; no new native run', archivedReports: results.length,
+    rejected: results.reduce((sum, r) => sum + r.rejected.length, 0), optionalAbsentStatuses: results.map(r => r.optionalAbsentStatus), results}));
+  return results;
+}
+
 const assetKey = report => Object.keys(report.assets)[0];
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) runPaletteEvidenceSchemaTests();
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  if (process.argv[2] === '--actual-transport-root') {
+    assert.equal(process.argv.length, 4, 'one immutable artifact root required');
+    await runPaletteTransportActualReportRegression(process.argv[3]);
+  } else {
+    assert.equal(process.argv.length, 2, 'unknown schema-test argument');
+    runPaletteEvidenceSchemaTests(); runPaletteTransportSchemaTests();
+  }
+}

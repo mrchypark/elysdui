@@ -27,6 +27,10 @@ export const paletteSourcePaths = [
   'package.json', 'package-lock.json', '.github/workflows/palette-query.yml',
 ];
 export const paletteRequiredBrowserPaths = ['/', '/fixture-observer.js', '/assets/app.css', '/assets/ely-api.css', '/assets/ely-api-interaction.css', '/assets/ely-controls.css', '/assets/ely-patterns.css', '/assets/ely-controls.js', '/assets/ely-patterns.js', '/assets/htmx.min.js', '/assets/ely-api-interaction-entry.js', '/assets/ely-api.js', '/assets/ely-api-interaction.js'];
+// Font loading is optional; when observed, its request and response must agree.
+// This bounded fixture uses only these two faces. Other preflight assets are
+// not permission to invent a browser fetch in a case.
+export const paletteOptionalBrowserPaths = ['/assets/ely/fonts/Inter-Regular.ttf', '/assets/ely/fonts/Inter-SemiBold.ttf'];
 export const paletteReportName = (surface, group) => `palette-query-${surface}-${group}.json`;
 export const paletteOwner = (surface, slot = 'primary') => surface === 'sdui' ? 'sdui-internal-' + createHash('sha256').update(`palette-${slot}-screen\0palette-${slot}-component`).digest('hex') : `palette-${slot}-component`;
 const component = 'navigation/CommandPalette';
@@ -242,6 +246,30 @@ export function paletteDiagnostics(check) {
     coverageLimits: ['No long-list scrolling', 'No assistive-technology verification', 'No IME/composition', 'No aliases or other palette primaries']};
 }
 const hash = value => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
+function assertPaletteTransportInventory(report, surface, assets, fixtures, inventory) {
+  const preflightPaths = [...Object.keys(assets), ...Object.keys(fixtures)].sort();
+  const preflight = report.requests.filter(request => request.check === null);
+  assert.deepEqual(preflight.map(request => request.path).sort(), preflightPaths, 'exact preflight request inventory');
+  for (const proof of report.httpAssetProof) assert(!Object.hasOwn(proof, 'check'), 'preflight response has no browser case');
+  for (const proof of report.browserResponses) assert(inventory.includes(proof.check), 'browser response belongs to an exact case');
+  for (const request of report.requests.filter(request => request.path !== '/sdui-action')) {
+    assert.deepEqual(Object.keys(request).sort(), ['check', 'path', 'method', 'htmx', 'status', 'responseSHA256', 'responseBytes'].sort(), 'exact static request fields');
+    assert.equal(request.htmx, request.check !== null && request.path === '/fragment' ? 'true' : null, 'static versus HTMX request provenance');
+  }
+  for (const name of inventory) {
+    const required = [...paletteRequiredBrowserPaths, ...(surface === 'sdui' ? ['/assets/sdui.js', '/assets/sdui.css'] : []), ...(name === 'owner.replacement' ? ['/fragment'] : [])];
+    const allowed = new Set([...required, ...paletteOptionalBrowserPaths]);
+    const requests = report.requests.filter(request => request.check === name && request.path !== '/sdui-action');
+    const responses = report.browserResponses.filter(proof => proof.check === name && proof.path !== '/sdui-action');
+    for (const entry of [...requests, ...responses]) assert(allowed.has(entry.path), name + ': source-owned browser path inventory');
+    assert.deepEqual(requests.map(request => request.path).sort(), responses.map(proof => proof.path).sort(), name + ': exact static request/response join');
+    for (const path of required) assert.equal(requests.filter(request => request.path === path).length, 1, name + ': mandatory browser request ' + path);
+    for (const request of requests) {
+      const proof = responses.find(proof => proof.path === request.path);
+      assert.equal(request.status, proof.status); assert.equal(request.responseSHA256, proof.receivedSHA256); assert.equal(request.responseBytes, proof.bytes);
+    }
+  }
+}
 export function verifyPaletteEvidence(report, trusted, exitCode) {
   const {surface, group, revision, tree, runToken, sourceFiles, assets, fixtures} = trusted;
   assert(paletteSurfaces.includes(surface));
@@ -282,6 +310,7 @@ export function verifyPaletteEvidence(report, trusted, exitCode) {
     if (Object.hasOwn(proof, 'check')) assert(inventory.includes(proof.check));
     if (proof.path === '/sdui-action') assert.equal(proof.responseFixture, '/sdui-response-primary');
   }
+  assertPaletteTransportInventory(report, surface, assets, fixtures, inventory);
   for (const check of report.checks) {
     assert.equal(check.error, undefined); assert.equal(check.captureError, undefined);
     assert.deepEqual(check.finalTrace, (check.raw.repeat?.after || check.raw.after).log, 'final trace raw consistency');
