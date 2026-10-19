@@ -20,13 +20,15 @@ assert(!/dispatchEvent[^\n]+htmx:/.test(browser), 'real HTMX lifecycle, never sy
 assert(observer.includes("detail.formData === null ? 'null'") && observer.includes("valuesKind: Array.isArray(detail.values)"), 'raw payload shape retained');
 assert(!/\.focus\(|\.value\s*=|setAttribute\(|\.click\(/.test(observer), 'passive observer cannot repair production DOM');
 assert(loader.includes("git(['rev-parse', paletteBaseline + '^{tree}'])"));
-assert(loader.includes("'unchanged baseline production: ' + path"));
+assert(loader.includes("'reviewed production input: ' + path"));
+assert(loader.includes('repairedProduction.has(path) ? revision : paletteBaseline'));
+assert(loader.includes("'loaded production assets pinned to reviewed source: ' + path"));
 assert.equal(paletteOwner('sdui'), 'sdui-internal-cb0aff20eca69b4d6a19786f3d9788b761f8ee6825dfcd07bfacf11c0a78a4e4');
 assert.deepEqual(paletteExpectedRows('opo').filter(row => !row.hidden && !row.disabled).map(row => row.value), ['option-file']);
 assert.deepEqual(paletteExpectedAction('go-qualified', 'option-file', 'option-command').values, []);
 const sha = path => createHash('sha256').update(readFileSync(new URL('../' + path, import.meta.url))).digest('hex');
-assert.equal(sha('ui/gohtmx/assets/ely-api-interaction.js'), '73edb0f9135820be46813ea49fc6c704fa9922ca24507ae1a07978fe189b2c54');
+assert.equal(sha('ui/gohtmx/assets/ely-api-interaction.js'), 'd85e11cdb19a3da03b3d4770676ad595e807269f625fe4bb165afb9aa73138ac');
 assert.equal(sha('ui/gohtmx/assets/ely-api.js'), '76d3102718dd754ee5cc774416f5f2d891d5b744cbf7f4fdddd79cc52fefa9bc');
 const pkg = JSON.parse(read('package.json'));
 for (const path of ['scripts/palette-query-oracles-test.mjs', 'scripts/palette-query-evidence-test.mjs', 'ui/gohtmx/tests/unit/palette_query_test.mjs']) assert(pkg.scripts.test.includes('node ' + path), path + ' must run by default');
-console.log('CommandPalette source-owned keyboard, fixture, payload and baseline pins checked (no browser execution).');
+console.log('CommandPalette source-owned keyboard, fixture, payload and reviewed repair pins checked (no browser execution).');

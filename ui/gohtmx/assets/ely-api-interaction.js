@@ -808,7 +808,19 @@ register('interaction', (root, registerCleanup) => {
     options.forEach(option => option.setAttribute('aria-selected', String(option === first)));
     const empty = palette?.querySelector('[data-interaction-palette-empty]');
     if (empty) empty.hidden = Boolean(first);
+    syncCommandPalette(palette, first, true);
     return first;
+  };
+  // CommandPalette retains native query editing while a separate active option
+  // represents navigation. IDs belong to the rendered rows, not sorted positions
+  // or caller values; other palette primaries keep their existing focus model.
+  const syncCommandPalette = (palette, option, scroll = false) => {
+    if (palette?.closest('[data-interaction-kind]')?.dataset.interactionKind !== 'CommandPalette') return;
+    const field = palette.querySelector('[data-interaction-filter]');
+    if (!field) return;
+    if (option) field.setAttribute('aria-activedescendant', option.id);
+    else field.removeAttribute('aria-activedescendant');
+    if (scroll && palette.open) option?.scrollIntoView({block: 'nearest', inline: 'nearest'});
   };
   const paintUpload = row => { const state=row.dataset.interactionUploadState, progress=row.querySelector('progress'), detail=row.querySelector('[data-interaction-upload-detail]'), output=row.querySelector('[data-interaction-upload-value]'), icon=row.querySelector('.ely-interaction__feedback-icon');progress.hidden=state!=='uploading';detail.textContent=state==='failed'?row.dataset.uploadError:'';output.textContent=state==='uploading'?`${Math.round(progress.value)}%`:state==='done'?row.dataset.uploadSize:'';icon.textContent=state==='done'?'✓':state==='failed'?'!':'▤';const old=row.querySelector('button'), next=uploadButton(state==='uploading'?'data-interaction-upload-cancel':state==='failed'?'data-interaction-upload-retry':'data-interaction-upload-remove',state==='failed'?'↻':'×');next.setAttribute('aria-label',`${state==='failed'?'Retry':state==='uploading'?'Cancel':'Remove'} ${row.querySelector('strong').textContent}`);old.replaceWith(next); };
   const settleOverlay = host => { const overlay=host.querySelector('.ely-interaction__loading'), article=host.querySelector('article'); const prior=Number(host.dataset.interactionOverlayTimer);if(prior){clearTimeout(prior);timers.delete(prior);} delete host.dataset.interactionOverlayTimer; overlay.inert=true;overlay.setAttribute('aria-busy','false');const done=()=>{overlay.hidden=true;article.inert=false;host.querySelector('[data-interaction-loading-overlay-toggle]').disabled=false;change(root,{name:'loading-overlay',value:'complete'});};if(overlay.animate&&!matchMedia('(prefers-reduced-motion: reduce)').matches){const animation=overlay.animate([{opacity:1},{opacity:0}],{duration:120,fill:'both'});const cleanup=()=>animation.cancel();lottieCleanups.push(cleanup);later(()=>{cleanup();const index=lottieCleanups.indexOf(cleanup);if(index>=0)lottieCleanups.splice(index,1);done();},120);}else done(); };
@@ -1176,6 +1188,7 @@ register('interaction', (root, registerCleanup) => {
     if (paletteOption) {
       const results = paletteOption.closest('[data-interaction-palette-results]');
       results?.querySelectorAll('[data-interaction-palette-option]').forEach(option => option.setAttribute('aria-selected', String(option === paletteOption)));
+      syncCommandPalette(paletteOption.closest('[data-interaction-palette]'), paletteOption);
       change(root, {name: 'palette', value: paletteOption.value, selected: true});
       closeDialog(paletteOption.closest('dialog'));
       return;
@@ -1450,7 +1463,12 @@ register('interaction', (root, registerCleanup) => {
       const base = focusIndex >= 0 ? focusIndex : Math.max(selected, 0);
       const next = event.key === 'Home' ? 0 : event.key === 'End' ? options.length - 1 : (base + (event.key === 'ArrowDown' ? 1 : options.length - 1)) % options.length;
       options.forEach((option, optionIndex) => option.setAttribute('aria-selected', String(optionIndex === next)));
-      options[next].focus();
+      const dialog = palette.closest('[data-interaction-palette]');
+      const queryField = dialog?.closest('[data-interaction-kind]')?.dataset.interactionKind === 'CommandPalette' ? dialog.querySelector('[data-interaction-filter]') : null;
+      if (queryField) {
+        queryField.focus({preventScroll: true});
+        syncCommandPalette(dialog, options[next], true);
+      } else options[next].focus();
       return;
     }
     const pageInput = closest(root, event.target, '[data-interaction-page-input]');

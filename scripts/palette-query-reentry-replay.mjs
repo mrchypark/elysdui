@@ -1,0 +1,12 @@
+import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
+import {fileURLToPath} from 'node:url';
+import {loadReentryInputs} from '../ui/gohtmx/tests/browser/palette-query-reentry-inputs.mjs';
+import {verifyReentryEvidence} from '../ui/gohtmx/tests/browser/palette-query-reentry-evidence.mjs';
+const [reportPath,invocationPath,exitPath,revision,tree,runToken]=process.argv.slice(2);
+assert(reportPath&&invocationPath&&exitPath&&revision&&tree&&runToken,'usage: node scripts/palette-query-reentry-replay.mjs REPORT INVOCATION EXIT EXPECTED_REVISION EXPECTED_TREE EXPECTED_TOKEN');
+const [report,invocation,exit]=await Promise.all([reportPath,invocationPath,exitPath].map(async path=>JSON.parse(await readFile(path,'utf8'))));
+for(const source of [invocation,exit])for(const [key,value]of Object.entries({revision,tree,runToken}))assert.equal(source[key],value,'independent invocation '+key);
+const base=fileURLToPath(new URL('../',import.meta.url)),{assetBodies,fixtureBodies,...current}=await loadReentryInputs(base,invocation.surface);assert.equal(current.dirty,'');assert.equal(current.revision,revision);assert.equal(current.tree,tree);
+for(const key of ['sourceFiles','reentrySourceFiles','assets','fixtures','fixtureManifest','standaloneDependencyProof'])assert.deepEqual(invocation[key],current[key],'current-source replay '+key);
+console.log(JSON.stringify({evidenceValidation:'valid-replay',...verifyReentryEvidence(report,{...current,...invocation,revision,tree,runToken},exit.exitCode),rawExit:exit.exitCode}));
