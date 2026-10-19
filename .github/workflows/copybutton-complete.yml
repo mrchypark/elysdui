@@ -1,0 +1,66 @@
+name: CopyButton complete contract baseline
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'ui/gohtmx/**'
+      - 'adapters/gohtmx/**'
+      - 'sdui/**'
+      - 'internal/httpencoding/**'
+      - 'scripts/copybutton-complete-*.mjs'
+      - 'docs/gohtmx/copybutton-complete-contract.md'
+      - '.github/workflows/copybutton-complete.yml'
+      - 'go.mod'
+      - 'go.sum'
+      - 'package*.json'
+  pull_request:
+    paths:
+      - 'ui/gohtmx/**'
+      - 'adapters/gohtmx/**'
+      - 'sdui/**'
+      - 'internal/httpencoding/**'
+      - 'scripts/copybutton-complete-*.mjs'
+      - 'docs/gohtmx/copybutton-complete-contract.md'
+      - '.github/workflows/copybutton-complete.yml'
+      - 'go.mod'
+      - 'go.sum'
+      - 'package*.json'
+permissions:
+  contents: read
+jobs:
+  copybutton-complete:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Check source-owned fixture and evidence schema
+        run: |
+          go test ./ui/gohtmx/tests/fixtures/copybutton-complete
+          node scripts/copybutton-complete-evidence-test.mjs
+      - name: Existing copy helper coverage (unchanged)
+        run: node ui/gohtmx/tests/unit/copy_feedback_test.mjs
+      - name: Existing browser coverage and two negative controls (unchanged)
+        run: |
+          node ui/gohtmx/tests/browser/copy-contracts-browser-test.mjs
+          COPY_NEGATIVE_CONTROL=optimistic-failure node ui/gohtmx/tests/browser/copy-contracts-browser-test.mjs
+          COPY_NEGATIVE_CONTROL=duplicate-action node ui/gohtmx/tests/browser/copy-contracts-browser-test.mjs
+      - name: Complete desired contract (raw failures keep this baseline red)
+        if: always()
+        run: node scripts/copybutton-complete-run.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: copybutton-complete-evidence
+          path: |
+            test-results/copybutton-complete/
+            test-results/contracts/copy*.json
+          if-no-files-found: error
