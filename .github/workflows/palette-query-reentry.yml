@@ -1,4 +1,4 @@
-name: CommandPalette proposed-repair reentry probe
+name: CommandPalette reentry guard and causal reversal
 on:
   workflow_dispatch:
   push:
@@ -12,6 +12,7 @@ jobs:
       fail-fast: false
       matrix:
         surface: [go-qualified, go-chapter, sdui]
+        mode: [control, guard-removed]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -26,14 +27,15 @@ jobs:
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       - name: Validate synthetic replay and corruption controls
-        run: node scripts/palette-query-reentry-evidence-test.mjs
-      - name: Native focus reentry probe (unguarded failures stay red)
+        run: node scripts/palette-query-reentry-evidence-test.mjs && node scripts/palette-query-reentry-guard-evidence-test.mjs && node scripts/palette-query-reentry-replay-test.mjs
+      - name: Native focus reentry probe (causal failures stay red)
         env:
           PALETTE_QUERY_SURFACE: ${{ matrix.surface }}
+          PALETTE_QUERY_REENTRY_MODE: ${{ matrix.mode }}
         run: node scripts/palette-query-reentry-run.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: palette-query-reentry-${{ matrix.surface }}
+          name: palette-query-reentry-${{ matrix.surface }}-${{ matrix.mode }}
           path: test-results/contracts/
           if-no-files-found: error

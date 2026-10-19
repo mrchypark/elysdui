@@ -64,8 +64,8 @@ export const menuPointerControls = {
   },
   'cleanup-close': {
     file: '/assets/ely-api-interaction.js',
-    from: 'const cleanup = () => { close(); cleanupContextRequests(); clearReorderPreview();',
-    to: 'const cleanup = () => { cleanupContextRequests(); clearReorderPreview();',
+    from: 'const cleanup = () => { paletteNavigationActive = false; close(); cleanupContextRequests(); clearReorderPreview();',
+    to: 'const cleanup = () => { paletteNavigationActive = false; cleanupContextRequests(); clearReorderPreview();',
     check: 'lifecycle.outerHTML', oracle: 'lifecycle.old-panel-hidden',
     prior: ['lifecycle.cleanup-once', 'lifecycle.root-identity', 'lifecycle.real-network-request', 'lifecycle.actual-swap-target-and-style'], observed: false, expected: true,
   },

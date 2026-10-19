@@ -11,6 +11,14 @@ original row, so ranking and repeated item values do not change their identity.
 The active row is scrolled into view. This uses the existing native searchbox
 and listbox roles; no new combobox property or alias is introduced.
 
+A caller focus listener may synchronously replace a row or dispose the palette
+while keyboard navigation returns focus to the query. Before updating the active
+reference or scrolling, that continuation checks its controller, owner, current
+field/list and selected row. Invalidated work stops without writing through a
+reused row ID; normal HTMX remounting initializes the current instance. This
+bounded check does not promise coherence while an owner is between mounts or
+certify other lifecycle, action-callback or asynchronous host flows.
+
 This bounded behavior change is specific to CommandPalette. QuickOpen,
 QuickSwitcher and SearchPalette retain their existing keyboard focus behavior.
 Home/End retain CommandPalette's existing first/last-result navigation; Enter

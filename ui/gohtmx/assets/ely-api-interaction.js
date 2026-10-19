@@ -630,6 +630,8 @@ register('interaction', (root, registerCleanup) => {
   const loadingFamily = bindLoadingFamily(root);
   lottieCleanups.push(() => loadingFamily.destroy());
   lottieCleanups.push(() => sourceFamily.destroy());
+  const paletteNavigationOwner = {id: root.id, component: root.dataset.elyComponent};
+  let paletteNavigationActive = true;
   const dialogOpeners = new Map();
   const dialogFocusFrames = new Map();
   const restoreDialogFocus = (dialog, ownedFocus = false) => {
@@ -1467,6 +1469,21 @@ register('interaction', (root, registerCleanup) => {
       const queryField = dialog?.closest('[data-interaction-kind]')?.dataset.interactionKind === 'CommandPalette' ? dialog.querySelector('[data-interaction-filter]') : null;
       if (queryField) {
         queryField.focus({preventScroll: true});
+        // A caller focus listener may synchronously swap, dispose, or reown
+        // this controller's nodes. Never continue into a replacement row whose
+        // ID happens to match the detached option selected before focus.
+        const nextOption = options[next];
+        if (!paletteNavigationActive || !root.isConnected || root.dataset.elyReady !== 'true' ||
+            root.id !== paletteNavigationOwner.id || root.dataset.elyComponent !== paletteNavigationOwner.component ||
+            root.dataset.elyFamily !== 'interaction' || root.dataset.elyDisabled === 'true' ||
+            !dialog.isConnected || !dialog.open || dialog.closest('[data-ely-family]') !== root ||
+            dialog.querySelector('[data-interaction-filter]') !== queryField ||
+            dialog.querySelector('[data-interaction-palette-results]') !== palette ||
+            !queryField.isConnected || queryField.disabled || queryField.closest('[data-ely-family]') !== root ||
+            document.activeElement !== queryField || !nextOption.isConnected || nextOption.disabled ||
+            nextOption.closest('[data-ely-family]') !== root ||
+            nextOption.closest('[data-interaction-palette-results]') !== palette ||
+            nextOption.closest('[hidden]') || nextOption.getAttribute('aria-selected') !== 'true') return;
         syncCommandPalette(dialog, options[next], true);
       } else options[next].focus();
       return;
@@ -1953,7 +1970,7 @@ register('interaction', (root, registerCleanup) => {
   document.addEventListener('pointerdown', outside);
   const contextRequests = bindContextRequests(root, () => { menuPointerReturn = contextPointerFocus = undefined; menuConfirmKey = menuConfirmTarget = menuSearchConfirm = undefined; });
   const cleanupContextRequests = contextRequests.cleanup;
-  const cleanup = () => { close(); cleanupContextRequests(); clearReorderPreview(); menuSearchConfirm = undefined; timers.forEach(clearTimeout); lottieCleanups.forEach(cleanup => cleanup()); root.removeEventListener('click', click); root.removeEventListener('scroll', scroll, true); root.removeEventListener('input', input); root.removeEventListener('keydown', keydown); root.removeEventListener('ely:result', result); root.removeEventListener('ely:error', error); root.removeEventListener('contextmenu', contextmenu); root.removeEventListener('pointerover', pointerover); root.removeEventListener('pointermove', menuPointerMove); root.removeEventListener('dragend', dragend); root.removeEventListener('dragstart', dragstart); root.removeEventListener('dragover', dragover); root.removeEventListener('drop', drop); root.removeEventListener('pointerdown', lightboxPointerDownHandler); root.removeEventListener('pointerup', lightboxPointerUpHandler); root.removeEventListener('pointerdown', holdStart); root.removeEventListener('pointerup', holdEnd); root.removeEventListener('pointercancel', holdEnd); root.removeEventListener('keyup', keyup); document.removeEventListener('pointerdown', outside); };
+  const cleanup = () => { paletteNavigationActive = false; close(); cleanupContextRequests(); clearReorderPreview(); menuSearchConfirm = undefined; timers.forEach(clearTimeout); lottieCleanups.forEach(cleanup => cleanup()); root.removeEventListener('click', click); root.removeEventListener('scroll', scroll, true); root.removeEventListener('input', input); root.removeEventListener('keydown', keydown); root.removeEventListener('ely:result', result); root.removeEventListener('ely:error', error); root.removeEventListener('contextmenu', contextmenu); root.removeEventListener('pointerover', pointerover); root.removeEventListener('pointermove', menuPointerMove); root.removeEventListener('dragend', dragend); root.removeEventListener('dragstart', dragstart); root.removeEventListener('dragover', dragover); root.removeEventListener('drop', drop); root.removeEventListener('pointerdown', lightboxPointerDownHandler); root.removeEventListener('pointerup', lightboxPointerUpHandler); root.removeEventListener('pointerdown', holdStart); root.removeEventListener('pointerup', holdEnd); root.removeEventListener('pointercancel', holdEnd); root.removeEventListener('keyup', keyup); document.removeEventListener('pointerdown', outside); };
   registerCleanup?.(cleanup);
   contextRequests.openSeed();
   return cleanup;

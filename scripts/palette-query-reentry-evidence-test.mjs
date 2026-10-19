@@ -3,6 +3,7 @@ import {createHash} from 'node:crypto';
 import {pathToFileURL} from 'node:url';
 import {buildPaletteSchemaFixture} from './palette-query-evidence-test.mjs';
 import {paletteOwner, paletteRows, paletteErrors} from '../ui/gohtmx/tests/browser/palette-query-evidence.mjs';
+import {reentryMutationMetadata, reentryRuntimePath, reentryRuntimeSourcePath} from '../ui/gohtmx/tests/browser/palette-query-reentry-mutants.mjs';
 import {reentrySourcePaths} from '../ui/gohtmx/tests/browser/palette-query-reentry-inputs.mjs';
 import {reentryCase, reentryClassification, reentryOracles, reconstructReentryWrites, verifyReentryEvidence} from '../ui/gohtmx/tests/browser/palette-query-reentry-evidence.mjs';
 const copy=value=>structuredClone(value), sha=value=>createHash('sha256').update(value).digest('hex');
@@ -52,12 +53,15 @@ export function buildReentrySchemaFixture(surface='go-qualified',red=false){
   native('keyup','ArrowDown',final);
   const assets={...baseline.assets,'/reentry-observer.js':{...metadata('observer'),contentType:'text/javascript; charset=utf-8'}};
   for(const path of ['/assets/ely/fonts/Inter-Regular.ttf','/assets/ely/fonts/Inter-SemiBold.ttf'])assets[path]={...metadata(path),contentType:'font/ttf'};
-  const report={suite:'palette-query-reentry',classification:reentryClassification,surface,stage:'checks',runToken:'synthetic-reentry-schema-no-browser-proof',revision:baseline.revision,tree:baseline.tree,dirty:'',sourceFiles:baseline.sourceFiles,reentrySourceFiles:Object.fromEntries(reentrySourcePaths.map(path=>[path,sha('source: '+path)])),assets,fixtures:baseline.fixtures,fixtureManifest:baseline.fixtureManifest,standaloneDependencyProof:baseline.standaloneDependencyProof,toolchain:baseline.toolchain,browserVersion:'synthetic-schema-only',caseInventory:[reentryCase],checks:[{name:reentryCase,raw,finalCapture:{log:copy(raw.log),baseTrace:copy(raw.baseTrace)}}],requests:[],browserResponses:[],httpAssetProof:[],...Object.fromEntries(paletteErrors.map(key=>[key,[]]))};
+  const mutation=reentryMutationMetadata('control');
+  baseline.sourceFiles[reentryRuntimeSourcePath]=mutation.sourceSHA256;
+  assets[reentryRuntimePath]={...assets[reentryRuntimePath],sourceSHA256:mutation.sourceSHA256,servedSHA256:mutation.servedSHA256};
+  const report={mode:'control',mutation,suite:'palette-query-reentry' ,classification:reentryClassification,surface,stage:'checks',runToken:'synthetic-reentry-schema-no-browser-proof',revision:baseline.revision,tree:baseline.tree,dirty:'',sourceFiles:baseline.sourceFiles,reentrySourceFiles:Object.fromEntries(reentrySourcePaths.map(path=>[path,sha('source: '+path)])),assets,fixtures:baseline.fixtures,fixtureManifest:baseline.fixtureManifest,standaloneDependencyProof:baseline.standaloneDependencyProof,toolchain:baseline.toolchain,browserVersion:'synthetic-schema-only',caseInventory:[reentryCase],checks:[{name:reentryCase,raw,finalCapture:{log:copy(raw.log),baseTrace:copy(raw.baseTrace)}}],requests:[],browserResponses:[],httpAssetProof:[],...Object.fromEntries(paletteErrors.map(key=>[key,[]]))};
   const paths=[...Object.keys(assets),...Object.keys(report.fixtures)],browserPaths=['/',...Object.keys(assets),'/fragment'];
   const proof=path=>{const entry=assets[path]||report.fixtures[path];return {path,status:200,bytes:entry.bytes,expectedSHA256:entry.servedSHA256,receivedSHA256:entry.servedSHA256};};
   for(const path of paths)report.httpAssetProof.push(proof(path));for(const path of browserPaths)report.browserResponses.push(proof(path));
   for(const [phase,list]of [['preflight',paths],['browser',browserPaths]])for(const path of list){const entry=assets[path]||report.fixtures[path];report.requests.push({phase,path,method:'GET',htmx:null,status:200,responseSHA256:entry.servedSHA256,responseBytes:entry.bytes});}
-  const trusted=copy(Object.fromEntries(['surface','revision','tree','runToken','sourceFiles','reentrySourceFiles','assets','fixtures','fixtureManifest','standaloneDependencyProof','toolchain'].map(key=>[key,report[key]])));
+  const trusted=copy(Object.fromEntries(['surface','revision','tree','runToken','mode','mutation','sourceFiles','reentrySourceFiles','assets','fixtures','fixtureManifest','standaloneDependencyProof','toolchain'].map(key=>[key,report[key]])));
   return refresh({report,trusted,exit:0});
 }
 function renumber(log) {

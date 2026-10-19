@@ -70,8 +70,8 @@ const readBrowserControl=(path,name)=>{
  return {from:get('from'),to:get('to'),oracle:get('oracle')};
 };
 for(const [path,name,from,to,oracle] of [
- ['ui/gohtmx/tests/browser/menu-contracts-browser-test.mjs','cleanup','const cleanup = () => { close(); cleanupContextRequests(); clearReorderPreview();','const cleanup = () => { cleanupContextRequests(); clearReorderPreview();','teardown must close the old open menu'],
- ['adapters/gohtmx/tests/browser/menu-empty-submenu-browser-test.mjs','cleanup','const cleanup = () => { close(); cleanupContextRequests(); clearReorderPreview();','const cleanup = () => { cleanupContextRequests(); clearReorderPreview();','cleanup.old-empty-panel-hidden'],
+ ['ui/gohtmx/tests/browser/menu-contracts-browser-test.mjs','cleanup','const cleanup = () => { paletteNavigationActive = false; close(); cleanupContextRequests(); clearReorderPreview();','const cleanup = () => { paletteNavigationActive = false; cleanupContextRequests(); clearReorderPreview();','teardown must close the old open menu'],
+ ['adapters/gohtmx/tests/browser/menu-empty-submenu-browser-test.mjs','cleanup','const cleanup = () => { paletteNavigationActive = false; close(); cleanupContextRequests(); clearReorderPreview();','const cleanup = () => { paletteNavigationActive = false; cleanupContextRequests(); clearReorderPreview();','cleanup.old-empty-panel-hidden'],
  ['ui/gohtmx/tests/browser/menu-contracts-browser-test.mjs','native-focus','if (panel.contains(event.relatedTarget) || contextPointerFocus?.contains(event.relatedTarget)) return;','if (contextPointerFocus?.contains(event.relatedTarget)) return;','clicking a hover-open submenu keeps it open'],
 ]){
  const control=readBrowserControl(path,name);

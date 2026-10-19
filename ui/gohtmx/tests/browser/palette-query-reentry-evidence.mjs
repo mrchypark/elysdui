@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import {isDeepStrictEqual as same} from 'node:util';
 import {paletteSurfaces, paletteOwner, paletteRows, paletteSourcePaths, paletteRequiredBrowserPaths, paletteErrors} from './palette-query-evidence.mjs';
+import {reentryModes, reentryRuntimePath, reentryRuntimeSourcePath, reentryMutationMetadata, reentryGuardKills} from './palette-query-reentry-mutants.mjs';
 import {reentrySourcePaths} from './palette-query-reentry-inputs.mjs';
 export const reentryCase = 'proposed-repair.native-focus-reentry';
 export const reentryClassification = 'new proposed-repair reentry risk; neither original-nine baseline nor sequential replacement credit';
-export const reentryReportName = surface => `palette-query-reentry-${surface}.json`;
+export const reentryReportName = (surface, mode = 'control') => `palette-query-reentry-${surface}-${mode}.json`;
 const keys = (object, wanted) => assert.deepEqual(Object.keys(object).sort(), [...wanted].sort(), 'exact raw keys');
 const hash = value => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
 const token = value => Number.isInteger(value) && value > 0;
@@ -160,13 +161,22 @@ export function reentryOracles(raw, surface) {
 export function verifyReentryEvidence(report, trusted, exitCode) {
   assert.equal(report.suite,'palette-query-reentry'); assert.equal(report.classification,reentryClassification); assert.equal(report.stage,'checks');
   assert(paletteSurfaces.includes(trusted.surface));
-  for (const key of ['surface','revision','tree','runToken']) assert.equal(report[key],trusted[key],'independent '+key);
+  for (const key of ['surface','revision','tree','runToken','mode']) assert.equal(report[key],trusted[key],'independent '+key);
   for(const key of ['revision','tree']) assert(/^[a-f0-9]{40}$/.test(trusted[key])); assert(typeof trusted.runToken==='string' && trusted.runToken.length>10);
   assert.equal(report.dirty,''); assert.equal(report.error,undefined); assert.equal(report.captureError,undefined); assert.equal(report.validationError,undefined);
   assert.deepEqual(Object.keys(trusted.sourceFiles),paletteSourcePaths); assert.deepEqual(Object.keys(trusted.reentrySourceFiles),reentrySourcePaths);
   for(const key of ['sourceFiles','reentrySourceFiles','assets','fixtures','fixtureManifest','standaloneDependencyProof','toolchain']) assert.deepEqual(report[key],trusted[key],'independent '+key);
   for(const value of [...Object.values(trusted.sourceFiles),...Object.values(trusted.reentrySourceFiles)]) assert(hash(value));
-  for(const value of Object.values({...trusted.assets,...trusted.fixtures})) { assert(hash(value.sourceSHA256)); assert.equal(value.sourceSHA256,value.servedSHA256); assert(value.bytes>0); }
+  assert(reentryModes.includes(trusted.mode));
+  const mutation = reentryMutationMetadata(trusted.mode);
+  assert.deepEqual(trusted.mutation, mutation, 'source-owned causal metadata');
+  assert.deepEqual(report.mutation, mutation, 'independent causal metadata');
+  assert.equal(trusted.sourceFiles[reentryRuntimeSourcePath], mutation.sourceSHA256);
+  for(const [path,value] of Object.entries({...trusted.assets,...trusted.fixtures})) {
+    assert(hash(value.sourceSHA256)); assert(value.bytes>0);
+    if(path===reentryRuntimePath) assert.deepEqual([value.sourceSHA256,value.servedSHA256],[mutation.sourceSHA256,mutation.servedSHA256]);
+    else assert.equal(value.sourceSHA256,value.servedSHA256);
+  }
   assert(hash(report.standaloneDependencyProof.SHA256)); assert.deepEqual(report.standaloneDependencyProof.forbiddenImports,[]);
   for(const key of ['node','go','playwright']) assert(typeof report.toolchain[key]==='string' && report.toolchain[key]);
   assert(typeof report.browserVersion==='string' && report.browserVersion);
@@ -195,5 +205,8 @@ export function verifyReentryEvidence(report, trusted, exitCode) {
   assert.deepEqual(check.writes,reconstructReentryWrites(check.raw),'passive mutation reconstruction replay');
   for(const oracle of oracles) if(oracle.prerequisite) assert(oracle.pass,oracle.id+': prerequisite failure');
   const status=oracles.every(oracle=>oracle.pass)?'passed':'failed'; assert.equal(check.status,status); assert.equal(report.status,status); assert.equal(exitCode,status==='passed'?0:1,'nonzero contract exit preserved');
-  return {status,surface:trusted.surface,revision:trusted.revision,failed:oracles.filter(oracle=>!oracle.pass).map(oracle=>oracle.id)};
+  const failed=oracles.filter(oracle=>!oracle.pass).map(oracle=>oracle.id);
+  const causalKills=trusted.mode==='guard-removed'?reentryGuardKills.filter(id=>failed.includes(id)):[];
+  if(trusted.mode==='guard-removed') assert.deepEqual(causalKills,reentryGuardKills,'every designated guard reversal kill must be observed');
+  return {status,surface:trusted.surface,mode:trusted.mode,revision:trusted.revision,failed,causalKills};
 }

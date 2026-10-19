@@ -4,8 +4,8 @@
 export const cleanupRemountControl = Object.freeze({
   name: 'elide-close',
   file: '/assets/ely-api-interaction.js',
-  anchor: 'const cleanup = () => { close(); cleanupContextRequests();',
-  replacement: 'const cleanup = () => { cleanupContextRequests();',
+  anchor: 'const cleanup = () => { paletteNavigationActive = false; close(); cleanupContextRequests();',
+  replacement: 'const cleanup = () => { paletteNavigationActive = false; cleanupContextRequests();',
 });
 export function elideCleanupClose(source) {
   const {anchor, replacement} = cleanupRemountControl;

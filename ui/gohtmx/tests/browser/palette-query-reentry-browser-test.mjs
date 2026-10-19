@@ -10,13 +10,14 @@ import {paletteSurfaces, paletteErrors} from './palette-query-evidence.mjs';
 import {reentryCase, reentryClassification, reentryReportName, reentryOracles, reconstructReentryWrites} from './palette-query-reentry-evidence.mjs';
 const base = fileURLToPath(new URL('../../../../', import.meta.url));
 const surface = process.env.PALETTE_QUERY_SURFACE || 'go-qualified';
+const mode = process.env.PALETTE_QUERY_REENTRY_MODE || 'control';
 const report = {suite:'palette-query-reentry', classification:reentryClassification, surface, runToken:process.env.PALETTE_QUERY_REENTRY_RUN_TOKEN || null, status:'running', stage:'startup', caseInventory:[reentryCase], checks:[], requests:[], browserResponses:[], httpAssetProof:[], ...Object.fromEntries(paletteErrors.map(key=>[key,[]]))};
 const output = join(base,'test-results/contracts'), pending=[];
 let inputs, server, browser, page, phase='preflight', check;
 const settle = () => page.evaluate(()=>new Promise(resolve=>setTimeout(()=>requestAnimationFrame(()=>requestAnimationFrame(resolve)),30)));
 try {
   assert.equal(process.env.CI,'true','browser execution is restricted to CI'); assert(paletteSurfaces.includes(surface)); assert(report.runToken);
-  inputs = await loadReentryInputs(base,surface); const {assetBodies,fixtureBodies,...metadata}=inputs; Object.assign(report,metadata);
+  inputs = await loadReentryInputs(base,surface,mode); const {assetBodies,fixtureBodies,...metadata}=inputs; Object.assign(report,metadata);
   assert.equal(report.dirty,'','browser evidence requires clean committed source');
   server=createServer((req,res)=>{
     const path=new URL(req.url,'http://localhost').pathname, entry={phase,path,method:req.method,htmx:req.headers['hx-request']||null}; report.requests.push(entry);
@@ -72,6 +73,6 @@ finally{
   await Promise.all(pending);
   if(page&&check){try{check.finalCapture=await page.evaluate(()=>({log:window.paletteReentryLog||null,baseTrace:window.paletteLog||null}));}catch(error){report.captureError=String(error);}}
   await mkdir(join(output,'palette-query-fixtures'),{recursive:true});for(const body of inputs?.fixtureBodies.values()||[])await writeFile(join(output,'palette-query-fixtures/'+sha(body)+'.html'),body);
-  await writeFile(join(output,reentryReportName(surface)),JSON.stringify(report,null,2));await browser?.close();if(server?.listening)await new Promise(resolve=>server.close(resolve));
+  await writeFile(join(output,reentryReportName(surface,mode)),JSON.stringify(report,null,2));await browser?.close();if(server?.listening)await new Promise(resolve=>server.close(resolve));
   if(report.status!=='passed')process.exitCode=1;
 }
