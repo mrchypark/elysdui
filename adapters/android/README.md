@@ -211,7 +211,11 @@ the main thread was unresponsive. No deadline is extended or retried.
 classification checks, then reverses only the typed classification and requires
 its designated test to fail. The Native workflow retains both reports. Existing
 bounded test-owned `baseline`, `persistent-dialog` and `transient-dialog`
-window/activity/last-ANR diagnostics are copied from the debug app cache into the
-Android artifact, with a three-second limit per file. Unbounded active-window
-root text is excluded. Copy failures are recorded and do not replace the native
-test result.
+window/activity/last-ANR diagnostics use the instrumentation additional-output
+directory, which Gradle UTP copies before uninstalling the app. The host collector
+accepts only those nine fixed names, validates their diagnostic header and reads
+at most 132 KiB plus one byte to reject oversized output. Missing optional files,
+ambiguous sources and malformed contents are recorded explicitly. Unbounded
+counterexample active-window root text stays in app cache and is excluded. Collection failures
+do not replace the native test result. Fresh CI evidence must show genuine
+persistent-dialog diagnostics; a successful copy command alone is insufficient.

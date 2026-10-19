@@ -1,37 +1,51 @@
 #!/usr/bin/env python3
-"""Copy only the bounded, test-owned focus counterexample diagnostics."""
+"""Validate only the bounded, test-owned diagnostics already copied by Gradle UTP."""
 import json
-import subprocess
+import re
 import sys
 from pathlib import Path
 
+MAX_BYTES = 132 * 1024
+HEADER = re.compile(rb"elapsedRealtime=[0-9]+\noriginal=[^\r\n]+\n")
 
-def export(destination, serial="emulator-5554", run=subprocess.run):
+
+def export(source, destination):
     destination.mkdir(parents=True, exist_ok=True)
     manifest = []
-    # Active-window root text has no source size cap and is intentionally excluded.
+    # UTP copies this output before uninstall. Never read private app files after teardown.
+    # Active-window root text has no source size cap and stays outside this allowlist.
     for case in ("baseline", "persistent-dialog", "transient-dialog"):
         for kind in ("windows", "activities", "last-anr"):
             name = f"{case}-{kind}.txt"
-            command = ["adb", "-s", serial, "exec-out", "run-as", "dev.ely.nativeprofile",
-                       "cat", f"cache/focus-counterexamples/{name}"]
-            entry = {"file": name, "command": command}
+            target = destination / name
+            entry = {"file": name}
             try:
-                result = run(command, capture_output=True, timeout=3, check=False)
-                entry["exit"] = result.returncode
-                entry["stderr"] = result.stderr[:4096].decode("utf-8", "replace")
-                if result.returncode == 0 and len(result.stdout) <= 132 * 1024:
-                    (destination / name).write_bytes(result.stdout)
-                    entry["bytes"] = len(result.stdout)
-                elif result.returncode == 0:
-                    entry["error"] = "unexpected output beyond bounded diagnostic size"
-            except subprocess.TimeoutExpired:
-                entry["error"] = "diagnostic copy exceeded 3 seconds"
+                target.unlink(missing_ok=True)
+                candidates = list(source.glob(f"debugAndroidTest/connected/*/focus-counterexamples/{name}"))
+                if not candidates:
+                    entry["status"] = "missing"
+                elif len(candidates) != 1:
+                    entry.update(status="rejected", error="ambiguous diagnostic sources")
+                else:
+                    path = candidates[0]
+                    entry["source"] = str(path.relative_to(source))
+                    if path.is_symlink() or not path.is_file() or not path.resolve().is_relative_to(source.resolve()):
+                        entry.update(status="rejected", error="diagnostic source is not a regular contained file")
+                    else:
+                        with path.open("rb") as stream:
+                            data = stream.read(MAX_BYTES + 1)
+                        if len(data) > MAX_BYTES:
+                            entry.update(status="rejected", error="unexpected output beyond bounded diagnostic size")
+                        elif not HEADER.match(data):
+                            entry.update(status="rejected", error="invalid diagnostic header")
+                        else:
+                            target.write_bytes(data)
+                            entry.update(status="copied", bytes=len(data))
             except OSError as error:
-                entry["error"] = f"diagnostic command unavailable: {type(error).__name__}"
+                entry.update(status="rejected", error=f"diagnostic copy unavailable: {type(error).__name__}")
             manifest.append(entry)
     (destination / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
 
 
 if __name__ == "__main__":
-    export(Path(sys.argv[1]))
+    export(Path(sys.argv[1]), Path(sys.argv[2]))

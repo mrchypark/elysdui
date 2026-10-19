@@ -17,6 +17,7 @@ internal class FocusedWindowGate(
     private val activity: Activity,
     private val automation: UiAutomation,
     private val output: () -> File,
+    private val boundedOutput: () -> File = output,
 ) {
     private var stickyAnr: String? = null
 
@@ -96,7 +97,7 @@ internal class FocusedWindowGate(
                     }
                 }
                 try {
-                    File(output(), "$name-$label.txt").writeText(
+                    File(boundedOutput(), "$name-$label.txt").writeText(
                         "elapsedRealtime=${SystemClock.elapsedRealtime()}\noriginal=$original\n" +
                         task.get(2, TimeUnit.SECONDS)
                     )
