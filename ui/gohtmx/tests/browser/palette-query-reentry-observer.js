@@ -1,7 +1,7 @@
 // Passive test observation. No production setters, focus methods, scrolling,
 // selection or ARIA are replaced. The sole induced effect is the public swap.
 (() => {
-  const identities = new WeakMap(); let next = 0, sequence = 0;
+  const identities = new WeakMap(); let next = 0, sequence = 0, nativeArrow = null;
   const token = node => node ? (identities.has(node) || identities.set(node, ++next), identities.get(node)) : null;
   const root = () => document.querySelector('#palette-primary [data-ely-family]');
   const field = () => root().querySelector('[data-interaction-filter]');
@@ -15,7 +15,8 @@
   const record = (phase, details = {}) => { const event = {sequence: ++sequence, phase, ...details, state: snapshot()}; log.events.push(event); return event; };
   for (const type of ['keydown', 'keyup', 'focus']) document.addEventListener(type, event => {
     if (!root()?.contains(event.target)) return;
-    record(type, {trusted: event.isTrusted, key: event.key ?? null, targetToken: token(event.target), targetID: event.target.id, targetValue: event.target.value ?? null, targetTag: event.target.tagName, targetConnected: event.target.isConnected, targetFocused: document.activeElement === event.target, ctrl: Boolean(event.ctrlKey), alt: Boolean(event.altKey), shift: Boolean(event.shiftKey), meta: Boolean(event.metaKey)});
+    const entry = record(type, {trusted: event.isTrusted, key: event.key ?? null, targetToken: token(event.target), targetID: event.target.id, targetValue: event.target.value ?? null, targetTag: event.target.tagName, targetConnected: event.target.isConnected, targetFocused: document.activeElement === event.target, ctrl: Boolean(event.ctrlKey), alt: Boolean(event.altKey), shift: Boolean(event.shiftKey), meta: Boolean(event.metaKey)});
+    if (type === 'keydown' && event.key === 'ArrowDown') nativeArrow = entry;
   }, true);
   window.paletteReentrySnapshot = snapshot;
   window.paletteReentryPeerSnapshot = () => snapshot('peer');
@@ -48,14 +49,25 @@
     owner.addEventListener('ely:cleanup', () => record('ely:cleanup'));
     document.addEventListener('keydown', event => {
       if (event.key !== 'ArrowDown' || !window.paletteReentryPromise) return;
-      // Document bubble runs after the root keydown continuation, before the
-      // microtask checkpoint can hide the transient through async remount.
+      // Keep document bubbling as a later diagnostic. Native dispatch can run
+      // microtasks (including remount) before this listener, so it cannot anchor
+      // the suspended root handler's transient state.
       paletteReentryDrain('native-keydown-return');
-      record('arrow-continuation-return', {trusted: event.isTrusted, targetToken: token(event.target)});
+      record('document-arrow-bubble', {trusted: event.isTrusted, targetToken: token(event.target)});
     }, {once: true});
     query.addEventListener('focus', event => {
       window.paletteReentryInFocus = true;
-      record('query-focus-listener', {trusted: event.isTrusted});
+      const focusEntry = record('query-focus-listener', {trusted: event.isTrusted});
+      const arrowEntry = nativeArrow;
+      const scheduled = record('pre-swap-microtask-scheduled', {sourceArrowSequence: arrowEntry?.sequence ?? null, sourceFocusSequence: focusEntry.sequence, queryToken: token(event.target)});
+      // Queue before calling swap: this passive callback runs when the suspended
+      // root keydown callback leaves the JS stack, ahead of swap's async
+      // continuation. A MutationObserver delivery may precede it; drain any
+      // remaining records, and retain an independent raw state either way.
+      queueMicrotask(() => {
+        paletteReentryDrain('pre-swap-microtask');
+        record('arrow-continuation-return', {trusted: arrowEntry?.trusted ?? false, targetToken: arrowEntry?.targetToken ?? null, scheduleSequence: scheduled.sequence, sourceArrowSequence: arrowEntry?.sequence ?? null, sourceFocusSequence: focusEntry.sequence, queryToken: token(event.target), inFocus: Boolean(window.paletteReentryInFocus)});
+      });
       window.paletteReentryPromise = htmx.swap(paletteReentryContext);
       // Drain the passive queue at this exact native listener return boundary,
       // before the suspended keydown handler can continue its old-option write.

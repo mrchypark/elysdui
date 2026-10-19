@@ -39,8 +39,8 @@ export function assertReentryRaw(raw, surface) {
   const nativeKeys = ['trusted', 'key', 'targetToken', 'targetID', 'targetValue', 'targetTag', 'targetConnected', 'targetFocused', 'ctrl', 'alt', 'shift', 'meta'];
   const lifecycle = ['htmx:before:swap', 'htmx:after:swap', 'htmx:finally:swap'];
   for (const event of raw.log.events) {
-    const extra = ['keydown', 'keyup', 'focus'].includes(event.phase) ? nativeKeys : lifecycle.includes(event.phase) ? ['inFocus', 'contextTargetSame', 'tasks'] : event.phase === 'arrow-continuation-return' ? ['trusted','targetToken'] : event.phase === 'query-focus-listener' ? ['trusted'] : event.phase === 'native-focus-return' ? ['oldRowConnected', 'oldRowParent'] : [];
-    assert(['keydown', 'keyup', 'focus', ...lifecycle, 'query-focus-listener', 'native-focus-return', 'installed', 'ely:cleanup', 'arrow-continuation-return'].includes(event.phase));
+    const extra = ['keydown', 'keyup', 'focus'].includes(event.phase) ? nativeKeys : lifecycle.includes(event.phase) ? ['inFocus', 'contextTargetSame', 'tasks'] : event.phase === 'pre-swap-microtask-scheduled' ? ['sourceArrowSequence','sourceFocusSequence','queryToken'] : event.phase === 'arrow-continuation-return' ? ['trusted','targetToken','scheduleSequence','sourceArrowSequence','sourceFocusSequence','queryToken','inFocus'] : event.phase === 'document-arrow-bubble' ? ['trusted','targetToken'] : event.phase === 'query-focus-listener' ? ['trusted'] : event.phase === 'native-focus-return' ? ['oldRowConnected', 'oldRowParent'] : [];
+    assert(['keydown', 'keyup', 'focus', ...lifecycle, 'query-focus-listener', 'native-focus-return', 'installed', 'ely:cleanup', 'arrow-continuation-return', 'pre-swap-microtask-scheduled', 'document-arrow-bubble'].includes(event.phase));
     keys(event, ['sequence', 'phase', 'state', ...extra]); assertState(event.state, surface);
     if(['keydown','keyup','focus'].includes(event.phase)) {
       assert.deepEqual([event.targetToken,event.targetID,event.targetValue],[event.state.focusedToken,event.state.focusedID,event.state.focusedValue],'raw native target matches active element tuple');
@@ -51,7 +51,7 @@ export function assertReentryRaw(raw, surface) {
     }
   }
   for (const batch of raw.log.batches) {
-    keys(batch, ['sequence', 'reason', 'records', 'nodes', 'state']); assert(['observer-callback', 'native-focus-return', 'native-keydown-return', 'final'].includes(batch.reason));
+    keys(batch, ['sequence', 'reason', 'records', 'nodes', 'state']); assert(['observer-callback', 'native-focus-return', 'native-keydown-return', 'pre-swap-microtask', 'final'].includes(batch.reason));
     assert(batch.records.length); assertState(batch.state, surface); batch.nodes.forEach(assertRow);
     assert.equal(new Set(batch.nodes.map(row => row.token)).size, batch.nodes.length);
     for (const record of batch.records) {
@@ -125,8 +125,22 @@ export function reentryOracles(raw, surface) {
   add('swap.cleanup-once', events('ely:cleanup').length, 1, true);
   add('observer.focus-return-drain-retained', raw.log.batches.filter(batch=>batch.reason==='native-focus-return').length, 1, true);
   add('input.exact-native-continuation-checkpoint', continuation.map(event=>[event.trusted,event.targetToken]), [[true,raw.tab.focusedToken]], true);
-  const checkpoint=continuation[0];
+  const checkpoint=continuation[0], scheduled=events('pre-swap-microtask-scheduled'), schedule=scheduled[0], documentEvents=events('document-arrow-bubble');
+  const arrowDown=keyEvents.find(event=>event.phase==='keydown' && event.key==='ArrowDown');
+  add('input.exact-pre-swap-microtask-schedule',scheduled.length,1,true);
+  add('input.microtask-scheduled-by-native-arrow-and-focus',schedule && [schedule.sourceArrowSequence,schedule.sourceFocusSequence,schedule.queryToken,schedule.state],[arrowDown?.sequence,first?.sequence,raw.before.queryToken,first?.state],true);
+  add('input.microtask-callback-matches-schedule',checkpoint && [checkpoint.scheduleSequence,checkpoint.sourceArrowSequence,checkpoint.sourceFocusSequence,checkpoint.queryToken,checkpoint.inFocus],[schedule?.sequence,arrowDown?.sequence,first?.sequence,raw.before.queryToken,false],true);
+  add('input.microtask-source-arrow-identity',arrowDown && [arrowDown.trusted,arrowDown.targetToken,arrowDown.targetID,arrowDown.targetValue,arrowDown.targetTag],[true,raw.tab.focusedToken,openID,'open-file','BUTTON'],true);
+  add('input.microtask-scheduled-before-swap',Boolean(arrowDown && first && schedule && before && arrowDown.sequence < first.sequence && first.sequence < schedule.sequence && schedule.sequence < before.sequence),true,true);
   add('input.continuation-before-async-lifecycle', Boolean(checkpoint && last && after && last.sequence < checkpoint.sequence && checkpoint.sequence < after.sequence),true,true);
+  add('input.microtask-retains-disposed-owner-and-query',checkpoint && [checkpoint.state.ownerToken,checkpoint.state.queryToken,checkpoint.state.focusedToken,checkpoint.state.ready,checkpoint.state.query,checkpoint.state.old?.token,checkpoint.state.old?.connected],[raw.before.ownerToken,raw.before.queryToken,raw.before.queryToken,null,'op',last?.state.old?.token,false],true);
+  const callbackOption=checkpoint?.state.rows.find(row=>row.id===optionID);
+  add('input.microtask-retains-replacement-identity',callbackOption && [callbackOption.token,callbackOption.id,callbackOption.connected],[fresh?.token,optionID,true],true);
+  // Document bubbling remains a required trusted diagnostic; its position
+  // relative to async remount is no longer the transient-state premise.
+  const documentCheckpoint=documentEvents[0], arrowUp=keyEvents.find(event=>event.phase==='keyup' && event.key==='ArrowDown');
+  add('input.exact-document-arrow-diagnostic',documentEvents.map(event=>[event.trusted,event.targetToken]),[[true,raw.tab.focusedToken]],true);
+  add('input.document-checkpoint-within-native-arrow',Boolean(last && documentCheckpoint && arrowUp && last.sequence < documentCheckpoint.sequence && documentCheckpoint.sequence < arrowUp.sequence),true,true);
   add('reentry.no-old-handler-active-write-after-disposal', checkpoint && [checkpoint.state.activeID,checkpoint.state.activeToken], last && [last.state.activeID,last.state.activeToken]);
   const writes = reconstructReentryWrites(raw);
   add('observer.active-write-captured', writes.length > 0, true, true);
