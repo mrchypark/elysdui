@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {isDeepStrictEqual as same} from 'node:util';
-import {paletteOwner,paletteRows,paletteSourcePaths,paletteSurfaces,paletteRequiredBrowserPaths,paletteErrors,paletteTyping} from './palette-query-evidence.mjs';
+import {paletteOwner,paletteRows,paletteSourcePaths,paletteSurfaces,paletteRequiredBrowserPaths,paletteOptionalBrowserPaths,paletteErrors,paletteTyping} from './palette-query-evidence.mjs';
 import {activationSourcePaths,activationBaseline,activationBaselineTree} from './palette-activation-inputs.mjs';
 export const activationCases=['pointer.activation','owner.close-rebind','owner.close-bind-absent','callback.reopen','callback.peer-focus','empty.initial','empty.disabled','empty.filtered'];
 export const activationClassification='supplemental activation and empty-confirmation baseline; close-rebind cancellation is added web ownership policy, not native parity';
@@ -37,7 +37,10 @@ function assertState(s,surface,name){
  for(const [slot,rows]of [['primary',s.rows],['peer',s.peer.rows]]){
   const wanted=slot==='primary'&&name==='empty.initial'?[]:paletteRows(slot);
   assert.equal(rows.length,wanted.length);const owner=paletteOwner(surface,slot);
-  rows.forEach((row,i)=>{keys(row,rowKeys);assertNode(Object.fromEntries(nodeKeys.map(k=>[k,row[k]])));assert.deepEqual([row.id,row.value,row.label,row.action,row.disabled,row.role,row.tag,row.connected],[owner+'-palette-option-'+i,wanted[i].value,wanted[i].label,commands[i],wanted[i].disabled||(slot==='primary'&&name==='empty.disabled'),'option','BUTTON',true]);assert.equal(typeof row.hidden,'boolean');assert(['true','false'].includes(row.selected));if(slot==='peer')assert.deepEqual([row.hidden,row.selected],[false,i===0?'true':'false'],'untouched peer row state');});
+  // Filtering legitimately re-appends primary rows. Preserve raw order, but
+  // join each row to its fixed source value/index and require the full inventory.
+  assert.equal(new Set(rows.map(row=>row.value)).size,wanted.length,'unique source row values');
+  rows.forEach((row,position)=>{const i=slot==='peer'?position:wanted.findIndex(source=>source.value===row.value);assert(i>=0,'source-owned row value');keys(row,rowKeys);assertNode(Object.fromEntries(nodeKeys.map(k=>[k,row[k]])));assert.deepEqual([row.id,row.value,row.label,row.action,row.disabled,row.role,row.tag,row.connected],[owner+'-palette-option-'+i,wanted[i].value,wanted[i].label,commands[i],wanted[i].disabled||(slot==='primary'&&name==='empty.disabled'),'option','BUTTON',true]);assert.equal(typeof row.hidden,'boolean');assert(['true','false'].includes(row.selected));if(slot==='peer')assert.deepEqual([row.hidden,row.selected],[false,i===0?'true':'false'],'untouched peer row state');});
  }
  const nodes=[s.owner,s.query,s.form,s.dialog,s.opener,s.list,s.outside,...s.rows,s.peer.owner,...s.peer.rows];assert.equal(new Set(nodes.map(n=>n.token)).size,nodes.length,'distinct actual nodes');
 }
@@ -67,7 +70,9 @@ export function assertActivationRaw(check,surface){
  }
  // Snapshot identities cannot drift inside these same-root probes.
  for(const snapshot of all)for(const key of ['owner','query','form','dialog','opener','list','outside'])assert.equal(snapshot.state[key].token,r.ready.state[key].token);
- for(const capture of [...all,...final.log])assert.deepEqual(capture.state.rows.map(row=>[row.id,row.token]),r.ready.state.rows.map(row=>[row.id,row.token]),'exact same primary row objects');
+ const readyRows=r.ready.state.rows;assert.deepEqual(readyRows.map(row=>row.value),check.name==='empty.initial'?[]:paletteRows().map(row=>row.value),'source-fixed initial row order');
+ const rowIdentity=rows=>rows.map(row=>[row.value,row.id,row.token]).sort((a,b)=>a[0].localeCompare(b[0]));
+ for(const capture of [...all,...final.log])assert.deepEqual(rowIdentity(capture.state.rows),rowIdentity(readyRows),'exact same primary value/id/token objects through reorder');
  for(const snapshot of all)assert.deepEqual(snapshot.state.peer,r.ready.state.peer,'exact peer node identities and state');
  for(const e of final.log)assert.deepEqual(e.state.peer,r.ready.state.peer,'exact peer node identities and state');
  for(const e of final.log)for(const key of ['owner','query','form','dialog','opener','list','outside'])assert.equal(e.state[key].token,r.ready.state[key].token);
@@ -171,7 +176,7 @@ export function activationOracles(check,surface){
  }
  return out;
 }
-export const activationBrowserPaths=(surface,name)=>[...paletteRequiredBrowserPaths.map(p=>p==='/'?activationPage(name):p),'/activation-observer.js','/assets/ely/fonts/Inter-Regular.ttf','/assets/ely/fonts/Inter-SemiBold.ttf',...(surface==='sdui'?['/assets/sdui.js','/assets/sdui.css']:[])];
+export const activationBrowserPaths=(surface,name)=>[...paletteRequiredBrowserPaths.map(p=>p==='/'?activationPage(name):p),'/activation-observer.js',...(surface==='sdui'?['/assets/sdui.js','/assets/sdui.css']:[])];
 export function verifyActivationEvidence(report,trusted,exitCode){
  assert.equal(report.suite,'palette-activation');assert.equal(report.classification,activationClassification);assert.equal(report.stage,'checks');assert(paletteSurfaces.includes(trusted.surface));
  for(const key of ['surface','revision','tree','runToken'])assert.equal(report[key],trusted[key]);for(const key of ['revision','tree'])assert(/^[a-f0-9]{40}$/.test(trusted[key]));assert(typeof trusted.runToken==='string'&&trusted.runToken.length>10);
@@ -193,7 +198,14 @@ export function verifyActivationEvidence(report,trusted,exitCode){
   const computed=activationOracles(check,trusted.surface);assert.deepEqual(check.oracles,computed,'independently recomputed raw expectations');for(const o of computed)if(o.prerequisite)assert(o.pass,check.name+': '+o.id);
   assert.equal(check.status,computed.every(o=>o.pass)?'passed':'failed');
   const requests=report.requests.filter(r=>r.check===check.name),responses=report.browserResponses.filter(r=>r.check===check.name),wanted=activationBrowserPaths(trusted.surface,check.name);
-  for(const list of [requests,responses])assert.deepEqual(list.filter(p=>p.path!=='/sdui-action').map(p=>p.path).sort(),[...wanted].sort(),'exact source-owned per-case HTTP inventory');
+  // Same mandatory/optional transport contract as the hardened original suite:
+  // fonts may be unused, but any observed request and response must join exactly.
+  const staticRequests=requests.filter(p=>p.path!=='/sdui-action'),staticResponses=responses.filter(p=>p.path!=='/sdui-action'),allowed=new Set([...wanted,...paletteOptionalBrowserPaths]);
+  for(const entry of [...staticRequests,...staticResponses])assert(allowed.has(entry.path),'source-owned browser path inventory');
+  assert.deepEqual(staticRequests.map(p=>p.path).sort(),staticResponses.map(p=>p.path).sort(),'exact static request/response join');
+  for(const path of wanted)assert.equal(staticRequests.filter(p=>p.path===path).length,1,'mandatory browser request '+path);
+  for(const path of paletteOptionalBrowserPaths)assert(staticRequests.filter(p=>p.path===path).length<=1,'optional font request at most once');
+  for(const request of staticRequests){const proof=staticResponses.find(p=>p.path===request.path);assert.equal(request.status,proof.status);assert.equal(request.responseSHA256,proof.receivedSHA256);assert.equal(request.responseBytes,proof.bytes);}
   const starts=events(final,'request-start'),posts=requests.filter(r=>r.path==='/sdui-action'),proofs=responses.filter(r=>r.path==='/sdui-action'),success=events(final,'bridge-success');
   assert.equal(posts.length,starts.length);assert.equal(proofs.length,starts.length);assert.equal(success.length,starts.length);
   if(trusted.surface!=='sdui')assert.equal(starts.length,0);

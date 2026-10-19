@@ -48,3 +48,18 @@ emission, missing owned emission, delayed close, omitted renderer marker,
 post-close binding-check bypass, trailing close/selection, restored empty-submit,
 and blanket submit suppression are killed with prerequisites intact. This
 baseline does not claim those future production mutations have been run.
+
+
+The first collection at 4ba625b64cd991cf3874639aace590eae70f279d retained
+raw failures but was invalid: an unused SemiBold font was required, and filtered
+row order was mistaken for row identity. Font requests are now optional only
+within the source-owned Regular/SemiBold set; observed request/response paths,
+counts, status, bytes and hashes still join exactly. Mandatory assets remain
+required once. Primary rows retain the complete source value/id/token mapping
+through legitimate filter reordering; initial order and untouched peer state
+remain strict. Desired activation/empty assertions are unchanged.
+
+The six original archives, errors and nonzero exits remain invalid evidence.
+Synthetic derived diagnostics and corruption regressions cannot repair their
+missing collector assertions or grant retrospective browser credit. Fresh CI
+collection and exact-current-source replay are required.

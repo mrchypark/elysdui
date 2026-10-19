@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {pathToFileURL} from 'node:url';
 import {buildPaletteSchemaFixture} from './palette-query-evidence-test.mjs';
-import {paletteSourcePaths,paletteErrors,paletteTyping} from '../ui/gohtmx/tests/browser/palette-query-evidence.mjs';
+import {paletteSourcePaths,paletteErrors,paletteTyping,paletteOptionalBrowserPaths} from '../ui/gohtmx/tests/browser/palette-query-evidence.mjs';
 import {activationSourcePaths} from '../ui/gohtmx/tests/browser/palette-activation-inputs.mjs';
 import {activationCases,activationClassification,activationOracles,activationBrowserPaths,verifyActivationEvidence} from '../ui/gohtmx/tests/browser/palette-activation-evidence.mjs';
 const clone=structuredClone,sha=value=>createHash('sha256').update(value).digest('hex');
@@ -72,7 +72,7 @@ export function buildActivationSchemaFixture(surface='go-qualified',red=false){
  const entry=path=>assets[path]||fixtures[path],proof=(path,check)=>{const item=entry(path==='/sdui-action'?'/sdui-response-primary':path);return {path,...(check?{check}:{}),...(path==='/sdui-action'?{responseFixture:'/sdui-response-primary'}:{}),status:200,bytes:item.bytes,expectedSHA256:item.servedSHA256,receivedSHA256:item.servedSHA256};};
  const request=(path,check,fields)=>{const item=entry(path==='/sdui-action'?'/sdui-response-primary':path);return {path,check,method:fields?'POST':'GET',htmx:null,status:200,responseSHA256:item.servedSHA256,responseBytes:item.bytes,...(fields?{responseFixture:'/sdui-response-primary',fields,requestSHA256:sha(JSON.stringify(fields)),requestBytes:JSON.stringify(fields).length,contentType:'multipart/form-data; boundary=synthetic',idempotencyKey:Object.fromEntries(fields)._request}: {})};};
  for(const path of [...Object.keys(assets),...Object.keys(fixtures)]){report.httpAssetProof.push(proof(path));report.requests.push(request(path,null));}
- for(const c of report.checks){for(const path of activationBrowserPaths(surface,c.name)){report.browserResponses.push(proof(path,c.name));report.requests.push(request(path,c.name));}for(const start of c.finalTrace.log.filter(e=>e.type==='request-start')){report.browserResponses.push(proof('/sdui-action',c.name));report.requests.push(request('/sdui-action',c.name,start.fields));}}
+ for(const c of report.checks){for(const path of [...activationBrowserPaths(surface,c.name),...paletteOptionalBrowserPaths]){report.browserResponses.push(proof(path,c.name));report.requests.push(request(path,c.name));}for(const start of c.finalTrace.log.filter(e=>e.type==='request-start')){report.browserResponses.push(proof('/sdui-action',c.name));report.requests.push(request('/sdui-action',c.name,start.fields));}}
  const trusted=clone(Object.fromEntries(['surface','revision','tree','runToken','sourceFiles','activationSourceFiles','assets','fixtures','fixtureManifest','standaloneDependencyProof','toolchain'].map(k=>[k,report[k]])));return refresh({report,trusted,exit:0});
 }
 function staleResultFixture(surface){
@@ -166,6 +166,47 @@ attack('borrowed-native-event-identity',r=>logs(r,0,e=>{if(['pointerdown','point
    ['wrong bridge request ID',r=>all(r,0,e=>{if(e.type==='bridge-success')e.requestId='wrong';})],
   ])reject(label,mutate,true);
  }
+ runActivationObservedStructureTests();
  console.log(`Activation synthetic evidence: ${desired} desired, ${red} baseline red, ${semanticRed} semantic safety/count red, ${rejected} corruptions rejected. No browser verification.`);return {desired,red,semanticRed,rejected};
 }
+
+// Reproduce the two structure assumptions exposed by immutable 4ba625b6 CI
+// archives. These are synthetic validation controls, not reclassified CI runs.
+export function runActivationObservedStructureTests(){
+ let positives=0,rejected=0;
+ const states=(report,fn)=>{const c=report.checks.find(c=>c.name==='empty.filtered');for(const snapshot of Object.values(c.raw)){fn(snapshot.state);for(const event of snapshot.log)fn(event.state);}};
+ const reorder=report=>states(report,state=>{if(state.query.value){const rows=new Map(state.rows.map(row=>[row.value,row]));state.rows=['open-file','zebra-file','option-file','other-place','disabled-open'].map(value=>rows.get(value));}});
+ for(const surface of ['go-qualified','go-chapter','sdui'])for(const red of [false,true]){
+  const seed=buildActivationSchemaFixture(surface,red),expect=red?'failed':'passed';
+  for(const fonts of [[],[paletteOptionalBrowserPaths[0]],[paletteOptionalBrowserPaths[1]],paletteOptionalBrowserPaths]){
+   const f=clone(seed),keep=p=>p.check===null||!paletteOptionalBrowserPaths.includes(p.path)||fonts.includes(p.path);f.report.requests=f.report.requests.filter(keep);f.report.browserResponses=f.report.browserResponses.filter(keep);assert.equal(verifyActivationEvidence(f.report,f.trusted,f.exit).status,expect);positives++;
+  }
+  const ordered=clone(seed);reorder(ordered.report);refresh(ordered);assert.equal(verifyActivationEvidence(ordered.report,ordered.trusted,ordered.exit).status,expect);assert.deepEqual(ordered.report.checks.at(-1).raw.before.state.rows.map(row=>row.value),['open-file','zebra-file','option-file','other-place','disabled-open']);positives++;
+  const reject=(name,fixture,mutate,recompute=false)=>{const f=clone(fixture);assert.throws(()=>{mutate(f.report);if(recompute)refresh(f);verifyActivationEvidence(f.report,f.trusted,f.exit);},undefined,name);rejected++;};
+  const font=paletteOptionalBrowserPaths[1],match=p=>p.check==='empty.initial'&&p.path===font;
+  for(const [name,mutate]of [
+   ['optional request omitted',r=>r.requests=r.requests.filter(p=>!match(p))],
+   ['optional response omitted',r=>r.browserResponses=r.browserResponses.filter(p=>!match(p))],
+   ['optional duplicate pair',r=>{r.requests.push(clone(r.requests.find(match)));r.browserResponses.push(clone(r.browserResponses.find(match)));}],
+   ['optional duplicate request',r=>r.requests.push(clone(r.requests.find(match)))],
+   ['optional duplicate response',r=>r.browserResponses.push(clone(r.browserResponses.find(match)))],
+   ['optional cross-case response',r=>r.browserResponses.find(match).check='empty.disabled'],
+   ['optional wrong hash',r=>r.browserResponses.find(match).receivedSHA256=sha('wrong')],
+   ['optional wrong bytes',r=>r.requests.find(match).responseBytes++],
+   ['optional foreign case',r=>r.browserResponses.find(match).check='foreign'],
+   ['unknown optional path',r=>{r.requests.find(match).path='/assets/ely/fonts/foreign.ttf';r.browserResponses.find(match).path='/assets/ely/fonts/foreign.ttf';}],
+   ['mandatory pair omitted',r=>{r.requests=r.requests.filter(p=>!(p.check==='empty.initial'&&p.path==='/assets/app.css'));r.browserResponses=r.browserResponses.filter(p=>!(p.check==='empty.initial'&&p.path==='/assets/app.css'));}],
+   ['mandatory duplicate pair',r=>{r.requests.push(clone(r.requests.find(p=>p.check==='empty.initial'&&p.path==='/assets/app.css')));r.browserResponses.push(clone(r.browserResponses.find(p=>p.check==='empty.initial'&&p.path==='/assets/app.css')));}],
+  ])reject(name,seed,mutate);
+  for(const [name,mutate]of [
+   ['duplicate row',s=>s.rows[2]=clone(s.rows[1])],['foreign row value',s=>s.rows[1].value='foreign'],['foreign row id',s=>s.rows[1].id=s.peer.rows[1].id],
+   ['moved row tokens',s=>{[s.rows[1].token,s.rows[2].token]=[s.rows[2].token,s.rows[1].token];}],['replacement row token',s=>s.rows[1].token=999],
+   ['disconnected row',s=>s.rows[1].connected=false],['missing row',s=>s.rows.pop()],['borrowed peer row',s=>s.rows[1]=clone(s.peer.rows[1])],['changed row action',s=>s.rows[1].action='foreign'],
+  ])reject(name,ordered,r=>states(r,s=>{if(s.query.value)mutate(s);}),true);
+  reject('invented initial order',ordered,r=>r.checks.at(-1).raw.ready.state.rows.reverse(),true);
+  reject('peer reorder',ordered,r=>states(r,s=>s.peer.rows.reverse()),true);
+ }
+ console.log(`Activation observed-structure regressions: ${positives} synthetic positives, ${rejected} corruptions rejected. Original invalid archives remain invalid.`);return {positives,rejected};
+}
+
 if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href)runActivationSchemaTests();
