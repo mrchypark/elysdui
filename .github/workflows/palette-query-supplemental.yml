@@ -1,0 +1,69 @@
+name: CommandPalette supplemental repair evidence
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'ui/gohtmx/**'
+      - 'adapters/gohtmx/**'
+      - 'sdui/**'
+      - 'scripts/palette-query-*.mjs'
+      - '.github/workflows/palette-query*.yml'
+      - 'package*.json'
+  pull_request:
+    paths:
+      - 'ui/gohtmx/**'
+      - 'adapters/gohtmx/**'
+      - 'sdui/**'
+      - 'scripts/palette-query-*.mjs'
+      - '.github/workflows/palette-query*.yml'
+      - 'package*.json'
+permissions:
+  contents: read
+env:
+  PALETTE_QUERY_PRODUCTION_POLICY: activation-repair
+jobs:
+  schema:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: node scripts/palette-query-supplemental-evidence-test.mjs
+      - run: node scripts/palette-query-causal-controls-test.mjs
+  supplemental:
+    needs: schema
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        surface: [go-qualified, go-chapter, sdui]
+        mode: [control, focus-button, active-missing, active-peer, option-peer-id, option-role, list-role, controls-peer, wrong-enter, no-scroll]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Validate independent fixture sources
+        run: |
+          go test ./ui/gohtmx/tests/fixtures/palettesupplemental ./ui/gohtmx/tests/fixtures/palette-supplemental ./adapters/gohtmx/tests/fixtures/palette-supplemental
+      - name: Native supplemental evidence with strict causal aggregation
+        env:
+          PALETTE_QUERY_SURFACE: ${{ matrix.surface }}
+          PALETTE_SUPPLEMENTAL_MODE: ${{ matrix.mode }}
+        run: node scripts/palette-query-causal-controls.mjs supplemental
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: palette-query-supplemental-${{ matrix.surface }}-${{ matrix.mode }}
+          path: |
+            test-results/contracts/palette-query-supplemental-*.json*
+            test-results/contracts/palette-supplemental-fixtures/
+          if-no-files-found: error

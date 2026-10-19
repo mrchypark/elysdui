@@ -97,6 +97,8 @@ function start(scope = document) {
       if (button.dataset.interactionCopy !== undefined) return;
       // The menu family commits checked state and closes before invoking hosts.
       if (button.dataset.interactionMenuAction !== undefined) return;
+      // CommandPalette owns selection, native close, and owner revalidation.
+      if (button.dataset.interactionPaletteAction !== undefined) return;
       if (button.type === 'submit' && button.form?.matches('[data-ely-submit]')) return;
       const formData = button.form ? new FormData(button.form) : null;
       const accepted = emit(root, button.dataset.elyAction, { value: button.value || button.dataset.value || '', formData, values: formData ? [...formData] : [] });
@@ -133,8 +135,14 @@ function start(scope = document) {
       if (mounted.get(root) === cleanups) cleanups.push(cleanup);
       else dispose(root, cleanup);
     };
+    // Internal family context: neither map nor a replacement host callback is
+    // exposed. Captures include an absent binding and this exact initializer.
+    const ownerContext = Object.freeze({captureOwner: () => {
+      const binding = hostBindings.get(root);
+      return () => root.isConnected && mounted.get(root) === cleanups && hostBindings.get(root) === binding;
+    }});
     try {
-      registerCleanup(initialize(root, registerCleanup));
+      registerCleanup(initialize(root, registerCleanup, ownerContext));
       if (mounted.get(root) === cleanups) root.dataset.elyReady = 'true';
     } catch (error) {
       if (mounted.get(root) !== cleanups) return;

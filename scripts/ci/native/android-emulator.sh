@@ -20,6 +20,9 @@ cleanup() {
   adb -s "$SERIAL" shell cat /proc/meminfo > "$RESULTS/meminfo.txt" 2>&1
   adb -s "$SERIAL" shell cat /proc/pressure/cpu > "$RESULTS/cpu-pressure.txt" 2>&1
   adb -s "$SERIAL" pull /sdcard/Android/data/dev.ely.nativeprofile/files/screenshots "$RESULTS/"
+  python3 "$ROOT/scripts/ci/native/export-focus-diagnostics.py" \
+    "$ROOT/adapters/android/app/build/outputs/connected_android_test_additional_output" \
+    "$RESULTS/focus-counterexamples"
   if [ -n "$EMULATOR_PID" ]; then kill "$EMULATOR_PID" 2>/dev/null; fi
   if [ -n "$CONTROLS_PID" ]; then kill "$CONTROLS_PID" 2>/dev/null; fi
   if [ -n "$SERVER_PID" ]; then kill "$SERVER_PID" 2>/dev/null; fi

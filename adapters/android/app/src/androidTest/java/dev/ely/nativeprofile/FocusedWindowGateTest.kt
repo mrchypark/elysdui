@@ -20,9 +20,18 @@ import java.io.File
 class FocusedWindowGateTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
     private val instrumentation get() = InstrumentationRegistry.getInstrumentation()
-    private fun gate() = FocusedWindowGate(compose.activity, instrumentation.uiAutomation) {
-        File(instrumentation.targetContext.cacheDir, "focus-counterexamples").apply { mkdirs() }
-    }
+    private fun gate() = FocusedWindowGate(
+        compose.activity,
+        instrumentation.uiAutomation,
+        output = { File(instrumentation.targetContext.cacheDir, "focus-counterexamples").apply { mkdirs() } },
+        boundedOutput = {
+            // UTP copies this directory before uninstalling the app. Only the three
+            // bounded dumpsys results use it; active-window text remains in cache.
+            val additionalOutput = InstrumentationRegistry.getArguments().getString("additionalTestOutputDir")
+            val root = if (additionalOutput.isNullOrBlank()) instrumentation.targetContext.cacheDir else File(additionalOutput)
+            File(root, "focus-counterexamples").apply { check(isDirectory || mkdirs()) }
+        },
+    )
     private fun showTestDialog(): Dialog {
         lateinit var dialog: Dialog
         val activity = compose.activity

@@ -621,7 +621,7 @@ const copyFeedback = (root, notify, action) => {
   }};
 };
 
-register('interaction', (root, registerCleanup) => {
+register('interaction', (root, registerCleanup, ownerContext) => {
   const timers = new Set();
   const lottieCleanups = [];
   const clipboard = copyFeedback(root, detail => change(root, detail), (action, detail) => emit(root, action, detail));
@@ -630,6 +630,8 @@ register('interaction', (root, registerCleanup) => {
   const loadingFamily = bindLoadingFamily(root);
   lottieCleanups.push(() => loadingFamily.destroy());
   lottieCleanups.push(() => sourceFamily.destroy());
+  const paletteNavigationOwner = {id: root.id, component: root.dataset.elyComponent};
+  let paletteNavigationActive = true;
   const dialogOpeners = new Map();
   const dialogFocusFrames = new Map();
   const restoreDialogFocus = (dialog, ownedFocus = false) => {
@@ -665,6 +667,42 @@ register('interaction', (root, registerCleanup) => {
     if (dialog.open) dialog.close();
     else dialog.hidden = true;
     restoreDialogFocus(dialog, ownedFocus);
+  };
+  const activateCommandPalette = (event, option) => {
+    const dialog = closest(root, option, 'dialog[data-interaction-palette]');
+    const results = closest(root, option, '[data-interaction-palette-results]');
+    const query = dialog?.querySelector('[data-interaction-filter]');
+    const owns = ownerContext?.captureOwner();
+    const current = () => owns?.() && paletteNavigationActive && root.dataset.elyReady === 'true' &&
+      root.id === paletteNavigationOwner.id && root.dataset.elyComponent === paletteNavigationOwner.component &&
+      root.dataset.elyFamily === 'interaction' && root.dataset.elyKind === 'CommandPalette' && root.dataset.elyDisabled !== 'true' &&
+      dialog?.isConnected && dialog.closest('[data-ely-family]') === root &&
+      results?.isConnected && dialog.querySelector('[data-interaction-palette-results]') === results &&
+      query?.isConnected && !query.disabled && query.closest('[data-ely-family]') === root &&
+      dialog.querySelector('[data-interaction-filter]') === query &&
+      option.isConnected && option.closest('[data-ely-family]') === root &&
+      option.closest('[data-interaction-palette-results]') === results && option.closest('dialog') === dialog &&
+      !option.disabled && option.getAttribute('aria-disabled') !== 'true' && !option.closest('[hidden]');
+    if (!current() || !dialog.open) { event.preventDefault(); return; }
+    const action = option.dataset.elyAction, selectionValue = option.value;
+    const value = option.value || option.dataset.value || '';
+    const formData = option.form ? new FormData(option.form) : null;
+    const detail = {value, formData, values: formData ? [...formData] : []};
+    // FormData can synchronously run caller code too.
+    if (!current() || !dialog.open) { event.preventDefault(); return; }
+    results.querySelectorAll('[data-interaction-palette-option]').forEach(row => {
+      if (row.closest('[data-ely-family]') === root) row.setAttribute('aria-selected', String(row === option));
+    });
+    syncCommandPalette(dialog, option);
+    closeDialog(dialog);
+    // Native close may synchronously focus a host control that rebinds/remounts
+    // this same physical root. Never deliver the old command to its new owner.
+    if (!current() || dialog.open || option.getAttribute('aria-selected') !== 'true') { event.preventDefault(); return; }
+    if (!emit(root, action, detail)) event.preventDefault();
+    // A callback may reopen, replace, or rebind. Do no trailing presentation
+    // writes and omit a notification belonging to the superseded transaction.
+    if (!current() || dialog.open || option.getAttribute('aria-selected') !== 'true') return;
+    change(root, {name: 'palette', value: selectionValue, selected: true});
   };
   const showTourStep = (dialog, index, notify = true) => {
     const steps = [...dialog.querySelectorAll('[data-interaction-tour-step]')];
@@ -808,7 +846,19 @@ register('interaction', (root, registerCleanup) => {
     options.forEach(option => option.setAttribute('aria-selected', String(option === first)));
     const empty = palette?.querySelector('[data-interaction-palette-empty]');
     if (empty) empty.hidden = Boolean(first);
+    syncCommandPalette(palette, first, true);
     return first;
+  };
+  // CommandPalette retains native query editing while a separate active option
+  // represents navigation. IDs belong to the rendered rows, not sorted positions
+  // or caller values; other palette primaries keep their existing focus model.
+  const syncCommandPalette = (palette, option, scroll = false) => {
+    if (palette?.closest('[data-interaction-kind]')?.dataset.interactionKind !== 'CommandPalette') return;
+    const field = palette.querySelector('[data-interaction-filter]');
+    if (!field) return;
+    if (option) field.setAttribute('aria-activedescendant', option.id);
+    else field.removeAttribute('aria-activedescendant');
+    if (scroll && palette.open) option?.scrollIntoView({block: 'nearest', inline: 'nearest'});
   };
   const paintUpload = row => { const state=row.dataset.interactionUploadState, progress=row.querySelector('progress'), detail=row.querySelector('[data-interaction-upload-detail]'), output=row.querySelector('[data-interaction-upload-value]'), icon=row.querySelector('.ely-interaction__feedback-icon');progress.hidden=state!=='uploading';detail.textContent=state==='failed'?row.dataset.uploadError:'';output.textContent=state==='uploading'?`${Math.round(progress.value)}%`:state==='done'?row.dataset.uploadSize:'';icon.textContent=state==='done'?'✓':state==='failed'?'!':'▤';const old=row.querySelector('button'), next=uploadButton(state==='uploading'?'data-interaction-upload-cancel':state==='failed'?'data-interaction-upload-retry':'data-interaction-upload-remove',state==='failed'?'↻':'×');next.setAttribute('aria-label',`${state==='failed'?'Retry':state==='uploading'?'Cancel':'Remove'} ${row.querySelector('strong').textContent}`);old.replaceWith(next); };
   const settleOverlay = host => { const overlay=host.querySelector('.ely-interaction__loading'), article=host.querySelector('article'); const prior=Number(host.dataset.interactionOverlayTimer);if(prior){clearTimeout(prior);timers.delete(prior);} delete host.dataset.interactionOverlayTimer; overlay.inert=true;overlay.setAttribute('aria-busy','false');const done=()=>{overlay.hidden=true;article.inert=false;host.querySelector('[data-interaction-loading-overlay-toggle]').disabled=false;change(root,{name:'loading-overlay',value:'complete'});};if(overlay.animate&&!matchMedia('(prefers-reduced-motion: reduce)').matches){const animation=overlay.animate([{opacity:1},{opacity:0}],{duration:120,fill:'both'});const cleanup=()=>animation.cancel();lottieCleanups.push(cleanup);later(()=>{cleanup();const index=lottieCleanups.indexOf(cleanup);if(index>=0)lottieCleanups.splice(index,1);done();},120);}else done(); };
@@ -1172,10 +1222,14 @@ register('interaction', (root, registerCleanup) => {
     }
     const opener = target?.closest('[data-interaction-dialog]');
     if (opener) { const dialog = root.querySelector(`#${CSS.escape(opener.dataset.interactionDialog)}`); if (dialog) dialogOpeners.set(dialog, opener); if (dialog?.showModal && !dialog.open) dialog.showModal(); else if (dialog && !dialog.open) dialog.hidden = false; (dialog?.querySelector('input:not(:disabled)') || dialog?.querySelector('[data-ely-action]:not(:disabled), [data-interaction-close]:not(:disabled)'))?.focus(); return; }
+    const ownedPaletteOption = closest(root, event.target, '[data-interaction-palette-action]');
+    if (ownedPaletteOption) { activateCommandPalette(event, ownedPaletteOption); return; }
+    if (target?.closest('[data-interaction-palette-action]')) return;
     const paletteOption = target?.closest('[data-interaction-palette-option]');
     if (paletteOption) {
       const results = paletteOption.closest('[data-interaction-palette-results]');
       results?.querySelectorAll('[data-interaction-palette-option]').forEach(option => option.setAttribute('aria-selected', String(option === paletteOption)));
+      syncCommandPalette(paletteOption.closest('[data-interaction-palette]'), paletteOption);
       change(root, {name: 'palette', value: paletteOption.value, selected: true});
       closeDialog(paletteOption.closest('dialog'));
       return;
@@ -1441,6 +1495,12 @@ register('interaction', (root, registerCleanup) => {
     const paletteHost = closest(root, event.target, '[data-interaction-palette], [data-interaction-palette-results], [data-interaction-palette-option]');
     const palette = paletteHost?.matches('[data-interaction-palette-results]') ? paletteHost : paletteHost?.closest('[data-interaction-palette]')?.querySelector('[data-interaction-palette-results]');
     if (palette && ['ArrowDown', 'ArrowUp', 'Home', 'End', 'Enter'].includes(event.key)) {
+      // Plain query confirmation is consumed even when filtering leaves no row.
+      // Explicit form submission and modified/composing Enter keep their paths.
+      const confirmationDialog = palette.closest('dialog[data-interaction-palette]');
+      if (root.dataset.elyKind === 'CommandPalette' && event.key === 'Enter' &&
+          !event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey && !event.isComposing && event.keyCode !== 229 &&
+          confirmationDialog?.open && confirmationDialog.querySelector('[data-interaction-filter]') === event.target) event.preventDefault();
       const options = [...palette.querySelectorAll('[data-interaction-palette-option]:not(:disabled):not([hidden])')].filter(option => !option.closest('li').hidden);
       if (!options.length) return;
       const selected = options.findIndex(option => option.getAttribute('aria-selected') === 'true');
@@ -1450,7 +1510,27 @@ register('interaction', (root, registerCleanup) => {
       const base = focusIndex >= 0 ? focusIndex : Math.max(selected, 0);
       const next = event.key === 'Home' ? 0 : event.key === 'End' ? options.length - 1 : (base + (event.key === 'ArrowDown' ? 1 : options.length - 1)) % options.length;
       options.forEach((option, optionIndex) => option.setAttribute('aria-selected', String(optionIndex === next)));
-      options[next].focus();
+      const dialog = palette.closest('[data-interaction-palette]');
+      const queryField = dialog?.closest('[data-interaction-kind]')?.dataset.interactionKind === 'CommandPalette' ? dialog.querySelector('[data-interaction-filter]') : null;
+      if (queryField) {
+        queryField.focus({preventScroll: true});
+        // A caller focus listener may synchronously swap, dispose, or reown
+        // this controller's nodes. Never continue into a replacement row whose
+        // ID happens to match the detached option selected before focus.
+        const nextOption = options[next];
+        if (!paletteNavigationActive || !root.isConnected || root.dataset.elyReady !== 'true' ||
+            root.id !== paletteNavigationOwner.id || root.dataset.elyComponent !== paletteNavigationOwner.component ||
+            root.dataset.elyFamily !== 'interaction' || root.dataset.elyDisabled === 'true' ||
+            !dialog.isConnected || !dialog.open || dialog.closest('[data-ely-family]') !== root ||
+            dialog.querySelector('[data-interaction-filter]') !== queryField ||
+            dialog.querySelector('[data-interaction-palette-results]') !== palette ||
+            !queryField.isConnected || queryField.disabled || queryField.closest('[data-ely-family]') !== root ||
+            document.activeElement !== queryField || !nextOption.isConnected || nextOption.disabled ||
+            nextOption.closest('[data-ely-family]') !== root ||
+            nextOption.closest('[data-interaction-palette-results]') !== palette ||
+            nextOption.closest('[hidden]') || nextOption.getAttribute('aria-selected') !== 'true') return;
+        syncCommandPalette(dialog, options[next], true);
+      } else options[next].focus();
       return;
     }
     const pageInput = closest(root, event.target, '[data-interaction-page-input]');
@@ -1935,7 +2015,7 @@ register('interaction', (root, registerCleanup) => {
   document.addEventListener('pointerdown', outside);
   const contextRequests = bindContextRequests(root, () => { menuPointerReturn = contextPointerFocus = undefined; menuConfirmKey = menuConfirmTarget = menuSearchConfirm = undefined; });
   const cleanupContextRequests = contextRequests.cleanup;
-  const cleanup = () => { close(); cleanupContextRequests(); clearReorderPreview(); menuSearchConfirm = undefined; timers.forEach(clearTimeout); lottieCleanups.forEach(cleanup => cleanup()); root.removeEventListener('click', click); root.removeEventListener('scroll', scroll, true); root.removeEventListener('input', input); root.removeEventListener('keydown', keydown); root.removeEventListener('ely:result', result); root.removeEventListener('ely:error', error); root.removeEventListener('contextmenu', contextmenu); root.removeEventListener('pointerover', pointerover); root.removeEventListener('pointermove', menuPointerMove); root.removeEventListener('dragend', dragend); root.removeEventListener('dragstart', dragstart); root.removeEventListener('dragover', dragover); root.removeEventListener('drop', drop); root.removeEventListener('pointerdown', lightboxPointerDownHandler); root.removeEventListener('pointerup', lightboxPointerUpHandler); root.removeEventListener('pointerdown', holdStart); root.removeEventListener('pointerup', holdEnd); root.removeEventListener('pointercancel', holdEnd); root.removeEventListener('keyup', keyup); document.removeEventListener('pointerdown', outside); };
+  const cleanup = () => { paletteNavigationActive = false; close(); cleanupContextRequests(); clearReorderPreview(); menuSearchConfirm = undefined; timers.forEach(clearTimeout); lottieCleanups.forEach(cleanup => cleanup()); root.removeEventListener('click', click); root.removeEventListener('scroll', scroll, true); root.removeEventListener('input', input); root.removeEventListener('keydown', keydown); root.removeEventListener('ely:result', result); root.removeEventListener('ely:error', error); root.removeEventListener('contextmenu', contextmenu); root.removeEventListener('pointerover', pointerover); root.removeEventListener('pointermove', menuPointerMove); root.removeEventListener('dragend', dragend); root.removeEventListener('dragstart', dragstart); root.removeEventListener('dragover', dragover); root.removeEventListener('drop', drop); root.removeEventListener('pointerdown', lightboxPointerDownHandler); root.removeEventListener('pointerup', lightboxPointerUpHandler); root.removeEventListener('pointerdown', holdStart); root.removeEventListener('pointerup', holdEnd); root.removeEventListener('pointercancel', holdEnd); root.removeEventListener('keyup', keyup); document.removeEventListener('pointerdown', outside); };
   registerCleanup?.(cleanup);
   contextRequests.openSeed();
   return cleanup;

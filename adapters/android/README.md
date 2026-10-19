@@ -198,3 +198,33 @@ Run the helper controls with:
 Run both real dialog counterexamples and the unchanged real Go lifecycle with the
 normal connected Android instrumentation workflow. JVM success alone does not
 establish the device behavior.
+
+The shared observation budget can expire either in the worker or in the outer
+future wait. Only the typed internal budget-exhaustion cause is translated into
+the same failed-readiness assertion as the outer deadline, with its original
+cause retained. Other worker exceptions, interruption and cancellation remain
+hard failures. Diagnostics distinguish budget exhaustion before posting a
+main-thread probe from exhaustion after posting; neither alone establishes that
+the main thread was unresponsive. No deadline is extended or retried.
+
+`python3 scripts/ci/native/focus-budget-controls.py` runs deterministic JVM
+classification checks, then reverses only the typed classification and requires
+its designated test to fail. The Native workflow retains both reports. Existing
+bounded test-owned `baseline`, `persistent-dialog` and `transient-dialog`
+window/activity/last-ANR diagnostics use the instrumentation additional-output
+directory, which Gradle UTP copies before uninstalling the app. The host collector
+accepts only those nine fixed names, validates their diagnostic header and reads
+at most 132 KiB plus one byte to reject oversized output. Missing optional files,
+ambiguous sources and malformed contents are recorded explicitly. Unbounded
+counterexample active-window root text stays in app cache and is excluded. Collection failures
+do not replace the native test result. Fresh CI evidence must show genuine
+persistent-dialog diagnostics; a successful copy command alone is insufficient.
+
+The JVM causal collector also joins each XML result to successful Kotlin compile
+tasks and the exact selected test task. A mutant is accepted only for the
+source-derived expected-exception assertion, with its ordered `ExecutionException`
+and typed budget cause chain; merely mentioning those exception names is not
+evidence. Genuine archived XML/log fixtures are replayed alongside independent
+corruptions of positive counts, causal sites, exception order and compiler logs.
+The positive case proves original-cause preservation; the reversal fails earlier
+at the expected-exception assertion and is labelled accordingly.

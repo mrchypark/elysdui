@@ -17,6 +17,7 @@ internal class FocusedWindowGate(
     private val activity: Activity,
     private val automation: UiAutomation,
     private val output: () -> File,
+    private val boundedOutput: () -> File = output,
 ) {
     private var stickyAnr: String? = null
 
@@ -34,19 +35,18 @@ internal class FocusedWindowGate(
                     val anr = try { root?.let { findAnr(it) } } finally { root?.recycle() }
                     val done = CountDownLatch(1)
                     var focused = false
+                    requireFocusObservationBudget(policy.remaining(SystemClock.elapsedRealtime()), "before posting main-thread probe")
                     Handler(Looper.getMainLooper()).post {
                         focused = activity.hasWindowFocus()
                         done.countDown()
                     }
-                    check(done.await(policy.remaining(SystemClock.elapsedRealtime()), TimeUnit.MILLISECONDS)) {
-                        "Main thread did not answer the focus probe"
+                    if (!done.await(policy.remaining(SystemClock.elapsedRealtime()), TimeUnit.MILLISECONDS)) {
+                        throw FocusObservationBudgetExceeded("after posting main-thread probe")
                     }
                     focused to anr
                 }
                 val (focused, anr) = try {
-                    sample.get(remaining, TimeUnit.MILLISECONDS)
-                } catch (timeout: java.util.concurrent.TimeoutException) {
-                    throw AssertionError("Window focus observation exceeded ${timeoutMillis}ms", timeout)
+                    awaitFocusObservation(sample, remaining, timeoutMillis)
                 } finally { sample.cancel(true) }
                 if (anr != null) stickyAnr = anr
                 if (policy.observe(SystemClock.elapsedRealtime(), focused, stickyAnr)) return
@@ -97,7 +97,7 @@ internal class FocusedWindowGate(
                     }
                 }
                 try {
-                    File(output(), "$name-$label.txt").writeText(
+                    File(boundedOutput(), "$name-$label.txt").writeText(
                         "elapsedRealtime=${SystemClock.elapsedRealtime()}\noriginal=$original\n" +
                         task.get(2, TimeUnit.SECONDS)
                     )

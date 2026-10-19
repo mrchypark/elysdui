@@ -317,9 +317,11 @@ const check = async ({root,expectError}, selector) => {
       input.value = options[0]?.textContent.trim().slice(0, 4) || ''; input.dispatchEvent(new Event('input', {bubbles: true}));
       assert(options.some(option => !option.closest('li').hidden), 'palette filtering hid every matching result');
       input.dispatchEvent(new KeyboardEvent('keydown', {key: 'ArrowDown', bubbles: true}));
-      assert(target.contains(document.activeElement), 'palette ArrowDown did not retain result focus');
-      const option = document.activeElement.closest('[data-interaction-palette-option]');
-      assert(option && !option.closest('li').hidden, 'palette keyboard selected a filtered-out result');
+      const commandPalette = target.closest('[data-interaction-kind]')?.dataset.interactionKind === 'CommandPalette';
+      assert(commandPalette ? document.activeElement === input : target.contains(document.activeElement), 'palette ArrowDown did not retain its keyboard focus');
+      const option = commandPalette ? target.querySelector('[data-interaction-palette-option][aria-selected="true"]') : document.activeElement.closest('[data-interaction-palette-option]');
+      assert(option && !option.disabled && !option.closest('li').hidden, 'palette keyboard selected a disabled or filtered-out result');
+      if (commandPalette) assert(input.getAttribute('aria-activedescendant') === option.id && input.getAttribute('aria-controls') === option.closest('[role="listbox"]').id, 'palette active option was not linked to the query');
       document.activeElement.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', bubbles: true}));
       await waitFor(() => !target.open);
       const event = emitted.find(item => item.action === option?.dataset.elyAction && item.value === option?.value);

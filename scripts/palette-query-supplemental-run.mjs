@@ -1,0 +1,32 @@
+import assert from 'node:assert/strict';
+import {paletteProductionPolicy} from '../ui/gohtmx/tests/browser/palette-query-production-policy.mjs';
+const productionPolicy = paletteProductionPolicy(process.env.PALETTE_QUERY_PRODUCTION_POLICY || 'strict');
+import {spawnSync} from 'node:child_process';
+import {causalRunToken,causalCompletion,causalCompletionEmission} from './palette-query-causal-controls.mjs';
+import {readFile, writeFile, mkdir} from 'node:fs/promises';
+import {fileURLToPath} from 'node:url';
+import {loadSupplementalInputs} from '../ui/gohtmx/tests/browser/palette-query-supplemental-inputs.mjs';
+import {supplementalReportName, verifySupplementalEvidence} from '../ui/gohtmx/tests/browser/palette-query-supplemental-evidence.mjs';
+const base = fileURLToPath(new URL('../', import.meta.url));
+const surface = process.env.PALETTE_QUERY_SURFACE || 'go-qualified', mode = process.env.PALETTE_SUPPLEMENTAL_MODE || 'control';
+assert.equal(process.env.CI, 'true', 'browser execution is restricted to CI');
+const runToken = causalRunToken(process.env.PALETTE_CAUSAL_RUN_TOKEN);
+const {assetBodies, fixtureBodies, ...trusted} = await loadSupplementalInputs(base, surface, mode, {productionPolicy});
+assert.equal(trusted.dirty, '', 'committed clean source required');
+await mkdir(new URL('../test-results/contracts/', import.meta.url), {recursive: true});
+// Written before the child starts, for independent replay with a separately
+// supplied invocation identity. Report-authored provenance is never trusted.
+const invocation = {...trusted, surface, mode, runToken};
+await writeFile(new URL(`../test-results/contracts/${supplementalReportName(surface, mode)}.invocation.json`, import.meta.url), JSON.stringify(invocation, null, 2));
+const child = spawnSync(process.execPath, ['ui/gohtmx/tests/browser/palette-query-supplemental-browser-test.mjs'], {cwd: base, env: {...process.env, PALETTE_QUERY_PRODUCTION_POLICY: productionPolicy, PALETTE_SUPPLEMENTAL_RUN_TOKEN: runToken}, stdio: 'inherit'});
+assert.equal(child.error, undefined); assert.equal(child.signal, null);
+await writeFile(new URL(`../test-results/contracts/${supplementalReportName(surface, mode)}.exit.json`, import.meta.url), JSON.stringify({productionPolicy, revision: trusted.revision, tree: trusted.tree, runToken, exitCode: child.status}));
+const report = JSON.parse(await readFile(new URL(`../test-results/contracts/${supplementalReportName(surface, mode)}`, import.meta.url), 'utf8'));
+const verdict = verifySupplementalEvidence(report, invocation, child.status);
+console.log(JSON.stringify({evidenceValidation: 'valid', ...verdict, rawExit: child.status}));
+const output=new URL(`../test-results/contracts/${supplementalReportName(surface, mode)}`,import.meta.url);
+const rawBytes=Object.fromEntries(await Promise.all(['report','invocation','exit'].map(async(key,i)=>[key,await readFile(new URL(output.href+['','.invocation.json','.exit.json'][i]),'utf8')])));
+const completion=causalCompletion(verdict,runToken,child.status,rawBytes),completionBytes=JSON.stringify(completion,null,2);
+await writeFile(new URL(output.href+'.validation.json'),completionBytes);
+console.log(JSON.stringify(causalCompletionEmission(completion,completionBytes)));
+process.exitCode = child.status;

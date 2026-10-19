@@ -2,6 +2,32 @@
 
 Navigation palettes rank fuzzy matches for commands, files, and switcher labels. Command groups rank by their best row, with stable ties. Numeric `Items[].Recent` orders recent commands before other groups while the query is empty. QuickOpen uses `Items[].Recent` to select its initial files. SearchPalette uses `Items[].Suggested` for initial suggestions and preserves caller group order. Matched letters use escaped text nodes and accent marks.
 
+`navigation/CommandPalette` keeps keyboard focus in its search field during
+ArrowUp/ArrowDown navigation so typing can refine the query without refocusing.
+The field controls a local `listbox` and its `aria-activedescendant` identifies
+the visible, enabled selected option. Filtering selects the first enabled match
+and clears the reference when none remains. IDs belong to the instance and
+original row, so ranking and repeated item values do not change their identity.
+The active row is scrolled into view. This uses the existing native searchbox
+and listbox roles; no new combobox property or alias is introduced.
+
+A caller focus listener may synchronously replace a row or dispose the palette
+while keyboard navigation returns focus to the query. Before updating the active
+reference or scrolling, that continuation checks its controller, owner, current
+field/list and selected row. Invalidated work stops without writing through a
+reused row ID; normal HTMX remounting initializes the current instance. This
+bounded check does not promise coherence while an owner is between mounts or
+certify other lifecycle, action-callback or asynchronous host flows.
+
+This bounded behavior change is specific to CommandPalette. QuickOpen,
+QuickSwitcher and SearchPalette retain their existing keyboard focus behavior.
+Home/End retain CommandPalette's existing first/last-result navigation; Enter
+retains its existing keydown activation. Native text editing, Tab containment,
+Escape, pointer activation and host ownership are checked separately. There is
+no assistive-technology, IME, modifier-key or native-platform verification claim.
+The independently recorded close-before-action and empty-result Enter-submit
+mismatches remain open; this focus repair does not redefine either contract.
+
 For host search, bind `onChange` through `ui.mount` and use the query field's `name` and `value`. The host owns fetching and rendering new `Items`. Replace the component root through an htmx swap, then bind the new root with `ui.mount`; the htmx lifecycle initializes its interaction behavior. Preserve `Value` in the new props if the query should remain. An `ely:result` callback does not automatically insert palette rows or reopen the dialog. Host-ranked results should already match the query because local SearchPalette filtering still applies. No remote search endpoint is built into this component.
 
 Render an interaction component with `ui.Component{Chapter, Name, ID, Props}`. `ID` is required, starts with a letter, and is the instance boundary for behavior and events. `Name` accepts a catalogue alias; the renderer receives its primary story as `Kind` and the requested alias as `Variant` and `ComponentName`.

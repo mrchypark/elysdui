@@ -203,11 +203,19 @@ try {
     try { await ready(origin); await runCase(name); current.oracles = searchableOracles(current, surface); current.replacementOracles = searchableReplacementOracles(current); }
     catch (error) { current.error = {message: error.message, stack: error.stack}; }
     finally {
-      try { const log = await page.evaluate(() => structuredClone(searchLog)); current.finalTrace = log; report.runtimeErrors.push(...log.errors.map(error => ({check: name, ...error}))); }
-      catch (error) { current.captureError = String(error); }
+      try {
+        // Interactions can start fonts absent from the initial layout. Settle
+        // this document before changing its case owner or navigating away.
+        // waitForFunction retains the existing 10-second default deadline.
+        await page.waitForFunction(async () => { await document.fonts.ready; return document.fonts.status === 'loaded'; });
+        const log = await page.evaluate(() => structuredClone(searchLog)); current.finalTrace = log; report.runtimeErrors.push(...log.errors.map(error => ({check: name, ...error})));
+      }
+      catch (error) { current.captureError = String(error); current.captureErrorStack = error.stack; }
       current.status = !current.error && !current.captureError && current.oracles.every(oracle => oracle.pass) && current.replacementOracles.every(oracle => oracle.pass) ? 'passed' : 'failed';
       console.log(`${surface}/${name}: ${current.status}`);
       for (const oracle of [...current.oracles, ...(current.replacementOracles || [])].filter(oracle => !oracle.pass)) console.error(`${oracle.id}: observed=${JSON.stringify(oracle.observed)} expected=${JSON.stringify(oracle.expected)}`);
+      // Release pending body reads before the outer drain if settlement failed.
+      if (current.captureError) { await page.close(); break; }
       await Promise.all(responses);
     }
   }

@@ -137,6 +137,8 @@ jobs:
           curl --fail --silent http://127.0.0.1:8095/ > /dev/null
           cd adapters/android
           ELY_NATIVE_CONTROLS_BASE_URL=http://127.0.0.1:8095 ELY_NATIVE_TEST_BASE_URL=http://127.0.0.1:8094 ./gradlew --no-daemon :protocol:test :app:assembleDebug :app:testDebugUnitTest :app:assembleDebugAndroidTest
+      - name: Verify focus observation budget causal control
+        run: python3 scripts/ci/native/focus-budget-controls.py
       - name: Native Android emulator lifecycle against Go
         run: bash scripts/ci/native/android-emulator.sh
       - uses: actions/upload-artifact@v4
