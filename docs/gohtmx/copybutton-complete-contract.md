@@ -83,6 +83,16 @@ select only `CSSAnimation` objects on the exact element and exact pseudo-element
 Descendant animations and pseudo `CSSTransition` objects cannot certify rotation.
 The [Web Animations API](https://www.w3.org/TR/web-animations-1/#dom-animatable-getanimations)
 distinguishes the element-only default from pseudo-inclusive subtree discovery.
+Rotation keyframes are compared as exactly two single `rotate()` values at offsets
+0 and 1, from -0.6rad to exactly zero. Compatible rad/deg/grad/turn units are
+converted numerically without wrapping full turns; matrices, extra transforms,
+malformed/nonfinite values and nonzero endpoints are rejected. A fixed 1e-6rad
+start tolerance covers the captured Chromium degree serialization
+`rotate(-34.3775deg)`, whose error is about 5.636e-7rad. At that magnitude,
+six-significant-digit rounding is bounded by .00005deg (8.727e-7rad); this is a
+bounded serialization allowance, not a universal browser precision claim or a
+visual similarity threshold. Raw strings are retained unchanged. See
+[CSS compatible angle units](https://www.w3.org/TR/css-values-4/#angles).
 Replay requires its own resolved clipboard call after the source-owned deadline
 checkpoint and its own subsequent start witness on the same physical control
 and root. Sequence is strictly later; the controlled clock may remain equal. A
@@ -116,6 +126,7 @@ node ui/gohtmx/tests/unit/copy_feedback_test.mjs
 node scripts/copybutton-complete-evidence-test.mjs
 node scripts/copybutton-complete-timers-test.mjs
 node scripts/copybutton-complete-animations-test.mjs
+node scripts/copybutton-complete-rotation-test.mjs
 node scripts/copybutton-complete-controls-test.mjs
 ```
 

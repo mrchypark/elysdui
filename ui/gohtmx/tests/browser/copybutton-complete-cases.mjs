@@ -50,6 +50,7 @@ export const copyRequiredSources = [
   'scripts/copybutton-complete-evidence-test.mjs',
   'scripts/copybutton-complete-transitions-test.mjs',
   'scripts/copybutton-complete-animations-test.mjs',
+  'scripts/copybutton-complete-rotation-test.mjs',
   'scripts/copybutton-complete-run.mjs',
   'scripts/copybutton-complete-controls.mjs',
   'scripts/copybutton-complete-controls-test.mjs',

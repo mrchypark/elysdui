@@ -6,6 +6,27 @@ const same = (a,b) => JSON.stringify(a) === JSON.stringify(b);
 const keys = (object, expected, label) => assert.deepEqual(Object.keys(object).sort(), [...expected].sort(), label);
 const finite = value => typeof value === 'number' && Number.isFinite(value);
 const close = (a,b,tolerance=.3) => finite(a) && Math.abs(a-b)<=tolerance;
+// Browser keyframes serialize compatible angle units canonically (usually deg).
+// At the expected -34.3774677deg, six significant digits round by at most
+// .00005deg = 8.727e-7rad. This fixed 1e-6rad bound covers that serialization,
+// not a visually similar motion; angles are never reduced modulo a full turn.
+const copyRotationTolerance = 1e-6;
+const copyRotationRadians = value => {
+  if(typeof value !== 'string')return null;
+  const match=/^[\t\n\f\r ]*rotate\([\t\n\f\r ]*([+-]?(?:\d+(?:\.\d+)?|\.\d+)(?:[eE][+-]?\d+)?)(rad|deg|grad|turn)?[\t\n\f\r ]*\)[\t\n\f\r ]*$/i.exec(value);
+  if(!match)return null;
+  const number=Number(match[1]),zero=!/[1-9]/.test(match[1].split(/[eE]/)[0]);
+  if(!finite(number)||(!match[2]&&!zero)||(number===0&&!zero))return null;
+  const scale={rad:1,deg:Math.PI/180,grad:Math.PI/200,turn:2*Math.PI}[match[2]?.toLowerCase()||'rad'];
+  const radians=number*scale;
+  return finite(radians)&&(radians!==0||zero)?radians:null;
+};
+export const copyRotationFramesMatch = frames => {
+  if(!Array.isArray(frames)||frames.length!==2||frames[0]?.offset!==0||frames[1]?.offset!==1)return false;
+  const from=copyRotationRadians(frames[0].transform),to=copyRotationRadians(frames[1].transform);
+  // Zero has no conversion/serialization error, so any nonzero endpoint fails.
+  return from!==null&&Math.abs(from+.6)<=copyRotationTolerance&&to===0;
+};
 export function copyOracles(check) {
   const spec=copyCases.find(c=>c.id===check.id); assert(spec, 'source-owned case');
   const {raw}=check, snapshots=Object.fromEntries(raw.snapshots.map(s=>[s.name,s])), log=raw.log, result=[];
@@ -92,7 +113,7 @@ export function copyOracles(check) {
     const animations=name==='replayed'?starts.flatMap(r=>r.animations):[...(icon(name,'check')?.animations||[]),...starts.flatMap(r=>r.animations)];
     const a=animations.find(a=>a.frames?.length>=2),duration=Number(a?.timing?.duration);
     const easing=(a?.timing?.easing==='linear'?a?.frames?.[0]?.easing:a?.timing?.easing)||'',cubic=easing.match(/^cubic-bezier\(([^)]+)\)$/)?.[1].split(',').map(Number);
-    add(name+'.rotation-animation',(reduced&&!a)||!!a&&a.frames[0].transform==='rotate(-0.6rad)'&&['rotate(0rad)','rotate(0deg)','rotate(0)'].includes(a.frames.at(-1).transform));
+    add(name+'.rotation-animation',(reduced&&!a)||!!a&&copyRotationFramesMatch(a.frames));
     add(name+'.motion-duration',reduced?(!a||(duration>=0&&duration<=1)):duration===120);
     add(name+'.motion-runs',(reduced&&!a)||['running','finished'].includes(a?.playState)&&finite(a.currentTime)&&a.currentTime>=0);
     add(name+'.cubic-ease-out',(reduced&&!a)||cubic&&close(cubic[0],1/3,.001)&&cubic[1]===1&&close(cubic[2],2/3,.001)&&cubic[3]===1);

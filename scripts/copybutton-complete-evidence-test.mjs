@@ -6,6 +6,7 @@ import {copySHA} from '../ui/gohtmx/tests/browser/copybutton-complete-inputs.mjs
 import {verifyProcessEvidence, verifyCopyScreenshots} from './copybutton-complete-run.mjs';
 import {testCopyTransitions} from './copybutton-complete-transitions-test.mjs';
 import {testCopyPseudoAnimations} from './copybutton-complete-animations-test.mjs';
+import {testCopyRotationFrames} from './copybutton-complete-rotation-test.mjs';
 
 // These source-owned, explicitly synthetic examples exercise report admission.
 // They never launch a browser, server, Go build or external process, read a real
@@ -508,4 +509,4 @@ export async function testCopyScreenshotEvidence(schemaReport=buildCopySchemaFix
   return {sourceOnly,classification:'synthetic PNG bytes only; no browser screenshots',screenshots:positive.screenshots,rejectedCorruptions:rejected};
 }
 
-if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href){console.log(JSON.stringify(testCopyPseudoAnimations()));console.log(JSON.stringify(await testCopyTransitions()));console.log(JSON.stringify(await testCopySchemaEvidence()));}
+if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href){console.log(JSON.stringify(testCopyRotationFrames()));console.log(JSON.stringify(testCopyPseudoAnimations()));console.log(JSON.stringify(await testCopyTransitions()));console.log(JSON.stringify(await testCopySchemaEvidence()));}
