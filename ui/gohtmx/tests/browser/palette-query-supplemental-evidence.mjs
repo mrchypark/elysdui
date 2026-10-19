@@ -4,6 +4,7 @@ import {isDeepStrictEqual as same} from 'node:util';
 import {paletteOwner,paletteRows,paletteExpectedAction,paletteTyping,paletteRequiredBrowserPaths,paletteSurfaces,paletteErrors,paletteSourcePaths} from './palette-query-evidence.mjs';
 import {supplementalSourcePaths} from './palette-query-supplemental-inputs.mjs';
 import {supplementalModes,supplementalMutants} from './palette-query-supplemental-mutants.mjs';
+import {assertSupplementalObservationJoins,assertSupplementalPositiveWitnesses} from './palette-query-positive-witnesses.mjs';
 export const supplementalCases=()=>['rank.stable-identity','scroll.active-visible'];
 export const supplementalReportName=(surface,mode)=>`palette-query-supplemental-${surface}-${mode}.json`;
 export const supplementalRows=(slot='primary')=>[...paletteRows(slot),...Array.from({length:40},(_,i)=>({label:`Entry ${String(i+1).padStart(2,'0')}`,value:`${slot==='peer'?'peer-':''}entry-${String(i+1).padStart(2,'0')}`,disabled:i===6}))];
@@ -166,6 +167,8 @@ export function verifySupplementalEvidence(report,trusted,exitCode){
    assert.equal(fields.commandValue,check.raw.after.log.actions[0]?.value);assert.equal(fields.commandAction,check.raw.after.log.actions[0]?.action);
   }
  }
+ for(const check of report.checks)assertSupplementalObservationJoins(check);
+ if(mode!=='control')assertSupplementalPositiveWitnesses(report,surface,mode);
  const status=report.checks.every(c=>c.status==='passed')?'passed':'failed';assert.equal(report.status,status);assert.equal(exitCode,status==='passed'?0:1,'retain raw nonzero');
  const causalKills=mode==='control'?[]:supplementalMutants[mode].kills.filter(id=>report.checks.some(c=>c.oracles.some(o=>o.id===id&&!o.pass)));
  if(mode!=='control'){assert.equal(status,'failed','causal mutant must retain raw failure');assert.deepEqual(causalKills,supplementalMutants[mode].kills,'every designated source-owned causal kill required');}

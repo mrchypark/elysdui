@@ -134,3 +134,51 @@ that remains red still replays as valid raw failing evidence. Duplicate generic
 dispatch is collected natively on qualified Go only; SDUI may suppress a repeated
 request while the same source is busy, so duplicate callbacks do not imply two
 POSTs. Synthetic transport-admissibility traces are not native predictions.
+
+## Complete positive causal witnesses
+
+A designated failed oracle alone is insufficient: an absent command cannot prove
+callback order, and an unconsumed key cannot prove implicit submission. The
+external causal gate requires these positive observations in addition to the
+unchanged raw verifier and designated failures. All payloads are source-fixed
+`activationPayload(surface)` (Option) or `activationPayload(surface, 'run', query)`;
+queries are empty for initial/disabled and `zzzzzz` for filtered. Identity checks
+use live DOM/event/handler tokens and independently observed raw traces.
+
+| Mechanism | Native variants | Required positive witness |
+| --- | --- | --- |
+| Generic skip removed | qualified Go | Exactly two fixed direct actions, installed original host action callbacks and results. First action/host/result is open with Open selected; second is closed with Option selected. Both actions/hosts lie inside the same trusted click. The first native result precedes the second direct action. Final state and click return are closed/Option; one healthy final selection pair follows the second host. |
+| Template marker omitted | qualified Go, chapter Go, SDUI | Exactly one fixed action, original host callback and result. Action/host are open with Open selected inside the trusted click. Healthy selection occurs open with Option; return/final state are closed/Option. SDUI has its joined command request/completion. |
+| Family emission omitted | qualified Go | Trusted click and return, zero command/action/host/result/request/completion, closed/Option final and return state, and one healthy selection pair inside that click. |
+| Close after action | qualified Go | Exactly one fixed action, original host callback and result. Action/host are open with Option committed inside the trusted click. Healthy selection, return and final state are closed/Option. |
+| Immediate post-close owner check bypassed | qualified Go, SDUI | Observed close-focus binding transition precedes the fixed old command delivered once to the exact replacement action callback, closed/Option, before the same outer click returns. Its replacement result remains recorded. No stale activation selection occurs. A separate trusted fresh click then delivers one fixed replacement action/host/result and healthy selection, closed/Option. SDUI joins both real command request/completion pairs to their stages. |
+| Trailing notification check removed | qualified Go | One fixed action/host/result; action/host are closed/Option. The callback demonstrably reopens the same dialog with query focus. One exact original-host and document selection pair follows reopen before the same outer click returns, with reopened/query-focused Option state retained. |
+| Empty Enter falls through | qualified Go | Each of the three cases retains the ordinary trusted Enter, its unconsumed same-event handler boundary, actual trusted implicit form submit and same-event submit boundary, and exact original run host/action/result between keydown and keyup. Separately, requestSubmit call/return surrounds a real explicit submit/boundary/run. Form owner, exact FormData, open/no-selection state and result identity are joined. |
+| Blanket form prevention | qualified Go | Each of the three cases retains the named requestSubmit call and return with a real trusted submit of its exact form strictly between them, but no explicit command/action/host/result/request/completion. |
+
+A healthy selection pair means exactly one palette host-change followed by one
+document change: exact owner/component/name/value/selected payload, the installed
+change-callback token, the mechanism's stated open/selection phase, and the stated
+post-action (or post-click for omitted emission) order before trusted click return.
+Incidental native query changes are distinct. The raw verifier independently
+checks immutable native event tuples, complete source inventories, owner/row
+continuity, prefixes and HTTP joins.
+
+Result requirements here describe this collector's retained native observations.
+The mounted action handler is asynchronous; native Chromium listener checkpoints
+can expose its first result before a later listener. This is not a claim that
+arbitrary callback results are synchronous. Except the source-specific first core
+result and implicit-key interval, result completion need not precede click return.
+A duplicate callback does not imply duplicate SDUI POSTs, since the busy-source
+guard can coalesce them; the native duplicate variant is qualified Go only.
+
+Fast invented-schema regressions enumerate positive-witness substitutions for all
+eight mechanisms on the three schema surfaces, including absent observations,
+wrong payloads/handler identities/states, reordered boundaries, missing healthy
+selection and stale cached statuses/oracles. The current-source replay regression
+binds those observations to each of the fourteen real compiled source/served
+variants and checks the CLI's separate valid-raw/failed-causal result. These are
+validator controls, not additional native collection. Independent attacks on
+immutable actual reports complement them. Historical native bytes and exit codes
+remain preserved; a previous gate's false acceptance is never rewritten into a
+new native success. Fresh exact-head collection is required after publication.

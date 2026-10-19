@@ -10,6 +10,9 @@ const groups = {focus: ['query.continue', 'cursor.coherence'], preserve: ['enter
 export function paletteCases(group = 'all') { assert(group === 'all' || Object.hasOwn(groups, group), 'known palette case group'); return group === 'all' ? Object.values(groups).flat() : [...groups[group]]; }
 export const paletteErrors = ['pageErrors', 'consoleErrors', 'requestFailures', 'serverErrors', 'transportErrors', 'runtimeErrors'];
 export const paletteSourcePaths = [
+  'ui/gohtmx/tests/browser/palette-query-positive-witnesses.mjs',
+  'scripts/palette-query-supplemental-schema-fixture.mjs',
+  'scripts/palette-query-positive-witnesses-test.mjs',
   'scripts/palette-query-causal-controls.mjs', 'scripts/palette-query-causal-controls-test.mjs',
   'scripts/palette-query-causal-replay.mjs', 'scripts/palette-query-causal-replay-test.mjs', 'ui/gohtmx/tests/browser/diagnostics/palette-query-causal-aggregation.md',
   'ui/gohtmx/tests/browser/diagnostics/palette-query-baseline.md',

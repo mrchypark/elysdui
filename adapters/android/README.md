@@ -219,3 +219,12 @@ ambiguous sources and malformed contents are recorded explicitly. Unbounded
 counterexample active-window root text stays in app cache and is excluded. Collection failures
 do not replace the native test result. Fresh CI evidence must show genuine
 persistent-dialog diagnostics; a successful copy command alone is insufficient.
+
+The JVM causal collector also joins each XML result to successful Kotlin compile
+tasks and the exact selected test task. A mutant is accepted only for the
+source-derived expected-exception assertion, with its ordered `ExecutionException`
+and typed budget cause chain; merely mentioning those exception names is not
+evidence. Genuine archived XML/log fixtures are replayed alongside independent
+corruptions of positive counts, causal sites, exception order and compiler logs.
+The positive case proves original-cause preservation; the reversal fails earlier
+at the expected-exception assertion and is labelled accordingly.

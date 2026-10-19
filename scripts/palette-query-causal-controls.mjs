@@ -11,6 +11,7 @@ import {supplementalReportName,verifySupplementalEvidence} from '../ui/gohtmx/te
 import {supplementalModes,supplementalMutants} from '../ui/gohtmx/tests/browser/palette-query-supplemental-mutants.mjs';
 import {loadReentryInputs} from '../ui/gohtmx/tests/browser/palette-query-reentry-inputs.mjs';
 import {reentryReportName,verifyReentryEvidence} from '../ui/gohtmx/tests/browser/palette-query-reentry-evidence.mjs';
+import {assertSupplementalPositiveWitnesses,assertReentryPositiveWitnesses} from '../ui/gohtmx/tests/browser/palette-query-positive-witnesses.mjs';
 
 const range=(first,last)=>Array.from({length:last-first+1},(_,i)=>i+first);
 const steps=range(0,56).map(i=>'scroll.step-'+i);
@@ -90,6 +91,7 @@ export function verifyCausalRun({report,invocation,exit,completion,rawBytes,comp
  assert.deepEqual(exit,expectedExit,'raw exit provenance and child status');
  const verify=selection.suite==='supplemental'?verifySupplementalEvidence:verifyReentryEvidence;
  const raw=verify(report,trusted,child.status),outcome=assertCausalOutcome(report,selection,child.status);
+ (selection.suite==='supplemental'?assertSupplementalPositiveWitnesses:assertReentryPositiveWitnesses)(report,selection.surface,selection.mode);
  for(const [key,value]of Object.entries({report,invocation,exit}))assert.deepEqual(JSON.parse(rawBytes[key]),value,'exact raw bytes '+key);
  assert.deepEqual(completion,causalCompletion(raw,expectedToken,child.status,rawBytes),'raw runner reached validated completion');
  assert.deepEqual(JSON.parse(completionBytes),completion,'exact completion bytes');

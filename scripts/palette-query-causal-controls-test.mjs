@@ -1,3 +1,4 @@
+import {mutateSupplementalSchemaFixture} from './palette-query-supplemental-schema-fixture.mjs';
 import assert from 'node:assert/strict';
 import {readFile,mkdtemp,mkdir,writeFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
@@ -16,42 +17,7 @@ const token='12345678-1234-4234-9234-123456789abc',oldToken='87654321-1234-4234-
 let positives=0,rejected=0,inventoryChecks=0;
 const runtime=await readFile(new URL('../ui/gohtmx/assets/ely-api-interaction.js',import.meta.url),'utf8');
 function refresh(report){for(const c of report.checks){c.oracles=supplementalOracles(c,report.surface);c.status=c.oracles.every(o=>o.pass)?'passed':'failed';c.finalTrace=copy(c.raw.after.log);}report.status=report.checks.every(c=>c.status==='passed')?'passed':'failed';}
-function mutate(f,mode){
- const {report:r,trusted:t}=f,path='/assets/ely-api-interaction.js',served=supplementalMutation(runtime,mode);
- t.mode=mode;t.assets[path]={...t.assets[path],sourceSHA256:sha(runtime),servedSHA256:sha(served),bytes:Buffer.byteLength(served)};t.mutation={mode,path,sourceSHA256:sha(runtime),servedSHA256:sha(served),classification:'synthetic causal fixture'};
- r.mode=mode;r.assets=copy(t.assets);r.mutation=copy(t.mutation);
- for(const p of [...r.httpAssetProof,...r.browserResponses])if(p.path===path){p.expectedSHA256=p.receivedSHA256=sha(served);p.bytes=t.assets[path].bytes;}
- for(const p of r.requests)if(p.path===path){p.responseSHA256=sha(served);p.responseBytes=t.assets[path].bytes;}
- for(const c of r.checks)for(const [label,value]of Object.entries(c.raw))for(const s of label==='steps'?value:[value]){
-  if(mode==='active-missing')s.state.relationship.activeID=null;
-  if(mode==='active-peer')s.state.relationship.activeID=s.peer.rows[0].id;
-  if(mode==='option-peer-id'){const row=s.state.rows.find(x=>x.selected);s.geometry.rows.find(x=>x.id===row.id).id=s.peer.rows[0].id;row.id=s.peer.rows[0].id;s.state.relationship.activeID=row.id;}
-  if(mode==='option-role')for(const state of [s.state,s.peer])state.rows.find(x=>x.selected).role='button';
-  if(mode==='list-role')s.state.relationship.listRole='group';
-  if(mode==='controls-peer')s.state.relationship.controls=s.peer.relationship.listID;
- }
- if(mode==='wrong-enter')for(const c of r.checks){const value=c.name==='rank.stable-identity'?'open-file':'entry-01',action=c.name==='rank.stable-identity'?'open-command':'entry-command';for(const s of [c.raw.down,c.raw.after]){for(const k of ['actions','hosts','results'])for(const e of s.log[k]){e.value=value;e.action=action;}for(const e of s.log.changes.filter(e=>e.name==='palette'))e.value=value;}for(const req of r.requests.filter(x=>x.check===c.name&&x.path==='/sdui-action'))req.fields=req.fields.map(([k,v])=>[k,k==='commandValue'?value:k==='commandAction'?action:v]);}
- if(mode==='no-scroll')for(const [i,s]of r.checks[1].raw.steps.entries()){
-  if(i>=5&&i<=49||i===56){const row=s.geometry.rows.find(x=>x.value===s.state.rows.find(r=>r.selected).value);row.top=i>=19&&i<=35||i===56?1000:400;row.bottom=row.top+row.height;}
-  if(i===27)s.geometry.list.scrollTop=r.checks[1].raw.query.geometry.list.scrollTop;
- }
- if(mode==='focus-button'){
-  const rank=r.checks[0].raw,scroll=r.checks[1].raw;
-  for(const s of [rank.arrow,rank.refined,rank.restored,rank.reselected,...scroll.steps]){s.state.focusedInput=false;s.state.activeTag='BUTTON';s.state.activeValue=s.state.rows.find(x=>x.selected).value;s.state.relationship.activeID=s.state.rows.find(x=>x.value===(s.state.query==='Entry'?'entry-01':'open-file')).id;}
-  for(const s of [rank.arrow,...scroll.steps]){const e=s.log.inputs.at(-1);e.targetTag='BUTTON';e.field=false;e.selectionStart=e.selectionEnd=null;}
-  // Lost edit on a focused option preserves the source-owned key pairs but has
-  // no insertion/deletion. Later rank setup is desired evidence, not a prereq.
-  for(const label of ['refined','restored']){
-   const s=rank[label];s.state.query='op';s.state.selectionStart=s.state.selectionEnd=2;
-   s.state.rows=copy(rank.arrow.state.rows);s.geometry=copy(rank.arrow.geometry);
-   s.log.inputs=s.log.inputs.filter(e=>e.type==='keydown'||e.type==='keyup').map(e=>({...e,targetTag:'BUTTON',field:false,selectionStart:null,selectionEnd:null}));
-   s.log.timeline=s.log.timeline.filter(e=>e.kind!=='inputs');
-   s.log.timeline=[...s.log.inputs.map((_,index)=>({kind:'inputs',index})),...s.log.timeline].map((e,i)=>({...e,sequence:i+1}));
-  }
-  rank.reselected.log.inputs[0].targetTag='BUTTON';rank.reselected.log.inputs[0].field=false;
- }
- refresh(r);return f;
-}
+const mutate=(f,mode)=>mutateSupplementalSchemaFixture(f,mode,runtime);
 function packet(f,suite,mode){
  const selection=causalSelection(suite,f.trusted.surface,mode,'strict'),current=copy(f.trusted);delete current.runToken;current.mode=mode;
  const report=copy(f.report);report.runToken=token;

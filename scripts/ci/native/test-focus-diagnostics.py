@@ -28,7 +28,7 @@ class FocusDiagnosticsTest(unittest.TestCase):
             source, destination = Path(temporary) / "utp", Path(temporary) / "export"
             for name in NAMES:
                 self.source_file(source, name, HEADER + b"bounded diagnostic")
-            self.source_file(source, "persistent-dialog-active-window.txt", b"unbounded private root")
+            self.source_file(source, "persistent-dialog-active-window.txt", HEADER + b"private root must remain excluded")
             exporter.export(source, destination)
             self.assertEqual({p.name for p in destination.glob("*.txt")}, set(NAMES))
             manifest = self.manifest(destination)

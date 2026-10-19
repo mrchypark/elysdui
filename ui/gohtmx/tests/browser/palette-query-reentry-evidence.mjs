@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {assertReentryObservationJoins,assertReentryPositiveWitnesses} from './palette-query-positive-witnesses.mjs';
 import {verifyPaletteProductionPolicy} from './palette-query-production-policy.mjs';
 import {isDeepStrictEqual as same} from 'node:util';
 import {paletteSurfaces, paletteOwner, paletteRows, paletteSourcePaths, paletteRequiredBrowserPaths, paletteErrors} from './palette-query-evidence.mjs';
@@ -209,6 +210,7 @@ export function verifyReentryEvidence(report, trusted, exitCode) {
   const status=oracles.every(oracle=>oracle.pass)?'passed':'failed'; assert.equal(check.status,status); assert.equal(report.status,status); assert.equal(exitCode,status==='passed'?0:1,'nonzero contract exit preserved');
   const failed=oracles.filter(oracle=>!oracle.pass).map(oracle=>oracle.id);
   const causalKills=trusted.mode==='guard-removed'?reentryGuardKills.filter(id=>failed.includes(id)):[];
-  if(trusted.mode==='guard-removed') assert.deepEqual(causalKills,reentryGuardKills,'every designated guard reversal kill must be observed');
+  assertReentryObservationJoins(report);
+  if(trusted.mode==='guard-removed') { assert.deepEqual(causalKills,reentryGuardKills,'every designated guard reversal kill must be observed'); assertReentryPositiveWitnesses(report,trusted.surface,trusted.mode); }
   return {productionPolicy:trusted.productionPolicy,status,surface:trusted.surface,mode:trusted.mode,revision:trusted.revision,failed,causalKills};
 }

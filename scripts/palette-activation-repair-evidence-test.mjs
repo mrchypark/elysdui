@@ -6,7 +6,7 @@ import {mkdtemp,writeFile,rm,readFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {fileURLToPath,pathToFileURL} from 'node:url';
-import {buildActivationMutantSchemaFixture,buildActivationPostCloseRejectionFixture,buildActivationShapeRejectionFixture} from './palette-activation-controls-evidence-test.mjs';
+import {buildActivationMutantSchemaFixture,buildActivationPostCloseRejectionFixture,buildActivationShapeRejectionFixture,buildActivationWitnessRejectionFixture,activationWitnessKinds} from './palette-activation-controls-evidence-test.mjs';
 import {buildActivationSchemaFixture} from './palette-activation-evidence-test.mjs';
 import {loadActivationInputs} from '../ui/gohtmx/tests/browser/palette-activation-inputs.mjs';
 import {activationSelection,activationPolicy,verifyActivationPolicy,activationRepairSourcePaths} from '../ui/gohtmx/tests/browser/palette-activation-policy.mjs';
@@ -82,6 +82,15 @@ export async function runActivationRepairEvidenceTests(){
   args[args.length-1]=mutation;
   const badShapes=mutation==='post-close-owner-bypassed'?['after-click-boundary','query-run-payload'].map(kind=>buildActivationPostCloseRejectionFixture(surface,kind)):['core-skip-removed','family-emit-omitted','blanket-palette-submit-prevention'].includes(mutation)?[buildActivationShapeRejectionFixture(surface,mutation)]:[];
   for(const seed of badShapes){const bad=bindActivationMetadata(seed,metadata);assert.equal(verifyActivationEvidence(bad.report,bad.trusted,1).status,'failed');assert.throws(()=>verifyActivationControl(bad.report,bad.trusted,1,selected));await writeFile(reportPath,JSON.stringify(bad.report));const failure=spawnSync(process.execPath,args,{cwd:base,encoding:'utf8'});assert.equal(failure.status,1);assert.equal(failure.stderr,'');const denied=JSON.parse(failure.stdout);assert.equal(denied.evidenceValidation,'valid-replay');assert.equal(denied.status,'failed');assert.equal(denied.causalValidation,'failed');assert.equal(denied.rawExit,1);assert.match(denied.causalError.message,/original trusted click interval|fixed captured command payload|duplicates the command|owned emit omission|blanket submit reversal suppresses/);rejected++;}
+  for(const kind of activationWitnessKinds(surface,mutation)){
+   const bad=bindActivationMetadata(buildActivationWitnessRejectionFixture(surface,mutation,kind),metadata);
+   assert.equal(verifyActivationEvidence(bad.report,bad.trusted,1).status,'failed');
+   assert.deepEqual(bad.report.checks.flatMap(check=>check.oracles.filter(oracle=>oracle.prerequisite&&!oracle.pass)),[]);
+   for(const {case:name,oracle:id}of metadata.activationPolicy.definition.kills)assert.equal(bad.report.checks.find(check=>check.name===name).oracles.find(oracle=>oracle.id===id).pass,false);
+   assert.throws(()=>verifyActivationControl(bad.report,bad.trusted,1,selected),undefined,'required positive witness '+kind);
+   await writeFile(reportPath,JSON.stringify(bad.report));const failure=spawnSync(process.execPath,args,{cwd:base,encoding:'utf8'});assert.equal(failure.error,undefined);assert.equal(failure.status,1,failure.stderr);assert.equal(failure.stderr,'');const denied=JSON.parse(failure.stdout);
+   assert.equal(denied.evidenceValidation,'valid-replay');assert.equal(denied.status,'failed');assert.equal(denied.causalValidation,'failed');assert.equal(denied.rawExit,1);assert(denied.causalError.message.length>0);rejected++;
+  }
   console.log(JSON.stringify({syntheticCurrentSource:true,surface,mutation,status:'passed'}));
  }
  }finally{await rm(temp,{recursive:true,force:true});}

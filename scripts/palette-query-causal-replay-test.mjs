@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
-import {mkdtemp,writeFile,rm} from 'node:fs/promises';
+import {readFile,mkdtemp,writeFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
+import {mutateSupplementalSchemaFixture} from './palette-query-supplemental-schema-fixture.mjs';
 import {buildSupplementalSchemaFixture} from './palette-query-supplemental-evidence-test.mjs';
 import {buildReentryGuardSchemaFixture} from './palette-query-reentry-guard-evidence-test.mjs';
 import {supplementalOracles,verifySupplementalEvidence} from '../ui/gohtmx/tests/browser/palette-query-supplemental-evidence.mjs';
@@ -16,9 +17,9 @@ try {
  for(const [suite,mode]of [['supplemental','control'],['supplemental','active-peer'],['reentry','control'],['reentry','guard-removed']]){
   const selection=causalSelection(suite,'go-qualified',mode,process.env.PALETTE_QUERY_PRODUCTION_POLICY||'strict'),current=await loadCausalInputs(base,selection),runToken=causalRunToken();
   assert.deepEqual(JSON.parse(JSON.stringify(current)),current,'JSON-safe independent source inputs');
-  const f=suite==='supplemental'?buildSupplementalSchemaFixture(selection.surface):buildReentryGuardSchemaFixture(selection.surface,mode),report=f.report;
-  Object.assign(report,current,{runToken});
-  if(suite==='supplemental'&&mode==='active-peer')for(const c of report.checks)for(const [label,value]of Object.entries(c.raw))for(const s of label==='steps'?value:[value])s.state.relationship.activeID=s.peer.rows[0].id;
+  const f=suite==='supplemental'?buildSupplementalSchemaFixture(selection.surface):buildReentryGuardSchemaFixture(selection.surface,mode);
+  if(suite==='supplemental'&&mode!=='control')mutateSupplementalSchemaFixture(f,mode,await readFile(new URL('../ui/gohtmx/assets/ely-api-interaction.js',import.meta.url),'utf8'));
+  const report=f.report;Object.assign(report,current,{runToken});
   if(suite==='supplemental')for(const c of report.checks){c.oracles=supplementalOracles(c,selection.surface);c.status=c.oracles.every(o=>o.pass)?'passed':'failed';c.finalTrace=structuredClone(c.raw.after.log);}
   else {const c=report.checks[0];c.raw.fragment.bytes=current.fixtures['/fragment'].bytes;c.raw.fragment.sha256=current.fixtures['/fragment'].servedSHA256;c.oracles=reentryOracles(c.raw,selection.surface);c.writes=reconstructReentryWrites(c.raw);}
   report.status=mode==='control'?'passed':'failed';

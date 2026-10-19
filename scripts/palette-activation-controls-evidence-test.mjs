@@ -109,10 +109,11 @@ function ordinaryReversal(fixture, mutation) {
   const boundary = emit(['click-boundary'], closed);
   const settled = emit(['result', 'bridge-success'], closed);
   if (mutation === 'core-skip-removed') {
-    // The second same-action host invocation invalidates the generic result.
-    // SDUI's synchronous busy(source) guard admits only the first bridge
+    // A native listener microtask checkpoint exposes the first result before
+    // the owned listener, as retained CI pointer traces demonstrate. SDUI's
+    // synchronous busy(source) guard admits only the first bridge
     // request while it is pending, despite the two public action events.
-    snapshot.log = [...prefix, ...emit(sync, old, '-generic'),
+    snapshot.log = [...prefix, ...emit(sync, old, '-generic'), ...emit(['result'], old),
       ...emit(['direct-action', 'host'], closed), ...emit(changes, closed),
       ...boundary, ...emit(['result'], closed), ...emit(['bridge-success'], closed, '-generic')];
   } else if (mutation === 'family-emit-omitted') {
@@ -245,6 +246,68 @@ export function buildActivationShapeRejectionFixture(surface, mutation) {
   return fixture;
 }
 
+// Each item is a raw-valid semantic substitute for a required positive native
+// witness. The finite inventory is also consumed by current-source CLI replay.
+const ordinaryWitnessKinds = ['missing-command', 'missing-result', 'after-click', 'wrong-payload', 'closed-action', 'wrong-host-handler', 'final-open'];
+const selectionWitnessKinds = ['missing-host-selection', 'missing-document-selection', 'wrong-selection-payload', 'wrong-selection-handler', 'wrong-selection-state', 'selection-after-click'];
+export const activationWitnessAttacks = Object.freeze(Object.fromEntries([
+ ['core-skip-removed', [...ordinaryWitnessKinds, 'generic-selected-option', ...selectionWitnessKinds]],
+ ['template-marker-omitted', [...ordinaryWitnessKinds, ...selectionWitnessKinds]],
+ ['family-emit-omitted', ['final-open', 'final-wrong-selection', ...selectionWitnessKinds]],
+ ['close-after-action', [...ordinaryWitnessKinds, ...selectionWitnessKinds]],
+ ['post-close-owner-bypassed', ['completion-in-later-setup', 'missing-result', 'missing-fresh-command', 'missing-fresh-result', 'fresh-wrong-host-handler', 'fresh-after-click', ...selectionWitnessKinds.map(kind => 'fresh-' + kind)]],
+ ['trailing-notification-guard-removed', ['missing-result', 'missing-reopen', 'closed-reopen', 'reopen-wrong-focus', ...selectionWitnessKinds]],
+ ['empty-enter-fallthrough', ['missing-implicit', 'missing-implicit-submit', 'missing-implicit-command', 'missing-implicit-result', 'implicit-after-keyup', 'missing-explicit-submit', 'missing-explicit-command', 'missing-explicit-return']],
+ ['blanket-palette-submit-prevention', ['missing-explicit-submit', 'submit-after-api-return', 'missing-explicit-return']],
+].map(([mutation,kinds])=>[mutation,Object.freeze(kinds)])));
+export function activationWitnessKinds(surface, mutation) {
+ return (activationWitnessAttacks[mutation] || []).filter(kind => (kind !== 'wrong-payload' || surface !== 'sdui') && (kind !== 'closed-action' || mutation === 'core-skip-removed') && (kind !== 'completion-in-later-setup' || surface === 'sdui'));
+}
+function mutateWitness(fixture, mutation, kind) {
+ assert(activationWitnessKinds(fixture.report.surface, mutation).includes(kind), 'known causal witness regression');
+ const names = mutation === 'post-close-owner-bypassed' ? ['owner.close-rebind','owner.close-bind-absent'] : mutation === 'trailing-notification-guard-removed' ? ['callback.reopen'] : ['empty-enter-fallthrough','blanket-palette-submit-prevention'].includes(mutation) ? ['empty.initial','empty.disabled','empty.filtered'] : ['pointer.activation'];
+ for (const check of fixture.report.checks.filter(check=>names.includes(check.name))) for (const snapshot of Object.values(check.raw)) {
+  const stage = kind.startsWith('fresh-') || kind.startsWith('missing-fresh-') ? 'fresh' : kind.includes('explicit') || kind === 'submit-after-api-return' ? 'explicit' : 'activation';
+  const events = snapshot.log.filter(event=>event.stage===stage);
+  if (!events.length) continue;
+  const local = kind.startsWith('fresh-') ? kind.slice(6) : kind;
+  const palette = event => ['host-change','change'].includes(event.type) && event.detail.name === 'palette';
+  const remove = types => { snapshot.log = snapshot.log.filter(event=>event.stage!==stage || !types.includes(event.type)); };
+  const move = (moving,anchor) => { if (!moving.length || !anchor) return; snapshot.log=snapshot.log.filter(event=>!moving.includes(event)); snapshot.log.splice(snapshot.log.indexOf(anchor)+1,0,...moving); };
+  if (local === 'completion-in-later-setup') { const event=events.find(event=>event.type==='bridge-success'),setup=snapshot.log.find(event=>event.stage==='setup'&&event.type==='stage');if(event){snapshot.log=snapshot.log.filter(value=>value!==event);if(setup){event.stage='setup';snapshot.log.splice(snapshot.log.indexOf(setup)+1,0,event);}} }
+  else if (['missing-command','missing-fresh-command','missing-implicit-command','missing-explicit-command'].includes(local)) remove(transactionTypes);
+  else if (['missing-result','missing-fresh-result','missing-implicit-result'].includes(local)) remove(['result']);
+  else if (local === 'missing-implicit') remove([...transactionTypes,'submit','submit-boundary']);
+  else if (['missing-implicit-submit','missing-explicit-submit'].includes(local)) remove(['submit','submit-boundary']);
+  else if (local === 'missing-explicit-return') remove(['requestSubmit-return']);
+  else if (local === 'missing-reopen') remove(['callback-reopen']);
+  else if (local === 'missing-host-selection' || local === 'missing-document-selection') snapshot.log=snapshot.log.filter(event=>!(event.stage===stage && palette(event) && event.type===(local==='missing-host-selection'?'host-change':'change')));
+  else if (local === 'after-click') move(events.filter(event=>transactionTypes.includes(event.type)), events.find(event=>event.type==='click-boundary'&&event.trusted));
+  else if (local === 'selection-after-click') move(events.filter(palette),events.find(event=>event.type==='click-boundary'&&event.trusted));
+  else if (local === 'implicit-after-keyup') { const up=events.find(event=>event.type==='keyup'),types=[...transactionTypes,'submit','submit-boundary']; if(up)move(events.filter(event=>types.includes(event.type)),up);else remove(types); }
+  else if (local === 'submit-after-api-return') move(events.filter(event=>event.type==='submit'),events.find(event=>event.type==='requestSubmit-return'));
+  else if (local === 'wrong-payload') { for (const event of events) if (event.payload) event.payload.action='foreign-command'; }
+  else if (local === 'wrong-host-handler') { for(const event of events) if(event.type==='host') event.handlerToken=event.state.binding.change; }
+  else if (local === 'closed-action') { for(const event of events) if(['direct-action','host'].includes(event.type)) event.state.open=false; }
+  else if (local === 'generic-selected-option') { for(const type of ['direct-action','host']) { const event=events.find(event=>event.type===type); if(event) for(const row of event.state.rows) row.selected=row.value==='option-file'?'true':'false'; } }
+  else if (local === 'final-open') { if(snapshot===check.raw.after) snapshot.state.open=true; }
+  else if (local === 'final-wrong-selection') { if(snapshot===check.raw.after) for(const row of snapshot.state.rows) row.selected=row.value==='open-file'?'true':'false'; }
+  else if (local === 'wrong-selection-payload') { for(const event of events.filter(palette)) event.detail.value='foreign-value'; }
+  else if (local === 'wrong-selection-handler') { for(const event of events) if(event.type==='host-change'&&palette(event)) event.handlerToken=event.state.binding.action; }
+  else if (local === 'wrong-selection-state') { for(const event of events.filter(palette)) event.state.open=!event.state.open; }
+  else if (local === 'closed-reopen' || local === 'reopen-wrong-focus') { const event=events.find(event=>event.type==='callback-reopen'); if(event) { if(local==='closed-reopen') event.state.open=false; else event.state.focus=copy(event.state.opener); } }
+  else assert.fail('implemented causal witness regression '+kind);
+ }
+ return fixture;
+}
+export function buildActivationWitnessRejectionFixture(surface, mutation, kind) {
+ const fixture=buildActivationMutantSchemaFixture(surface,mutation);
+ mutateWitness(fixture,mutation,kind);finish(fixture);
+ assert.equal(verifyActivationEvidence(fixture.report,fixture.trusted,1).status,'failed','witness regression stays raw-valid red: '+surface+'/'+mutation+'/'+kind);
+ assert.deepEqual(fixture.report.checks.flatMap(check=>check.oracles.filter(oracle=>oracle.prerequisite&&!oracle.pass)),[],'witness regression retains every prerequisite');
+ return fixture;
+}
+
 // This binding is solely for fast schema self-tests. Its non-runtime source
 // digests and template output are invented; it does not claim an actual build.
 // The separate repair replay replaces this with independently compiled metadata.
@@ -277,7 +340,7 @@ function bindSyntheticPolicy(fixture, mutation) {
   return fixture;
 }
 export function runActivationMutantSchemaTests() {
-  let positives = 0, greenRejected = 0, unrelatedRejected = 0, corruptRejected = 0, witnessRejected = 0, cachedRejected = 0, shapeRejected = 0;
+  let positives = 0, greenRejected = 0, unrelatedRejected = 0, corruptRejected = 0, witnessRejected = 0, cachedRejected = 0, shapeRejected = 0, completeWitnessRejected = 0, completeWitnessCachedRejected = 0;
   for (const surface of surfaces) for (const mutation of activationMutations) {
     const selected = {mode: 'repaired', mutation};
     const fixture = bindSyntheticPolicy(buildActivationMutantSchemaFixture(surface, mutation), mutation);
@@ -335,7 +398,19 @@ export function runActivationMutantSchemaTests() {
     assert.throws(() => verifyActivationControl(fixture.report, fixture.trusted, 1, {mode: 'repaired', mutation}), expected);
     shapeRejected++;
   }
-  console.log(`Activation synthetic control evidence: ${positives} valid control/red fixtures, ${greenRejected} mutant greens, ${unrelatedRejected} nondesignated reds, ${corruptRejected} corruptions, ${witnessRejected} raw-valid wrong witnesses, ${cachedRejected} cached-field forgeries, ${shapeRejected} ambiguous shapes rejected. Invented schema observations only; no renderer, browser, or native evidence.`);
-  return {positives, greenRejected, unrelatedRejected, corruptRejected, witnessRejected, cachedRejected, shapeRejected};
+  for (const surface of surfaces) for (const mutation of Object.keys(activationWitnessAttacks)) for (const kind of activationWitnessKinds(surface,mutation)) {
+    const selected={mode:'repaired',mutation},good=bindSyntheticPolicy(buildActivationMutantSchemaFixture(surface,mutation),mutation);
+    const bad=bindSyntheticPolicy(buildActivationWitnessRejectionFixture(surface,mutation,kind),mutation);
+    for(const {case:name,oracle:id} of bad.trusted.activationPolicy.definition.kills) assert.equal(findCase(bad,name).oracles.find(oracle=>oracle.id===id).pass,false,'witness still hits designated kill '+surface+'/'+mutation+'/'+kind);
+    assert.throws(()=>verifyActivationControl(bad.report,bad.trusted,1,selected),undefined,'rejects missing positive witness '+surface+'/'+mutation+'/'+kind);completeWitnessRejected++;
+    const stale=mutateWitness(copy(good),mutation,kind);
+    assert.throws(()=>verifyActivationControl(stale.report,stale.trusted,1,selected));completeWitnessCachedRejected++;
+    const cached=copy(bad);for(let index=0;index<cached.report.checks.length;index++){cached.report.checks[index].oracles=copy(good.report.checks[index].oracles);cached.report.checks[index].status=good.report.checks[index].status;}
+    assert.throws(()=>verifyActivationControl(cached.report,cached.trusted,1,selected));completeWitnessCachedRejected++;
+    const green=copy(bad);green.report.status='passed';for(const check of green.report.checks){check.status='passed';check.oracles.forEach(oracle=>oracle.pass=true);}
+    assert.throws(()=>verifyActivationControl(green.report,green.trusted,0,selected));completeWitnessCachedRejected++;
+  }
+  console.log(`Activation synthetic control evidence: ${positives} valid control/red fixtures, ${greenRejected} mutant greens, ${unrelatedRejected} nondesignated reds, ${corruptRejected} corruptions, ${witnessRejected} raw-valid wrong witnesses, ${cachedRejected} cached-field forgeries, ${shapeRejected} ambiguous shapes, ${completeWitnessRejected} complete witness regressions and ${completeWitnessCachedRejected} cached witness forgeries rejected. Invented schema observations only; no renderer, browser, or native evidence.`);
+  return {positives, greenRejected, unrelatedRejected, corruptRejected, witnessRejected, cachedRejected, shapeRejected, completeWitnessRejected, completeWitnessCachedRejected};
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) runActivationMutantSchemaTests();

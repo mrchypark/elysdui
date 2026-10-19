@@ -24,7 +24,7 @@ export function buildReentrySchemaFixture(surface='go-qualified',red=false){
   const native=(phase,key,state)=>event(phase,state,{trusted:true,key,targetToken:state.focusedToken,targetID:state.focusedID,targetValue:state.focusedValue,targetTag:state.focusedToken===2?'INPUT':'BUTTON',targetConnected:true,targetFocused:true,ctrl:false,alt:false,shift:false,meta:false});
   native('focus',null,{...before,focusedToken:before.openerToken,focusedID:'',focusedValue:''});
   native('focus',null,before);
-  for(const key of ['o','p'])for(const phase of ['keydown','keyup'])native(phase,key,before);
+  for(const [key,phase,query]of [['o','keydown',''],['o','keyup','o'],['p','keydown','o'],['p','keyup','op']]){const state=copy(before);state.query=state.focusedValue=query;native(phase,key,state);}
   native('keydown','Tab',before);native('focus',null,tab);native('keyup','Tab',tab);
   const installed=copy(tab);installed.old=copy(installed.rows[1]);installed.oldRowToken=30;event('installed',installed);
   const arrowEntry=native('keydown','ArrowDown',installed);native('focus',null,started);const focusEntry=event('query-focus-listener',started,{trusted:true});
@@ -43,12 +43,12 @@ export function buildReentrySchemaFixture(surface='go-qualified',red=false){
     raw.log.batches.push({sequence:++sequence,reason:'observer-callback',records:[{type:'attributes',targetToken:2,attribute:'aria-activedescendant',oldValue:openID,finalValue:optionID}],nodes:[...copy(checkpoint.rows),copy(checkpoint.old)],state:copy(checkpoint)});
   }
   event('arrow-continuation-return',checkpoint,{trusted:true,targetToken:11,scheduleSequence:scheduled.sequence,sourceArrowSequence:arrowEntry.sequence,sourceFocusSequence:focusEntry.sequence,queryToken:2,inFocus:false});
+  event('htmx:after:swap',final,{inFocus:false,contextTargetSame:true,tasks:[{targetSame:true,targetToken:30,style:'outerHTML'}]});
+  event('htmx:finally:swap',final,{inFocus:false,contextTargetSame:true,tasks:[{targetSame:true,targetToken:30,style:'outerHTML'}]});
   raw.log.batches.push({sequence:++sequence,reason:'observer-callback',records:[
     {type:'attributes',targetToken:11,attribute:'aria-selected',oldValue:'false',finalValue:'true'},
     {type:'attributes',targetToken:2,attribute:'aria-activedescendant',oldValue:red?optionID:openID,finalValue:openID},
   ],nodes:[...copy(final.rows),copy(final.old)],state:copy(final)});
-  event('htmx:after:swap',final,{inFocus:false,contextTargetSame:true,tasks:[{targetSame:true,targetToken:30,style:'outerHTML'}]});
-  event('htmx:finally:swap',final,{inFocus:false,contextTargetSame:true,tasks:[{targetSame:true,targetToken:30,style:'outerHTML'}]});
   event('document-arrow-bubble',final,{trusted:true,targetToken:11});
   native('keyup','ArrowDown',final);
   const assets={...baseline.assets,'/reentry-observer.js':{...metadata('observer'),contentType:'text/javascript; charset=utf-8'}};
