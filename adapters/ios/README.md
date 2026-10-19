@@ -182,19 +182,33 @@ portable controls complement rather than replace the actual simulator scenario.
 
 ### CI simulator bootstrap
 
-The native workflow creates a dedicated `ElyCI-<unique ID>` simulator instead of
-booting the first device precreated in the runner image. The hardware is explicitly
-`iPhone-17-Pro` (override only with `ELY_IOS_DEVICE_TYPE`); the runtime is the newest
-available iOS runtime that reports support for that device type. For older
-`simctl` JSON, an available device registered to that runtime supplies compatibility
-evidence only. Its data is never reused. Missing compatibility fails the gate;
-there is no automatic hardware fallback, runtime installation, or OS downgrade.
-The application's minimum supported iOS version is unchanged.
+The native workflow uses GitHub's ARM64 `macos-15` runner with Xcode 26.3
+(build `17C529`) selected through `/Applications/Xcode_26.3.app/Contents/Developer`,
+simulator SDK 26.2, and the exact iOS 26.2 runtime
+`com.apple.CoreSimulator.SimRuntime.iOS-26-2`. These are documented in the
+[runner labels](https://github.com/actions/runner-images/blob/main/README.md#available-images)
+and [macOS 15 ARM64 inventory](https://github.com/actions/runner-images/blob/macos-15-arm64/20260907.0337/images/macos/macos-15-arm64-Readme.md).
+The runner label selects an OS family, not an immutable image version. The job
+verifies the selected Xcode version/build and SDK before any build, and records
+the actual OS/image, architecture, worker, source/checkout/tree and run attempt.
+
+It creates a dedicated `ElyCI-<unique ID>` simulator instead of booting a device
+precreated in the runner image. Hardware remains `iPhone-17-Pro` (override only
+with `ELY_IOS_DEVICE_TYPE`). `ELY_IOS_RUNTIME_ID` and `ELY_IOS_RUNTIME_VERSION`
+must both be nonempty in CI. A missing, ambiguous, unavailable, version-mismatched,
+or incompatible pin stops before creation or boot; there is no automatic runtime
+fallback, installation, or hardware change. Outside CI, omitting both runtime
+pins retains selection of the newest available compatible iOS runtime. For older
+`simctl` JSON that omits `supportedDeviceTypes`, an available device registered to
+that runtime supplies compatibility evidence only. It cannot override an explicit
+incompatibility and its data is never reused. The application's minimum supported
+iOS version is unchanged.
 
 `scripts/ci/native/prepare-ios-simulator.sh` invokes the Python orchestrator using Apple's
 [Xcode command-line tools](https://developer.apple.com/documentation/xcode/xcode-command-line-tool-reference).
 It records runner/Xcode/SDK metadata, installed-tool help, the complete preboot
-inventory, selected runtime/type, and the newly created device ID before boot.
+inventory, selected runtime identifier/version/build/type, and the newly created
+device ID before boot.
 `simctl bootstatus <ID> -b` must complete successfully before `device_id` is published
 to the UI-test step. There is one boot attempt and no test retry or assertion change.
 
@@ -220,9 +234,13 @@ passed core tests and the simulator build, then stayed in
 `com.apple.locationd.migrator (CoreLocationMigrator.migrator)` until the old
 five-minute gate timed out. UI tests never started and no result bundle existed.
 A fresh device removes inherited device data from the experiment; first boot can
-still run migration. Only exact-revision macOS CI can establish whether it resolves
-the stall and whether all four UI tests pass. Offline tests validate deterministic
-selection, readiness gating, failure handling, time limits, and owned-only cleanup:
+still run migration. The pinned stack is a separate, supported infrastructure
+experiment, not a proven fix for CoreLocation migration. Only exact-revision macOS
+CI can establish readiness and pass all ten simulator cases with their six expected
+screenshots, raw diagnostics and successful owned-device cleanup. The boot bound,
+test suite and cleanup are unchanged. Offline tests validate fail-closed pins,
+deterministic selection, readiness gating, failure handling, time limits, and
+owned-only cleanup:
 
 ```sh
 python3 scripts/ci/native/test-ios-simulator.py

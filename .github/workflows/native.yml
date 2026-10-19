@@ -29,10 +29,21 @@ jobs:
           python scripts/ci/native/validate-schema.py
 
   ios:
-    runs-on: macos-latest
+    # Supported ARM64 stack; fail closed if the pinned tools/runtime disappear.
+    runs-on: macos-15
     timeout-minutes: 25
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+      ELY_IOS_XCODE_VERSION: '26.3'
+      ELY_IOS_XCODE_BUILD: '17C529'
+      ELY_IOS_SDK_VERSION: '26.2'
+      ELY_IOS_RUNTIME_ID: com.apple.CoreSimulator.SimRuntime.iOS-26-2
+      ELY_IOS_RUNTIME_VERSION: '26.2'
+      ELY_IOS_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
       - uses: actions/checkout@v4
+      - name: Verify pinned iOS toolchain
+        run: python3 scripts/ci/native/ios-simulator.py verify-toolchain
       - uses: actions/setup-go@v5
         with:
           go-version: '1.26.x'
