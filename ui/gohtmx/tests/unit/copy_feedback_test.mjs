@@ -15,7 +15,8 @@ events.length=0;let resolve,writes=0;navigator.clipboard.writeText=()=>{writes++
 const second=factory(root,x=>events.push(x),()=>{throw Error('failure emitted action');});navigator.clipboard.writeText=()=>{throw Error('sync failure');};second.copy(b);assert.equal(events.at(-1).copied,false);navigator.clipboard=undefined;second.copy(b);assert.equal(events.at(-1).error,'clipboard-unavailable');assert.equal(b['aria-busy'],undefined);
 b.disabled=true;const count=events.length;second.copy(b);assert.equal(events.length,count);
 // A deliberately optimistic failure mutation must be killed by these assertions.
-const mutated=code.replace('finish(false); return;', 'finish(true); return;');const mutant=runInNewContext(`${mutated};copyFeedback`,{navigator,setTimeout(){},clearTimeout(){}});let falseSuccess=false;mutant(root,()=>{},()=>falseSuccess=true).copy(a);assert.throws(()=>assert.equal(falseSuccess,false,'missing clipboard must not report success'),assert.AssertionError,'the production failure oracle must kill optimistic success');
+assert.equal(code.split('if (!navigator.clipboard?.writeText) { finish(false); return; }').length-1,1,'unique missing-clipboard mutation anchor');
+const mutated=code.replace('if (!navigator.clipboard?.writeText) { finish(false); return; }', 'if (!navigator.clipboard?.writeText) { finish(true); return; }');const mutant=runInNewContext(`${mutated};copyFeedback`,{navigator,setTimeout(){},clearTimeout(){}});let falseSuccess=false;mutant(root,()=>{},()=>falseSuccess=true).copy(a);assert.throws(()=>assert.equal(falseSuccess,false,'missing clipboard must not report success'),assert.AssertionError,'the production failure oracle must kill optimistic success');
 console.log('Copy feedback: rejection, exact successful payload, reset, pending deduplication, teardown, sync errors, unavailable API, disabled and causal mutation passed');
 
 // Reusing a node after teardown must not let the old promise clear new busy state.

@@ -48,9 +48,9 @@ jobs:
           node scripts/copybutton-complete-evidence-test.mjs
           node scripts/copybutton-complete-timers-test.mjs
           node scripts/copybutton-complete-controls-test.mjs
-      - name: Existing copy helper coverage (unchanged)
+      - name: Copy helper coverage
         run: node ui/gohtmx/tests/unit/copy_feedback_test.mjs
-      - name: Existing browser coverage and two negative controls (unchanged)
+      - name: Retained browser coverage and two negative controls
         run: |
           node ui/gohtmx/tests/browser/copy-contracts-browser-test.mjs
           COPY_NEGATIVE_CONTROL=optimistic-failure node ui/gohtmx/tests/browser/copy-contracts-browser-test.mjs

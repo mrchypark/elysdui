@@ -4,7 +4,7 @@ import {readFile,mkdir,writeFile} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
 import {join} from 'node:path';
 import {chromium} from 'playwright';
-import {copyCases,copyCaseIDs,copyLimitations} from './copybutton-complete-cases.mjs';
+import {copyCases,copyCaseIDs,copyLimitations,copyTransitionCheckpoints} from './copybutton-complete-cases.mjs';
 import {copySchema,copyOracles} from './copybutton-complete-evidence.mjs';
 import {copyMode,copyOutputPath} from './copybutton-complete-mutants.mjs';
 import {loadCopyInputs,copySHA} from './copybutton-complete-inputs.mjs';
@@ -56,7 +56,7 @@ try {
     const fontsReady=async()=>{let deadline;try{const status=await Promise.race([page.evaluate(async()=>{document.body.getBoundingClientRect();await document.fonts.ready;return document.fonts.status;}),new Promise((_,reject)=>{deadline=setTimeout(()=>reject(new Error('Same-case font readiness deadline exceeded')),5000);})]);assert.equal(status,'loaded');await page.evaluate(status=>copyProbe.record('operation',{name:'fonts-ready',status}),status);}finally{clearTimeout(deadline);}};
     const snap=async name=>{
       await fontsReady();
-      if(spec.id.startsWith('appearance-')&&['idle','hover','pressed','focus'].includes(name))await settleCopyAppearance(page,name);
+      if(copyTransitionCheckpoints(spec.id).includes(name))await settleCopyAppearance(page,name,{caseID:spec.id});
       raw.snapshots.push(await page.evaluate(name=>copyProbe.capture(name),name));
       const ariaKey=spec.id==='empty-value'?'empty':spec.id==='explicit-override'?'override':spec.id==='adapter'?'adapter':'a';raw.aria[name]=await page.locator(selector(ariaKey)).ariaSnapshot();
       const path=`screenshots/${spec.id}-${name}.png`,bytes=await page.screenshot({animations:'allow',caret:'initial',timeout:10000});await writeFile(join(output,path),bytes);

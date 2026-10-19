@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {copyCases, copyCaseIDs, copyValue, copyRequiredSources, copyRequiredBrowserPaths, copyLimitations} from './copybutton-complete-cases.mjs';
+import {copyCases, copyCaseIDs, copyValue, copyRequiredSources, copyRequiredBrowserPaths, copyLimitations, copyTransitionCheckpoints} from './copybutton-complete-cases.mjs';
 import {verifyCopyMutation} from './copybutton-complete-mutants.mjs';
 export const copySchema = 'copybutton-complete-v1';
 const same = (a,b) => JSON.stringify(a) === JSON.stringify(b);
@@ -97,13 +97,13 @@ export function copyOracles(check) {
     add(name+'.motion-runs',(reduced&&!a)||['running','finished'].includes(a?.playState)&&finite(a.currentTime)&&a.currentTime>=0);
     add(name+'.cubic-ease-out',(reduced&&!a)||cubic&&close(cubic[0],1/3,.001)&&cubic[1]===1&&close(cubic[2],2/3,.001)&&cubic[3]===1);
   };
+  for(const name of copyTransitionCheckpoints(spec.id)) {
+    const s=snap(name),previous=spec.checkpoints.indexOf(name)>0?snap(spec.checkpoints[spec.checkpoints.indexOf(name)-1]).sequence:0;
+    const rows=log.filter(r=>r.type==='operation'&&r.name==='appearance-transitions'&&r.checkpoint===name&&r.sequence>previous&&r.sequence<s.sequence);
+    const final=rows.slice(-3);
+    add(name+'.real-transitions-settled',same(final.map(r=>r.phase),['observed','observed','settled'])&&final.every(r=>r.control===button(name).token&&r.root===root(name).token&&r.transitions.length===0),true);
+  }
   if(spec.id.startsWith('appearance-')) {
-    for(const name of ['idle','hover','pressed','focus']) {
-      const s=snap(name),previous=spec.checkpoints.indexOf(name)>0?snap(spec.checkpoints[spec.checkpoints.indexOf(name)-1]).sequence:0;
-      const rows=log.filter(r=>r.type==='operation'&&r.name==='appearance-transitions'&&r.checkpoint===name&&r.sequence>previous&&r.sequence<s.sequence);
-      const final=rows.slice(-3);
-      add(name+'.real-transitions-settled',same(final.map(r=>r.phase),['observed','observed','settled'])&&final.every(r=>r.control===button(name).token&&r.root===root(name).token&&r.transitions.length===0),true);
-    }
     add('default-type-and-name',initial.type==='button'&&initial.pressed===null&&raw.aria.idle.includes('button "Copy"')&&(initial.ariaLabel||initial.text||initial.title||'').trim()==='Copy');
     add('default-icon-only',initial.visibleText===''); add('default-square',close(initial.rect.width,24)&&close(initial.rect.height,24));
     add('default-radius',close(parseFloat(initial.style.borderRadius),6)); add('default-nonshrinking',initial.style.flexShrink==='0');
@@ -259,7 +259,7 @@ export function validateCopyRaw(check) {
     if(row.type==='host'){assert(['throw','teardown','rebind','old-action','new-action','new-change'].includes(row.name),'known host observation');fields=['name',...(['new-action','new-change'].includes(row.name)?['value']:[])];}
     assert(fields,'known raw event');keys(row,['sequence','time','type',...fields],'exact raw event fields');
     if(row.type==='operation'&&row.name==='appearance-transitions') {
-      assert(spec.id.startsWith('appearance-')&&['idle','hover','pressed','focus'].includes(row.checkpoint),'appearance transition scope');
+      assert(copyTransitionCheckpoints(spec.id).includes(row.checkpoint),'source-owned presentation transition scope');
       assert(finite(row.control)&&row.control>0&&finite(row.root)&&row.root>0);
       assert(['observed','completed','settled'].includes(row.phase)&&Array.isArray(row.transitions));
       if(row.phase==='settled')assert.equal(row.transitions.length,0);

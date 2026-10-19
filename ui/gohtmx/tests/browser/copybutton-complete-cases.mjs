@@ -33,6 +33,11 @@ export const copyCases = [
   entry('narrow-zoom', 'idle copied reset', 'U2 W9', {zoom: 2}),
 ];
 export const copyCaseIDs = copyCases.map(c => c.id);
+// Only these presentation checkpoints wait for real CSS transitions. The JS
+// confirmation clock and independent check CSSAnimation remain untouched.
+export const copyTransitionCheckpoints = caseID => caseID.startsWith('appearance-')
+  ? ['idle','hover','pressed','focus']
+  : caseID === 'reduced-motion' ? ['idle','copied','before-deadline','deadline'] : [];
 export const copyRequiredSources = [
   'ui/gohtmx/tests/browser/copybutton-complete-cases.mjs',
   'ui/gohtmx/tests/browser/copybutton-complete-evidence.mjs',
@@ -44,6 +49,7 @@ export const copyRequiredSources = [
   'ui/gohtmx/tests/fixtures/copybutton-complete/main_test.go',
   'scripts/copybutton-complete-evidence-test.mjs',
   'scripts/copybutton-complete-transitions-test.mjs',
+  'scripts/copybutton-complete-animations-test.mjs',
   'scripts/copybutton-complete-run.mjs',
   'scripts/copybutton-complete-controls.mjs',
   'scripts/copybutton-complete-controls-test.mjs',

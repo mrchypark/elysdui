@@ -55,14 +55,20 @@ Copy/Copied tooltips must be visible on hover and keyboard focus. This harness
 allows 450ms before taking its hover/focus observation; the separate native
 TooltipTrigger's 400ms default is not a CopyButton requirement. That JS clock
 advance does not establish CSS transition completion. After same-case font
-readiness, appearance idle (including theme setup), hover, pressed and focus
-observations flush layout and await actual `CSSTransition.finished` on the tested
-control, its descendants/pseudos and containing theme surfaces. Two empty
+readiness, appearance idle (including theme setup), hover, pressed and focus,
+and reduced-motion idle, copied, before-deadline and deadline observations flush
+layout and await actual `CSSTransition.finished` on the tested control, its
+descendants/pseudos, its associated sibling tooltip and containing theme surfaces.
+The tooltip's physical identity must remain stable during observation. The shared
+reduced-motion stylesheet assigns a nonzero transition duration even to pseudo
+size/color and tooltip visibility; their first style sample can therefore precede
+the settled rendered state. Two empty
 observations separated by a real Node-time render window establish settlement,
 under one five-second real deadline. Cancellation is recorded and re-observed;
 paused/nonfinishing transitions time out and unrelated failures remain raw errors.
 A checkpoint/control/root-bound settlement witness is required before capture.
-This does not wait for or change the independent check `CSSAnimation`. The copied
+This does not wait for or change the independent check `CSSAnimation`, or advance
+the controlled JavaScript clock. The copied
 confirmation observation requires an immediately updated tooltip on an already
 active trigger. Tooltip position is a web policy. Cubic easing is tested as the
 linear-x cubic Bezier `(1/3, 1, 2/3, 1)`, equivalent to `1-(1-t)^3`, with .001
@@ -72,6 +78,11 @@ of real time before observing the endpoint, separately from the controlled JS
 clock used for the exact 1399/1400ms confirmation boundary. A real CSS start
 sample is retained for the same physical control and successful clipboard cycle,
 so a completed `fill:none` animation is not lost during the font-readiness wait.
+Both live and event-time pseudo sampling use `getAnimations({subtree:true})`, then
+select only `CSSAnimation` objects on the exact element and exact pseudo-element.
+Descendant animations and pseudo `CSSTransition` objects cannot certify rotation.
+The [Web Animations API](https://www.w3.org/TR/web-animations-1/#dom-animatable-getanimations)
+distinguishes the element-only default from pseudo-inclusive subtree discovery.
 Replay requires its own resolved clipboard call after the source-owned deadline
 checkpoint and its own subsequent start witness on the same physical control
 and root. Sequence is strictly later; the controlled clock may remain equal. A
@@ -104,6 +115,7 @@ go test ./ui/gohtmx/tests/fixtures/copybutton-complete
 node ui/gohtmx/tests/unit/copy_feedback_test.mjs
 node scripts/copybutton-complete-evidence-test.mjs
 node scripts/copybutton-complete-timers-test.mjs
+node scripts/copybutton-complete-animations-test.mjs
 node scripts/copybutton-complete-controls-test.mjs
 ```
 
@@ -130,8 +142,10 @@ and one final child completion bound to the exact report bytes. A missing case,
 stale cached pass, omitted positive witness or early exit is an integrity error,
 not a useful baseline failure. All acceptance goes through the same strict gate.
 
-The existing helper/browser CopyButton suite and its two historical controls run
-unchanged for continuity. Their historical weak reports do not close any new
+The existing helper/browser CopyButton suite retains its historical success/error
+assertions and two controls. A repeated pending attempt uses a measured real mouse
+click, with trusted target/busy witnesses, because an enabled-only Playwright
+locator click would wait rather than exercise the temporarily unavailable control. Their historical weak reports do not close any new
 case. Seven repair-specific controls are defined in
 [copybutton-complete-mutants.mjs](../../ui/gohtmx/tests/browser/copybutton-complete-mutants.mjs):
 

@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import {pathToFileURL} from 'node:url';
-import {copyCases, copyCaseIDs, copyValue, copyRequiredSources, copyRequiredBrowserPaths, copyLimitations} from '../ui/gohtmx/tests/browser/copybutton-complete-cases.mjs';
+import {copyCases, copyCaseIDs, copyValue, copyRequiredSources, copyRequiredBrowserPaths, copyLimitations,copyTransitionCheckpoints} from '../ui/gohtmx/tests/browser/copybutton-complete-cases.mjs';
 import {copySchema, copyOracles, validateCopyRaw, verifyCopyEvidence} from '../ui/gohtmx/tests/browser/copybutton-complete-evidence.mjs';
 import {copySHA} from '../ui/gohtmx/tests/browser/copybutton-complete-inputs.mjs';
 import {verifyProcessEvidence, verifyCopyScreenshots} from './copybutton-complete-run.mjs';
 import {testCopyTransitions} from './copybutton-complete-transitions-test.mjs';
+import {testCopyPseudoAnimations} from './copybutton-complete-animations-test.mjs';
 
 // These source-owned, explicitly synthetic examples exercise report admission.
 // They never launch a browser, server, Go build or external process, read a real
@@ -65,7 +66,7 @@ function buildCase(spec) {
       row('animation',{event:'animationstart',control:b().token,root:r().token,call:call.sequence,pseudo:'',icon:'check',animations:[animation(false)]});
     }
     row('operation',{name:'fonts-ready',status:'loaded'});
-    if(spec.id.startsWith('appearance-')&&['idle','hover','pressed','focus'].includes(name)) {
+    if(copyTransitionCheckpoints(spec.id).includes(name)) {
       const observe=(phase,transitions=[])=>row('operation',{name:'appearance-transitions',checkpoint:name,control:b().token,root:r().token,phase,transitions});
       if(name==='idle') {
         const transition={target:b().token,pseudo:'',property:'background-color',playState:'running',currentTime:0,duration:150,outcome:null,error:null};
@@ -284,7 +285,11 @@ export async function testCopySchemaEvidence() {
   witness('appearance-light','checkpoint time mismatch',c=>{c.raw.snapshots.find(s=>s.name==='hover').time+=1;});
   witness('appearance-light','missing mounted root',c=>{c.raw.snapshots[0].roots['#copy-a'].ready=null;});
   witness('appearance-light','detached initial control',c=>{c.raw.snapshots[0].roots['#copy-a'].controls[0].connected=false;});
-  for(const name of ['idle','hover','pressed','focus'])for(const field of ['phase','control','root','checkpoint'])witness('appearance-light','transition settlement '+name+' '+field,c=>{const row=c.raw.log.find(r=>r.name==='appearance-transitions'&&r.checkpoint===name&&r.phase==='settled');row[field]=field==='phase'?'observed':field==='checkpoint'?(name==='hover'?'idle':'hover'):0;});
+  for(const id of ['appearance-light','reduced-motion'])for(const name of copyTransitionCheckpoints(id)) {
+    for(const field of ['phase','control','root','checkpoint'])witness(id,'transition settlement '+name+' '+field,c=>{const row=c.raw.log.find(r=>r.name==='appearance-transitions'&&r.checkpoint===name&&r.phase==='settled');row[field]=field==='phase'?'observed':field==='checkpoint'?(name==='idle'?'copied':'idle'):0;});
+    witness(id,'omitted settlement '+name,c=>{const row=c.raw.log.find(r=>r.name==='appearance-transitions'&&r.checkpoint===name&&r.phase==='settled'),{sequence,time}=row;for(const key of Object.keys(row))delete row[key];Object.assign(row,{sequence,time,type:'mode',value:'success'});});
+    witness(id,'missing real-frame re-observation '+name,c=>{c.raw.log.findLast(r=>r.name==='appearance-transitions'&&r.checkpoint===name&&r.phase==='observed').phase='completed';});
+  }
   witness('appearance-light','missing real-frame re-observation',c=>{c.raw.log.findLast(r=>r.name==='appearance-transitions'&&r.checkpoint==='idle'&&r.phase==='observed').phase='completed';});
   witness('appearance-light','new active transition after earlier empty observations',c=>{const rows=c.raw.log.filter(r=>r.name==='appearance-transitions'&&r.checkpoint==='idle'),transition=clone(rows[0].transitions[0]);rows[0].transitions=[];rows.findLast(r=>r.phase==='observed').transitions=[transition];});
   witness('real-clock','wrong clock',c=>{c.raw.environment.clock='playwright-controlled';});
@@ -503,4 +508,4 @@ export async function testCopyScreenshotEvidence(schemaReport=buildCopySchemaFix
   return {sourceOnly,classification:'synthetic PNG bytes only; no browser screenshots',screenshots:positive.screenshots,rejectedCorruptions:rejected};
 }
 
-if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href){console.log(JSON.stringify(await testCopyTransitions()));console.log(JSON.stringify(await testCopySchemaEvidence()));}
+if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href){console.log(JSON.stringify(testCopyPseudoAnimations()));console.log(JSON.stringify(await testCopyTransitions()));console.log(JSON.stringify(await testCopySchemaEvidence()));}
