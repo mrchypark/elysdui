@@ -374,7 +374,10 @@ register('data', root => {
       modified: (a, b) => ageInSeconds(a.cells[index]?.textContent) - ageInSeconds(b.cells[index]?.textContent),
     }[column];
     if (!compare) return;
-    const rows = direction === 'none' ? original : [...original].sort((a, b) => compare(a, b) * (direction === 'ascending' ? 1 : -1));
+    const rows = direction === 'none' ? original : [...original].sort((a, b) => {
+      const foldersFirst = Number(b.hasAttribute('data-ely-directory-folder')) - Number(a.hasAttribute('data-ely-directory-folder'));
+      return foldersFirst || compare(a, b) * (direction === 'ascending' ? 1 : -1);
+    });
     rows.forEach(row => body.append(row));
     headers.forEach(cell => {
       const sortControl = cell.querySelector('[data-ely-directory-sort]');

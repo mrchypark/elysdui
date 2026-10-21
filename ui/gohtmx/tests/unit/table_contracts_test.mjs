@@ -8,6 +8,7 @@ class Element {
  fire(type) { for(const fn of this.handlers[type]||[]) fn({target:this}); }
  setAttribute(k,v) {this.attrs[k]=v;}
  getAttribute(k) {return this.attrs[k];}
+ hasAttribute(k) {return Object.hasOwn(this.attrs,k);}
  toggleAttribute(k,v) {this[k]=v;}
  closest(s) {return this.parent;}
  querySelector(s) {return this.querySelectorAll(s)[0]||null;}
@@ -42,3 +43,52 @@ const before=f.root.events.length;f.previous.fire('click');f.next.fire('click');
 f.cleanup();f.sort.fire('click');assert.equal(f.heading.getAttribute('aria-sort'),'none','cleanup removes listeners');
 const fresh=fixture();fresh.rows[0].control.disabled=true;fresh.all.checked=true;fresh.all.fire('change');assert.equal(fresh.rows[0].control.checked,false,'select all skips disabled rows');fresh.sort.fire('click');assert.equal(fresh.heading.getAttribute('aria-sort'),'ascending');
 console.log('Paged table production initializer contracts passed');
+
+function directoryFixture() {
+ const root=new Element({elyComponent:'DirectoryListing'});root.id='directory';root.events=[];
+ const columns=['name','size','modified'];
+ const controls=columns.map(value=>Object.assign(new Element(),{value}));
+ const headers=controls.map(control=>{const header=new Element();header.contains=node=>node===control;header.queries={'[data-ely-directory-sort]':[control]};return header;});
+ const rows=[
+  ['Alpha.txt','4 KB','2 days ago',false],
+  ['Zulu','2 KB','1 hour ago',true],
+  ['Zulu.txt','1 KB','1 week ago',false],
+  ['Bravo','8 KB','3 days ago',true],
+  ['Middle.txt','16 KB','1 minute ago',false],
+ ].map(([name,size,modified,folder])=>{const row=new Element();row.cells=[name,size,modified].map(textContent=>Object.assign(new Element(),{textContent}));if(folder)row.setAttribute('data-ely-directory-folder','');return row;});
+ const body={rows:[...rows],append(row){this.rows.splice(this.rows.indexOf(row),1);this.rows.push(row);}};
+ const table={tBodies:[body],tHead:{rows:[{cells:headers}]}};
+ controls.forEach(control=>control.parent=table);
+ root.queries={'[data-ely-directory-sort]':controls};
+ const cleanup=initialize(root);
+ return {root,body,rows,controls,headers,cleanup};
+}
+const directory=directoryFixture(),isolatedDirectory=directoryFixture();
+const directoryNames=()=>directory.body.rows.map(row=>row.cells[0].textContent);
+const callerOrder=directoryNames();
+const orders=[
+ [['Bravo','Zulu','Alpha.txt','Middle.txt','Zulu.txt'],['Zulu','Bravo','Zulu.txt','Middle.txt','Alpha.txt']],
+ [['Zulu','Bravo','Zulu.txt','Alpha.txt','Middle.txt'],['Bravo','Zulu','Middle.txt','Alpha.txt','Zulu.txt']],
+ [['Zulu','Bravo','Middle.txt','Alpha.txt','Zulu.txt'],['Bravo','Zulu','Zulu.txt','Alpha.txt','Middle.txt']],
+];
+for(const [index,control] of directory.controls.entries()) {
+ for(const [click,direction] of ['ascending','descending','none'].entries()) {
+  const before=directory.root.events.length;
+  control.fire('click');
+  assert.deepEqual(directoryNames(),click===2?callerOrder:orders[index][click],`${control.value} ${direction}: folders stay first while each partition sorts; none restores caller order`);
+  directory.headers.forEach((header,i)=>assert.equal(header.getAttribute('aria-sort'),i===index?direction:'none'));
+  assert.equal(directory.root.events.length,before+1,'each directory sort emits once');
+  assert.deepEqual({...directory.root.events.at(-1)},{id:'directory',component:'DirectoryListing',action:'directory-sort',value:control.value,direction});
+  assert.deepEqual(isolatedDirectory.body.rows,isolatedDirectory.rows,'directory instances keep independent order');
+ }
+}
+directory.controls[0].fire('click');directory.controls[0].fire('click');directory.controls[1].fire('click');
+assert.deepEqual(directoryNames(),orders[1][0],'changing columns starts ascending and retains folder partition');
+assert.equal(directory.headers[0].getAttribute('aria-sort'),'none');
+assert.equal(directory.headers[1].getAttribute('aria-sort'),'ascending');
+const sortedOrder=directoryNames(),eventCount=directory.root.events.length;
+directory.cleanup();directory.controls.forEach(control=>control.fire('click'));
+assert.deepEqual(directoryNames(),sortedOrder,'directory cleanup removes sorting listeners');
+assert.equal(directory.root.events.length,eventCount,'directory cleanup prevents sort events');
+isolatedDirectory.cleanup();
+console.log('DirectoryListing production initializer sort contracts passed');
