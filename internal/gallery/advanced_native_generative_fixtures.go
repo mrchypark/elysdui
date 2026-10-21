@@ -22,7 +22,10 @@ func nativeEmbeddingPoints() string {
 		at := [3]float32{}
 		for axis := range at {
 			seed := uint32(i*6 + axis*2)
-			at[axis] = middles[i%4][axis] + (noise(seed)+noise(seed+1)-1)*.3
+			// Quantize onto a fixed grid: arm64 contracts this multiply-add into
+			// FMA while amd64 does not, so the raw float32 differs in the last ULP
+			// between architectures and the committed fixture bytes must not.
+			at[axis] = float32(nativeQuantize(float64(middles[i%4][axis]+(noise(seed)+noise(seed+1)-1)*.3), 1e5))
 		}
 		points[i] = map[string]any{"key": "note-" + strconv.Itoa(i), "label": "Note " + strconv.Itoa(i+1), "group": i % 4, "at": at}
 	}

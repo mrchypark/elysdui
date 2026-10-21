@@ -13,3 +13,6 @@
 
 /* Palette swatches use colors.border; measure samples retain their stronger boundary. */
 .ely-tooling-token[data-kind=color]>i{border-color:var(--color-line,#e1dfdd)}
+
+/* Inspector overlay wrapper; the scope, panel and highlight rules stay local. */
+.ely-tooling-inspector{position:relative}

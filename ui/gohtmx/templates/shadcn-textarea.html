@@ -54,6 +54,6 @@
           {{- if .AriaRequired}} aria-required="{{.AriaRequired}}"{{end}}
           {{- if .AriaErrormessage}} aria-errormessage="{{.AriaErrormessage}}"{{end}}
           data-slot="textarea"{{if .Role}} role="{{.Role}}"{{end}}{{if .TabIndex}} tabindex="{{.TabIndex}}"{{end}}
-          {{- range $k, $v := .Attrs}} {{attrName $k}}="{{$v}}"{{end -}}
+          {{- range $k, $v := .Attrs}} {{attrName $k}}="{{attrValue $k $v}}"{{end -}}
 >{{.Value}}</textarea>
 {{end}}

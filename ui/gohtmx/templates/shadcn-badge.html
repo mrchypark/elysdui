@@ -33,6 +33,6 @@
   {{- if .AriaLabelledby}} aria-labelledby="{{.AriaLabelledby}}"{{end}}
   data-slot="badge" data-variant="{{$variant}}"
   class="{{$base}} {{index $variants $variant}}"
-  {{- range $k, $v := .Attrs}} {{attrName $k}}="{{$v}}"{{end -}}
+  {{- range $k, $v := .Attrs}} {{attrName $k}}="{{attrValue $k $v}}"{{end -}}
 >{{.Text}}</span>
 {{end}}

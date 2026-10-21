@@ -20,7 +20,7 @@ on:
 permissions:
   contents: read
 env:
-  PALETTE_QUERY_PRODUCTION_POLICY: activation-repair
+  PALETTE_QUERY_PRODUCTION_POLICY: audit-candidate
 jobs:
   schema:
     runs-on: ubuntu-latest

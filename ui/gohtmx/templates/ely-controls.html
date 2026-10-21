@@ -4,29 +4,29 @@
 */}}
 
 {{define "clearable-input"}}
-<div id="{{.ID}}" data-ui-component="clearable-input"{{range $k, $v := .Attrs}} {{attrName $k}}="{{$v}}"{{end}}>
+<div id="{{.ID}}" data-ui-component="clearable-input"{{range $k, $v := .Attrs}} {{attrName $k}}="{{attrValue $k $v}}"{{end}}>
   {{if .Label}}<label for="{{.ID}}-input">{{.Label}}</label>{{end}}
-  <div class="ely-control-row">{{template "input" (withProps . "ID" (printf "%s-input" .ID) "Attrs" nil)}}{{template "button" (dict "Type" "button" "Label" "Clear" "Variant" "ghost" "Size" "icon-sm" "Disabled" .Disabled "Attrs" (dict "data-ui-action" "clear" "aria-label" "Clear value"))}}</div>
+  <div class="ely-control-row">{{template "input" (withProps . "ID" (printf "%s-input" .ID) "Attrs" nil)}}{{template "button" (dict "Type" "button" "Label" "Clear" "Variant" "ghost" "Size" "icon-sm" "Disabled" (or .Disabled .Readonly) "Attrs" (dict "data-ui-action" "clear" "aria-label" "Clear value"))}}</div>
 </div>
 {{end}}
 
 {{define "password-input"}}
-<div id="{{.ID}}" data-ui-component="password-input"{{range $k, $v := .Attrs}} {{attrName $k}}="{{$v}}"{{end}}>
+<div id="{{.ID}}" data-ui-component="password-input"{{range $k, $v := .Attrs}} {{attrName $k}}="{{attrValue $k $v}}"{{end}}>
   {{if .Label}}<label for="{{.ID}}-input">{{.Label}}</label>{{end}}
   <div class="ely-control-row">{{template "input" (withProps . "ID" (printf "%s-input" .ID) "Type" "password" "Attrs" nil)}}{{template "button" (dict "Type" "button" "Label" "Show" "Variant" "ghost" "Size" "icon-sm" "Disabled" .Disabled "Attrs" (dict "data-ui-action" "password-toggle" "aria-label" "Show password"))}}</div>
 </div>
 {{end}}
 
 {{define "pin-input"}}
-<div id="{{.ID}}" data-ui-component="pin-input"{{range $k, $v := .Attrs}} {{attrName $k}}="{{$v}}"{{end}}>
-  {{if .Label}}<label for="{{.ID}}-value">{{.Label}}</label>{{end}}
+<div id="{{.ID}}" data-ui-component="pin-input"{{range $k, $v := .Attrs}} {{attrName $k}}="{{attrValue $k $v}}"{{end}}>
+  {{if .Label}}<label{{if .Items}} for="{{.ID}}-pin-0"{{end}}>{{.Label}}</label>{{end}}
   <input id="{{.ID}}-value" type="hidden" name="{{.Name}}" value="{{.Value}}"{{if .Disabled}} disabled{{end}}>
-  <div class="ely-pin-slots" aria-label="{{.Label}}">{{range $i, $_ := .Items}}{{template "input" (dict "ID" (printf "%s-pin-%d" $.ID $i) "Type" "tel" "Class" "ely-pin-slot" "InputMode" "numeric" "Autocomplete" "one-time-code" "MaxLength" 1 "Required" (and $.Required (eq $i 0)) "Disabled" $.Disabled "AriaLabel" (printf "%s digit %d" $.Label (add $i 1)) "Attrs" (dict "data-ui-pin-slot" "true"))}}{{end}}</div>
+  <div class="ely-pin-slots" role="group" aria-label="{{or .Label "PIN"}}">{{range $i, $_ := .Items}}{{template "input" (dict "ID" (printf "%s-pin-%d" $.ID $i) "Type" "tel" "Class" "ely-pin-slot" "InputMode" "numeric" "Autocomplete" "one-time-code" "MaxLength" 1 "Required" (and $.Required (eq $i 0)) "Disabled" $.Disabled "AriaLabel" (printf "%s digit %d" $.Label (add $i 1)) "Attrs" (dict "data-ui-pin-slot" "true"))}}{{end}}</div>
 </div>
 {{end}}
 
 {{define "tag-input"}}
-<div id="{{.ID}}" data-ui-component="tag-input"{{if .Required}} data-ui-required{{end}}{{range $k, $v := .Attrs}} {{attrName $k}}="{{$v}}"{{end}}>
+<div id="{{.ID}}" data-ui-component="tag-input"{{if .Required}} data-ui-required{{end}}{{range $k, $v := .Attrs}} {{attrName $k}}="{{attrValue $k $v}}"{{end}}>
   {{if .Label}}<label for="{{.ID}}-input">{{.Label}}</label>{{end}}
   <input id="{{.ID}}-value" type="hidden" name="{{.Name}}" value="{{.Value}}"{{if .Disabled}} disabled{{end}}>
   <div class="ely-tag-field"><div class="ely-tags" data-ui-tags></div>
@@ -36,16 +36,16 @@
 {{end}}
 
 {{define "key-value-input"}}
-<div id="{{.ID}}" data-ui-component="key-value-input"{{range $k, $v := .Attrs}} {{attrName $k}}="{{$v}}"{{end}}>
+<div id="{{.ID}}" data-ui-component="key-value-input"{{range $k, $v := .Attrs}} {{attrName $k}}="{{attrValue $k $v}}"{{end}}>
   {{if .Label}}<p class="ely-control-label">{{.Label}}</p>{{end}}
-  <div data-ui-key-values>{{range $i, $item := .Items}}<div class="ely-control-row" data-ui-key-value>{{template "input" (dict "ID" (printf "%s-key-%d" $.ID $i) "Name" (printf "%s[key]" $.Name) "Value" $item.Key "Placeholder" $.Placeholder "Disabled" $.Disabled)}}{{template "input" (dict "ID" (printf "%s-value-%d" $.ID $i) "Name" (printf "%s[value]" $.Name) "Value" $item.Value "Placeholder" $.Placeholder "Disabled" $.Disabled)}}{{template "button" (dict "Type" "button" "Label" "Remove" "Disabled" $.Disabled "Attrs" (dict "data-ui-action" "remove-pair" "aria-label" "Remove pair"))}}</div>{{end}}</div>
+  <div data-ui-key-values>{{range $i, $item := .Items}}{{$removeLabel := "Remove pair"}}{{if $item.Key}}{{$removeLabel = printf "Remove %s pair" $item.Key}}{{end}}{{$rowDisabled := or $.Disabled $item.Disabled}}<div class="ely-control-row" data-ui-key-value>{{template "input" (dict "ID" (printf "%s-key-%d" $.ID $i) "Name" (printf "%s[key]" $.Name) "Value" $item.Key "Placeholder" $.Placeholder "Disabled" $rowDisabled)}}{{template "input" (dict "ID" (printf "%s-value-%d" $.ID $i) "Name" (printf "%s[value]" $.Name) "Value" $item.Value "Placeholder" $.Placeholder "Disabled" $rowDisabled)}}{{template "button" (dict "Type" "button" "Label" "Remove" "Disabled" $rowDisabled "Attrs" (dict "data-ui-action" "remove-pair" "aria-label" $removeLabel))}}</div>{{end}}</div>
   <template data-ui-key-value-template><div class="ely-control-row" data-ui-key-value>{{template "input" (dict "Name" (printf "%s[key]" .Name) "Placeholder" .Placeholder "Disabled" .Disabled)}}{{template "input" (dict "Name" (printf "%s[value]" .Name) "Placeholder" .Placeholder "Disabled" .Disabled)}}{{template "button" (dict "Type" "button" "Label" "Remove" "Disabled" .Disabled "Attrs" (dict "data-ui-action" "remove-pair" "aria-label" "Remove pair"))}}</div></template>
   {{template "button" (dict "Type" "button" "Label" "Add" "Disabled" .Disabled "Attrs" (dict "data-ui-action" "add-pair"))}}
 </div>
 {{end}}
 
 {{define "file-dropzone"}}{{$fileClass := ""}}{{if .DropZone}}{{$fileClass = "ui-dropzone-input"}}{{end}}
-<div id="{{.ID}}" data-ui-component="file-dropzone"{{if .DropZone}} data-ui-dropzone{{end}}{{range $k, $v := .Attrs}} {{attrName $k}}="{{$v}}"{{end}}>
+<div id="{{.ID}}" data-ui-component="file-dropzone"{{if .DropZone}} data-ui-dropzone{{end}}{{range $k, $v := .Attrs}} {{attrName $k}}="{{attrValue $k $v}}"{{end}}>
   {{if .Label}}<label for="{{.ID}}-input">{{.Label}}</label>{{end}}
   {{template "input" (dict "ID" (printf "%s-input" .ID) "Name" .Name "Type" "file" "AriaLabel" (or .AriaLabel .Label "Choose files") "Class" $fileClass "Accept" .Accept "Multiple" .Multiple "Required" .Required "Disabled" .Disabled "Attrs" (dict "data-ui-file-input" "true"))}}
   {{if .DropZone}}<span class="ui-dropzone-icon" aria-hidden="true"></span><span>{{if .Multiple}}Drop files here{{else}}Drop a file here{{end}}</span>{{if .Hint}}<small>{{.Hint}}</small>{{end}}{{template "button" (dict "Type" "button" "Label" "Browse" "Variant" "outline" "Disabled" .Disabled "Attrs" (dict "data-ui-file-browse" "true"))}}{{end}}
@@ -54,19 +54,19 @@
 {{end}}
 
 {{define "date-picker"}}
-<div id="{{.ID}}" data-ui-component="date-picker"{{range $k, $v := .Attrs}} {{attrName $k}}="{{$v}}"{{end}}>{{if .Label}}<label for="{{.ID}}-input">{{.Label}}</label>{{end}}{{template "input" (dict "ID" (printf "%s-input" .ID) "Name" .Name "Value" .Value "Type" "date" "Min" .Min "Max" .Max "Required" .Required "Disabled" .Disabled)}}</div>
+<div id="{{.ID}}" data-ui-component="date-picker"{{range $k, $v := .Attrs}} {{attrName $k}}="{{attrValue $k $v}}"{{end}}>{{if .Label}}<label for="{{.ID}}-input">{{.Label}}</label>{{end}}{{template "input" (dict "ID" (printf "%s-input" .ID) "Name" .Name "Value" .Value "Type" "date" "Min" .Min "Max" .Max "Required" .Required "Disabled" .Disabled)}}</div>
 {{end}}
 
 {{define "color-picker"}}
-<div id="{{.ID}}" data-ui-component="color-picker"{{range $k, $v := .Attrs}} {{attrName $k}}="{{$v}}"{{end}}>{{if .Label}}<label for="{{.ID}}-input">{{.Label}}</label>{{end}}{{template "input" (dict "ID" (printf "%s-input" .ID) "Name" .Name "Value" .Value "Type" "color" "Required" .Required "Disabled" .Disabled)}}</div>
+<div id="{{.ID}}" data-ui-component="color-picker"{{range $k, $v := .Attrs}} {{attrName $k}}="{{attrValue $k $v}}"{{end}}>{{if .Label}}<label for="{{.ID}}-input">{{.Label}}</label>{{end}}{{template "input" (dict "ID" (printf "%s-input" .ID) "Name" .Name "Value" .Value "Type" "color" "Required" .Required "Disabled" .Disabled)}}</div>
 {{end}}
 
 {{define "hotkey-input"}}
-<div id="{{.ID}}" data-ui-component="hotkey-input"{{range $k, $v := .Attrs}} {{attrName $k}}="{{$v}}"{{end}}>{{if .Label}}<label for="{{.ID}}-input">{{.Label}}</label>{{end}}{{template "input" (dict "ID" (printf "%s-input" .ID) "Name" .Name "Value" .Value "Placeholder" .Placeholder "Required" .Required "Disabled" .Disabled "Attrs" (dict "data-ui-hotkey" "true"))}}</div>
+<div id="{{.ID}}" data-ui-component="hotkey-input"{{range $k, $v := .Attrs}} {{attrName $k}}="{{attrValue $k $v}}"{{end}}>{{if .Label}}<label for="{{.ID}}-input">{{.Label}}</label>{{end}}{{template "input" (dict "ID" (printf "%s-input" .ID) "Name" .Name "Value" .Value "Placeholder" .Placeholder "Required" .Required "Disabled" .Disabled "Attrs" (dict "data-ui-hotkey" "true"))}}</div>
 {{end}}
 
 {{define "signature-pad"}}
-<div id="{{.ID}}" data-ui-component="signature-pad"{{range $k, $v := .Attrs}} {{attrName $k}}="{{$v}}"{{end}}>
+<div id="{{.ID}}" data-ui-component="signature-pad"{{range $k, $v := .Attrs}} {{attrName $k}}="{{attrValue $k $v}}"{{end}}>
   {{if .Label}}<label for="{{.ID}}-fallback">{{.Label}}</label>{{end}}
   <div class="ui-signature-surface"><canvas id="{{.ID}}-canvas" data-ui-signature aria-label="{{or .Label "Signature"}}"{{if .Disabled}} aria-disabled="true"{{end}}></canvas><span class="ui-signature-guide" aria-hidden="true">×&nbsp; Sign here</span></div>
   {{template "input" (dict "Type" "hidden" "Name" .Name "Value" .Value "Disabled" true "Attrs" (dict "data-ui-signature-value" ""))}}
@@ -77,35 +77,35 @@
 {{end}}
 
 {{define "combobox"}}
-<div id="{{.ID}}" data-ui-component="combobox"{{if .Free}} data-ui-combobox-free{{end}}{{range $k, $v := .Attrs}} {{attrName $k}}="{{$v}}"{{end}}>
+<div id="{{.ID}}" data-ui-component="combobox"{{if .Free}} data-ui-combobox-free{{end}}{{range $k, $v := .Attrs}} {{attrName $k}}="{{attrValue $k $v}}"{{end}}>
   {{if .Label}}<label for="{{.ID}}-input">{{.Label}}</label>{{end}}
   <input id="{{.ID}}-value" type="hidden" name="{{.Name}}" value="{{.Value}}" disabled{{if .Disabled}} data-ui-permanently-disabled{{end}}>
   {{template "input" (dict "ID" (printf "%s-input" .ID) "Value" .Value "Placeholder" .Placeholder "Required" .Required "Disabled" .Disabled "Readonly" .Readonly "Role" "combobox" "AriaLabel" .AriaLabel "Attrs" (dict "data-ui-combobox-input" "true" "aria-autocomplete" "list" "aria-haspopup" "listbox" "aria-expanded" "false" "aria-controls" (printf "%s-listbox" .ID)))}}
-  <ul id="{{.ID}}-listbox" role="listbox" data-ui-combobox-list hidden>{{range $i, $option := .Options}}<li id="{{$.ID}}-option-{{$i}}" role="option" data-ui-option data-ui-label="{{$option.Label}}" data-ui-search="{{$option.Note}} {{$option.Keywords}}" data-value="{{$option.Value}}"{{if $option.Disabled}} aria-disabled="true"{{end}}{{if eq $option.Value $.Value}} aria-selected="true"{{end}}><span>{{$option.Label}}</span>{{if $option.Note}}<small>{{$option.Note}}</small>{{end}}</li>{{end}}</ul>
-  <noscript>{{template "select" (dict "ID" (printf "%s-native" .ID) "Name" .Name "Value" .Value "Placeholder" .Placeholder "Options" .Options "Required" .Required "Disabled" .Disabled)}}</noscript>
+  <ul id="{{.ID}}-listbox" role="listbox" aria-label="{{or .Label .AriaLabel "Options"}}" data-ui-combobox-list hidden>{{range $i, $option := .Options}}<li id="{{$.ID}}-option-{{$i}}" role="option" data-ui-option data-ui-label="{{$option.Label}}" data-ui-search="{{$option.Note}} {{$option.Keywords}}" data-value="{{$option.Value}}"{{if $option.Disabled}} aria-disabled="true"{{end}}{{if eq $option.Value $.Value}} aria-selected="true"{{end}}><span>{{$option.Label}}</span>{{if $option.Note}}<small>{{$option.Note}}</small>{{end}}</li>{{end}}</ul>
+  <noscript>{{template "select" (dict "ID" (printf "%s-native" .ID) "Name" .Name "Value" .Value "Placeholder" .Placeholder "Options" .Options "Required" .Required "Disabled" .Disabled "AriaLabel" (or .Label .AriaLabel "Options"))}}</noscript>
 </div>
 {{end}}
 
 {{define "multi-select"}}
-<div id="{{.ID}}" data-ui-component="multi-select"{{if .Required}} data-ui-required{{end}}{{range $k, $v := .Attrs}} {{attrName $k}}="{{$v}}"{{end}}>
+<div id="{{.ID}}" data-ui-component="multi-select"{{if .Required}} data-ui-required{{end}}{{range $k, $v := .Attrs}} {{attrName $k}}="{{attrValue $k $v}}"{{end}}>
   {{if .Label}}<p id="{{.ID}}-label" class="ely-control-label">{{.Label}}</p>{{end}}
   <div role="group"{{if .Label}} aria-labelledby="{{.ID}}-label"{{end}} data-ui-multi-list>{{range $i, $option := .Options}}<label data-ui-multi-option>{{template "checkbox" (dict "ID" (printf "%s-option-%d" $.ID $i) "Name" $.Name "Value" $option.Value "Checked" (or $option.Selected (eq $option.Value $.Value)) "Disabled" (or $.Disabled $option.Disabled))}}<span>{{$option.Label}}</span></label>{{end}}</div>
 </div>
 {{end}}
 
 {{define "selectable-list"}}
-<div id="{{.ID}}" data-ui-component="selectable-list"{{range $k, $v := .Attrs}} {{attrName $k}}="{{$v}}"{{end}}>
+<div id="{{.ID}}" data-ui-component="selectable-list"{{range $k, $v := .Attrs}} {{attrName $k}}="{{attrValue $k $v}}"{{end}}>
   {{if .Label}}<label for="{{.ID}}-input">{{.Label}}</label>{{end}}
   {{template "select" (dict "ID" (printf "%s-input" .ID) "Name" .Name "Value" .Value "Placeholder" .Placeholder "Options" .Options "Required" .Required "Disabled" .Disabled "Size" .Size "Attrs" (dict "data-ui-selectable-list" "true"))}}
 </div>
 {{end}}
 
 {{define "dialog"}}
-<dialog id="{{.ID}}" data-ui-component="dialog"{{if .Label}} aria-label="{{.Label}}"{{end}}{{range $k, $v := .Attrs}} {{attrName $k}}="{{$v}}"{{end}}>{{.Content}}<form method="dialog">{{template "button" (dict "Type" "submit" "Label" "Close")}}</form></dialog>
+<dialog id="{{.ID}}" data-ui-component="dialog"{{if .Label}} aria-label="{{.Label}}"{{end}}{{range $k, $v := .Attrs}} {{attrName $k}}="{{attrValue $k $v}}"{{end}}>{{.Content}}<form method="dialog">{{template "button" (dict "Type" "submit" "Label" "Close")}}</form></dialog>
 {{end}}
 
 {{define "tabs"}}
-<div id="{{.ID}}" data-ui-component="tabs"{{range $k, $v := .Attrs}} {{attrName $k}}="{{$v}}"{{end}}>
+<div id="{{.ID}}" data-ui-component="tabs"{{range $k, $v := .Attrs}} {{attrName $k}}="{{attrValue $k $v}}"{{end}}>
   {{if .Label}}<p id="{{.ID}}-label" class="ely-control-label">{{.Label}}</p>{{end}}
   <div role="tablist"{{if .Label}} aria-labelledby="{{.ID}}-label"{{end}}>{{range $i, $item := .Items}}{{template "button" (dict "ID" (printf "%s-tab-%d" $.ID $i) "Type" "button" "Role" "tab" "Label" $item.Label "Disabled" $.Disabled "Attrs" (dict "data-ui-tab" "true" "aria-controls" (printf "%s-panel-%d" $.ID $i) "aria-selected" (printf "%t" (or (eq $item.Value $.Value) (and (not $.Value) (eq $i 0))))))}}{{end}}</div>
   {{range $i, $item := .Items}}<section id="{{$.ID}}-panel-{{$i}}" role="tabpanel" aria-labelledby="{{$.ID}}-tab-{{$i}}" data-ui-tab-panel{{if not (or (eq $item.Value $.Value) (and (not $.Value) (eq $i 0)))}} hidden{{end}}>{{$item.Content}}</section>{{end}}

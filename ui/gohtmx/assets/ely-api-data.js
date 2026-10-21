@@ -2,8 +2,26 @@ import { register, emit } from './ely-api.js';
 import './ely-patterns.js';
 
 const visibleRows = root => [...root.querySelectorAll('tbody tr, .ely-data__list > li')];
+// Tree and file nodes carry an icon glyph and a status badge around the label.
+const nodeLabel = node => node.querySelector(':scope > span:not(.ely-data__node-icon)')?.textContent.trim() || node.textContent.trim();
+// Directory columns render human sizes and relative times, not sortable values.
+const sizeInBytes = text => {
+  const match = /([\d.]+)\s*(KB|MB|GB|B)?/i.exec(text || '');
+  if (!match) return -1;
+  const unit = (match[2] || 'B').toUpperCase();
+  const scale = unit === 'GB' ? 1073741824 : unit === 'MB' ? 1048576 : unit === 'KB' ? 1024 : 1;
+  return Number(match[1]) * scale;
+};
+const ageInSeconds = text => {
+  const match = /(\d+)\s*(second|minute|hour|day|week|month|year)/i.exec(text || '');
+  if (!match) return Number.POSITIVE_INFINITY;
+  const scales = { second: 1, minute: 60, hour: 3600, day: 86400, week: 604800, month: 2592000, year: 31536000 };
+  return Number(match[1]) * (scales[match[2].toLowerCase()] || 1);
+};
 const selectionAnchors = new WeakMap();
 const typeAheadStates = new WeakMap();
+const directoryOrders = new WeakMap();
+const directorySorts = new WeakMap();
 const changed = (root, detail = {}) => root.dispatchEvent(new CustomEvent('ely:change', {
   bubbles: true, detail: { id: root.id, component: root.dataset.elyComponent, ...detail },
 }));
@@ -330,6 +348,42 @@ register('data', root => {
     emit(root, 'directory-open', { value: folder, folder });
   }));
   root.querySelectorAll('[data-ely-directory-path]').forEach(control => listen(control, 'click', () => emit(root, 'directory-path', { value: control.value })));
+  // Opening a file records it in the specimen output; folders stay closed.
+  const openFile = node => {
+    const tree = node.closest('.ely-data__file-tree');
+    if (!tree || node.closest('li')?.dataset.elyNodeKind === 'folder') return;
+    const status = tree.querySelector('[data-ely-file-opened]');
+    const label = nodeLabel(node);
+    if (status) status.value = `Opened ${label}.`;
+    changed(root, { action: 'file-open', value: label });
+  };
+  root.querySelectorAll('[data-ely-directory-sort]').forEach(control => listen(control, 'click', () => {
+    const table = control.closest('table');
+    const body = table?.tBodies[0];
+    if (!body) return;
+    const column = control.value;
+    const headers = [...table.tHead.rows[0].cells];
+    const index = headers.findIndex(cell => cell.contains(control));
+    const original = directoryOrders.get(body) || [...body.rows];
+    if (!directoryOrders.has(body)) directoryOrders.set(body, original);
+    const previous = directorySorts.get(body);
+    const direction = previous?.column === column ? (previous.direction === 'ascending' ? 'descending' : 'none') : 'ascending';
+    const compare = {
+      name: (a, b) => a.cells[0].textContent.trim().localeCompare(b.cells[0].textContent.trim(), undefined, { numeric: true }),
+      size: (a, b) => sizeInBytes(a.cells[index]?.textContent) - sizeInBytes(b.cells[index]?.textContent),
+      modified: (a, b) => ageInSeconds(a.cells[index]?.textContent) - ageInSeconds(b.cells[index]?.textContent),
+    }[column];
+    if (!compare) return;
+    const rows = direction === 'none' ? original : [...original].sort((a, b) => compare(a, b) * (direction === 'ascending' ? 1 : -1));
+    rows.forEach(row => body.append(row));
+    headers.forEach(cell => {
+      const sortControl = cell.querySelector('[data-ely-directory-sort]');
+      if (!sortControl) return;
+      cell.setAttribute('aria-sort', sortControl.value === column ? direction : 'none');
+    });
+    if (direction === 'none') directorySorts.delete(body); else directorySorts.set(body, { column, direction });
+    changed(root, { action: 'directory-sort', value: column, direction });
+  }));
   root.querySelectorAll('[data-ely-market-tile], [data-ely-calendar-event]').forEach(control => {
     listen(control, 'click', () => { const detail = { value: control.dataset.value || control.textContent.trim() }; if (control.matches('[data-ely-calendar-event]')) emit(root, 'calendar-event', detail); else changed(root, { action: 'market-tile', ...detail }); });
   });
@@ -493,23 +547,33 @@ register('data', root => {
     const select = event.target.closest('[data-ely-select]');
     if (select && !select.disabled) {
       const list = select.closest('[data-ely-selectable]');
-      const options = list ? [...list.querySelectorAll('[data-ely-select]:not(:disabled)')] : [select];
-      const selected = options.filter(item => item.getAttribute('aria-selected') === 'true');
+      // A tree node keeps its selection state on the role="treeitem" element,
+      // because the button inside it only carries the button role.
+      const treeRoot = select.closest('[role="tree"]');
+      const scope = treeRoot || list;
+      const candidates = scope ? [...scope.querySelectorAll('[data-ely-select]:not(:disabled)')] : [select];
+      const owners = candidates.map(item => treeRoot ? item.closest('[role="treeitem"]') || item : item);
+      const owner = treeRoot ? select.closest('[role="treeitem"]') || select : select;
+      const selected = owners.filter(item => item.getAttribute('aria-selected') === 'true');
       if (list?.getAttribute('aria-multiselectable') === 'true' && event.shiftKey) {
-        const state = selectionAnchors.get(list) || { anchor: selected.at(-1) || select, base: new Set(selected) };
-        const from = options.indexOf(state.anchor), to = options.indexOf(select);
-        const range = new Set(options.slice(Math.min(from, to), Math.max(from, to) + 1));
-        options.forEach(item => item.setAttribute('aria-selected', String(state.base.has(item) || range.has(item))));
+        const state = selectionAnchors.get(list) || { anchor: selected.at(-1) || owner, base: new Set(selected) };
+        const from = owners.indexOf(state.anchor), to = owners.indexOf(owner);
+        const range = new Set(owners.slice(Math.min(from, to), Math.max(from, to) + 1));
+        owners.forEach(item => item.setAttribute('aria-selected', String(state.base.has(item) || range.has(item))));
       } else if (list?.getAttribute('aria-multiselectable') === 'true' && (event.metaKey || event.ctrlKey)) {
-        select.setAttribute('aria-selected', String(select.getAttribute('aria-selected') !== 'true'));
-        selectionAnchors.set(list, { anchor: select, base: new Set(options.filter(item => item.getAttribute('aria-selected') === 'true')) });
+        owner.setAttribute('aria-selected', String(owner.getAttribute('aria-selected') !== 'true'));
+        selectionAnchors.set(list, { anchor: owner, base: new Set(owners.filter(item => item.getAttribute('aria-selected') === 'true')) });
       } else {
-        options.forEach(item => item.setAttribute('aria-selected', String(item === select)));
-        if (list) selectionAnchors.set(list, { anchor: select, base: new Set() });
+        owners.forEach(item => item.setAttribute('aria-selected', String(item === owner)));
+        if (list) selectionAnchors.set(list, { anchor: owner, base: new Set() });
       }
       const value = select.dataset.value || select.value;
-      changed(root, { value, values: options.filter(item => item.getAttribute('aria-selected') === 'true').map(item => item.dataset.value || item.value) });
+      changed(root, { value, values: candidates.filter((item, index) => owners[index].getAttribute('aria-selected') === 'true').map(item => item.dataset.value || item.value) });
       if (select.matches('.ely-data__outline button')) emit(root, 'select-heading', { headingId: select.dataset.elyHeadingId || value });
+      // The tree specimen reports the picked node in its status output.
+      const tree = select.closest('.ely-data__tree-wrap');
+      const treeStatus = tree?.querySelector('[data-ely-tree-selected]');
+      if (treeStatus) treeStatus.value = nodeLabel(select);
     }
     const listItem = event.target.closest('[data-ely-list-item]');
     if (listItem && !listItem.matches('[data-ely-select]') && !listItem.disabled) changed(root, { action: 'activate-item', value: listItem.dataset.value });
@@ -580,6 +644,8 @@ register('data', root => {
     const row = event.target.closest('[data-ely-row-key]');
     const form = row?.nextElementSibling;
     if (form?.matches('[data-ely-row-form]')) { form.hidden = false; form.querySelector('input[name="value"]')?.focus(); }
+    const node = event.target.closest('.ely-data__file-tree [data-ely-tree-node]');
+    if (node) openFile(node);
   });
   listen(root, 'input', event => {
     const converter = event.target.closest('[data-ely-converter]');
@@ -615,6 +681,14 @@ register('data', root => {
       const query = event.target.value.trim().toLocaleLowerCase();
       visibleRows(root).forEach(row => { row.hidden = Boolean(query) && !row.textContent.toLocaleLowerCase().includes(query); });
       changed(root, { value: event.target.value });
+    }
+    if (event.target.matches('[data-ely-symbol-search]')) {
+      const query = event.target.value.trim().toLocaleLowerCase();
+      const panel = event.target.closest('.ely-data__symbol-controls');
+      panel?.querySelectorAll('[data-ely-symbol-add]').forEach(button => {
+        button.hidden = Boolean(query) && !button.textContent.toLocaleLowerCase().includes(query);
+      });
+      changed(root, { action: 'symbol-search', value: event.target.value });
     }
     if (event.target.matches('[data-ely-column]')) {
       const column = [...root.querySelectorAll('.ely-data__table th')].findIndex(cell => cell.textContent.trim() === event.target.value);
@@ -664,6 +738,8 @@ register('data', root => {
       const nodes = [...root.querySelectorAll('[data-ely-tree-node]')];
       const at = nodes.indexOf(event.target);
       const details = event.target.closest('details');
+      // Enter opens a file in the file-tree specimen.
+      if (event.key === 'Enter' && event.target.closest('.ely-data__file-tree')) { openFile(event.target); return; }
       if (event.key === 'ArrowRight' && details && !details.open) { event.preventDefault(); details.open = true; return; }
       if (event.key === 'ArrowLeft' && details?.open) { event.preventDefault(); details.open = false; return; }
       const next = event.key === 'Home' ? nodes[0] : event.key === 'End' ? nodes.at(-1) : ['ArrowUp', 'ArrowDown'].includes(event.key) ? nodes[at + (event.key === 'ArrowDown' ? 1 : -1)] : event.key.length === 1 ? nodes.find(node => node.textContent.trim().toLocaleLowerCase().startsWith(event.key.toLocaleLowerCase())) : null;

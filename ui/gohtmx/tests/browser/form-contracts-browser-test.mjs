@@ -97,9 +97,14 @@ try {
  await check('basic.select.native-selection-multiple-disabled',async () => {
   assert.equal(await page.locator('#select').inputValue(),'b');
   assert.deepEqual(await page.locator('#multiple').evaluate(n=>[...n.selectedOptions].map(o=>o.value)),['a','b']);
-  await page.locator('#select').focus(); await page.keyboard.press('Home');
-  assert.equal(await page.locator('#select').inputValue(),'a');
-  await page.keyboard.press('End'); assert.equal(await page.locator('#select').inputValue(),'b');
+  // Native type-ahead also works on macOS, where a closed select ignores Home/End.
+  // Refocusing clears the native type-ahead buffer between independent searches.
+  for (const [key, expected] of [['a','a'],['b','b'],['u','b']]) {
+   await page.locator('#multiple').focus(); await page.locator('#select').focus();
+   await page.keyboard.press(key);
+   assert.equal(await page.locator('#select').inputValue(),expected);
+  }
+  assert.deepEqual(await page.locator('#multiple').evaluate(n=>[...n.selectedOptions].map(o=>o.value)),['a','b']);
  });
  await check('basic.form.real-htmx-successful-controls',async () => {
   const response = page.waitForResponse(r=>r.url()===`${origin}/submit`);

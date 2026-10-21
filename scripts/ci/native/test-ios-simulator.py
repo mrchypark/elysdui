@@ -180,6 +180,9 @@ class SimulatorTests(unittest.TestCase):
         commands = [call.args[0] for call in run.call_args_list]
         for command in (['git', 'rev-parse', 'HEAD', 'HEAD^{tree}'], ['sw_vers'], ['uname', '-m']):
             self.assertIn(command, commands)
+    def help_calls(self, calls):
+        """Return the `simctl help` captures recorded by the mocked run()."""
+        return [call for call in calls if call.args[0][1:3] == ['simctl', 'help']]
 
     def test_ready_creates_explicit_clean_device(self):
         with patch.object(sim, 'run', side_effect=self.mock_run) as run:
@@ -287,7 +290,9 @@ class SimulatorTests(unittest.TestCase):
     def test_bounded_command_retains_partial_output_and_timeout(self):
         start = time.monotonic()
         with self.assertRaises(sim.CommandFailure) as error:
-            sim.run([sys.executable, '-u', '-c', 'import time; print("partial"); time.sleep(10)'], 'hang.log', timeout=0.1)
+            # The bound must exceed interpreter startup on a loaded runner,
+            # otherwise the child is killed before it can print anything.
+            sim.run([sys.executable, '-u', '-c', 'import time; print("partial"); time.sleep(10)'], 'hang.log', timeout=1.0)
         self.assertEqual(error.exception.code, 124)
         self.assertLess(time.monotonic() - start, 3)
         self.assertEqual((self.root / 'hang.log').read_text(), 'partial\n')
@@ -326,6 +331,120 @@ class SimulatorTests(unittest.TestCase):
         with self.assertRaises(sim.CommandFailure) as error:
             sim.run([sys.executable, '-c', 'raise SystemExit(7)'], 'fail.log')
         self.assertEqual(error.exception.code, 7)
+
+    def test_help_captures_are_non_gating_with_a_longer_bound(self):
+        """The four help captures are evidence only; they must never abort prepare()."""
+        with patch.object(sim, 'run', side_effect=self.mock_run) as run:
+            sim.prepare()
+        calls = run.call_args_list
+        helps = self.help_calls(calls)
+        self.assertEqual(len(helps), 4)
+        for call in helps:
+            self.assertIs(call.kwargs.get('required'), False,
+                          'simctl help captures must not gate preparation')
+            self.assertEqual(call.kwargs.get('timeout'), sim.HELP_TIMEOUT)
+            self.assertGreater(call.kwargs.get('timeout'), 15,
+                               'A cold simctl start needs more than the default bound')
+        # Preparation still reached the real gates and published the device.
+        commands = [call.args[0] for call in calls]
+        self.assertIn(['xcrun', 'simctl', 'list', '-j'], commands)
+        self.assertIn(['xcrun', 'simctl', 'bootstatus', DEVICE, '-b'], commands)
+        self.assertEqual(self.output.read_text(), f'device_id={DEVICE}\n')
+
+    def test_help_timeout_does_not_abort_prepare(self):
+        """A timed-out help capture (exit 124) must not stop preparation."""
+        original = sim.run
+        def failing_help(command, filename, timeout=15, required=True):
+            if command[1:3] == ['simctl', 'help']:
+                # Use the real runner with a tiny bound so the exit-124 timeout
+                # path, the process-group kill and the audit trail are real.
+                return original([sys.executable, '-c', 'import time; time.sleep(10)'],
+                                filename, timeout=0.5, required=required)
+            return self.mock_run(command, filename, timeout=timeout, required=required)
+        with patch.object(sim, 'run', side_effect=failing_help) as run:
+            sim.prepare()
+        commands = [call.args[0] for call in run.call_args_list]
+        self.assertEqual(len(self.help_calls(run.call_args_list)), 4)
+        for call in self.help_calls(run.call_args_list):
+            self.assertIs(call.kwargs.get('required'), False)
+        self.assertIn(['xcrun', 'simctl', 'list', '-j'], commands)
+        self.assertTrue(any(c[1:3] == ['simctl', 'create'] for c in commands))
+        self.assertIn(['xcrun', 'simctl', 'bootstatus', DEVICE, '-b'], commands)
+        self.assertEqual(self.output.read_text(), f'device_id={DEVICE}\n')
+        # The timeout path still recorded exit 124 for every help capture.
+        recorded = [json.loads(line) for line in
+                    (self.root / 'commands.jsonl').read_text().splitlines()]
+        self.assertEqual(len(recorded), 4)
+        self.assertTrue(all(record['exit'] == 124 for record in recorded))
+
+    def test_help_non_zero_exit_does_not_abort_prepare(self):
+        """A non-zero help exit must not stop preparation either."""
+        original = sim.run
+        def failing_help(command, filename, timeout=15, required=True):
+            if command[1:3] == ['simctl', 'help']:
+                # The real runner records the exit but does not raise because
+                # the capture is non-gating.
+                return original([sys.executable, '-c', 'raise SystemExit(3)'],
+                                filename, timeout=timeout, required=required)
+            return self.mock_run(command, filename, timeout=timeout, required=required)
+        with patch.object(sim, 'run', side_effect=failing_help) as run:
+            sim.prepare()
+        commands = [call.args[0] for call in run.call_args_list]
+        self.assertIn(['xcrun', 'simctl', 'bootstatus', DEVICE, '-b'], commands)
+        self.assertEqual(self.output.read_text(), f'device_id={DEVICE}\n')
+        recorded = [json.loads(line) for line in
+                    (self.root / 'commands.jsonl').read_text().splitlines()]
+        self.assertEqual(len(recorded), 4)
+        self.assertTrue(all(record['exit'] == 3 for record in recorded))
+
+    def test_required_inventory_failure_still_aborts_without_publishing(self):
+        """Required gates stay fail-closed: the original exit code surfaces."""
+        def failing_list(command, filename, timeout=15, required=True):
+            if command[1:3] == ['simctl', 'list']:
+                raise sim.CommandFailure(command, 6)
+            return self.mock_run(command, filename, timeout=timeout, required=required)
+        with patch.object(sim, 'run', side_effect=failing_list) as run:
+            with self.assertRaises(sim.CommandFailure) as caught:
+                sim.prepare()
+        self.assertEqual(caught.exception.code, 6)
+        self.assertFalse(self.output.exists(), 'A failed inventory gate must not publish device_id')
+        commands = [call.args[0] for call in run.call_args_list]
+        self.assertFalse(any(c[1:3] == ['simctl', 'create'] for c in commands))
+        self.assertFalse((self.root / 'created-device.json').exists())
+
+    def test_boot_gate_timeout_bound_is_300_and_cleanup_runs(self):
+        """The boot bound stays exactly 300s and a boot failure still cleans up."""
+        def failing_boot(command, filename, timeout=15, required=True):
+            if command[1:3] == ['simctl', 'bootstatus']:
+                self.assertEqual(timeout, 300)
+                self.mock_run(command, filename, timeout=timeout, required=required)
+                raise sim.CommandFailure(command, 124)
+            return self.mock_run(command, filename, timeout=timeout, required=required)
+        with patch.object(sim, 'run', side_effect=failing_boot) as run:
+            with self.assertRaises(sim.CommandFailure) as caught:
+                sim.prepare()
+        self.assertEqual(caught.exception.code, 124)
+        self.assertFalse(self.output.exists())
+        commands = [call.args[0] for call in run.call_args_list]
+        self.assertIn(['xcrun', 'simctl', 'delete', DEVICE], commands)
+        self.assertEqual(sum(c[1:3] == ['simctl', 'bootstatus'] for c in commands), 1)
+        # The owned device is released only after a successful delete.
+        self.assertFalse(json.loads((self.root / 'created-device.json').read_text())['owned'])
+
+    def test_non_gating_timeout_records_124_and_kills_the_process_group(self):
+        """A non-gating capture keeps the exit-124 contract and group kill."""
+        marker = self.root / 'orphan-marker'
+        # The descendant must outlive the bound to prove the group kill works.
+        child = f'import time; from pathlib import Path; time.sleep(3); Path({str(marker)!r}).touch()'
+        parent = f'import subprocess, sys, time; subprocess.Popen([sys.executable, "-c", {child!r}]); print("partial"); time.sleep(10)'
+        # required=False must not raise even though the command times out.
+        sim.run([sys.executable, '-u', '-c', parent], 'nongating.log', timeout=1.0, required=False)
+        time.sleep(3.5)
+        self.assertFalse(marker.exists(), 'Timed-out descendants must not survive the command')
+        self.assertEqual((self.root / 'nongating.log').read_text(), 'partial\n')
+        recorded = [json.loads(line) for line in
+                    (self.root / 'commands.jsonl').read_text().splitlines()]
+        self.assertEqual(recorded[-1]['exit'], 124)
 
 
 if __name__ == '__main__':

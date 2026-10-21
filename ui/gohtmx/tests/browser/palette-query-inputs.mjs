@@ -18,16 +18,25 @@ export async function loadPaletteInputs(base, surface, {productionPolicy = 'stri
   assert.equal(history.tree(paletteBaseline), paletteBaselineTree, 'actual-main recorded tree');
   const sourceFiles = {};
   for (const path of paletteSourcePaths) sourceFiles[path] = paletteSHA(await readFile(join(base, path)));
-  // The original baseline remains immutable at paletteBaseline. This repair
-  // admits only the policy's explicitly reviewed runtime/template/catalogue
-  // and asset bytes. Candidate pins are fixed below and joined to clean HEAD;
-  // every other production input remains byte-equal to baseline.
-  const repairedProduction = new Set(paletteProductionPaths(productionPolicy));
+  // The original baseline remains immutable at paletteBaseline. The reviewed
+  // CommandPalette runtime/template and its generated catalogue fingerprint are
+  // pinned to the independently identified clean HEAD; every other production
+  // input remains byte-equal to baseline.
+  //
+  // The source-owned allowed set of the selected policy decides which
+  // production inputs may equal clean HEAD bytes (`git show HEAD:<path>`).
+  // The audited candidate policy extends that set with the audited candidate
+  // production files and the audited loaded asset, compared the same way. The
+  // allowance is therefore bound to clean HEAD bytes: it holds once the
+  // audited change is committed, and it keeps rejecting the change while it is
+  // still uncommitted in the working tree. No allowance ever lets an
+  // uncommitted tree pass the audited policy.
+  const cleanHeadProduction = new Set(paletteProductionPaths(productionPolicy));
   if (productionPolicy === 'activation-repair') for (const [path, expected] of Object.entries(paletteActivationRepairPins)) {
     assert.equal(sourceFiles[path], expected, 'fixed activation-repair production input: ' + path);
   }
   for (const path of paletteSourcePaths.filter(path => !/tests\/|^scripts\/|^package|^\.github/.test(path))) {
-    const ref = repairedProduction.has(path) ? revision : paletteBaseline;
+    const ref = cleanHeadProduction.has(path) ? revision : paletteBaseline;
     const expected = ref === paletteBaseline ? history.sha256(ref, path) : paletteSHA(execFileSync('git', ['show', `${ref}:${path}`], {cwd: base, maxBuffer: 8 * 1024 * 1024}));
     assert.equal(expected, sourceFiles[path], 'reviewed production input: ' + path);
   }
@@ -42,7 +51,7 @@ export async function loadPaletteInputs(base, surface, {productionPolicy = 'stri
   }
   for (const [path, asset] of assetBodies) {
     const directory = path.startsWith('/assets/sdui') ? 'adapters/gohtmx' : 'ui/gohtmx';
-    const ref = repairedProduction.has(`${directory}${path}`) ? revision : paletteBaseline;
+    const ref = cleanHeadProduction.has(`${directory}${path}`) ? revision : paletteBaseline;
     const expected = ref === paletteBaseline ? history.sha256(ref, `${directory}${path}`) : paletteSHA(execFileSync('git', ['show', `${ref}:${directory}${path}`], {cwd: base, maxBuffer: 16 * 1024 * 1024}));
     assert.equal(expected, asset.sourceSHA256, 'loaded production assets pinned to reviewed source: ' + path);
   }

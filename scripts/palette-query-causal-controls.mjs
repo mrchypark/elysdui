@@ -28,8 +28,8 @@ export function causalSelection(suite,surface,mode,productionPolicy){
 // Fixed checkpoint/suffix sets for the pinned fixture, viewport and gestures.
 // No report, failure count or runtime-selected checkpoint defines this oracle.
 // All six native records per mode at 27895479 had these exact consequences.
-export function causalFailureIDs(suite,mode){
- causalSelection(suite,'go-qualified',mode,'activation-repair');
+export function causalFailureIDs(suite,mode,productionPolicy='strict'){
+ causalSelection(suite,'go-qualified',mode,productionPolicy);
  if(mode==='control')return [];
  if(suite==='reentry')return [...reentryCausalFailures].sort();
  const active=cross(states,['active-local-selected']);
@@ -53,7 +53,7 @@ export function causalFailureIDs(suite,mode){
  assert(ids);assert.equal(new Set(ids).size,ids.length);return [...ids].sort();
 }
 export function assertCausalOutcome(report,selection,exitCode){
- const {suite,mode}=selection,expected=causalFailureIDs(suite,mode),oracles=report.checks.flatMap(check=>check.oracles);
+ const {suite,mode}=selection,expected=causalFailureIDs(suite,mode,selection.productionPolicy),oracles=report.checks.flatMap(check=>check.oracles);
  for(const oracle of oracles)if(oracle.prerequisite)assert.equal(oracle.pass,true,'causal prerequisite '+oracle.id);
  const failed=oracles.filter(o=>!o.pass).map(o=>o.id).sort();
  assert.deepEqual(failed,expected,'exact source-owned causal failure inventory; extra/missing failures require review');

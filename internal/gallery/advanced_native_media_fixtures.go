@@ -54,7 +54,7 @@ func nativeMediaFixtures(name string, props map[string]any) {
 			noise := float32(float64(state>>33) / float64(uint64(1)<<31))
 			fade := min(float32(min(i, 179-i))/10, 1)
 			swell := float32(.55) + float32(.45)*float32(math.Sin(float64(float32(i)/23)))
-			peaks[i] = float64(fade * swell * (.35 + .65*noise))
+			peaks[i] = nativeQuantize(float64(fade*swell*(.35+.65*noise)), 1e6)
 		}
 		encoded, _ := json.Marshal(peaks)
 		p = map[string]any{"Duration": 222, "Position": 64, "Peaks": string(encoded)}
@@ -64,7 +64,7 @@ func nativeMediaFixtures(name string, props map[string]any) {
 			band := float32(i)
 			beat := float32(math.Sin(float64(float32(64)*2.3+band*.7))) * float32(math.Cos(float64(float32(64)*.9+band*.31)))
 			level := (1 - band/52) * (.3 + .35*(1+beat))
-			levels[i] = map[string]any{"Height": float64(level) * 100}
+			levels[i] = map[string]any{"Height": nativeQuantize(float64(level)*100, 1e4)}
 		}
 		p["Samples"] = levels
 	case "VolumeControl":

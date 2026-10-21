@@ -213,12 +213,14 @@ device ID before boot.
 to the UI-test step. There is one boot attempt and no test retry or assertion change.
 
 Every subprocess has a deadline: boot gets 300 seconds, other commands get 15
-seconds each. Timeout kills the command's process group and records exit 124 with
-elapsed time in `commands.jsonl`. The 10-minute workflow step is an outer guard,
-leaving room for metadata, failure diagnostics, and cleanup. Boot failures capture
-postboot inventory, targeted simulator migration/location logs, and host
-CoreSimulator logs, each bounded separately. Partial stdout/stderr is preserved
-in `ios-launch-diagnostics` even if a diagnostic command fails or times out.
+seconds each. The four `simctl help` captures are evidence only, so they get 30
+seconds and never abort preparation. Timeout kills the command's process group
+and records exit 124 with elapsed time in `commands.jsonl`. The 10-minute
+workflow step is an outer guard, leaving room for metadata, failure diagnostics,
+and cleanup. Boot failures capture postboot inventory, targeted simulator
+migration/location logs, and host CoreSimulator logs, each bounded separately.
+Partial stdout/stderr is preserved in `ios-launch-diagnostics` even if a
+diagnostic command fails or times out.
 
 The ownership record allows cleanup after startup failure and an `always()` step
 after the UI stage. Cleanup shuts down and deletes only the newly created UUID;

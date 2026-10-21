@@ -692,3 +692,18 @@
 [data-ely-family="interaction"] [data-direct-keycaps]{display:inline-flex;align-items:center;gap:8px}
 [data-ely-family="interaction"] .ely-interaction__key-stroke{display:inline-flex;align-items:center;gap:4px;color:var(--color-muted);font-size:11px}
 [data-ely-family="interaction"] .ely-interaction__key-stroke kbd{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:20px;padding:0 4px;border:1px solid var(--color-line);border-bottom-width:2px;border-radius:3px;background:var(--surface);color:var(--color-muted);font-family:inherit;font-size:11px;font-weight:400;box-sizing:border-box}
+
+/* Navigation, menu, overlay, and countdown status specimens. */
+[data-ely-family="interaction"] .ely-interaction__breadcrumb-status{color:var(--color-muted,#687087);font-size:.85em}
+[data-ely-family="interaction"] .ely-interaction__navigation-status{color:var(--color-muted,#687087);font-size:.85em}
+[data-ely-family="interaction"] .ely-interaction__context-trigger{background:transparent;border-color:var(--color-line,#cdd2df)}
+[data-ely-family="interaction"] .ely-interaction__context-trigger.is-visually-hidden{height:1px!important;overflow:hidden!important;padding:0!important;position:absolute!important;width:1px!important;clip:rect(0 0 0 0)!important;white-space:nowrap!important}
+[data-ely-family="interaction"] .ely-interaction__mega{display:grid;gap:.75rem;grid-template-columns:repeat(auto-fit,minmax(11rem,1fr))}
+[data-ely-family="interaction"] .ely-interaction__mega section{display:grid;gap:.3rem;align-content:start;padding:.6rem .7rem;border:1px solid var(--color-line,#cdd2df);border-radius:.45rem}
+[data-ely-family="interaction"] .ely-interaction__mega h2{font-size:1em;margin:0}
+[data-ely-family="interaction"] .ely-interaction__mega p{color:var(--color-muted,#687087);margin:0}
+[data-ely-family="interaction"] .ely-interaction__overlay-reference{margin:0;padding:.5rem .6rem;border:1px dashed var(--color-line,#cdd2df);border-radius:.45rem;color:var(--color-muted,#687087)}
+[data-ely-family="interaction"] .ely-interaction__countdown{display:grid;gap:.4rem;justify-items:start;padding:.6rem .7rem;border:1px solid var(--color-line,#cdd2df);border-radius:.45rem}
+[data-ely-family="interaction"] .ely-interaction__countdown>div{display:flex;gap:.5rem;align-items:center}
+[data-ely-family="interaction"] .ely-interaction__countdown output{font-size:1.3rem;font-weight:700;font-variant-numeric:tabular-nums}
+[data-ely-family="interaction"] .ely-interaction__countdown small{color:var(--color-muted,#687087)}

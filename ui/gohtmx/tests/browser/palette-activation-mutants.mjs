@@ -6,7 +6,7 @@ import {createHash} from 'node:crypto';
 // The template control changes renderer input, never a post-render DOM patch.
 // Original activation-definition provenance, not the current candidate revision.
 // Current source identity is independently joined to exact file pins and run HEAD/tree.
-export const activationSourceRevision = 'bde72c5f272105344da55b7b675076de269444c0';
+export const activationSourceRevision = '41d7f50f3072b065445899dcf615de5378013977';
 export const activationSourcePins = Object.freeze({
   core: Object.freeze({sourcePath: 'ui/gohtmx/assets/ely-api.js', servedPath: '/assets/ely-api.js', sourceSHA256: '6039000e8e983d7ebe55cd733cb4012810d2f15f949a2e1286f605966ad12116', sourceBytes: 11271}),
   runtime: Object.freeze({sourcePath: 'ui/gohtmx/assets/ely-api-interaction.js', servedPath: '/assets/ely-api-interaction.js', sourceSHA256: '53f29f4c6232ee96c7e8fa45a61dba5a900a6bb7544f56c163c72052b2f3f5f6', sourceBytes: 179192}),

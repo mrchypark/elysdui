@@ -47,7 +47,7 @@ for(const p of samples){
   ['missing raw report',q=>delete q.data.report],['missing check',q=>q.data.report.checks.pop()],['duplicate check',q=>q.data.report.checks.push(copy(q.data.report.checks[0]))],['missing oracle',q=>q.data.report.checks[0].oracles.pop()],['forged observed and expected cache',q=>{q.data.report.checks[0].oracles[0].observed=q.data.report.checks[0].oracles[0].expected='forged';q.data.report.checks[0].oracles[0].pass=true;}],['raw status inversion',q=>q.data.report.status=q.data.report.status==='passed'?'failed':'passed'],['exit inversion',q=>q.data.exit.exitCode=1-q.data.exit.exitCode],
  ])reject(label,edit);
  // Inventory-layer tests are deliberately separate from raw verifier positives.
- const expected=causalFailureIDs(p.selection.suite,p.selection.mode),base={status:p.selection.mode==='control'?'passed':'failed',checks:[{oracles:expected.map(id=>({id,prerequisite:false,pass:false}))}]};
+ const expected=causalFailureIDs(p.selection.suite,p.selection.mode,p.selection.productionPolicy),base={status:p.selection.mode==='control'?'passed':'failed',checks:[{oracles:expected.map(id=>({id,prerequisite:false,pass:false}))}]};
  assertCausalOutcome(base,p.selection,p.data.child.status);inventoryChecks++;
  for(const id of expected){const r=copy(base);r.checks[0].oracles=r.checks[0].oracles.filter(o=>o.id!==id);assert.throws(()=>assertCausalOutcome(r,p.selection,p.data.child.status));rejected++;}
  for(const [id,prerequisite]of [['foreign.extra',false],['native.prerequisite',true]]){const r=copy(base);r.checks[0].oracles.push({id,pass:false,prerequisite});assert.throws(()=>assertCausalOutcome(r,p.selection,p.data.child.status));rejected++;}

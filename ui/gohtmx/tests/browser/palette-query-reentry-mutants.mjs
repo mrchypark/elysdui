@@ -10,6 +10,7 @@ const sha = value => createHash('sha256').update(value).digest('hex');
 export const reentryRuntimePins = {
   strict: {sourceSHA256:'9aa473de4940934bebe152d88707b706479c84715090dfbf4bb7fcd1b34acc46', reversedSHA256:'567809e61193b63ade6bfc8126d4aea16f961197ce8b38c41079336c7478e685'},
   'activation-repair': {sourceSHA256:'53f29f4c6232ee96c7e8fa45a61dba5a900a6bb7544f56c163c72052b2f3f5f6', reversedSHA256:'7cf470413638b7c8fc9be2f6a6a93e3cfe09c8298fb05d2d8aca066effde2702'},
+  'audit-candidate': {sourceSHA256:'53f29f4c6232ee96c7e8fa45a61dba5a900a6bb7544f56c163c72052b2f3f5f6', reversedSHA256:'7cf470413638b7c8fc9be2f6a6a93e3cfe09c8298fb05d2d8aca066effde2702'},
 };
 export const reentryGuardKills = [
   'reentry.no-old-handler-active-write-after-disposal',

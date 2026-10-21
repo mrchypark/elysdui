@@ -161,7 +161,7 @@ session; DOM/ARIA tests alone do not establish screen-reader announcements.
 | motion/Ripple | `Label`, `CelebrateLabel` | pointer ripple and confetti |
 | motion/Glow | `Content`, `Label` | glow and pulse |
 | motion/Blink | `Content`, `Value`, `Step` | blink, flash tick, failed sign-in shake |
-| motion/ParticleBackground | `Content`, `GradientContent` | particles and tonal gradient |
+| motion/ParticleBackground | `Content`, `GradientLabel` | particles and tonal gradient |
 | interaction/Draggable | `Lanes[].Items`, legacy `Items` | cross-lane move with source/target payload |
 | interaction/Resizable | `Width`, `Height`, `MinWidth`, `MaxWidth`, `MinHeight`, `MaxHeight`, `Shapes`, `SortItems` | bounded resize, rotation, selection and sorting |
 | interaction/LongPress | `Threshold`, `PressAction`, `Action`, `Gestures` | separate press/hold, double-click, pan/zoom |

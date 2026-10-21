@@ -7,11 +7,13 @@
 
 `NewTemplates()`는 브랜드, 기본 폼, 복합 폼, 데이터 표시, 달력, 지도와 Ely 카탈로그 템플릿을 준비한다. 호출자는 자신의 `ParseFS`로 화면을 추가한다. `BindAssets(mux)`는 공통 자산의 개별 경로를 등록하므로 앱의 다른 `/assets/` 핸들러와 함께 사용할 수 있다. 중첩된 Ely 이미지·라이선스·지도 데이터도 같은 방식으로 제공한다.
 
-`Catalogue()`는 공식 목록에 대응하는 44개 분류, 624개 예제, 1,279개 고유 이름을 반환한다. 여러 이름이 한 예제의 관련 변형을 가리킨다. **1,279개 이름이 각각 독립적인 API라는 뜻은 아니다.** 예제에 있던 구현·스타일·동작의 원본은 이 패키지에 있으며 `internal/gallery/templates/demo-*.html`은 호출과 샘플 설정만 담는다.
+`Catalogue()`는 공식 목록에 대응하는 44개 분류, 624개 예제, 1,279개 고유 이름을 반환한다. 여러 이름이 한 예제의 관련 변형을 가리킨다. **1,279개 이름이 각각 독립적인 API라는 뜻은 아니다.** 예제에 있던 구현·스타일·동작의 원본은 이 패키지에 있으며, 갤러리는 `ui.RenderComponent`로 같은 공통 컴포넌트 API를 렌더링한다.
 
 ## 카탈로그 컴포넌트 API
 
 고급 컴포넌트는 `Component{Chapter, Name, ID, Props}`와 `RenderComponent()`로 호출한다. `Name`에는 기본 이름이나 해당 분류의 별칭을 지정한다. 이름이 여러 분류에 있으면 `Chapter`가 필요하다. `ID`는 페이지에서 고유해야 하며, 영문자로 시작하는 128자 이하의 영문·숫자·밑줄·하이픈이다. 잘못된 이름과 ID는 오류를 반환한다. 호출자 `Props`는 변경하지 않는다.
+
+렌더 크기를 제한하려면 `RenderComponentLimited(tpl, writer, component, maxBytes)`를 쓴다. `maxBytes`는 중간 본문과 최종 래퍼 출력에 모두 상한이 되고, 한도를 넘으면 `component rendering exceeds output limit` 오류로 템플릿 실행을 중단한다. `maxBytes`가 0 이하이면 `component render limit must be positive` 오류를 반환한다. 오류는 `unknown component` (이름을 찾지 못한 경우), `component "<name>" requires Chapter` (여러 분류에 같은 이름이 있는 경우), 잘못된 `ID`, 렌더러가 없는 경우로 구분된다. 렌더러는 중복 `ID`를 검사하지 않으므로 페이지 단위 중복 확인은 호출자의 책임이다.
 
 ```go
 err := ui.RenderComponent(templates, writer, ui.Component{
@@ -24,9 +26,11 @@ Go 화면에서는 같은 API를 `{{component (dict "Chapter" "documents" "Name"
 
 공통 속성은 `Title`, `Label`, `Name`, `Value`, `Disabled`, `Required`이다. `Items`, `Options`, `Rows`, `Fields`와 SVG 좌표는 컴포넌트별 데이터이다. 문자열은 Go 템플릿이 이스케이프한다. Markdown은 GFM으로 렌더링하며 입력의 HTML과 위험한 링크 스킴을 실행하지 않는다. QR, Code128과 EAN-13은 실제 호출 값으로 인코딩한다. EAN-13은 12자리 숫자의 검증 숫자를 계산하고, 13자리 입력의 검증 숫자를 확인한다.
 
+Extra `Attrs` accept validated `data-*`, `aria-*`, and `hx-*` names with escaped values. Executable htmx event attributes, `hx-config` (including `data-hx-config`), JavaScript-valued request attributes, and `hx-trigger` filter expressions are rejected with a rendering error. Use declarative request attributes and host-owned event listeners instead of executable attribute values.
+
 각 계열의 속성과 동작은 [기본 표시](advanced-foundation.md), [상호작용](advanced-interaction.md), [데이터](advanced-data.md), [작업 공간](advanced-workspace.md), [통신](advanced-communication.md), [미디어·환경](advanced-native.md), [폼·계정·설정](advanced-forms.md)에 있다.
 
-브라우저의 `ely:change`는 인스턴스의 값 변경을 전달한다. `ely:action`은 `id`, `component`, `action`, `value`와 폼의 `formData`·`values`를 전달하며, 특정 동작은 좌표·파일·선택 경로 등 추가 데이터를 포함한다. 호스트는 `/assets/ely-api.js`의 `mount()`로 처리한다.
+계열의 상태 변경은 대체로 `ely:action`으로 전달한다. 기본 표시 계열(foundation)은 상태 변경을 action이 `change`인 `ely:action`으로 보내고, 데이터·상호작용·폼·작업 공간·통신·미디어 계열과 네이티브 `input`·`textarea`·`select`의 값 변경은 `ely:change`로 보낸다. 기본 표시 계열도 `FocusScope`의 Escape처럼 `ely:change`를 직접 보내는 동작이 있다. `ely:action`은 `id`, `component`, `action`, `value`와 폼의 `formData`·`values`를 전달하며, 특정 동작은 좌표·파일·선택 경로 등 추가 데이터를 포함한다. 호스트는 `/assets/ely-api.js`의 `mount()`로 처리한다.
 
 ```js
 import {mount} from '/assets/ely-api.js';
@@ -36,7 +40,7 @@ const unbind = mount(document.querySelector('#order-entry'), {
 });
 ```
 
-호스트 결과는 `ely:result`, 실패는 `ely:error`로 전달한다. 같은 동작의 오래된 비동기 결과는 무시한다. `unbind()` 또는 요소 제거 시 리스너와 계열의 타이머를 정리한다. 인증·금융 주문·AI 생성·실제 파일 조작은 호출자가 서비스를 연결해야 한다. 요청 버튼을 누른 것만으로 완료했다고 표시하지 않는다. MarkdownEditor의 `preview-markdown`은 `source`를 전달한다. 호스트는 안전하게 렌더링한 결과를 미리보기에 반영한다. 갤러리의 `advanced-markdown.js`가 실제 서버 연결 예제를 제공한다.
+호스트 결과는 `ely:result`, 실패는 `ely:error`로 전달한다. 같은 동작의 오래된 비동기 결과는 무시한다. `unbind()`는 호스트의 `ely:action`·`ely:change` 리스너를 제거하고 대기 중인 호스트 결과를 버린다. 계열의 타이머와 컨트롤러 정리는 컴포넌트 해제 시점(루트 제거 또는 영향을 받는 HTMX 스왑)에 처리한다. 인증·금융 주문·AI 생성·실제 파일 조작은 호출자가 서비스를 연결해야 한다. 요청 버튼을 누른 것만으로 완료했다고 표시하지 않는다. MarkdownEditor의 `preview-markdown`은 `source`를 전달한다. 호스트는 안전하게 렌더링한 결과를 미리보기에 반영한다. 갤러리의 `advanced-markdown.js`가 실제 서버 연결 예제를 제공한다.
 
 `/components/api`는 고급 API 예제, `/components/audit`는 624개 기본 컴포넌트 검사, `?aliases=1`은 분류를 포함한 1,313개 이름 검사다. 검사는 합성 데이터와 두 인스턴스를 사용한다. 외부 서비스는 호출하지 않는다.
 
@@ -112,7 +116,7 @@ on repeated swap notifications.
 
 ## 카탈로그와 검증 범위
 
-`ely-<분류>` 템플릿은 이전 디자인 감사의 고정 데이터 레시피이다. 현재 상세 페이지와 실제 화면은 공통 컴포넌트 API를 사용한다. 레시피의 htmx 요청 주소는 `Endpoint`로 전달하며, 갤러리만 `/components/demo`를 지정한다. 특정 레시피의 고급 금융·편집기·OS·AI 동작은 원본 런타임과 동일하게 구현한 것이 아니다. 외부 서비스와 파일 시스템을 실제로 연결하는 것은 호출자의 책임이다.
+카탈로그 분류는 `ely-api-<분류>` 템플릿과 대응한다. 분류별 컴포넌트는 공통 컴포넌트 API로 렌더링하며, 현재 상세 페이지와 실제 화면도 이 API를 사용한다. htmx 요청 주소는 호출자 `Props`로 전달한다. 특정 레시피의 고급 금융·편집기·OS·AI 동작은 원본 런타임과 동일하게 구현한 것이 아니다. 외부 서비스와 파일 시스템을 실제로 연결하는 것은 호출자의 책임이다.
 
 `internal/gallery`는 검색·샘플 응답·예제 구성을 담당한다. `/components/usage`는 서로 다른 값의 복수 인스턴스, 제출값, 키보드 조작을 확인하는 실행 화면이다. 갤러리는 라이브러리를 사용하는 별도 예제다. 원본 GPUI/WASM API 호환성과 모든 화면의 픽셀 일치는 보장하지 않는다.
 

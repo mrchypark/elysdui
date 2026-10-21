@@ -10,12 +10,29 @@ import uuid
 
 OUTPUT = Path(os.environ.get('ELY_IOS_DIAGNOSTICS_DIR', '/tmp/ely-ios-diagnostics'))
 DEVICE_TYPE = 'com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro'
+# The four `simctl help` captures are evidence only: their stdout is written to
+# files that no control flow reads, so they must never abort preparation. A
+# cold CoreSimulator load on a hosted runner can exceed the default 15s bound
+# (run 39258557368 timed out at 15.01s on the first help call, while the same
+# call cost 1.9s once CoreSimulator was warm), so they get a longer bound.
+# 30s doubles the default and still fits the 10-minute step: worst case is
+# 4x30s help + 4x15s metadata/inventory/create + 300s boot + 45s diagnostics
+# + 30s cleanup = 555s, leaving margin under the 600s step timeout.
+HELP_TIMEOUT = 30
 
 
 class CommandFailure(RuntimeError):
     def __init__(self, command, code):
         super().__init__(f'{command} exited {code}')
         self.code = code
+
+
+def note(message):
+    """Report on stderr without ever raising; a notice must not fail the run."""
+    try:
+        print(message, file=sys.stderr)
+    except Exception:
+        pass
 
 
 def run(command, filename, timeout=15, required=True):
@@ -37,7 +54,15 @@ def run(command, filename, timeout=15, required=True):
                               'elapsed_seconds': round(time.monotonic() - start, 2)}) + '\n')
     if code and required:
         raise CommandFailure(command, code)
-    return (OUTPUT / filename).read_text()
+    if code:
+        note(f'Non-gating command exited {code}: {" ".join(command)}')
+    try:
+        return (OUTPUT / filename).read_text()
+    except OSError:
+        # A non-gating capture must never raise, not even on an unreadable file.
+        if required:
+            raise
+        return ''
 
 
 def select(inventory, device_type, runtime_id=None, runtime_version=None):
@@ -126,7 +151,10 @@ def prepare():
         raise RuntimeError('Existing ownership record: clean it up before preparing another simulator')
     verify_toolchain()
     for command in ('create', 'bootstatus', 'spawn', 'delete'):
-        run(['xcrun', 'simctl', 'help', command], command + '-help.txt')
+        # Non-gating: these captures are evidence for the diagnostics artifact,
+        # not a gate. A timeout or non-zero exit must not stop preparation.
+        run(['xcrun', 'simctl', 'help', command], command + '-help.txt',
+            timeout=HELP_TIMEOUT, required=False)
     inventory = json.loads(run(['xcrun', 'simctl', 'list', '-j'], 'inventory-before.json'))
     device_type = os.environ.get('ELY_IOS_DEVICE_TYPE', DEVICE_TYPE)
     runtime_id = os.environ.get('ELY_IOS_RUNTIME_ID')
