@@ -28,6 +28,7 @@ jobs:
           - {surface: sdui, mutation: post-close-owner-bypassed}
     env:
       PALETTE_QUERY_SURFACE: ${{ matrix.surface }}
+      PALETTE_QUERY_PRODUCTION_POLICY: audit-candidate
       PALETTE_ACTIVATION_MODE: repaired
       PALETTE_ACTIVATION_MUTATION: ${{ matrix.mutation }}
     steps:

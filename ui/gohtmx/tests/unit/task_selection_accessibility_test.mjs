@@ -1,0 +1,37 @@
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+import {runInNewContext} from 'node:vm';
+
+const source=readFileSync(new URL('../../assets/ely-api-communication.js',import.meta.url),'utf8');
+const code=source.slice(source.indexOf('const projectStatuses='),source.indexOf("\nregister('communication'"));
+const calendar=source.slice(source.indexOf('const calendarDate='),source.indexOf('const mountCalendar='));
+const listeners={},events=[];
+const row=id=>{
+  const item={dataset:{taskId:id},output:{},querySelector:s=>s==='output'?item.output:item.button};
+  item.button={disabled:false,attrs:{'aria-pressed':'false'},setAttribute(k,v){this.attrs[k]=v},focus(){this.focused=true},matches:()=>false,closest:s=>s==='[data-project-row]'?item:null};
+  item.box={value:id,checked:false,matches:s=>s==='[data-ely-task-done]'||s==='input,textarea,select',closest:s=>s==='[data-project-row]'?item:s==='input'?item.box:null};
+  return item;
+};
+const rows=[row('one'),row('two'),row('disabled')];rows[2].button.disabled=true;
+const root={dataset:{},querySelector:()=>null,querySelectorAll:s=>s==='[data-project-row]'?rows:[],addEventListener(type,fn){(listeners[type]??=[]).push(fn)}};
+const mount=runInNewContext(calendar+code+'\nmountProject',{emit:(_root,action,detail)=>events.push({action,...detail})});
+mount(root,{signal:{addEventListener(){}}});
+const fire=(type,target,key)=>{const event={target,key,preventDefault(){this.prevented=true}};listeners[type].forEach(fn=>fn(event));return event};
+const pressed=()=>rows.map(r=>r.button.attrs['aria-pressed']);
+fire('click',rows[0].button);assert.deepEqual(pressed(),['true','false','false']);
+rows[0].box.checked=true;fire('click',rows[0].box);fire('change',rows[0].box);
+assert.deepEqual(pressed(),['true','false','false']);assert.equal(rows[0].output.textContent,'Done');
+assert.deepEqual(events.pop(),{action:'toggle-task',taskId:'one',done:true});
+assert.equal(fire('keydown',rows[0].button,'ArrowDown').prevented,true);
+assert.equal(rows[1].button.focused,true);assert.deepEqual(pressed(),['false','true','false']);
+fire('keydown',rows[1].button,'ArrowDown');assert.deepEqual(pressed(),['false','true','false']);
+fire('keydown',rows[1].button,'ArrowUp');assert.deepEqual(pressed(),['true','false','false']);
+fire('keydown',rows[1].box,'ArrowUp');assert.deepEqual(pressed(),['true','false','false']);
+fire('keydown',rows[1].button,'Enter');assert.deepEqual(pressed(),['false','true','false']);assert.deepEqual(events.pop(),{action:'open-task',value:'two'});
+fire('dblclick',rows[0].button);assert.deepEqual(events.pop(),{action:'open-task',value:'one'});
+fire('dblclick',rows[0].box);assert.equal(events.length,0);
+fire('click',rows[2].button);fire('dblclick',rows[2].button);fire('keydown',rows[2].button,'Enter');
+assert.deepEqual(pressed(),['false','true','false']);assert.equal(events.length,0);
+assert.equal(fire('keydown',rows[1].button,' ').prevented,undefined,'Space retains native button activation');
+fire('click',rows[0].button);assert.deepEqual(pressed(),['true','false','false']);
+console.log('Task selection: independent checkbox, pressed state, keyboard focus, disabled guard and exact host actions passed');

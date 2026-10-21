@@ -18,7 +18,7 @@ on:
       - 'package*.json'
       - '.github/workflows/palette-query.yml'
 env:
-  PALETTE_QUERY_PRODUCTION_POLICY: activation-repair
+  PALETTE_QUERY_PRODUCTION_POLICY: audit-candidate
 jobs:
   palette-query:
     runs-on: ubuntu-latest

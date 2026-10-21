@@ -6,7 +6,10 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {loadPaletteInputs,paletteSHA as sha} from './palette-query-inputs.mjs';
 import {activationSelection,activationPolicy,activationRepairSourcePaths,activationTemplateMarkerCounts} from './palette-activation-policy.mjs';
+import {paletteActivationRepairPins} from './palette-query-production-policy.mjs';
 import {applyActivationMutation} from './palette-activation-mutants.mjs';
+import {applyActivationAuditCandidateMutation} from './palette-activation-audit-candidate.mjs';
+import {paletteProductionPaths} from './palette-query-production-policy.mjs';
 export const activationBaseline='ee28495c7cd6581d49d53874e831c6cea40930a4';
 export const activationBaselineTree='c2d6ed91c378f59070fde8d626df2748e9fd837c';
 export const activationSourcePaths=[
@@ -19,17 +22,26 @@ export const activationSourcePaths=[
  '.github/workflows/palette-activation.yml','ui/gohtmx/tests/browser/diagnostics/palette-activation.md',
 ];
 export async function loadActivationInputs(base,surface,options={}){
- const selected=activationSelection(options),inputs=await loadPaletteInputs(base,surface,selected.mode==='repaired'?{productionPolicy:'activation-repair'}:{}),history=loadPaletteHistory(base);
+ const selected=activationSelection(options),productionPolicy=selected.productionPolicy||(selected.mode==='repaired'?'activation-repair':'strict'),inputs=await loadPaletteInputs(base,surface,{productionPolicy}),history=loadPaletteHistory(base);
  assert.equal(history.tree(activationBaseline),activationBaselineTree);
- // Baseline is immutable; repaired mode admits only the two fixed JS assets.
- // The actual template is independently pinned by the mutation definition.
- for(const [path,entry]of inputs.assetBodies){if(!path.startsWith('/assets/'))continue;if(selected.mode==='repaired'&&['/assets/ely-api.js','/assets/ely-api-interaction.js'].includes(path))continue;const dir=path.startsWith('/assets/sdui')?'adapters/gohtmx':'ui/gohtmx';assert.equal(history.sha256(activationBaseline,dir+path),entry.sourceSHA256);}
+ // Baseline is immutable. Repaired assets must match explicit reviewed pins;
+ // neither arbitrary HEAD bytes nor an unpinned CSS change is admitted.
+ for(const [path,entry]of inputs.assetBodies){
+  if(!path.startsWith('/assets/'))continue;
+  const dir=path.startsWith('/assets/sdui')?'adapters/gohtmx':'ui/gohtmx',sourcePath=dir+path;
+  if(productionPolicy==='audit-candidate'&&paletteProductionPaths(productionPolicy).includes(sourcePath))continue;
+  if(selected.mode==='repaired'&&['/assets/ely-api.js','/assets/ely-api-interaction.js','/assets/ely-api-interaction.css','/assets/ely/icons/check.svg'].includes(path)){
+   assert.equal(entry.sourceSHA256,paletteActivationRepairPins[sourcePath],'fixed activation repaired asset: '+path);
+   continue;
+  }
+  assert.equal(history.sha256(activationBaseline,sourcePath),entry.sourceSHA256);
+ }
  inputs.activationPolicy=activationPolicy(selected);inputs.activationRepairSourceFiles={};inputs.activationRenderMutation={};
  let transformed;
  if(selected.mode==='repaired'){
   for(const path of activationRepairSourcePaths)inputs.activationRepairSourceFiles[path]=sha(await readFile(join(base,path)));
   const sources=Object.fromEntries(await Promise.all([['core','ui/gohtmx/assets/ely-api.js'],['runtime','ui/gohtmx/assets/ely-api-interaction.js'],['template','ui/gohtmx/templates/ely-api-interaction.html']].map(async([key,path])=>[key,await readFile(join(base,path),'utf8')])));
-  transformed=applyActivationMutation(sources,selected.mutation);assert.deepEqual(transformed.metadata,inputs.activationPolicy.definition);
+  transformed=(productionPolicy==='audit-candidate'?applyActivationAuditCandidateMutation:applyActivationMutation)(sources,selected.mutation);assert.deepEqual(transformed.metadata,inputs.activationPolicy.definition);
   for(const [key,path]of [['core','/assets/ely-api.js'],['runtime','/assets/ely-api-interaction.js']]){
    const entry=inputs.assetBodies.get(path),body=Buffer.from(transformed.sources[key]),file=transformed.metadata.files[key];
    assert.equal(entry.sourceSHA256,file.sourceSHA256);assert.equal(sha(body),file.servedSHA256);

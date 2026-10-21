@@ -34,7 +34,7 @@
   class="{{$base}}"
   {{- if .AriaLabel}} aria-label="{{.AriaLabel}}"{{end}}
   {{- if .Title}} title="{{.Title}}"{{end}}
-  {{- range $k, $v := .Attrs}} {{attrName $k}}="{{$v}}"{{end -}}
+  {{- range $k, $v := .Attrs}} {{attrName $k}}="{{attrValue $k $v}}"{{end -}}
 >{{.Text}}</kbd>
 {{end}}
 
@@ -47,7 +47,7 @@
   data-slot="kbd-group"
   class="{{$groupBase}}"
   {{- if .AriaLabel}} aria-label="{{.AriaLabel}}"{{end}}
-  {{- range $k, $v := .Attrs}} {{attrName $k}}="{{$v}}"{{end -}}
+  {{- range $k, $v := .Attrs}} {{attrName $k}}="{{attrValue $k $v}}"{{end -}}
 >
   {{- if .Keys -}}
     {{- range $i, $key := .Keys -}}

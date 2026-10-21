@@ -34,7 +34,7 @@
          {{- if .AriaLabel}} aria-label="{{.AriaLabel}}"{{end}}
          {{- if .AriaLabelledby}} aria-labelledby="{{.AriaLabelledby}}"{{end}}
          {{- if .AriaDescribedby}} aria-describedby="{{.AriaDescribedby}}"{{end}}
-         {{- range $k, $v := .Attrs}} {{attrName $k}}="{{$v}}"{{end -}}
+         {{- range $k, $v := .Attrs}} {{attrName $k}}="{{attrValue $k $v}}"{{end -}}
   >
   <span class="{{$thumbBase}} {{$thumbSize}}" data-slot="switch-thumb" aria-hidden="true"></span>
 </span>

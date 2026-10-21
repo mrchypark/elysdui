@@ -2,6 +2,7 @@ package httpencoding
 
 import (
 	"fmt"
+	"math/bits"
 	"sort"
 )
 
@@ -95,6 +96,8 @@ func Normalize(input *Options, profile string) (Options, error) {
 
 // MeetsThresholds reports whether a representation meets all configured size
 // thresholds. With zero savings thresholds even an expanded encoding qualifies.
+// The savings percentage is compared with exact integer arithmetic, so an exact
+// percentage meets its threshold and large sizes never overflow.
 func MeetsThresholds(originalSize, encodedSize int, o Options) bool {
 	if originalSize < o.MinBytes {
 		return false
@@ -103,7 +106,20 @@ func MeetsThresholds(originalSize, encodedSize int, o Options) bool {
 	if o.MinSavingsBytes > 0 && saved < o.MinSavingsBytes {
 		return false
 	}
-	return o.MinSavingsPercent == 0 || (originalSize > 0 && float64(saved)/float64(originalSize)*100 >= float64(o.MinSavingsPercent))
+	if o.MinSavingsPercent <= 0 {
+		return true
+	}
+	if originalSize <= 0 || saved <= 0 {
+		return false
+	}
+	// Compare saved*100 against percent*originalSize as 128-bit products so the
+	// percentage is exact for every integer input and cannot overflow.
+	savedHi, savedLo := bits.Mul64(uint64(saved), 100)
+	needHi, needLo := bits.Mul64(uint64(o.MinSavingsPercent), uint64(originalSize))
+	if savedHi != needHi {
+		return savedHi > needHi
+	}
+	return savedLo >= needLo
 }
 
 // Select chooses from already encoded representations using normalized options.

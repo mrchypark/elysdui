@@ -17,6 +17,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/mrchypark/elysdui/internal/httpencoding"
 )
@@ -36,12 +37,89 @@ type Option struct {
 
 var extraAttributeName = regexp.MustCompile(`^(data|aria|hx)-[a-z0-9]+(-[a-z0-9]+)*$`)
 
+// htmxEventAttributeName matches the htmx event handler family. htmx runs the
+// attribute value as JavaScript, so these names are never allowed.
+var htmxEventAttributeName = regexp.MustCompile(`^hx-on(?::|-|$)`)
+
+// htmxScriptValueAttributes are the htmx attributes whose value htmx evaluates
+// as JavaScript source when it starts with "js:" or "javascript:".
+var htmxScriptValueAttributes = map[string]bool{
+	"hx-get":     true,
+	"hx-post":    true,
+	"hx-put":     true,
+	"hx-patch":   true,
+	"hx-delete":  true,
+	"hx-query":   true,
+	"hx-action":  true,
+	"hx-confirm": true,
+	"hx-vals":    true,
+	"hx-headers": true,
+}
+
 func attrName(name string) (template.HTMLAttr, error) {
 	if !extraAttributeName.MatchString(name) {
 		return "", fmt.Errorf("unsupported component attribute %q", name)
 	}
+	// hx-config can override request.action with executable JavaScript after
+	// the individual request attributes have been validated.
+	if htmx := htmxAttributeName(name); htmxEventAttributeName.MatchString(htmx) || htmx == "hx-config" {
+		return "", fmt.Errorf("unsupported component attribute %q", name)
+	}
 	// Only the validated name bypasses escaping. Attribute values remain escaped.
 	return template.HTMLAttr(name), nil
+}
+
+// htmxAttributeName strips the optional "data-" prefix so the htmx prefixed
+// and unprefixed spellings share one rule.
+func htmxAttributeName(name string) string {
+	return strings.TrimPrefix(name, "data-")
+}
+
+// attrValue rejects values htmx would execute and returns the value as plain
+// text so html/template keeps escaping it.
+func attrValue(name string, value any) (string, error) {
+	text := attrValueText(value)
+	htmx := htmxAttributeName(name)
+	if htmxScriptValueAttributes[htmx] && isScriptPrefix(scriptValue(text)) {
+		return "", fmt.Errorf("unsupported component attribute value for %q", name)
+	}
+	if htmx == "hx-trigger" && strings.Contains(text, "[") {
+		return "", fmt.Errorf("unsupported component attribute value for %q", name)
+	}
+	return text, nil
+}
+
+// attrValueText renders a caller supplied attribute value as plain text.
+// Trusted markup types are flattened to text so they stay escaped in the
+// output instead of bypassing it.
+func attrValueText(value any) string {
+	switch v := value.(type) {
+	case nil:
+		return ""
+	case string:
+		return v
+	case fmt.Stringer:
+		return v.String()
+	default:
+		return fmt.Sprint(value)
+	}
+}
+
+// scriptValue drops whitespace and control characters and lowercases the value
+// so "JS:", " js:" and "java\tscript:" cannot hide a script prefix.
+func scriptValue(value string) string {
+	var b strings.Builder
+	for _, r := range value {
+		if unicode.IsSpace(r) || unicode.IsControl(r) {
+			continue
+		}
+		b.WriteRune(unicode.ToLower(r))
+	}
+	return b.String()
+}
+
+func isScriptPrefix(value string) bool {
+	return strings.HasPrefix(value, "js:") || strings.HasPrefix(value, "javascript:")
 }
 
 func NewTemplates() (*template.Template, error) {
@@ -87,6 +165,9 @@ func BindAssets(mux *http.ServeMux) error {
 // BindAssetsWithOptions registers assets using a private immutable encoding cache.
 // A nil options pointer uses the shared default cache.
 func BindAssetsWithOptions(mux *http.ServeMux, options *CompressionOptions) error {
+	if mux == nil {
+		return fmt.Errorf("asset binding requires a mux")
+	}
 	normalized, err := httpencoding.Normalize(options, "static")
 	if err != nil {
 		return err
@@ -123,6 +204,12 @@ func prepareAssetsWithOptions(options CompressionOptions) (map[string]http.Handl
 // The filesystem must be rooted at its asset directory; paths must not overlap
 // routes already registered on mux. It does not register the UI assets itself.
 func BindAssetFS(mux *http.ServeMux, assets fs.FS, options *CompressionOptions) error {
+	if mux == nil {
+		return fmt.Errorf("asset binding requires a mux")
+	}
+	if assets == nil {
+		return fmt.Errorf("asset binding requires a filesystem")
+	}
 	normalized, err := httpencoding.Normalize(options, "static")
 	if err != nil {
 		return err
@@ -285,6 +372,7 @@ func Funcs() template.FuncMap {
 		"menuHasItems":      menuHasItems,
 		"menuContextConfig": menuContextConfig,
 		"attrName":          attrName,
+		"attrValue":         attrValue,
 		"contains":          strings.Contains,
 		"hasPrefix":         strings.HasPrefix,
 		"deref": func(v any) any {

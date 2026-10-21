@@ -262,6 +262,27 @@
 [data-ely-family="interaction"] .ely-interaction__fab[data-interaction-icon-only="true"]{padding:0;width:2.5rem}
 [data-ely-family="interaction"] .ely-interaction__segmented [data-interaction-icon]{display:inline-block;height:1em;margin-right:.3rem;vertical-align:-.14em;width:1em}
 [data-ely-family="interaction"] .ely-interaction__confirm-specimens,[data-ely-family="interaction"] .ely-interaction__copy-specimens{align-items:center;display:flex;flex-wrap:wrap;gap:.65rem}
+/* CopyButton keeps one focusable control through its temporary confirmation. */
+[data-ely-family="interaction"] .ely-interaction__copy-control{display:inline-flex;flex:0 0 auto;position:relative}
+[data-ely-family="interaction"] button[data-interaction-copy]{cursor:pointer;transition:background-color .12s,border-color .12s,box-shadow .12s}
+[data-ely-family="interaction"] button[data-interaction-copy][data-variant="ghost"]{background:transparent;border:1px solid transparent;color:var(--color-ink)}
+[data-ely-family="interaction"] button[data-interaction-copy][data-variant="ghost"]:hover{background:var(--accent-tint)}
+[data-ely-family="interaction"] button[data-interaction-copy][data-variant="ghost"]:active{background:color-mix(in srgb,var(--color-ink) 14%,transparent)}
+[data-ely-family="interaction"] button[data-interaction-copy][data-size="icon-xs"]{width:24px;height:24px;min-width:24px;min-height:24px;padding:0;border-radius:6px}
+[data-ely-family="interaction"] button[data-interaction-copy]::before{width:12px;height:12px;flex:0 0 12px;font-size:12px}
+/* Text remains usable if the optional icon request fails. */
+[data-ely-family="interaction"] button[data-interaction-copy][data-interaction-icon-only="true"]:not(.is-icon-ready){font-size:9px;gap:0}
+[data-ely-family="interaction"] button[data-interaction-copy][data-interaction-icon-only="true"]:not(.is-icon-ready):not([data-interaction-copied="true"])::before{display:none}
+[data-ely-family="interaction"] button[data-interaction-copy][data-interaction-icon-only="true"][data-interaction-copied="true"]{font-size:0;gap:0}
+[data-ely-family="interaction"] button[data-interaction-copy][data-interaction-copied="true"]::before{display:inline-block;width:14px;height:14px;flex-basis:14px;color:var(--color-success,var(--success,#4d9d70));mask-image:url("/assets/ely/icons/check.svg");-webkit-mask-image:url("/assets/ely/icons/check.svg");animation:ely-copy-check 120ms cubic-bezier(.333333,1,.666667,1)}
+/* Preserve hover and current-owner reconciliation; native disabled stays native. */
+[data-ely-family="interaction"] button[data-interaction-copy][aria-disabled="true"]:not(:disabled){pointer-events:auto;opacity:1;cursor:default}
+[data-ely-family="interaction"] [data-interaction-copy-tooltip]{position:absolute;top:calc(100% + 6px);left:0;z-index:20;visibility:hidden;pointer-events:none;white-space:nowrap;padding:4px 8px;border-radius:6px;background:var(--color-ink);color:var(--color-paper);font-size:12px;line-height:16px}
+[data-ely-family="interaction"] button[data-interaction-copy]:is(:hover,:focus)+[data-interaction-copy-tooltip]{visibility:visible}
+[data-ely-family="interaction"] [data-interaction-copy-status]{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap;border:0}
+@keyframes ely-copy-check{from{transform:rotate(-.6rad)}to{transform:rotate(0rad)}}
+@media(prefers-reduced-motion:reduce){[data-ely-family="interaction"] button[data-interaction-copy][data-interaction-copied="true"]::before{animation-duration:1ms}}
+
 [data-ely-family="interaction"] [data-interaction-confirm-mode="hold"]{overflow:hidden;position:relative}
 [data-ely-family="interaction"] [data-interaction-confirm-mode="hold"].is-confirming::before{animation:ely-interaction-confirm-fill .7s linear forwards;background:#ffffff42;content:"";inset:0;position:absolute}
 @keyframes ely-interaction-confirm-fill{from{transform:translateX(-100%)}to{transform:translateX(0)}}
@@ -671,3 +692,18 @@
 [data-ely-family="interaction"] [data-direct-keycaps]{display:inline-flex;align-items:center;gap:8px}
 [data-ely-family="interaction"] .ely-interaction__key-stroke{display:inline-flex;align-items:center;gap:4px;color:var(--color-muted);font-size:11px}
 [data-ely-family="interaction"] .ely-interaction__key-stroke kbd{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:20px;padding:0 4px;border:1px solid var(--color-line);border-bottom-width:2px;border-radius:3px;background:var(--surface);color:var(--color-muted);font-family:inherit;font-size:11px;font-weight:400;box-sizing:border-box}
+
+/* Navigation, menu, overlay, and countdown status specimens. */
+[data-ely-family="interaction"] .ely-interaction__breadcrumb-status{color:var(--color-muted,#687087);font-size:.85em}
+[data-ely-family="interaction"] .ely-interaction__navigation-status{color:var(--color-muted,#687087);font-size:.85em}
+[data-ely-family="interaction"] .ely-interaction__context-trigger{background:transparent;border-color:var(--color-line,#cdd2df)}
+[data-ely-family="interaction"] .ely-interaction__context-trigger.is-visually-hidden{height:1px!important;overflow:hidden!important;padding:0!important;position:absolute!important;width:1px!important;clip:rect(0 0 0 0)!important;white-space:nowrap!important}
+[data-ely-family="interaction"] .ely-interaction__mega{display:grid;gap:.75rem;grid-template-columns:repeat(auto-fit,minmax(11rem,1fr))}
+[data-ely-family="interaction"] .ely-interaction__mega section{display:grid;gap:.3rem;align-content:start;padding:.6rem .7rem;border:1px solid var(--color-line,#cdd2df);border-radius:.45rem}
+[data-ely-family="interaction"] .ely-interaction__mega h2{font-size:1em;margin:0}
+[data-ely-family="interaction"] .ely-interaction__mega p{color:var(--color-muted,#687087);margin:0}
+[data-ely-family="interaction"] .ely-interaction__overlay-reference{margin:0;padding:.5rem .6rem;border:1px dashed var(--color-line,#cdd2df);border-radius:.45rem;color:var(--color-muted,#687087)}
+[data-ely-family="interaction"] .ely-interaction__countdown{display:grid;gap:.4rem;justify-items:start;padding:.6rem .7rem;border:1px solid var(--color-line,#cdd2df);border-radius:.45rem}
+[data-ely-family="interaction"] .ely-interaction__countdown>div{display:flex;gap:.5rem;align-items:center}
+[data-ely-family="interaction"] .ely-interaction__countdown output{font-size:1.3rem;font-weight:700;font-variant-numeric:tabular-nums}
+[data-ely-family="interaction"] .ely-interaction__countdown small{color:var(--color-muted,#687087)}

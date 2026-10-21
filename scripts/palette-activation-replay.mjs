@@ -5,11 +5,11 @@ import {loadActivationInputs} from '../ui/gohtmx/tests/browser/palette-activatio
 import {activationSelection,activationPolicy} from '../ui/gohtmx/tests/browser/palette-activation-policy.mjs';
 import {verifyActivationControl} from './palette-activation-controls.mjs';
 import {verifyActivationEvidence} from '../ui/gohtmx/tests/browser/palette-activation-evidence.mjs';
-const [reportPath,invocationPath,exitPath,revision,tree,runToken,mode='baseline',mutation='control',...extra]=process.argv.slice(2);assert.equal(extra.length,0);const selected=activationSelection({mode,mutation});
-assert(reportPath&&invocationPath&&exitPath&&revision&&tree&&runToken,'usage: node scripts/palette-activation-replay.mjs REPORT INVOCATION EXIT EXPECTED_REVISION EXPECTED_TREE EXPECTED_TOKEN [baseline|repaired] [MUTATION]');
+const [reportPath,invocationPath,exitPath,revision,tree,runToken,mode='baseline',mutation='control',productionPolicy,...extra]=process.argv.slice(2);assert.equal(extra.length,0);const selected=activationSelection({mode,mutation,...(productionPolicy?{productionPolicy}:{})});
+assert(reportPath&&invocationPath&&exitPath&&revision&&tree&&runToken,'usage: node scripts/palette-activation-replay.mjs REPORT INVOCATION EXIT EXPECTED_REVISION EXPECTED_TREE EXPECTED_TOKEN [baseline|repaired] [MUTATION] [activation-repair|audit-candidate]');
 const [report,invocation,exit]=await Promise.all([reportPath,invocationPath,exitPath].map(async path=>JSON.parse(await readFile(path,'utf8'))));
 for(const source of [invocation,exit])for(const [key,value]of Object.entries({revision,tree,runToken}))assert.equal(source[key],value,'independent invocation '+key);
-for(const source of [invocation,exit]){assert.deepEqual(source.activationPolicy,activationPolicy(selected),'externally selected activation policy');assert.equal(source.productionPolicy,selected.mode==='repaired'?'activation-repair':'strict','externally selected inherited production policy');}
+for(const source of [invocation,exit]){assert.deepEqual(source.activationPolicy,activationPolicy(selected),'externally selected activation policy');assert.equal(source.productionPolicy,selected.productionPolicy||(selected.mode==='repaired'?'activation-repair':'strict'),'externally selected inherited production policy');}
 const base=fileURLToPath(new URL('../',import.meta.url)),{assetBodies,fixtureBodies,...current}=await loadActivationInputs(base,invocation.surface,selected);assert.equal(current.dirty,'');assert.equal(current.revision,revision);assert.equal(current.tree,tree);
 for(const key of ['productionPolicy','activationPolicy','activationRepairSourceFiles','activationRenderMutation','sourceFiles','activationSourceFiles','assets','fixtures','fixtureManifest','standaloneDependencyProof'])assert.deepEqual(invocation[key],current[key],'current-source replay '+key);
 const trusted={...current,...invocation,revision,tree,runToken},result=verifyActivationEvidence(report,trusted,exit.exitCode);

@@ -298,11 +298,11 @@
     const component = root(event.target);
     if (!component || isDisabled(event.target)) return;
     const action = event.target.closest('[data-ui-action]')?.dataset.uiAction;
-    if (action === 'clear') { const input = component.querySelector('[data-slot="input"]'); input.value = ''; input.dispatchEvent(new Event('input', { bubbles: true })); input.dispatchEvent(new Event('change', { bubbles: true })); input.focus(); }
+    if (action === 'clear') { const input = component.querySelector('[data-slot="input"]'); if (input && !input.readOnly && !input.disabled) { input.value = ''; input.dispatchEvent(new Event('input', { bubbles: true })); input.dispatchEvent(new Event('change', { bubbles: true })); input.focus(); } }
     if (action === 'password-toggle') { const input = component.querySelector('[data-slot="input"]'); const shown = input.type === 'text'; input.type = shown ? 'password' : 'text'; event.target.textContent = shown ? 'Show' : 'Hide'; event.target.setAttribute('aria-label', shown ? 'Show password' : 'Hide password'); }
     if (action === 'remove-tag') { const hidden = hiddenValue(component); const previous = hidden.value; hidden.value = hidden.value.split(',').map(text).filter((value) => value && value !== event.target.value).join(','); syncTags(component); if (hidden.value !== previous) notifyValue(hidden); component.querySelector('[data-ui-tag-entry]').focus(); }
     if (action === 'add-pair') addKeyValue(component);
-    if (action === 'remove-pair') event.target.closest('[data-ui-key-value]')?.remove();
+    if (action === 'remove-pair') { const row = event.target.closest('[data-ui-key-value]'); if (row && ![...row.querySelectorAll('input, button')].some((control) => control.disabled)) row.remove(); }
     if(event.target.closest('[data-ui-file-browse]'))component.querySelector('[data-ui-file-input]')?.click();
     if(event.target.matches('[data-ui-combobox-input]'))openCombo(component);
     const option = event.target.closest('[data-ui-option]'); if (option && !component.querySelector('[data-ui-combobox-input]')?.disabled) selectCombo(component, option);

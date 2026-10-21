@@ -4,11 +4,13 @@ import {createHash} from 'node:crypto';
 // Finite, source-bound controls for a future browser fixture. This module does
 // not start a server, write production files, or establish browser evidence.
 // The template control changes renderer input, never a post-render DOM patch.
-export const activationSourceRevision = 'bde72c5f272105344da55b7b675076de269444c0';
+// Original activation-definition provenance, not the current candidate revision.
+// Current source identity is independently joined to exact file pins and run HEAD/tree.
+export const activationSourceRevision = '41d7f50f3072b065445899dcf615de5378013977';
 export const activationSourcePins = Object.freeze({
   core: Object.freeze({sourcePath: 'ui/gohtmx/assets/ely-api.js', servedPath: '/assets/ely-api.js', sourceSHA256: '6039000e8e983d7ebe55cd733cb4012810d2f15f949a2e1286f605966ad12116', sourceBytes: 11271}),
-  runtime: Object.freeze({sourcePath: 'ui/gohtmx/assets/ely-api-interaction.js', servedPath: '/assets/ely-api-interaction.js', sourceSHA256: '56ff8caa36d306b55e7cf0e36db297fd36648f40edd3186844d726c7eb1048e1', sourceBytes: 176783}),
-  template: Object.freeze({sourcePath: 'ui/gohtmx/templates/ely-api-interaction.html', servedPath: null, sourceSHA256: '9d24e3421c90615f702a1416b5b8819bc93e0947e18dd370eb22c99c18614e12', sourceBytes: 96792}),
+  runtime: Object.freeze({sourcePath: 'ui/gohtmx/assets/ely-api-interaction.js', servedPath: '/assets/ely-api-interaction.js', sourceSHA256: '53f29f4c6232ee96c7e8fa45a61dba5a900a6bb7544f56c163c72052b2f3f5f6', sourceBytes: 179192}),
+  template: Object.freeze({sourcePath: 'ui/gohtmx/templates/ely-api-interaction.html', servedPath: null, sourceSHA256: '04bb573b7f95b8517d444722efad5aea5c7fa63fe5ece31ebc7bfb3db6b04fec', sourceBytes: 97605}),
 });
 export const reviewedManifest = activationSourcePins;
 export const activationSourcePaths = Object.freeze(Object.fromEntries(Object.entries(activationSourcePins).map(([key, pin]) => [key, pin.sourcePath])));
@@ -65,12 +67,12 @@ export const activationModes = Object.freeze(['control', ...Object.keys(activati
 export const activationMutations = activationModes;
 const outputPins = Object.freeze(Object.fromEntries(Object.entries({
   'core-skip-removed': ['dabdc174a0f0e490b2a03ff0136c95b5bc3c122f07f374cb1326870e269e3e45', 11198],
-  'template-marker-omitted': ['debb8168cf96a6ca3f1f37c9958ab0dc34e75970b0054d8e4d6d0c5c52b92e9d', 96760],
-  'family-emit-omitted': ['42b570034e936b743bcb7d8b2ea6e6ddf7903988a5b08b0d6cd601064e5e1ec1', 176722],
-  'close-after-action': ['c64d99c3c733aa21c1dd47a49274d9d8ea5b1eeb7c5cd7d2c0316185926591e0', 176696],
-  'post-close-owner-bypassed': ['0c6101d15ec4655e94ba2e8d91a7ee95ca52b00c7cf459a6be00e5ee663b05ab', 176769],
-  'trailing-notification-guard-removed': ['54f7d0e79a0156b36647903c2263c34b6aa8e2b22955874322fbbfdaab880780', 176689],
-  'empty-enter-fallthrough': ['98b894345baba0cbb8e0aa9dc487e9a01d8920329648ed7a84ae231cc5c6bd26', 176184],
+  'template-marker-omitted': ['0d505907085ba684e6776f446cc2b6145097a53114293cd4545f34cec201a03a', 97573],
+  'family-emit-omitted': ['a943754a72f3cc791d8c5e36efc746321166df43c758b56b7a1282594ca84cae', 179131],
+  'close-after-action': ['d053526d6a5e2641bb35280ef45672730e732f8826a48d97d728215e983e48c3', 179105],
+  'post-close-owner-bypassed': ['6c2d94559e5b82a8dcc2f7b800d53b7aba6dbdf2198e180394aed646e0939c9d', 179178],
+  'trailing-notification-guard-removed': ['1286a66a66c9ac8f86932e480db208c3a1b4ef8e1c85255a994c698686569495', 179098],
+  'empty-enter-fallthrough': ['2a2995510d3e12bfae69cb4dbcc242ba84a8466129c3900144a490cf4b0b87fb', 178593],
   'blanket-palette-submit-prevention': ['b9a11c2f91717b7851d9e1202134e813cf56d8bada7f204d81e9f55ab2ca0670', 11440],
 }).map(([mode, pin]) => [mode, Object.freeze(pin)])));
 export const activationSHA256 = value => createHash('sha256').update(value).digest('hex');

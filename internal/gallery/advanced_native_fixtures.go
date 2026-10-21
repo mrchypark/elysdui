@@ -22,6 +22,15 @@ func nativePreviewValue(chapter, name string) string {
 	return chapter + " specimen"
 }
 
+// nativeQuantize rounds a computed fixture float onto a fixed decimal grid.
+// The committed catalogue bytes must match on every CPU architecture, and
+// arm64 contracts multiply-add into FMA while amd64 does not, so raw trig
+// results differ in the last ULP between machines. Quantizing the stored
+// value keeps the rounding far coarser than that drift.
+func nativeQuantize(v, scale float64) float64 {
+	return math.Round(v*scale) / scale
+}
+
 func nativeTorusMesh() (string, string) {
 	const majorSteps, minorSteps = 56, 24
 	vertices := make([][]float64, 0, majorSteps*minorSteps)
@@ -31,7 +40,11 @@ func nativeTorusMesh() (string, string) {
 		for minor := 0; minor < minorSteps; minor++ {
 			inner := float64(minor) * 2 * math.Pi / minorSteps
 			radius := 1 + .38*math.Cos(inner)
-			vertices = append(vertices, []float64{radius * math.Cos(angle), .38 * math.Sin(inner), radius * math.Sin(angle)})
+			vertices = append(vertices, []float64{
+				nativeQuantize(radius*math.Cos(angle), 1e6),
+				nativeQuantize(.38*math.Sin(inner), 1e6),
+				nativeQuantize(radius*math.Sin(angle), 1e6),
+			})
 		}
 	}
 	for major := 0; major < majorSteps; major++ {
@@ -374,7 +387,7 @@ rendering|RenderSurface`
 				samples := make([]map[string]any, 56)
 				for i := range samples {
 					peak := math.Min(1, .15+.8*math.Sin(float64(i)/55*math.Pi)*(.6+.4*float64(i*7%11)/10))
-					samples[i] = map[string]any{"X": float64(i) * 3, "Y": 14 - peak*14, "Width": 2, "Height": peak * 28}
+					samples[i] = map[string]any{"X": float64(i) * 3, "Y": nativeQuantize(14-peak*14, 1e6), "Width": 2, "Height": nativeQuantize(peak*28, 1e6)}
 				}
 				props["Samples"] = samples
 				props["PreviewExamples"] = []map[string]any{{"Title": ""}, {"Title": "", "Label": "a cello under a high window, morning", "Duration": 45, "Position": 0, "Making": .45}}

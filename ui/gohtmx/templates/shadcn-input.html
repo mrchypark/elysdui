@@ -107,6 +107,6 @@
        {{- if .AriaInvalid}} aria-invalid="{{.AriaInvalid}}"{{end}}
        {{- if .AriaRequired}} aria-required="{{.AriaRequired}}"{{end}}
        data-slot="input"{{if .Role}} role="{{.Role}}"{{end}}{{if .TabIndex}} tabindex="{{.TabIndex}}"{{end}}
-       {{- range $k, $v := .Attrs}} {{attrName $k}}="{{$v}}"{{end -}}
+       {{- range $k, $v := .Attrs}} {{attrName $k}}="{{attrValue $k $v}}"{{end -}}
 >
 {{end}}

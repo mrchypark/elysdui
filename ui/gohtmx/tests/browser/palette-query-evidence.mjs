@@ -31,6 +31,7 @@ export const paletteSourcePaths = [
   'ui/gohtmx/tests/browser/context-owner-assets.mjs', 'ui/gohtmx/tests/browser/context-owner-controls.mjs',
   'ui/gohtmx/assets/ely-api.js', 'ui/gohtmx/assets/ely-api-interaction.js', 'ui/gohtmx/assets/ely-api-interaction-entry.js',
   'ui/gohtmx/assets/ely-controls.js', 'ui/gohtmx/assets/ely-patterns.js', 'ui/gohtmx/assets/htmx.min.js',
+  'ui/gohtmx/assets/ely-api-interaction.css', 'ui/gohtmx/assets/ely/icons/check.svg',
   'ui/gohtmx/templates/ely-api-interaction.html', 'ui/gohtmx/templates/ely-api.html', 'ui/gohtmx/templates/ui-client.html',
   'ui/gohtmx/ui.go', 'ui/gohtmx/component.go', 'ui/gohtmx/components.json',
   'adapters/gohtmx/catalogue_manifest.json.gz', 'adapters/gohtmx/catalogue.go', 'adapters/gohtmx/render.go', 'adapters/gohtmx/registry.go',

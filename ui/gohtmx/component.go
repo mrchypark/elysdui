@@ -98,12 +98,15 @@ func ResolveComponent(chapter, name string) (ComponentDefinition, error) {
 	}
 	if chapter != "" {
 		if d, ok := r.qualified[chapter+"/"+name]; ok {
+			d.Aliases = append([]string(nil), d.Aliases...)
 			return d, nil
 		}
 		return ComponentDefinition{}, fmt.Errorf("unknown component %q", chapter+"/"+name)
 	}
 	if matches := r.names[name]; len(matches) == 1 {
-		return matches[0], nil
+		d := matches[0]
+		d.Aliases = append([]string(nil), d.Aliases...)
+		return d, nil
 	} else if len(matches) > 1 {
 		return ComponentDefinition{}, fmt.Errorf("component %q requires Chapter", name)
 	}
@@ -141,6 +144,12 @@ func (w *componentLimitWriter) Write(data []byte) (int, error) {
 }
 
 func renderComponent(tpl *template.Template, w io.Writer, component Component, maxBytes int) error {
+	if tpl == nil {
+		return fmt.Errorf("component render requires a template")
+	}
+	if w == nil {
+		return fmt.Errorf("component render requires a writer")
+	}
 	if !componentID.MatchString(component.ID) {
 		return fmt.Errorf("component ID must start with a letter and contain at most 128 letters, numbers, underscores or hyphens")
 	}

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import {activationMutations,activationMutationMetadata} from './palette-activation-mutants.mjs';
+import {activationAuditCandidateMetadata} from './palette-activation-audit-candidate.mjs';
 export const activationRepairSourcePaths=[
  'ui/gohtmx/tests/browser/palette-activation-policy.mjs',
  'ui/gohtmx/tests/browser/palette-activation-mutants.mjs',
@@ -13,27 +14,29 @@ export const activationRepairSourcePaths=[
  'scripts/palette-activation-controls.mjs',
  'scripts/palette-activation-controls-evidence-test.mjs',
  'scripts/palette-activation-repair-evidence-test.mjs',
+ 'ui/gohtmx/tests/browser/palette-activation-audit-candidate.mjs',
 ];
 export function activationSelection(options={}){
  assert(options&&typeof options==='object'&&!Array.isArray(options));
- assert(Object.keys(options).every(key=>['mode','mutation'].includes(key)),'known activation selection keys');
+ assert(Object.keys(options).every(key=>['mode','mutation','productionPolicy'].includes(key)),'known activation selection keys');
  const {mode='baseline',mutation='control'}=options;
  assert(['baseline','repaired'].includes(mode),'explicit finite activation mode');
  assert(activationMutations.includes(mutation),'source-owned activation mutation');
  assert(mode==='repaired'||mutation==='control','baseline cannot serve a repair mutant');
+ if(options.productionPolicy!==undefined){assert.equal(mode,'repaired');assert(['activation-repair','audit-candidate'].includes(options.productionPolicy),'explicit inherited activation policy');return {mode,mutation,productionPolicy:options.productionPolicy};}
  return {mode,mutation};
 }
 export function activationPolicy(options={}){
  const selected=activationSelection(options);
- return {...selected,definition:selected.mode==='repaired'?activationMutationMetadata(selected.mutation):null};
+ return {...selected,definition:selected.mode==='repaired'?(selected.productionPolicy==='audit-candidate'?activationAuditCandidateMetadata(selected.mutation):activationMutationMetadata(selected.mutation)):null};
 }
 export function activationEnvironment(env=process.env){
- return activationSelection({mode:env.PALETTE_ACTIVATION_MODE||'baseline',mutation:env.PALETTE_ACTIVATION_MUTATION||'control'});
+ return activationSelection({mode:env.PALETTE_ACTIVATION_MODE||'baseline',mutation:env.PALETTE_ACTIVATION_MUTATION||'control',...(env.PALETTE_QUERY_PRODUCTION_POLICY?{productionPolicy:env.PALETTE_QUERY_PRODUCTION_POLICY}:{})});
 }
 export const activationTemplateMarkerCounts={'/':10,'/empty-initial':5,'/empty-disabled':10,'/sdui-response-primary':0,'/sdui-response-peer':0};
 export function verifyActivationPolicy(report,trusted){
- const expected=activationPolicy({mode:trusted.activationPolicy.mode,mutation:trusted.activationPolicy.mutation});
- assert.equal(trusted.productionPolicy,expected.mode==='repaired'?'activation-repair':'strict','activation maps to exact inherited production policy');
+ const expected=activationPolicy({mode:trusted.activationPolicy.mode,mutation:trusted.activationPolicy.mutation,...(trusted.activationPolicy.productionPolicy?{productionPolicy:trusted.activationPolicy.productionPolicy}:{})});
+ assert.equal(trusted.productionPolicy,expected.productionPolicy||(expected.mode==='repaired'?'activation-repair':'strict'),'activation maps to exact inherited production policy');
  assert.equal(report.productionPolicy,trusted.productionPolicy,'reported inherited production policy');
  assert.deepEqual(trusted.activationPolicy,expected,'independently fixed source policy');
  assert.deepEqual(report.activationPolicy,expected,'report cannot choose source policy');

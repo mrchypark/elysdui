@@ -61,7 +61,7 @@
 .ely-data__tree summary{list-style:none}
 .ely-data__tree summary::-webkit-details-marker{display:none}
 .ely-data__tree [data-ely-tree-node]{display:grid;grid-template-columns:1rem minmax(0,1fr) auto;align-items:center;width:100%;min-height:1.65rem;padding:.1rem .2rem;border:0;border-radius:.2rem;background:transparent;color:inherit;text-align:left}
-.ely-data__tree [data-ely-tree-node][aria-selected=true],.ely-data__tree [data-ely-tree-node]:focus-visible{outline:0;background:var(--surface-muted)}
+.ely-data__tree [role="treeitem"][aria-selected=true]>[data-ely-tree-node],.ely-data__tree [role="treeitem"][aria-selected=true]>details>summary>[data-ely-tree-node],.ely-data__tree [data-ely-tree-node]:focus-visible{outline:0;background:var(--surface-muted)}
 .ely-data__node-icon{color:var(--muted-foreground);font-size:11px;line-height:1}
 .ely-data__tree details[open]>summary .ely-data__node-icon{transform:rotate(90deg)}
 .ely-data__tree [data-ely-tree-node] small{color:var(--muted-foreground);font-size:10px;line-height:14px}
@@ -103,3 +103,33 @@
 [data-ely-family="data"] .ely-data__ticker{display:grid;grid-template-columns:minmax(0,1fr);grid-template-rows:auto auto;width:min(100%,52.5rem);gap:1rem}
 [data-ely-family="data"] .ely-data__ticker-tape{grid-column:1;grid-row:1;box-sizing:border-box;width:100%;max-width:100%;justify-content:flex-start;overflow-x:auto;overflow-y:hidden;white-space:nowrap}
 [data-ely-family="data"] .ely-data__ticker>div{display:grid;grid-column:1;grid-row:2;grid-template-columns:repeat(3,minmax(0,1fr));width:100%;min-width:0}
+
+/* Chart geometry fills and strokes. */
+[data-ely-family="data"] .ely-data__area{fill:color-mix(in srgb,var(--primary,#286) 22%,transparent);stroke:var(--primary,#286);stroke-width:2}
+[data-ely-family="data"] .ely-data__bar{fill:var(--primary,#286);stroke:none}
+[data-ely-family="data"] .ely-data__segment{fill:color-mix(in srgb,var(--primary,#286) 70%,var(--surface,#fff));stroke:var(--surface,#fff);stroke-width:1}
+[data-ely-family="data"] .ely-data__point{fill:var(--primary,#286);stroke:none}
+[data-ely-family="data"] .ely-data__radar-grid{fill:none;stroke:var(--border,#d5d5d5);stroke-width:1}
+[data-ely-family="data"] .ely-data__radar{fill:color-mix(in srgb,var(--primary,#286) 22%,transparent);stroke:var(--primary,#286);stroke-width:2}
+[data-ely-family="data"] .ely-data__tile{fill:color-mix(in srgb,var(--primary,#286) 22%,var(--surface,#fff));stroke:var(--primary,#286);stroke-width:1}
+[data-ely-family="data"] .ely-data__flow{fill:none;stroke:var(--primary,#286);stroke-width:2}
+[data-ely-family="data"] .ely-data__node{fill:var(--primary,#286);stroke:none}
+[data-ely-family="data"] .ely-data__edge{stroke:var(--border,#d5d5d5);stroke-width:1}
+[data-ely-family="data"] .ely-data__wick{stroke:var(--primary,#286);stroke-width:1}
+[data-ely-family="data"] .ely-data__candle{fill:none;stroke:var(--primary,#286);stroke-width:2}
+[data-ely-family="data"] .ely-data__candle.up{stroke:#36a269}
+[data-ely-family="data"] .ely-data__candle.down{stroke:#cf5151}
+[data-ely-family="data"] .ely-data__indicator{fill:none;stroke:#c58b27;stroke-width:2}
+[data-ely-family="data"] .ely-data__drawing{fill:none;stroke:var(--primary,#286);stroke-width:2}
+[data-ely-family="data"] .ely-data__bid{fill:none;stroke:#36a269;stroke-width:2}
+[data-ely-family="data"] .ely-data__ask{fill:none;stroke:#cf5151;stroke-width:2}
+[data-ely-family="data"] .ely-data__gantt{display:grid;gap:.35rem}
+[data-ely-family="data"] .ely-data__gantt p{display:grid;grid-template-columns:10rem minmax(0,1fr);gap:.5rem;align-items:center;margin:0}
+[data-ely-family="data"] .ely-data__gantt i{display:block;padding:.15rem .35rem;background:var(--surface-muted);border-left:3px solid var(--primary,#286);font-style:normal}
+[data-ely-family="data"] .ely-data__profile{display:flex;flex-wrap:wrap;align-items:flex-end;gap:2px;min-height:6rem;padding:.35rem;border:1px solid var(--border,#d5d5d5)}
+[data-ely-family="data"] .ely-data__profile span{flex:1;min-width:.25rem;background:var(--primary,#286)}
+[data-ely-family="data"] .ely-data__renko{display:flex;flex-wrap:wrap;gap:2px;align-items:flex-end}
+[data-ely-family="data"] .ely-data__renko i{display:block;min-width:1.75rem;padding:.25rem .35rem;background:color-mix(in srgb,#36a269 24%,var(--surface-muted));font-style:normal;text-align:center}
+[data-ely-family="data"] .ely-data__renko i[data-direction=down]{background:color-mix(in srgb,#cf5151 24%,var(--surface-muted))}
+[data-ely-family="data"] .ely-data__multi{display:grid;gap:.75rem}
+[data-ely-family="data"] .ely-data__multi figure{display:grid;gap:.25rem;margin:0}
