@@ -369,9 +369,9 @@ register('data', root => {
     const previous = directorySorts.get(body);
     const direction = previous?.column === column ? (previous.direction === 'ascending' ? 'descending' : 'none') : 'ascending';
     const compare = {
-      name: (a, b) => a.cells[0].textContent.trim().localeCompare(b.cells[0].textContent.trim(), undefined, { numeric: true }),
+      name: (a, b) => (a.dataset.elyDirectoryName ?? a.cells[0].textContent.trim()).localeCompare(b.dataset.elyDirectoryName ?? b.cells[0].textContent.trim(), undefined, { numeric: true }),
       size: (a, b) => sizeInBytes(a.cells[index]?.textContent) - sizeInBytes(b.cells[index]?.textContent),
-      modified: (a, b) => ageInSeconds(a.cells[index]?.textContent) - ageInSeconds(b.cells[index]?.textContent),
+      modified: (a, b) => ageInSeconds(b.cells[index]?.textContent) - ageInSeconds(a.cells[index]?.textContent),
     }[column];
     if (!compare) return;
     const rows = direction === 'none' ? original : [...original].sort((a, b) => {

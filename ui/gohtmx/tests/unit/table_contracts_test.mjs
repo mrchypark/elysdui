@@ -42,6 +42,7 @@ f.search.value='missing';f.search.fire('input');assert.equal(f.all.disabled,true
 const before=f.root.events.length;f.previous.fire('click');f.next.fire('click');assert.equal(f.root.events.length,before,'disabled paging emits no action');
 f.cleanup();f.sort.fire('click');assert.equal(f.heading.getAttribute('aria-sort'),'none','cleanup removes listeners');
 const fresh=fixture();fresh.rows[0].control.disabled=true;fresh.all.checked=true;fresh.all.fire('change');assert.equal(fresh.rows[0].control.checked,false,'select all skips disabled rows');fresh.sort.fire('click');assert.equal(fresh.heading.getAttribute('aria-sort'),'ascending');
+fresh.cleanup();
 console.log('Paged table production initializer contracts passed');
 
 function directoryFixture() {
@@ -55,7 +56,7 @@ function directoryFixture() {
   ['Zulu.txt','1 KB','1 week ago',false],
   ['Bravo','8 KB','3 days ago',true],
   ['Middle.txt','16 KB','1 minute ago',false],
- ].map(([name,size,modified,folder])=>{const row=new Element();row.cells=[name,size,modified].map(textContent=>Object.assign(new Element(),{textContent}));if(folder)row.setAttribute('data-ely-directory-folder','');return row;});
+ ].map(([name,size,modified,folder],index)=>{const row=new Element({elyDirectoryName:name});row.cells=[`${['Z','A','B','Z','A'][index]} ${name}`,size,modified].map(textContent=>Object.assign(new Element(),{textContent}));if(folder)row.setAttribute('data-ely-directory-folder','');return row;});
  const body={rows:[...rows],append(row){this.rows.splice(this.rows.indexOf(row),1);this.rows.push(row);}};
  const table={tBodies:[body],tHead:{rows:[{cells:headers}]}};
  controls.forEach(control=>control.parent=table);
@@ -64,12 +65,12 @@ function directoryFixture() {
  return {root,body,rows,controls,headers,cleanup};
 }
 const directory=directoryFixture(),isolatedDirectory=directoryFixture();
-const directoryNames=()=>directory.body.rows.map(row=>row.cells[0].textContent);
+const directoryNames=()=>directory.body.rows.map(row=>row.dataset.elyDirectoryName);
 const callerOrder=directoryNames();
 const orders=[
  [['Bravo','Zulu','Alpha.txt','Middle.txt','Zulu.txt'],['Zulu','Bravo','Zulu.txt','Middle.txt','Alpha.txt']],
  [['Zulu','Bravo','Zulu.txt','Alpha.txt','Middle.txt'],['Bravo','Zulu','Middle.txt','Alpha.txt','Zulu.txt']],
- [['Zulu','Bravo','Middle.txt','Alpha.txt','Zulu.txt'],['Bravo','Zulu','Zulu.txt','Alpha.txt','Middle.txt']],
+ [['Bravo','Zulu','Zulu.txt','Alpha.txt','Middle.txt'],['Zulu','Bravo','Middle.txt','Alpha.txt','Zulu.txt']],
 ];
 for(const [index,control] of directory.controls.entries()) {
  for(const [click,direction] of ['ascending','descending','none'].entries()) {
@@ -92,3 +93,31 @@ assert.deepEqual(directoryNames(),sortedOrder,'directory cleanup removes sorting
 assert.equal(directory.root.events.length,eventCount,'directory cleanup prevents sort events');
 isolatedDirectory.cleanup();
 console.log('DirectoryListing production initializer sort contracts passed');
+
+for(const component of ['Tree','FileTree']) {
+ const root=new Element({elyComponent:component});root.events=[];
+ const tree=new Element(),selected=new Element(),unselected=new Element();
+ selected.setAttribute('aria-selected','true');unselected.setAttribute('aria-selected','false');
+ const buttons=[selected,unselected].map((owner,index)=>{
+  const button=new Element({value:String(index)});
+  button.closest=selector=>selector==='[role="treeitem"]'?owner:selector==='[role="tree"]'?tree:selector==='[data-ely-select]'?button:null;
+  button.matches=()=>false;
+  return button;
+ });
+ tree.queries={'[data-ely-select]:not(:disabled)':buttons};
+ root.queries={'[data-ely-tree-node]':buttons};
+ const cleanup=initialize(root);
+ assert.equal(selected.getAttribute('aria-selected'),'true',`${component} initialization preserves caller selection on the owner`);
+ assert.equal(unselected.getAttribute('aria-selected'),'false');
+ assert.equal(root.events.length,0,'initialization does not emit a selection change');
+ for(const handler of root.handlers.click) handler({target:buttons[1]});
+ assert.equal(selected.getAttribute('aria-selected'),'false');
+ assert.equal(unselected.getAttribute('aria-selected'),'true','interaction selects the treeitem owner');
+ assert.deepEqual(Array.from(root.events.at(-1).values),['1']);
+ assert.equal(buttons[1].hasAttribute('aria-selected'),false,'selection stays off the inner button');
+ cleanup();
+ const remountCleanup=initialize(root);
+ assert.equal(unselected.getAttribute('aria-selected'),'true','remount preserves selection');
+ remountCleanup();
+}
+console.log('Tree and FileTree production initializer selection contracts passed');

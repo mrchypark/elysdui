@@ -155,7 +155,7 @@ func TestInteractionAriaSelectedRoles(t *testing.T) {
 		{"mail", "MailboxList", true},
 		{"mail", "MailList", true},
 		{"calendar", "AgendaView", true},
-		{"project", "TaskItem", true},
+		{"project", "TaskItem", false},
 		{"lists", "SelectableList", true},
 		// WAI-ARIA 1.2 supports aria-selected on treeitem, so the tree
 		// widgets carry it on the treeitem element.

@@ -297,10 +297,10 @@
 [data-ely-family='communication'] :is(.ely-project-update,.ely-project-add,.ely-project-move):focus-visible{position:static;width:auto;height:auto;clip-path:none;padding:4px 8px}
 [data-ely-family='communication'] .ely-project-tasks{width:560px;max-width:100%;display:grid;gap:0}
 [data-ely-family='communication'] .ely-project-task{display:flex;align-items:center;gap:9px;padding:9px 12px;border:0;border-radius:4px;font-size:13px;min-height:36px;box-sizing:border-box;position:relative}
-[data-ely-family='communication'] .ely-project-task>[data-project-task-title]{flex:1;min-width:0}
+[data-ely-family='communication'] .ely-project-task>[data-project-task-title]{flex:1;min-width:0;border:0;padding:0;background:transparent;color:inherit;font:inherit;text-align:left}
 [data-ely-family='communication'] .ely-project-task>small{position:absolute;top:100%;background:var(--background);z-index:2;display:none}[data-ely-family='communication'] .ely-project-task:focus-within>small{display:block}
 [data-ely-family='communication'] .ely-project-task:has(input:checked)>[data-project-task-title]{text-decoration:line-through;color:var(--muted-foreground)}
-[data-ely-family='communication'] .ely-project-task[aria-selected=true]{background:var(--muted)}
+[data-ely-family='communication'] .ely-project-task:has([data-project-task-select][aria-pressed=true]){background:var(--muted)}
 [data-ely-family='communication'] .ely-project-task :is(code,time){font-size:11px;color:var(--muted-foreground)}
 [data-ely-family='communication'] .ely-project-task-status,[data-ely-family='communication'] :is(.ely-project-task,.ely-kanban) .ely-project-priority>span:last-child{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
 [data-ely-family='communication'] [data-overdue]{color:var(--destructive,#d16b68)!important}

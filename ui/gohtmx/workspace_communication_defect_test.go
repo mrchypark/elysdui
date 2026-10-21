@@ -28,7 +28,6 @@ func TestWorkspaceCommunicationSelectionRoles(t *testing.T) {
 		{"mail", "MailboxList", "data-ely-mailbox", "option", "ely-communication-list"},
 		{"mail", "MailList", "data-ely-mail-open", "option", "data-ely-mail-list"},
 		{"calendar", "AgendaView", "data-calendar-agenda", "option", "ely-calendar-agenda"},
-		{"project", "TaskItem", "data-project-row", "option", "ely-project-tasks"},
 		{"documents", "PrintPreview", "data-ws-print-thumb", "option", "data-ws-print-pages"},
 		{"documents", "DocumentViewer", "data-ws-page", "option", "data-ws-page-thumbnails"},
 		{"documents", "EpubReader", "data-ws-epub-chapter", "option", "data-ws-epub-nav"},
@@ -69,6 +68,69 @@ func TestWorkspaceCommunicationSelectionRoles(t *testing.T) {
 				t.Fatalf("marker %s not rendered", tc.marker)
 			}
 		})
+	}
+}
+
+// The option role makes descendants presentational; completion must remain
+// independent: https://www.w3.org/TR/wai-aria-1.2/#option.
+func TestTaskItemIndependentCompletionAndSelection(t *testing.T) {
+	tpl, err := NewTemplates()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, disabled := range []bool{false, true} {
+		var out bytes.Buffer
+		props := map[string]any{"Disabled": disabled, "Items": []map[string]any{{"Value": "task-1", "Title": "Review task", "Done": true}}}
+		if err := RenderComponent(tpl, &out, Component{Chapter: "project", Name: "TaskItem", ID: "task-access", Props: props}); err != nil {
+			t.Fatal(err)
+		}
+		doc, err := html.Parse(strings.NewReader(out.String()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var button, checkbox *html.Node
+		var walk func(*html.Node)
+		walk = func(n *html.Node) {
+			if _, ok := formAttr(n, "data-project-task-select"); ok {
+				button = n
+			}
+			if _, ok := formAttr(n, "data-ely-task-done"); ok {
+				checkbox = n
+			}
+			for child := n.FirstChild; child != nil; child = child.NextSibling {
+				walk(child)
+			}
+		}
+		walk(doc)
+		if button == nil || checkbox == nil {
+			t.Fatal("task needs independent selection button and completion checkbox")
+		}
+		if button.Data != "button" {
+			t.Fatal("selection must be a native button")
+		}
+		if kind, _ := formAttr(checkbox, "type"); checkbox.Data != "input" || kind != "checkbox" || checkbox.Parent != button.Parent {
+			t.Fatal("completion must be a native checkbox beside the selection button")
+		}
+		if label, _ := formAttr(checkbox, "aria-label"); label != "Complete Review task" {
+			t.Fatalf("completion label = %q", label)
+		}
+		if pressed, _ := formAttr(button, "aria-pressed"); pressed != "false" {
+			t.Fatalf("initial pressed state = %q", pressed)
+		}
+		if interactionAriaAncestorRole(checkbox, "option", "listbox", "button") || interactionAriaAncestorTag(checkbox, "button") {
+			t.Fatal("checkbox semantics hidden by selection ancestor")
+		}
+		if _, ok := formAttr(checkbox, "checked"); !ok {
+			t.Fatal("lost Done state")
+		}
+		for _, n := range []*html.Node{button, checkbox} {
+			if _, ok := formAttr(n, "disabled"); ok != disabled {
+				t.Fatal("lost disabled state")
+			}
+		}
+		if len(interactionAriaSelectedNodes(doc)) != 0 {
+			t.Fatal("task must use pressed state, not aria-selected")
+		}
 	}
 }
 
