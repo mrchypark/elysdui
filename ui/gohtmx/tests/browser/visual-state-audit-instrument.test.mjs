@@ -7,6 +7,117 @@ import {join} from 'node:path';
 import {chromium} from 'playwright';
 import {caseActionContract,requestedStateContract,runRequestedStateActions,clickVisibleControl,ownedOverlayInventory,captureTargetPNG,inventoryReceipt,inventoryDrift,unhandledBrowserErrors} from './visual-state-audit-drivers.mjs';
 
+test('non-workspace normalization pure: source bindings and atomic boundaries',async()=>{
+  const sources={};
+  for(const name of ['foundation','interaction','communication','native','forms'])sources[name]=await readFile(new URL(`../../../../internal/gallery/assets/advanced-${name}-checks.js`,import.meta.url),'utf8');
+  assert(sources.foundation.includes('for (const button of closingPanes) { button.click(); }'));
+  for(const name of ['suspenseReload','suspenseFail','dialogClose','bulkClear'])assert(sources.interaction.includes(`if (${name} !== null && ${name} !== undefined) { ${name}.click(); }`));
+  assert(sources.interaction.includes('return await lottieCheck({root});'));
+  assert(sources.communication.includes(`pick=name=>{ must(view,'[data-project-layout][value="'+name+'"]','layout '+name).click(); };`));
+  assert(sources.native.includes('return await comparison(context);'));
+  assert(sources.native.includes('for (const [index,field] of fields.entries())'));
+  assert(sources.native.includes("for (const value of ['2','+','3','×','4','=']) { key(value); }"));
+  assert(sources.forms.includes("checks['forms/CheckboxCard']=async({root})=>{ return await checkChoiceCardState(root); };"));
+  assert(sources.forms.includes('export function checkChoiceCardState(root){'));
+  assert(!sources.forms.includes('export async function checkChoiceCardState'));
+  assert(sources.forms.includes("const input=(node,value)=>{node.value=value;node.dispatchEvent(new Event('input',{bubbles:true}));node.dispatchEvent(new Event('change',{bubbles:true}));};"));
+  assert(sources.forms.includes("const suiteResult=(root,action,result,extra={})=>root.dispatchEvent(new CustomEvent('ely:result',{bubbles:true,detail:{action,result,...extra}}));"));
+  assert(sources.communication.includes('const event=action(root,actions,selector,name)'));
+  assert(sources.native.includes("send=form=>form.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}))"));
+});
+
+test('non-workspace normalization pure: nullish receivers and causal failures',async()=>{
+  const oldBody="root?.querySelector('close')?.click();";
+  const body="const close=root?.querySelector('close');if(close !== null && close !== undefined){close.click();}";
+  const oldShape=transform(`async function check(){${oldBody}}await check();`,'normalization-old-optional.js');
+  assert(oldShape.unsupported.some(site=>site.siteId),'Complex old optional receiver must stay a red control');
+  for(const receiver of ['null','undefined','false','0',"''",'{}',
+    "{tag:7,get click(){events.push('method');return function(){assert(this.tag===7);events.push('clicked');};}}",
+    "{get click(){throw failure;}}","{click(){throw failure;}}"]){
+    const prefix=`const failure=new Error('sentinel');const receiver=${receiver};const root={querySelector(){events.push('query');return receiver;}};`;
+    const suffix="}try{await check();}catch(error){events.push(error===failure?'sentinel':error.name);}";
+    const original=await execute(prefix+'async function check(){'+oldBody+suffix);
+    const normalized=prefix+'async function check(){'+body+suffix;
+    assert.deepEqual(await execute(normalized),original);
+    const transformed=transform(normalized,'normalization-optional.js');
+    assert.equal(transformed.unsupported.length,0);
+    const captured=await execute(transformed.source);
+    assert.deepEqual(captured.filter(value=>!value.startsWith('before:')&&!value.startsWith('checkpoint:')),original);
+    if(original.includes('sentinel')||original.includes('TypeError'))assert(!captured.includes('checkpoint:click'));
+    if(['false','0',"''"].includes(receiver)){
+      const truthy=normalized.replace('close !== null && close !== undefined','close');
+      assert.notDeepEqual(await execute(truthy),original,'Truthy guard would silently drop a non-nullish receiver');
+    }
+  }
+  for(const root of ['null','undefined',"{querySelector(){throw failure;}}"]){
+    const prefix=`const failure=new Error('sentinel');const root=${root};`;
+    const suffix="}try{await check();}catch(error){events.push(error===failure?'sentinel':error.name);}";
+    const original=await execute(prefix+'async function check(){'+oldBody+suffix);
+    assert.deepEqual(await execute(transform(prefix+'async function check(){'+body+suffix,'normalization-null-root.js').source),original);
+  }
+});
+
+test('non-workspace normalization pure: finite snapshot and checkpoint order',async()=>{
+  const oldBody='nodes.filter(button=>!button.hidden).slice(0,2).forEach(button=>button.click());';
+  const body='const closing=nodes.filter(button=>!button.hidden).slice(0,2);for(const button of closing){button.click();}';
+  assert(transform(`async function check(){${oldBody}}await check();`,'normalization-old-loop.js').unsupported.some(site=>site.siteId));
+  for(const size of [0,1,3])for(const failAt of [-1,0,1]){
+    const prefix=`const failure=new Error('sentinel');const nodes=Array.from({length:${size}},(_,index)=>({hidden:false,click(){events.push('click:'+index);if(index===${failAt})throw failure;if(index===0&&nodes[1])nodes[1].hidden=true;}}));`;
+    const suffix="}try{await check();}catch(error){assert(error===failure);events.push('sentinel');}";
+    const original=await execute(prefix+'async function check(){'+oldBody+suffix);
+    const normalized=prefix+'async function check(){'+body+suffix;
+    assert.deepEqual(await execute(normalized),original);
+    const transformed=transform(normalized,'normalization-loop.js');
+    assert.equal(transformed.unsupported.length,0);
+    const captured=await execute(transformed.source);
+    assert.deepEqual(captured.filter(value=>!value.startsWith('before:')&&!value.startsWith('checkpoint:')),original);
+    const expected=[];
+    for(const event of original){if(event.startsWith('click:'))expected.push('before:click',event);else expected.push(event);if(event.startsWith('click:')&&Number(event.slice(6))!==failAt)expected.push('checkpoint:click');}
+    assert.deepEqual(captured,expected,'Only completed calls receive after checkpoints, in original occurrence order');
+    if(size===3&&failAt===-1){
+      const reevaluated=normalized.replace('for(const button of closing){button.click();}','for(const button of closing){if(!button.hidden)button.click();}');
+      assert.notDeepEqual(await execute(reevaluated),original,'Refiltering after the first close loses the snapshotted second control');
+      assert.notDeepEqual(captured.filter(value=>value!=='checkpoint:click'),expected,'Missing checkpoints must not satisfy occurrence ordering');
+    }
+  }
+});
+
+test('non-workspace normalization pure: void helpers indexed fields and awaited tails',async()=>{
+  const oldBody="const key=value=>controls[value].click();['2','+','3','×','4','='].forEach(key);";
+  const body="const key=value=>{controls[value].click();};for(const value of ['2','+','3','×','4','=']){key(value);}";
+  assert(transform(`async function check(){${oldBody}}await check();`,'normalization-old-keys.js').unsupported.some(site=>site.siteId));
+  for(const fail of ['none','3']){
+    const prefix=`const failure=new Error('sentinel');const controls=Object.fromEntries(['2','+','3','×','4','='].map(value=>[value,{click(){events.push(value);if(value==='${fail}')throw failure;}}]));`;
+    const suffix="}try{await check();}catch(error){assert(error===failure);events.push('sentinel');}";
+    const original=await execute(prefix+'async function check(){'+oldBody+suffix);
+    const normalized=prefix+'async function check(){'+body+suffix;
+    assert.deepEqual(await execute(normalized),original);
+    const transformed=transform(normalized,'normalization-keys.js');
+    assert.equal(transformed.unsupported.length,0);
+    assert.deepEqual((await execute(transformed.source)).filter(value=>!value.startsWith('before:')&&!value.startsWith('checkpoint:')),original);
+  }
+  const oldFields="fields.forEach((field,index)=>{field.value=index?'calm':'gardens';field.dispatchEvent(new Event('input',{bubbles:true}));});";
+  const fields="for(const [index,field] of fields.entries()){field.value=index?'calm':'gardens';field.dispatchEvent(new Event('input',{bubbles:true}));}";
+  assert(transform(`async function check(){${oldFields}}await check();`,'normalization-old-fields.js').unsupported.some(site=>site.siteId));
+  const prefix="const fields=[0,1].map(index=>({value:'',dispatchEvent(event){events.push(index+':'+this.value+':'+event.type+':'+event.bubbles);return true;}}));";
+  const original=await execute(prefix+'async function check(){'+oldFields+'}await check();');
+  assert.deepEqual(original,['0:gardens:input:true','1:calm:input:true']);
+  assert.deepEqual((await execute(transform(prefix+'async function check(){'+fields+'}await check();','normalization-fields.js').source)).filter(value=>!value.startsWith('before:')&&!value.startsWith('checkpoint:')),original);
+  for(const keyword of ['', 'async '])for(const failure of [false,true]){
+    const prefix=`const failure=new Error('sentinel');${keyword}function delegate(){target.click();${failure?'throw failure;':'return 37;'}}`;
+    const suffix="}try{events.push('return:'+await check());}catch(error){assert(error===failure);events.push('sentinel');}";
+    const old=prefix+'async function check(){return delegate();'+suffix;
+    const normalized=prefix+'async function check(){return await delegate();'+suffix;
+    assert(transform(old,'normalization-old-tail.js').unsupported.some(site=>site.siteId));
+    const original=await execute(old);
+    assert.deepEqual(await execute(normalized),original);
+    const transformed=transform(normalized,'normalization-tail.js');
+    assert.equal(transformed.unsupported.length,0);
+    assert.deepEqual((await execute(transformed.source)).filter(value=>!value.startsWith('before:')&&!value.startsWith('checkpoint:')),original);
+  }
+  assert.deepEqual(await execute("const control={click(){events.push('click');}};const pick=()=>control.click();events.push('return:'+pick());"),await execute("const control={click(){events.push('click');}};const pick=()=>{control.click();};events.push('return:'+pick());"));
+});
+
 async function execute(source,unsupportedHook=()=>{}){
   const events=[];
   globalThis.events=events;
