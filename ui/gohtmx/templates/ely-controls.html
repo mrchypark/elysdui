@@ -62,7 +62,7 @@
 {{end}}
 
 {{define "hotkey-input"}}
-<div id="{{.ID}}" data-ui-component="hotkey-input"{{range $k, $v := .Attrs}} {{attrName $k}}="{{attrValue $k $v}}"{{end}}>{{if .Label}}<label for="{{.ID}}-input">{{.Label}}</label>{{end}}{{template "input" (dict "ID" (printf "%s-input" .ID) "Name" .Name "Value" .Value "Placeholder" .Placeholder "Required" .Required "Disabled" .Disabled "Attrs" (dict "data-ui-hotkey" "true"))}}</div>
+<div id="{{.ID}}" data-ui-component="hotkey-input"{{range $k, $v := .Attrs}} {{attrName $k}}="{{attrValue $k $v}}"{{end}}>{{if .Label}}<label for="{{.ID}}-input">{{.Label}}</label>{{end}}{{$input := dict "ID" (printf "%s-input" .ID) "Name" .Name "Value" .Value "Placeholder" .Placeholder "Required" .Required "Disabled" .Disabled "Attrs" (dict "data-ui-hotkey" "true")}}{{if .Glyph}}<div class="ely-api-hotkey-control"><span class="ely-api-hotkey-glyph" aria-hidden="true">⌘</span>{{template "input" $input}}</div>{{else}}{{template "input" $input}}{{end}}</div>
 {{end}}
 
 {{define "signature-pad"}}

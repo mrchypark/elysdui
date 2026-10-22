@@ -152,3 +152,22 @@ func TestAdvancedDurationPartsKeepBoundsAndNames(t *testing.T) {
 	}
 	t.Fatal("duration part submission field is missing")
 }
+
+func TestHotkeyAdornmentStaysWithItsInput(t *testing.T) {
+	for _, name := range []string{"HotkeyInput", "ShortcutRecorder"} {
+		t.Run(name, func(t *testing.T) {
+			markup := renderAdvancedForm(t, "forms", name, map[string]any{"Label": "Caller field", "Value": "alpha"})
+			if !strings.Contains(markup, `<div class="ely-api-hotkey-control"><span class="ely-api-hotkey-glyph" aria-hidden="true">⌘</span>`) ||
+				!strings.Contains(markup, `data-ui-hotkey="true"`) {
+				t.Fatalf("hotkey glyph is not grouped with the input: %s", markup)
+			}
+		})
+	}
+}
+
+func TestSignupTermsLabelHasLayoutHook(t *testing.T) {
+	markup := renderAdvancedForm(t, "account", "SignupForm", map[string]any{"TermsLabel": "Caller terms"})
+	if !strings.Contains(markup, `<label class="ely-suite-terms"><input type="checkbox" name="terms" required>Caller terms</label>`) {
+		t.Fatalf("signup terms checkbox lost its spacing hook or required state: %s", markup)
+	}
+}
