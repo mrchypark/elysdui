@@ -17,7 +17,7 @@ test('minimap viewport oracle rejects zoom changes against the pre-click state',
   );
 });
 
-test('InfiniteCanvas aliases remain one geometry-derived minimap action contract',async()=>{
+test('canonical InfiniteCanvas has a geometry-derived contract; seven alias cases remain untested',async()=>{
   const contract=requestedStateContract('canvas/InfiniteCanvas');
   assert.equal(contract?.kind,'InfiniteCanvas');
   assert.equal(contract.focusedSequence,'canvas-minimap-zoom-fit-hit-test');
