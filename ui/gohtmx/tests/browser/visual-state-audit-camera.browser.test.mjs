@@ -79,13 +79,27 @@ test('action camera tall-page, outline and centered native-modal causal pixels',
       const panelRect=await dialog.boundingBox();assert(panelRect);
       assert(Math.abs(panelRect.x+panelRect.width/2-720)<1&&Math.abs(panelRect.y+panelRect.height/2-500)<1,'Actual corrected native UI must be viewport-centered');
       const peerBefore=await twin.evaluate(node=>({html:node.innerHTML,values:[...node.querySelectorAll('select')].map(n=>n.value)}));
+      const focusState=()=>dialog.locator('#close').evaluate(node=>{const s=getComputedStyle(node),r=node.getBoundingClientRect();return {activeID:document.activeElement.id||null,focused:node===document.activeElement,focusVisible:node.matches(':focus-visible'),owned:node.closest('dialog[open]:modal')?.id==='owned-dialog',outlineStyle:s.outlineStyle,outlineWidth:s.outlineWidth,outlineOffset:s.outlineOffset,outlineColor:s.outlineColor,rect:{left:r.left,top:r.top,right:r.right,bottom:r.bottom}};});
       for(const mode of spacing==='320px'?['union','panel-only','panel-root-start']:['viewport-slot-root-start']){
         const stage={spacing,mode};receipt.modalCausal.stages.push(stage);
+        stage.pointerOpenFocus=await focusState();stage.keyboardSetup=[];
+        if(spacing==='100vh'){
+          for(let i=0;i<4;i++){
+            const observed=await focusState();if(observed.focused&&observed.focusVisible)break;
+            await page.keyboard.press('Tab');stage.keyboardSetup.push({key:'Tab',focus:await focusState()});
+          }
+        }
         const prefix=`modal-${spacing}-${mode}`,beforePath=join(output,prefix+'-before-context.png');
         const beforePNG=await screenshotWithoutCaretMutation(page,{path:beforePath,animations:'disabled'});
         stage.beforeContext={path:beforePath,sha256:hash(beforePNG)};
         const focus=await page.evaluate(()=>document.activeElement.id);
         const target=mode==='union'?main:mode==='panel-only'?dialog:await basicModalCaptureTarget(main,selection);
+        stage.preCaptureFocus=await focusState();
+        if(spacing==='100vh'){
+          const f=stage.preCaptureFocus;
+          assert.equal(f.activeID,'close');assert(f.focused&&f.focusVisible&&f.owned,'Real keyboard navigation must establish visible focus on the owned native Close control before capture');
+          assert.equal(f.outlineStyle,'solid');assert.equal(f.outlineWidth,'2px');assert.equal(f.outlineOffset,'4px');assert.equal(f.outlineColor,'rgb(0, 0, 255)');
+        }
         const geometry=await page.evaluate(()=>Object.fromEntries(['main-frame','owned-dialog','twin-frame','next-frame'].map(id=>{const r=document.getElementById(id).getBoundingClientRect();return [id,{x:r.x,y:r.y,width:r.width,height:r.height}];})));
         stage.geometry=geometry;
         const intersects=(a,b)=>a.x<b.x+b.width&&b.x<a.x+a.width&&a.y<b.y+b.height&&b.y<a.y+a.height;
@@ -101,8 +115,16 @@ test('action camera tall-page, outline and centered native-modal causal pixels',
         else{
           assert.deepEqual(captured.foreignDOMIntersections,[]);
           assert.equal(captured.bounds.focusOutline?.status,'bounded','Positive modal evidence requires a bounded owned focus outline');
-          assert.equal(await dialog.locator('#close').evaluate(node=>node===document.activeElement&&node.matches(':focus-visible')&&node.closest('dialog[open]:modal')?.id==='owned-dialog'),true,'The native Close control must actually own visible focus');
+          assert.deepEqual(await focusState(),stage.preCaptureFocus,'The camera must preserve actual focus, outline style and control geometry');
           const r=await dialog.boundingBox(),clip={x:Math.floor(r.x),y:Math.floor(r.y),width:Math.ceil(r.x+r.width)-Math.floor(r.x),height:Math.ceil(r.y+r.height)-Math.floor(r.y)};
+          const control=stage.preCaptureFocus.rect;
+          // Independent six-pixel outline envelope clipped by this fixture's
+          // borderless native dialog scrollport, not by the camera algorithm.
+          stage.independentOutlinePaint={left:Math.max(r.x,control.left-6),top:Math.max(r.y,control.top-6),right:Math.min(r.x+r.width,control.right+6),bottom:Math.min(r.y+r.height,control.bottom+6)};
+          const paint=stage.independentOutlinePaint;assert(paint.right>paint.left&&paint.bottom>paint.top);
+          assert(paint.left>=r.x&&paint.top>=r.y&&paint.right<=r.x+r.width&&paint.bottom<=r.y+r.height,'Visible native outline is contained by the owned dialog, not missing');
+          assert(paint.left<control.left||paint.top<control.top||paint.right>control.right||paint.bottom>control.bottom,'At least one outline strip must remain visibly outside the control border');
+          assert.deepEqual(captured.bounds.focusOutline.paint,paint,'Bounded focus metadata must match the independently derived visible outline');
           const independent=await screenshotWithoutCaretMutation(page,{path:join(output,'modal-independent-reference.png'),clip,animations:'disabled',scale:'css'});
           receipt.modalCausal.referenceSHA256=hash(independent);
           assert.deepEqual(captured.png,independent,'Primary modal pixels must equal the independent full-panel viewport reference');
