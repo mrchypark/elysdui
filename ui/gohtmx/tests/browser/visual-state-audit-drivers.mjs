@@ -100,11 +100,16 @@ export async function captureTargetPNG(page,root,path,{checkedRootID}={}){
   const bounds=await root.evaluate(actionBounds);
   assert(bounds.clip.width>0&&bounds.clip.height>0,'Target painted union must have positive dimensions');
   assert(!bounds.negativePageOverflow,'Target painted content extends beyond capturable document coordinates');
+  const {scroll,viewport}=await page.evaluate(()=>({scroll:{x:scrollX,y:scrollY},viewport:{width:innerWidth,height:innerHeight}}));
+  // Same camera rule as the frozen baseline: document capture is only the fallback.
+  const viewportClip={...bounds.clip,x:bounds.clip.x-scroll.x,y:bounds.clip.y-scroll.y};
+  const fits=viewportClip.x>=0&&viewportClip.y>=0&&viewportClip.x+bounds.clip.width<=viewport.width&&viewportClip.y+bounds.clip.height<=viewport.height;
+  const camera={fullPage:!fits,clip:fits?viewportClip:bounds.clip};
   const ownership=await root.evaluate(captureForeignPaint,{clip:bounds.clip,checkedRootID});
-  const png=await page.screenshot({path,fullPage:true,clip:bounds.clip,animations:'disabled',scale:'css'});
+  const png=await page.screenshot({path,...camera,animations:'disabled',scale:'css'});
   assert.equal(png.readUInt32BE(16),bounds.clip.width,'PNG width equals painted union');
   assert.equal(png.readUInt32BE(20),bounds.clip.height,'PNG height equals painted union');
-  return {bounds,png,...ownership};
+  return {bounds:{...bounds,scroll,viewport,camera,coordinateSpace:'document clip; camera.clip is viewport-relative when fullPage=false'},png,...ownership};
 }
 
 // Choose an actually reachable owned pixel, never a forced click through a twin.
