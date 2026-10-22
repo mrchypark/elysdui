@@ -48,7 +48,28 @@ test('resolver return flow pure: loop switch try and label boundaries stay conse
     const result=returnFlowSites(boundary+'later.click();');
     assert(returnFlowControls(result).includes('second'),boundary);
     assert(returnFlowControls(result).includes('later'),boundary);
+    assert(result.mappingGaps.some(gap=>gap.reason==='conservative-control-flow-boundary'),boundary);
     if(boundary.startsWith('try'))assert(returnFlowControls(result).includes('finalizer'));
+  }
+});
+test('resolver return flow pure: action-free boundaries block exact one-site matching',()=>{
+  const boundaries=[
+    ['while(unknown){return;}','WhileStatement'],
+    ['for(;unknown;){return;}','ForStatement'],
+    ['for(const item of items){return;}','ForOfStatement'],
+    ['for(const key in object){return;}','ForInStatement'],
+    ['do{return;}while(unknown);','DoWhileStatement'],
+    ['switch(selected){case true:return;}','SwitchStatement'],
+    ['try{return;}finally{}','TryStatement'],
+    ['label:{return;}','LabeledStatement'],
+  ];
+  for(const [boundary,type]of boundaries){
+    for(const body of [boundary+'target.click();',`function helper(){${boundary}}helper();target.click();`]){
+      const result=returnFlowSites(body);
+      assert.deepEqual(returnFlowControls(result),['target'],body);
+      assert(result.mappingGaps.some(gap=>gap.reason==='conservative-control-flow-boundary'&&gap.boundary===type),body);
+      assert.equal(result.sites.length===1&&result.mappingGaps.length===0,false,'Matching the sole action must not discharge an unresolved boundary');
+    }
   }
 });
 

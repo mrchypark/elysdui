@@ -285,6 +285,7 @@ export function resolveCaseActionSites(source,filename,{entry,facts}){
       return execute(selected?node.consequent:node.alternate,stack,unknown,conservative);
     }
     if(node.type==='SwitchStatement'){
+      mappingGaps.push({reason:'conservative-control-flow-boundary',boundary:node.type,line:node.loc.start.line,column:node.loc.start.column});
       const selected=value(node.discriminant);
       if(selected===undefined){for(const branch of node.cases)for(const stmt of branch.consequent)execute(stmt,stack,[...unknown,'unresolved switch'],true);}
       else {let active=false;for(const branch of node.cases){active ||= literal(branch.test)===selected;if(active){for(const stmt of branch.consequent)execute(stmt,stack,unknown,true);if(branch.consequent.some(stmt=>stmt.type==='BreakStatement'))break;}}}
@@ -292,6 +293,7 @@ export function resolveCaseActionSites(source,filename,{entry,facts}){
     }
     // No termination inference across iteration, exceptions, finalizers or labels.
     const boundary=['ForStatement','ForInStatement','ForOfStatement','WhileStatement','DoWhileStatement','TryStatement','LabeledStatement'].includes(node.type);
+    if(boundary)mappingGaps.push({reason:'conservative-control-flow-boundary',boundary:node.type,line:node.loc.start.line,column:node.loc.start.column});
     if(node.type==='CallExpression'){
       if(node.callee.type==='Identifier'){
         const target=binding(node.callee.name,node);
