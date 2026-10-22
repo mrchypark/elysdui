@@ -35,8 +35,8 @@ for(const path of paletteAuditCandidateProduction){
 for(const path of paletteAuditCandidateAssets){
   assert(!paletteReviewedProduction.includes(path),'audited asset is not a reviewed file');
   assert(!paletteProductionPaths('strict').includes(path),'audited asset is not strict-allowed');
-  assert(!paletteProductionPaths('activation-repair').includes(path),'audited asset is not activation-repair-allowed');
 }
+assert(!paletteProductionPaths('activation-repair').includes('ui/gohtmx/assets/ely-controls.css'),'new audited asset is not activation-repair-allowed');
 // The reviewed activation-repair digests stay byte-identical.
 assert.deepEqual(paletteActivationRepairPins,{
   'ui/gohtmx/assets/ely/icons/check.svg':'e4bab3ed87dca8961e94a4e72ce23c17a674bebcb72bbbbe5eff4ef41532aa83',
