@@ -54,6 +54,7 @@ jobs:
             test-results/visual-state-audit-dialog-layout-*/
             test-results/data-tree-layout/
             test-results/data-heatmap-contrast/
+            test-results/data-pixel-layout/
             test-results/workspace-communication-recovery/
             test-results/native-issue-regressions/
           if-no-files-found: warn
