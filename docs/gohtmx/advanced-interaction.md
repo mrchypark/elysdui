@@ -103,7 +103,7 @@ session; DOM/ARIA tests alone do not establish screen-reader announcements.
 | navigation/Breadcrumb | `Items[].Href` | browser navigation |
 | navigation/Pagination | `Page`, `Total`, `PreviousPage`, `NextPage`, `Jump`, `Items[].Gap`, `Items[].Selected` | local `ely:change` |
 | navigation/Steps | `Items[].Content`, `Items[].Selected` | none |
-| navigation/Sidebar Navigation | `Items[].Href`, `Items[].Selected` | browser navigation |
+| navigation/Sidebar Navigation | `Items[].Href`, `Items[].Selected`, `Groups`, `Groups[].Collapsed`, `Folded` | browser link navigation; local group expansion; fold control emits `ely:change` (`name: "sidebar"`) |
 | navigation/NavigationMenu | `Items[].Items`, `Items[].Icon`, `Items[].Content` | item `Action` or `select`; local panel open/close |
 | navigation/BackForwardNavigation | `BackLabel`, `ForwardLabel`, `Items[].Selected` | `back`, `forward`; local current place |
 | navigation/Anchor | `Items[].Value`, `Items[].Content`, `Items[].Selected` | local section scroll |
