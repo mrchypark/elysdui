@@ -612,7 +612,7 @@
 [data-ely-family='workspace'] [data-ws-changes][data-ws-source='true'] .ely-workspace__changes-grid{grid-template-columns:1fr;gap:16px}
 [data-ely-family='workspace'] [data-ws-changes][data-ws-source='true'] [data-ws-change]{display:flex;align-items:center;gap:6px;padding:4px 0;min-width:0}
 [data-ely-family='workspace'] [data-ws-changes][data-ws-source='true'] [data-ws-change]>code{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-[data-ely-family='workspace'] [data-ws-changes][data-ws-source='true']>form{display:grid;align-content:start;gap:8px}
+[data-ely-family='workspace'] [data-ws-changes]>form{display:grid;align-content:start;gap:8px}
 [data-ely-family='workspace'] [data-ws-commit-history]{display:grid;grid-template-columns:48px minmax(0,1fr);height:320px;align-content:start;overflow:auto}
 [data-ely-family='workspace'] [data-ws-commit-history]>svg{width:48px;height:192px}
 [data-ely-family='workspace'] [data-ws-commit-history] path{fill:none;stroke:var(--focus);stroke-width:1.5}
