@@ -366,9 +366,9 @@ test('action cameras distinguish covered foreign paint, exposed corners and empt
       assert((await captureTargetPNG(page,page.locator('#panel'))).foreignDOMIntersections.some(item=>item.id==='peer'),'Unmodelled auto-z ancestor stacking contexts cannot clear foreign paint');
       await page.locator('#main').evaluate(node=>{node.style.position='';});
     }
-    for(const [selector,property,value] of [['#main','overflow','hidden'],['#main','overflow','clip'],['#main','maskImage','linear-gradient(black,transparent)'],['body','overflow','hidden'],['body','clipPath','inset(10px round 8px)']]){
+    for(const [selector,property,value] of [['#main','isolation',['iso','late'].join('')],['#main','overflow','hidden'],['#main','overflow','clip'],['#main','maskImage','linear-gradient(black,transparent)'],['body','overflow','hidden'],['body','clipPath','inset(10px round 8px)']]){
       await page.locator(selector).evaluate((node,{property,value})=>{node.style[property]=value;},{property,value});
-      assert((await captureTargetPNG(page,page.locator('#panel'))).foreignDOMIntersections.some(item=>item.id==='peer'),'Owned or common ancestor clipping/masks must disable subtraction');
+      assert((await captureTargetPNG(page,page.locator('#panel'))).foreignDOMIntersections.some(item=>item.id==='peer'),'Owned ancestor stacking contexts or ancestor clipping/masks must disable subtraction');
       await page.locator(selector).evaluate((node,property)=>{node.style[property]='';},property);
     }
     await page.locator('#panel').evaluate(node=>{node.style.background='transparent';});
