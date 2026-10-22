@@ -24,6 +24,19 @@ const groups = {
   dashboard: ['Dashboard Grid', 'DashboardCard', 'DashboardFilterBar', 'MetricsChart', 'RefreshIntervalSelector', 'ResourceGauge', 'StatCard', 'Widget'].map(name => `dashboard/${name}`),
   measures: ['Gauge', 'Meter', 'UsageBar'].map(name => `data/${name}`)
 };
+const styleMeaning = snapshots => snapshots.map(({attribute,properties}) => ({present:attribute!==null,properties}));
+async function snapshotStyles(locator) {
+  return locator.evaluateAll(nodes => nodes.map(node => ({attribute:node.getAttribute('style'),properties:[...node.style].map(property => [property,node.style.getPropertyValue(property),node.style.getPropertyPriority(property)])})));
+}
+async function restoreStyles(locator, snapshots) {
+  await locator.evaluateAll((nodes,snapshots) => nodes.forEach((node,index) => {
+    const original=snapshots[index];
+    // The gallery CSP rejects style attributes; restore through the initializer's CSSOM path.
+    node.style.cssText='';
+    for(const [property,value,priority] of original.properties)node.style.setProperty(property,value,priority);
+    if(original.attribute===null)node.removeAttribute('style');
+  }),snapshots);
+}
 // The same measured oracle is used for production and deliberately broken DOM styles.
 function textRangesDoNotOverlap(texts) {
   return texts.length >= 2 && texts.every((text,index) => texts.slice(0,index).every(other =>
@@ -109,7 +122,11 @@ if (process.env.DATA_PIXEL_SELF_CHECK === '1') {
   assert(!valid({...measures,viewportContained:false},'measures',true));
   assert(!valid({...measures,gauges:[{...measures.gauges[0],textFits:false},measures.gauges[1]]},'measures',true));
   assert(!valid({...measures,gauges:[{...measures.gauges[0],height:0},measures.gauges[1]]},'measures',true));
-  console.log('20 measured-oracle self-checks passed; no files, server or browser started');
+  const styles=[{attribute:'color: red;',properties:[['color','red','important']]}];
+  assert.deepEqual(styleMeaning(styles),styleMeaning([{...styles[0],attribute:'color:red;'}]));
+  assert.notDeepEqual(styleMeaning(styles),styleMeaning([{...styles[0],properties:[['color','red','']]}]));
+  assert.notDeepEqual(styleMeaning([{attribute:null,properties:[]}]),styleMeaning([{attribute:'',properties:[]}]));
+  console.log('23 measured-oracle/style-contract self-checks passed; no files, server or browser started');
   process.exit(0);
 }
 await mkdir(outputRoot, {recursive: true});
@@ -198,11 +215,12 @@ try {
       if (group === 'chart') {
         const expected = /Treemap|Sunburst/.test(identity) ? ['Alpha','Beta'] : /Sankey|Funnel/.test(identity) ? ['In'] : ['A'];
         assert.deepEqual(initial.labels.map(label => label.text),expected,`${identity} caller labels`);
-        const original = await root.getAttribute('style');
+        const original = await snapshotStyles(root);
         await root.evaluate(node => node.style.color='rgb(17, 85, 153)');
         const custom = await measure(root,group);
         assert(custom.labels.every(label => label.fill === 'rgb(17, 85, 153)'),`${identity} caller color inheritance`);
-        await root.evaluate((node,style) => {if(style===null)node.removeAttribute('style');else node.setAttribute('style',style);},original);
+        await restoreStyles(root,original);
+        assert.deepEqual(styleMeaning(await snapshotStyles(root)),styleMeaning(original),'caller color CSSOM restoration');
       } else if (group === 'dashboard') {
         assert.deepEqual(initial.tiles.map(tile => [tile.key,tile.x,tile.y,tile.w,tile.h]),[['requests','0','0','4','2'],['errors','4','0','4','2'],['cpu','8','0','4','2'],['latency','0','2','8','3'],['saturation','8','2','4','3']]);
         await root.evaluate(node => {node.__pixelEvents=[];node.addEventListener('ely:action',event => {if(event.target===node && event.detail.action==='dashboard-layout')node.__pixelEvents.push(event.detail);});});
@@ -223,8 +241,8 @@ try {
         const modes=group==='chart'?['fill','hidden','offscreen']:group==='dashboard'?['columns']:['minimum','clipped-gauge'];
         for(const mode of modes){
         const target = group === 'chart' ? root.locator('.ely-data__chart text').first() : root.locator(group === 'dashboard' ? '[data-ely-dashboard]' : mode==='clipped-gauge'?'.ely-data__gauge':'.ely-data__measures').first();
-        const original = await target.getAttribute('style');
-        const tileStyles=mode==='columns'?await target.locator('[data-ely-dashboard-tile]').evaluateAll(nodes => nodes.map(node => node.getAttribute('style'))):null;
+        const original = await snapshotStyles(target);
+        const tileStyles=mode==='columns'?await snapshotStyles(target.locator('[data-ely-dashboard-tile]')):null;
         const negative = {profile,identity,group,mode,beforeStyles:{target:original,tiles:tileStyles}};
         report.negatives.push(negative);
         if(tileStyles)negative.beforeGrid=(await measure(root,group)).tiles.map(tile => tile.grid);
@@ -252,14 +270,17 @@ try {
         if(mode==='clipped-gauge')assert.equal(broken.gauges[0].textFits,false);
         await capture(root,`${profile}-negative-${group}-${mode}`);
         assert(!valid(broken,group,mobile),`${profile} ${group}/${mode} negative must be rejected`);
-        // Clear mutated CSSOM priorities before reparsing the exact original attribute.
-        await target.evaluate((node,style) => {node.removeAttribute('style');if(style!==null)node.setAttribute('style',style);},original);
-        if(tileStyles)await target.locator('[data-ely-dashboard-tile]').evaluateAll((nodes,styles) => nodes.forEach((node,index) => {node.removeAttribute('style');if(styles[index]!==null)node.setAttribute('style',styles[index]);}),tileStyles);
+        await restoreStyles(target,original);
+        if(tileStyles)await restoreStyles(target.locator('[data-ely-dashboard-tile]'),tileStyles);
         await page.evaluate(() => window.scrollTo(0,window.scrollY));
-        negative.afterStyles = {target:await target.getAttribute('style'),tiles:tileStyles ? await target.locator('[data-ely-dashboard-tile]').evaluateAll(nodes => nodes.map(node => node.getAttribute('style'))) : null};
+        negative.afterStyles = {target:await snapshotStyles(target),tiles:tileStyles ? await snapshotStyles(target.locator('[data-ely-dashboard-tile]')) : null};
+        negative.attributeBytesEqual = JSON.stringify([negative.beforeStyles.target.map(style=>style.attribute),tileStyles?.map(style=>style.attribute)]) === JSON.stringify([negative.afterStyles.target.map(style=>style.attribute),negative.afterStyles.tiles?.map(style=>style.attribute)]);
         negative.restoredMetrics = await measure(root,group);
-        assert.deepEqual(negative.afterStyles,negative.beforeStyles,`${group}/${mode} exact style restoration`);
-        if(tileStyles)assert.deepEqual(negative.restoredMetrics.tiles.map(tile => tile.grid),negative.beforeGrid,'dashboard CSSOM values, priorities and computed placement restored');
+        assert.deepEqual(styleMeaning(negative.afterStyles.target),styleMeaning(original),`${group}/${mode} exact CSSOM and attribute-presence restoration`);
+        if(tileStyles){
+          assert.deepEqual(styleMeaning(negative.afterStyles.tiles),styleMeaning(tileStyles),'dashboard exact CSSOM values/priorities and attribute presence restored');
+          assert.deepEqual(negative.restoredMetrics.tiles.map(tile => tile.grid.declarations),negative.beforeGrid.map(grid=>grid.declarations),'dashboard computed placement restored');
+        }
         assert(valid(negative.restoredMetrics,group,mobile),`${group} restored after negative: ${JSON.stringify(negative.restoredMetrics)}`);
         }
       }
