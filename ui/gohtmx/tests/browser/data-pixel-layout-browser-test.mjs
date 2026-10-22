@@ -25,11 +25,15 @@ const groups = {
   measures: ['Gauge', 'Meter', 'UsageBar'].map(name => `data/${name}`)
 };
 // The same measured oracle is used for production and deliberately broken DOM styles.
+function textRangesDoNotOverlap(texts) {
+  return texts.length >= 2 && texts.every((text,index) => texts.slice(0,index).every(other =>
+    text.right <= other.left + 1 || text.left >= other.right - 1 || text.bottom <= other.top + 1 || text.top >= other.bottom - 1));
+}
 function valid(metrics, group, mobile) {
   if (!metrics.viewportContained) return false;
   if (group === 'chart') return metrics.labels.length > 0 && metrics.labels.every(label => label.text && label.fill === metrics.foreground && label.visible && label.contained && label.contrast >= 4.5 && label.width > 0 && label.height > 0);
   if (!metrics.contained) return false;
-  if (group === 'dashboard') return metrics.columns === (mobile ? 1 : 12) && metrics.tiles.length === 5 && metrics.tiles.every(tile => tile.textFits && tile.ordered) && (!mobile || metrics.tiles.every((tile, i, all) => i === 0 || tile.top >= all[i - 1].bottom - 1));
+  if (group === 'dashboard') return metrics.columns === (mobile ? 1 : 12) && metrics.tiles.length === 5 && metrics.tiles.every(tile => tile.textFits && textRangesDoNotOverlap(tile.texts)) && (!mobile || metrics.tiles.every((tile, i, all) => i === 0 || tile.top >= all[i - 1].bottom - 1));
   return metrics.gauges.length === 2 && metrics.gauges.every(gauge => gauge.width > 0 && gauge.height > 0 && gauge.contained && gauge.textFits) && metrics.meterContained;
 }
 async function measure(root, group) {
@@ -69,7 +73,7 @@ async function measure(root, group) {
       const box = rect(tile), texts = [...tile.querySelectorAll('h2,small,output')].map(node => {const range = document.createRange(); range.selectNodeContents(node); return rect(range);});
       return {...box, key:tile.dataset.elyKey, x:tile.dataset.elyX, y:tile.dataset.elyY, w:tile.dataset.elyW, h:tile.dataset.elyH,
         textFits:inside(box,panelBounds) && texts.every(text => inside(text,box) && text.top >= box.top - 1 && text.bottom <= box.bottom + 1),
-        ordered:texts.every((text,i,all) => i === 0 || text.top >= all[i-1].bottom - 1)};
+        texts};
     })};
     const meter=panel.querySelector('.ely-data__meter'),meterBox=rect(meter);
     return {...base,meterContained:inside(meterBox,panelBounds) && [...meter.children].every(node => inside(rect(node),meterBox)),gauges:[...panel.querySelectorAll('.ely-data__gauge')].map(node => {
@@ -80,13 +84,20 @@ async function measure(root, group) {
 }
 if (process.env.DATA_PIXEL_SELF_CHECK === '1') {
   const chart = {viewportContained:true,foreground:'white',labels:[{text:'A',fill:'white',visible:true,contained:true,contrast:12,width:8,height:12}]};
-  const tiles = Array.from({length:5},(_,i) => ({textFits:true,ordered:true,top:i*100,bottom:i*100+90}));
+  const inline = [{left:0,right:100,top:0,bottom:20},{left:0,right:60,top:24,bottom:40},{left:60,right:120,top:20,bottom:44}];
+  const stacked = [inline[0],inline[1],{left:0,right:60,top:44,bottom:68}];
+  const overlapping = [inline[0],inline[1],{left:40,right:100,top:24,bottom:44}];
+  const tiles = Array.from({length:5},(_,i) => ({textFits:true,texts:inline,top:i*100,bottom:i*100+90}));
   const dashboard = {viewportContained:true,contained:true,columns:1,tiles};
   const measures = {viewportContained:true,contained:true,meterContained:true,gauges:[{width:112,height:112,contained:true,textFits:true},{width:112,height:112,contained:true,textFits:true}]};
   assert(valid(chart,'chart',true));
   assert(!valid({...chart,labels:[{...chart.labels[0],fill:'black'}]},'chart',true));
   for(const mutation of [{visible:false},{contained:false},{contrast:1},{height:0}])assert(!valid({...chart,labels:[{...chart.labels[0],...mutation}]},'chart',true));
   assert(valid(dashboard,'dashboard',true));
+  assert(textRangesDoNotOverlap(inline));
+  assert(textRangesDoNotOverlap(stacked));
+  assert(!textRangesDoNotOverlap(overlapping));
+  assert(!valid({...dashboard,tiles:tiles.map((tile,i) => i===1 ? {...tile,texts:overlapping} : tile)},'dashboard',true));
   assert(!valid({...dashboard,columns:4},'dashboard',true));
   assert(!valid({...dashboard,tiles:tiles.map((tile,i) => i===1 ? {...tile,textFits:false} : tile)},'dashboard',true));
   assert(valid({...dashboard,columns:12},'dashboard',false));
@@ -95,7 +106,7 @@ if (process.env.DATA_PIXEL_SELF_CHECK === '1') {
   assert(!valid({...measures,viewportContained:false},'measures',true));
   assert(!valid({...measures,gauges:[{...measures.gauges[0],textFits:false},measures.gauges[1]]},'measures',true));
   assert(!valid({...measures,gauges:[{...measures.gauges[0],height:0},measures.gauges[1]]},'measures',true));
-  console.log('15 measured-oracle self-checks passed; no files, server or browser started');
+  console.log('19 measured-oracle self-checks passed; no files, server or browser started');
   process.exit(0);
 }
 await mkdir(outputRoot, {recursive: true});
