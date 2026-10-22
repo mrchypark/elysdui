@@ -59,4 +59,10 @@ test('each declared focused sequence has a matching asserted driver path',()=>{
     assert.match(driver,new RegExp(`runStep\\('${id}'`),`${id} must be executed by the focused driver`);
   assert.match(driver,/clickVisibleControl\(label\)/,'Signup terms must be activated by a hit-tested visible label');
   assert.match(driver,/await seek\.press\('Home'\)/,'Lottie reset must use the public range keyboard interaction');
+  assert.match(driver,/node\.addEventListener\('ely:change'/,'Tabs and Lottie must observe real root-scoped change events');
+  assert.match(driver,/name==='tab'&&change\.value===expected&&change\.selected===true/,'Tab changes must be asserted from their emitted detail');
+  assert.match(driver,/name==='frame'&&change\.value===String\(expected\)/,'Lottie frame changes must be asserted from their emitted detail');
+  assert.match(driver,/getBoundingClientRect\(\)/,'Lottie frame shape geometry must come from rendered SVG bounds');
+  assert.match(driver,/movement>4/,'The moving marker must measurably change position at frame 50');
+  assert.match(driver,/resetDelta<=1/,'Reset must restore independently observed frame-zero geometry');
 });

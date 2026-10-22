@@ -257,6 +257,8 @@ export async function runRequestedStateActions(contract,root,runStep){
   if(contract.focusedSequence==='tabs-panel-selection'){
     const tabs=root.locator('[data-interaction-tab]:not(:disabled)'),enabled=await tabs.count();
     assert(enabled>=2,'Tabs fixture must provide at least two enabled tabs');
+    await root.evaluate(node=>{node.__visualFocusedChanges=[];node.addEventListener('ely:change',event=>node.__visualFocusedChanges.push({...event.detail}));});
+    const changes=()=>root.evaluate(node=>node.__visualFocusedChanges.map(change=>({...change})));
     const selected=root.locator('[data-interaction-tab][aria-selected="true"]');
     assert.equal(await selected.count(),1,'Tabs fixture must begin with one selected tab');
     let targetIndex=0;if(await tabs.nth(0).getAttribute('aria-selected')==='true')targetIndex=1;
@@ -268,8 +270,10 @@ export async function runRequestedStateActions(contract,root,runStep){
       if(expected)assert.equal(await chosen.getAttribute('value'),expected);
       return {selected:await chosen.getAttribute('value'),panel:await panels.first().getAttribute('id'),visiblePanels:1};
     };
-    await runStep('select-tab',()=>target.click(),async()=>{assert.equal(await target.getAttribute('aria-selected'),'true');return assertSelectedPanel(await target.getAttribute('value'));});
-    await runStep('keyboard-select-tab',()=>target.press(forward),async()=>{const state=await assertSelectedPanel();assert.notEqual(state.selected,await target.getAttribute('value'),'Arrow navigation must move selection to another enabled tab');return {...state,key:forward};});
+    let changesBefore=0;
+    const assertChange=async expected=>{const recorded=await changes(),event=recorded.slice(changesBefore).find(change=>change.name==='tab'&&change.value===expected&&change.selected===true);assert(event,'Tab selection must emit the documented ely:change payload');assert.deepEqual(event,{id:await root.getAttribute('id'),component:contract.identity,name:'tab',value:expected,selected:true});return event;};
+    await runStep('select-tab',async()=>{changesBefore=(await changes()).length;await target.click();},async()=>{assert.equal(await target.getAttribute('aria-selected'),'true');const panel=await assertSelectedPanel(await target.getAttribute('value')),event=await assertChange(panel.selected);return {...panel,change:event};});
+    await runStep('keyboard-select-tab',async()=>{changesBefore=(await changes()).length;await target.press(forward);},async()=>{const state=await assertSelectedPanel();assert.notEqual(state.selected,await target.getAttribute('value'),'Arrow navigation must move selection to another enabled tab');const event=await assertChange(state.selected);return {...state,key:forward,change:event};});
     return;
   }
   if(contract.focusedSequence==='lottie-play-pause-frame-reset'){
@@ -277,16 +281,27 @@ export async function runRequestedStateActions(contract,root,runStep){
     assert.equal(await host.getAttribute('data-lottie-autoplay'),'false','Deterministic fixture must not autoplay');
     assert.equal(await host.getAttribute('data-lottie-loop'),'false','Deterministic fixture must not loop');
     await svg.waitFor({state:'visible',timeout:5000});
+    for(let attempt=0;attempt<40&&(await status.textContent()).trim()!=='Animation ready';attempt++)await new Promise(resolve=>setTimeout(resolve,25));
+    assert.equal((await status.textContent()).trim(),'Animation ready','Lottie SVG must finish loading before its initial frame is measured');
+    await root.evaluate(node=>{node.__visualFocusedChanges=[];node.addEventListener('ely:change',event=>node.__visualFocusedChanges.push({...event.detail}));});
+    const changes=()=>root.evaluate(node=>node.__visualFocusedChanges.map(change=>({...change})));
+    let changesBefore=0;
+    const assertFrameChange=async expected=>{const recorded=await changes(),event=recorded.slice(changesBefore).find(change=>change.name==='frame'&&change.value===String(expected));assert(event,`Lottie seek must emit ely:change frame=${expected}`);assert.deepEqual(event,{id:await root.getAttribute('id'),component:contract.identity,name:'frame',value:String(expected)});return event;};
+    assert.equal(await seek.inputValue(),'0','Non-autoplay Lottie fixture must start at frame zero');
+    assert.equal((await progress.textContent()).trim(),'0%','Non-autoplay Lottie fixture must report its initial frame');
     const visibleFrame=async()=>{
       assert(await svg.isVisible(),'Lottie SVG must remain visible');
       const frame=await svg.evaluate(node=>{const paths=[...node.querySelectorAll('path')];const painted=paths.filter(path=>{const box=path.getBBox(),style=getComputedStyle(path);return box.width>0&&box.height>0&&style.display!=='none'&&style.visibility!=='hidden'&&Number(style.opacity)>0&&style.fill!=='none';});return {pathCount:paths.length,paintedPathCount:painted.length};});
       assert(frame.paintedPathCount>0,'Current Lottie frame must contain a visible painted path');
       return frame;
     };
+    const visibleGeometry=async()=>svg.evaluate(node=>{const svgBox=node.getBoundingClientRect();return [...node.querySelectorAll('path')].flatMap(path=>{const shape=path.getBoundingClientRect(),style=getComputedStyle(path),box=path.getBBox();if(!box.width||!box.height||style.display==='none'||style.visibility==='hidden'||Number(style.opacity)<=0||style.fill==='none')return [];return [{x:shape.x-svgBox.x,y:shape.y-svgBox.y,width:shape.width,height:shape.height}];});});
+    const frame0Geometry=await visibleGeometry();assert(frame0Geometry.length>0,'Initial frame must expose visible fixture shape geometry');
     await runStep('play-animation',()=>play.click(),async()=>{assert.equal((await status.textContent()).trim(),'Animation playing');const frame=await visibleFrame();return {status:(await status.textContent()).trim(),svgVisible:true,...frame};});
     await runStep('pause-animation',()=>pause.click(),async()=>{assert.equal((await status.textContent()).trim(),'Animation paused');const frame=await visibleFrame();return {status:(await status.textContent()).trim(),svgVisible:true,...frame};});
-    await runStep('seek-visible-frame',async()=>{await seek.focus();await seek.press('Home');for(let index=0;index<50;index++)await seek.press('ArrowRight');},async()=>{assert.equal(await seek.inputValue(),'50');assert.equal((await progress.textContent()).trim(),'50%');const frame=await visibleFrame();return {frame:50,progress:(await progress.textContent()).trim(),svgVisible:true,...frame};});
-    await runStep('reset-visible-frame',()=>seek.press('Home'),async()=>{assert.equal(await seek.inputValue(),'0');assert.equal((await progress.textContent()).trim(),'0%');const frame=await visibleFrame(),box=await svg.boundingBox();assert(box&&box.width>0&&box.height>0,'Reset frame must retain a painted SVG');return {frame:0,progress:(await progress.textContent()).trim(),svgVisible:true,svgBounds:box,...frame};});
+    let frame50Geometry=[];
+    await runStep('seek-visible-frame',async()=>{changesBefore=(await changes()).length;await seek.focus();await seek.press('Home');for(let index=0;index<50;index++)await seek.press('ArrowRight');},async()=>{assert.equal(await seek.inputValue(),'50');assert.equal((await progress.textContent()).trim(),'50%');const frame=await visibleFrame();frame50Geometry=await visibleGeometry();assert.equal(frame50Geometry.length,frame0Geometry.length,'Frame geometry must remain independently comparable');const movement=Math.max(...frame50Geometry.map((shape,index)=>Math.hypot(shape.x-frame0Geometry[index].x,shape.y-frame0Geometry[index].y,shape.width-frame0Geometry[index].width,shape.height-frame0Geometry[index].height)));assert(movement>4,`The visible marker must move at frame 50 (observed maximum geometry delta ${movement}px)`);const change=await assertFrameChange(50);return {frame:50,progress:(await progress.textContent()).trim(),svgVisible:true,maximumGeometryDelta:movement,geometry:frame50Geometry,change,...frame};});
+    await runStep('reset-visible-frame',async()=>{changesBefore=(await changes()).length;await seek.press('Home');},async()=>{assert.equal(await seek.inputValue(),'0');assert.equal((await progress.textContent()).trim(),'0%');const frame=await visibleFrame(),geometry=await visibleGeometry(),box=await svg.boundingBox();assert(box&&box.width>0&&box.height>0,'Reset frame must retain a painted SVG');assert.equal(geometry.length,frame0Geometry.length,'Reset geometry must match the original frame');const resetDelta=Math.max(...geometry.flatMap((shape,index)=>['x','y','width','height'].map(key=>Math.abs(shape[key]-frame0Geometry[index][key]))));assert(resetDelta<=1,`Reset frame must restore frame-zero shape geometry (observed maximum delta ${resetDelta}px)`);const change=await assertFrameChange(0);return {frame:0,progress:(await progress.textContent()).trim(),svgVisible:true,svgBounds:box,maximumResetGeometryDelta:resetDelta,geometry,change,...frame};});
     return;
   }
   if(!contract.target){
