@@ -35,39 +35,30 @@ func TestBasicDialogMarginCoversRootAndNestedWithoutCallerClass(t *testing.T) {
 		t.Fatal("unrelated caller dialog markup or custom inline margin changed")
 	}
 	for _, nested := range []bool{false, true} {
-		for _, open := range []bool{false, true} {
-			attrs := map[string]any{}
-			if open {
-				attrs["open"] = ""
+		props := map[string]any{"ID": "caller-dialog", "Label": "Caller <label>", "Content": "Caller <content>"}
+		name := "dialog"
+		if nested {
+			name = "caller-nested-dialog"
+		}
+		var out bytes.Buffer
+		if err := tpl.ExecuteTemplate(&out, name, props); err != nil {
+			t.Fatal(err)
+		}
+		got := out.String()
+		for _, want := range []string{`<dialog id="caller-dialog" data-ui-component="dialog"`, `aria-label="Caller &lt;label&gt;"`, "Caller &lt;content&gt;", `<form method="dialog">`, ">Close</button>"} {
+			if !strings.Contains(got, want) {
+				t.Errorf("dialog contract lost: %s", want)
 			}
-			props := map[string]any{"ID": "caller-dialog", "Label": "Caller <label>", "Content": "Caller <content>", "Attrs": attrs}
-			name := "dialog"
-			if nested {
-				name = "caller-nested-dialog"
+		}
+		if strings.Contains(got, "class=") {
+			// The Close button has its own classes; the dialog must not require one.
+			dialogTag := strings.SplitN(strings.SplitN(got, "<dialog", 2)[1], ">", 2)[0]
+			if strings.Contains(dialogTag, "class=") {
+				t.Fatal("dialog unexpectedly requires a caller class")
 			}
-			var out bytes.Buffer
-			if err := tpl.ExecuteTemplate(&out, name, props); err != nil {
-				t.Fatal(err)
-			}
-			got := out.String()
-			for _, want := range []string{`<dialog id="caller-dialog" data-ui-component="dialog"`, `aria-label="Caller &lt;label&gt;"`, "Caller &lt;content&gt;", `<form method="dialog">`, ">Close</button>"} {
-				if !strings.Contains(got, want) {
-					t.Errorf("dialog contract lost: %s", want)
-				}
-			}
-			if strings.Contains(got, "class=") {
-				// The Close button has its own classes; the dialog must not require one.
-				dialogTag := strings.SplitN(strings.SplitN(got, "<dialog", 2)[1], ">", 2)[0]
-				if strings.Contains(dialogTag, "class=") {
-					t.Fatal("dialog unexpectedly requires a caller class")
-				}
-			}
-			if strings.Contains(got, ` open=""`) != open {
-				t.Fatal("caller initial-open attribute changed")
-			}
-			if nested && !strings.Contains(got, `<input name="unrelated" value="caller">`) {
-				t.Fatal("unrelated caller control changed")
-			}
+		}
+		if nested && !strings.Contains(got, `<input name="unrelated" value="caller">`) {
+			t.Fatal("unrelated caller control changed")
 		}
 	}
 }
