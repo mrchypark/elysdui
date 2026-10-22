@@ -123,8 +123,21 @@ export async function runBasicActions(contract,root,runStep){
     assert.equal(await beta.count(),1,'Canonical Beta must remain present');
     assert.equal(await beta.evaluate(n=>n.disabled===true||n.getAttribute('aria-disabled')==='true'),true,'Disabled Beta must actually be rendered unavailable; do not silently change the canonical fixture');
   }
-  if(['input','textarea','clearable-input','date-picker'].includes(t)){
-    const selector=t==='textarea'?'textarea':field,expected=t==='date-picker'?'2026-10-20':t==='textarea'?'first\nsecond\nthird\nfourth':'Changed caller';
+  if(t==='textarea'){
+    const control=one('textarea'),id=await control.getAttribute('id'),name=await control.getAttribute('name');assert(id&&name);
+    const values=['first','first\n','first\nsecond','first\nsecond\n','first\nsecond\nthird','first\nsecond\nthird\n','first\nsecond\nthird\nfourth'];
+    const exact=async(type,expected)=>assert.deepEqual(await nativeTypes(expected.map(()=>type)),expected.map(value=>({type,target:id,name,value,checked:null,trusted:true,detail:type==='input'?0:null})));
+    await step('edit','textarea',async()=>{
+      // Multiline fill is a single CDP insertText call, not a single-event guarantee.
+      await control.fill('first');await value('textarea',values[0]);
+      for(const [i,line]of ['second','third','fourth'].entries()){
+        await control.press('Enter');await value('textarea',values[i*2+1]);
+        await page.keyboard.insertText(line);await value('textarea',values[i*2+2]);
+      }
+    },async()=>{await value('textarea',values.at(-1));await exact('input',values);return {nativeEditSequence:['fill:first','Enter','insertText:second','Enter','insertText:third','Enter','insertText:fourth'],inputValues:values};});
+    await step('commit','textarea',()=>control.press('Tab'),async()=>{await value('textarea',values.at(-1));await exact('change',[values.at(-1)]);});
+  }else if(['input','clearable-input','date-picker'].includes(t)){
+    const selector=field,expected=t==='date-picker'?'2026-10-20':'Changed caller';
     await step(t==='date-picker'?'edit-date':'edit',selector,()=>one(selector).fill(expected),async()=>{await value(selector,expected);await nativeTypes(t==='date-picker'?['input','change']:['input']);});
     if(t==='clearable-input')await step('clear','[data-ui-action="clear"]',()=>one('[data-ui-action="clear"]').click(),async()=>{await value(selector,'');await nativeTypes(['change','input','change']);});
     else await step(t==='date-picker'?'commit-date':'commit',selector,()=>one(selector).press('Tab'),async()=>{await value(selector,expected);await nativeTypes(t==='date-picker'?[]:['change']);});

@@ -155,6 +155,28 @@ test('phase2 source-only basic native button cannot pass a synthetic click or un
   }
 });
 
+test('phase2 source-only textarea uses explicit native newline edits with exact intermediate events and blur commit',async()=>{
+  const contract=basicActionContract('basic/textarea');assert.deepEqual(contract.steps.map(s=>s.id),['edit','commit']);
+  for(const defect of [null,'wrong-intermediate','untrusted','missing-final','extra-input','early-change','wrong-final-value','missing-commit','wrong-commit']){
+    const state={__basicEvents:[],__basicCursor:0},id='basic-textarea-main',name=id+'_value',calls=[],receipts=[];let current='Caller text';
+    const emit=type=>{const event={type,target:id,name,value:current,checked:null,trusted:true,detail:type==='input'?0:null};
+      if(defect==='wrong-intermediate'&&current==='first\n')event.value='first';if(defect==='untrusted')event.trusted=false;
+      if(defect==='wrong-commit'&&type==='change')event.value='wrong';
+      if(!(defect==='missing-final'&&current.endsWith('fourth'))&&!(defect==='missing-commit'&&type==='change'))state.__basicEvents.push(event);
+      if(defect==='extra-input'&&current==='first')state.__basicEvents.push({...event});
+      if(defect==='early-change'&&current==='first')state.__basicEvents.push({...event,type:'change',detail:null});};
+    const control={getAttribute:async key=>({id,name})[key],inputValue:async()=>current,
+      fill:async text=>{assert.equal(text,'first','Do not reintroduce ambiguous multiline fill');calls.push(['fill',text]);current=text;emit('input');},
+      press:async key=>{calls.push(key);if(key==='Enter'){current+='\n';emit('input');}else{assert.equal(key,'Tab');emit('change');}}};
+    const root={page:()=>({keyboard:{insertText:async text=>{calls.push(['insertText',text]);current+=defect==='wrong-final-value'&&text==='fourth'?'wrong':text;emit('input');}}}),locator:selector=>{assert.equal(selector,'textarea');return control;},evaluate:async fn=>fn(state)};
+    const execute=()=>runBasicActions(contract,root,async(action,selector,act,verify)=>{assert.equal(action,contract.steps[receipts.length].id);state.__basicCursor=state.__basicEvents.length;await act();const assertedState=await verify();receipts.push({action,assertedState,events:state.__basicEvents.slice(state.__basicCursor)});});
+    if(defect)await assert.rejects(execute,undefined,defect);
+    else{await execute();assert.deepEqual(calls,[['fill','first'],'Enter',['insertText','second'],'Enter',['insertText','third'],'Enter',['insertText','fourth'],'Tab']);
+      assert.deepEqual(receipts[0].events.map(e=>e.value),['first','first\n','first\nsecond','first\nsecond\n','first\nsecond\nthird','first\nsecond\nthird\n','first\nsecond\nthird\nfourth']);
+      assert.equal(receipts[1].events.length,1);assert.equal(receipts[1].events[0].type,'change');assert.equal(receipts[1].events[0].value,'first\nsecond\nthird\nfourth');}
+  }
+});
+
 test('phase2 source-only radio variant records Gamma, disabled pointer, then native ArrowLeft skipping Beta',async()=>{
   const contract=basicActionContract('basic/radio-group@second-enabled-option');
   assert.deepEqual(contract.steps.map(s=>s.id),['select-gamma','disabled-beta-pointer','keyboard-skip-beta']);
