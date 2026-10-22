@@ -196,7 +196,20 @@ export async function runBasicActions(contract,root,runStep){
   }else if(t==='password-input'){
     for(const [id,type]of [['reveal','text'],['conceal','password']])await step(id,'[data-ui-action="password-toggle"]',()=>one('[data-ui-action="password-toggle"]').click(),async()=>{assert.equal(await one('input').getAttribute('type'),type);await value('input','alpha');await nativeTypes([]);});
   }else if(t==='pin-input'){
-    await step('replace-digit','[data-ui-pin-slot]',()=>one('[data-ui-pin-slot]').first().fill('9'),async()=>{await value('input[type=hidden]','9234');const events=await nativeTypes(['input','input','change']);assert(events.some(e=>e.name?.endsWith('_value')&&e.value==='9234'));});
+    const slots=one('[data-ui-pin-slot]'),base=await one('[data-ui-component="pin-input"]').getAttribute('id'),name=await one('input[type=hidden]').getAttribute('name');
+    assert(base);assert.equal(name,base+'_value');assert.equal(await slots.count(),4);
+    await value('input[type=hidden]','1234');assert.deepEqual(await slots.evaluateAll(nodes=>nodes.map(n=>n.value)),['1','2','3','4']);
+    await step('replace-digit','[data-ui-pin-slot]',()=>slots.first().fill('9'),async()=>{
+      await value('input[type=hidden]','9234');assert.deepEqual(await slots.evaluateAll(nodes=>nodes.map(n=>n.value)),['9','2','3','4']);
+      assert.equal(await slots.nth(1).evaluate(n=>n===document.activeElement),true,'PIN input must advance native focus to digit 2');
+      assert.deepEqual(await nativeTypes(['input','input','change','change']),[
+        {type:'input',target:base+'-pin-0',name:null,value:'9',checked:false,trusted:true,detail:0},
+        {type:'input',target:base+'-value',name,value:'9234',checked:false,trusted:false,detail:null},
+        {type:'change',target:base+'-value',name,value:'9234',checked:false,trusted:false,detail:null},
+        {type:'change',target:base+'-pin-0',name:null,value:'9',checked:false,trusted:true,detail:null},
+      ]);
+      return {digits:['9','2','3','4'],aggregate:'9234',focused:base+'-pin-1'};
+    });
   }else if(t==='tag-input'){
     const entry='[data-ui-tag-entry]';
     await step('add-tag',entry,async()=>{await one(entry).fill('gamma');await one(entry).press('Enter');},async()=>{await value('input[type=hidden]','alpha,beta,gamma');await nativeTypes(['input','input','change']);});

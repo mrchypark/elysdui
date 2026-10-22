@@ -155,6 +155,23 @@ test('phase2 source-only basic native button cannot pass a synthetic click or un
   }
 });
 
+test('phase2 source-only PIN requires exact four-event native/runtime sequence, digits and next focus',async()=>{
+  const contract=basicActionContract('basic/pin-input'),base='basic-pin-input-main',name=base+'_value';
+  for(const defect of [null,'missing-slot-change','wrong-order','trusted-hidden','untrusted-slot','wrong-id','wrong-name','wrong-aggregate','wrong-digits','wrong-focus','extra-event']){
+    const state={__basicEvents:[],__basicCursor:0};let digits=['1','2','3','4'],aggregate='1234',focused=false;
+    const slots={count:async()=>4,evaluateAll:async fn=>fn(digits.map(value=>({value}))),nth:i=>({evaluate:async()=>i===1&&focused}),first:()=>({fill:async text=>{
+      assert.equal(text,'9');digits=['9','2','3','4'];aggregate='9234';focused=true;
+      state.__basicEvents=[{type:'input',target:base+'-pin-0',name:null,value:'9',checked:false,trusted:true,detail:0},{type:'input',target:base+'-value',name,value:'9234',checked:false,trusted:false,detail:null},{type:'change',target:base+'-value',name,value:'9234',checked:false,trusted:false,detail:null},{type:'change',target:base+'-pin-0',name:null,value:'9',checked:false,trusted:true,detail:null}];
+      if(defect==='missing-slot-change')state.__basicEvents.pop();if(defect==='wrong-order')state.__basicEvents.reverse();if(defect==='trusted-hidden')state.__basicEvents[1].trusted=true;if(defect==='untrusted-slot')state.__basicEvents[0].trusted=false;
+      if(defect==='wrong-id')state.__basicEvents[0].target='twin-pin-0';if(defect==='wrong-name')state.__basicEvents[1].name='twin_value';if(defect==='wrong-aggregate')state.__basicEvents[1].value='9235';
+      if(defect==='wrong-digits')digits[3]='5';if(defect==='wrong-focus')focused=false;if(defect==='extra-event')state.__basicEvents.push({...state.__basicEvents[3]});
+    }})};
+    const root={page:()=>({}),evaluate:async fn=>fn(state),locator:s=>s==='[data-ui-pin-slot]'?slots:s==='[data-ui-component="pin-input"]'?{getAttribute:async()=>base}:{getAttribute:async()=>name,inputValue:async()=>aggregate}};
+    const execute=()=>runBasicActions(contract,root,async(id,control,action,verify)=>{assert.equal(id,'replace-digit');await action();return verify();});
+    if(defect)await assert.rejects(execute,undefined,defect);else await execute();
+  }
+});
+
 test('phase2 source-only textarea uses explicit native newline edits with exact intermediate events and blur commit',async()=>{
   const contract=basicActionContract('basic/textarea');assert.deepEqual(contract.steps.map(s=>s.id),['edit','commit']);
   for(const defect of [null,'wrong-intermediate','untrusted','wrong-input-type','wrong-data','missing-final','extra-input','early-change','wrong-final-value','missing-commit','wrong-commit']){
