@@ -1,0 +1,32 @@
+#!/bin/sh
+set -eu
+
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+SRC_DIR="$SCRIPT_DIR/cleanup-ios-simulator-src"
+CACHE_ROOT="${CODEX_GO_SCRIPT_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/codex-go-scripts}"
+export GOTOOLCHAIN="${GOTOOLCHAIN:-go1.26.9}"
+export GOWORK=off
+KEY=$(
+  cd "$SRC_DIR"
+  {
+    go env GOVERSION GOOS GOARCH GOFLAGS CGO_ENABLED GOEXPERIMENT CC CXX
+    if command -v shasum >/dev/null 2>&1; then
+      find . -type d \( \( -name '.*' ! -name . \) -o -name vendor \) -prune -o -type f -exec shasum -a 256 {} + | sort
+    else
+      find . -type d \( \( -name '.*' ! -name . \) -o -name vendor \) -prune -o -type f -exec sha256sum {} + | sort
+    fi
+  } | if command -v shasum >/dev/null 2>&1; then shasum -a 256; else sha256sum; fi | awk '{print $1}'
+)
+[ -n "$KEY" ] || { printf '%s\n' 'failed to compute cache key' >&2; exit 1; }
+BIN_DIR="$CACHE_ROOT/cleanup-ios-simulator/$KEY"
+BIN="$BIN_DIR/cleanup-ios-simulator"
+if [ "${CACHED_GO_REBUILD:-0}" = 1 ] || [ ! -x "$BIN" ]; then
+  mkdir -p "$BIN_DIR"
+  [ "${CACHED_GO_DEBUG:-0}" != 1 ] || printf 'building %s\n' "$BIN" >&2
+  BUILD_TMP="$BIN.tmp.$$"
+  trap 'rm -f "$BUILD_TMP"' 0 1 2 3 15
+  (cd "$SRC_DIR" && go build -trimpath -o "$BUILD_TMP" .)
+  mv "$BUILD_TMP" "$BIN"
+  trap - 0 1 2 3 15
+fi
+exec "$BIN" "$@"
