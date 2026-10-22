@@ -8,7 +8,7 @@ import {fileURLToPath} from 'node:url';
 import {setTimeout as delay} from 'node:timers/promises';
 import {isDeepStrictEqual} from 'node:util';
 import {chromium} from 'playwright';
-import {actionModuleNames,prepareActionModule,synchronousTraceInit,registeredOutcomesEqual,compareActionTrace,traceContractStatus} from './visual-state-audit-instrument.mjs';
+import {actionModuleNames,prepareActionModule,synchronousTraceInit,registeredOutcomesEqual,registeredOutcomeDifferences,firstDifference,compareActionTrace,traceContractStatus} from './visual-state-audit-instrument.mjs';
 import {caseActionContract, requestedStateContract, runRequestedStateActions, ownedOverlayInventory, captureTargetPNG, inventoryReceipt, inventoryDrift, unhandledBrowserErrors} from './visual-state-audit-drivers.mjs';
 
 const repo = fileURLToPath(new URL('../../../../', import.meta.url));
@@ -73,18 +73,6 @@ const profile = {id: options.profileId, ...profiles[options.profileId], deviceSc
 const sha256 = value => createHash('sha256').update(value).digest('hex');
 const digest = value => sha256(JSON.stringify(value));
 const slug = value => value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 90);
-function firstDifference(left, right, path = '$') {
-  if (isDeepStrictEqual(left, right)) return null;
-  if (left && right && typeof left === 'object' && typeof right === 'object' && Array.isArray(left) === Array.isArray(right)) {
-    const keys = new Set([...Object.keys(left), ...Object.keys(right)]);
-    for (const key of keys) {
-      const difference = firstDifference(left[key], right[key], `${path}${Array.isArray(left) ? `[${key}]` : `.${key}`}`);
-      if (difference) return difference;
-    }
-  }
-  const compact = value => JSON.stringify(value)?.slice(0, 180) ?? String(value);
-  return {path, original: compact(left), instrumented: compact(right)};
-}
 let child, browser, runDir, staticServer, serverOutput = '', captureBytes = 0;
 
 async function sourceReceipt() {
@@ -620,6 +608,7 @@ try {
       else classification = 'passed-equivalent-with-action-checkpoints';
       const actionCoverage = {
         originalTraceProof:{...originalTraceProof,untouchedCalibrationEquivalent:traceEquivalent,error:originalTraceError||null,events:originalTrace.events,eventsSHA256:digest(originalTrace.events),lateEvents:originalTrace.lateEvents,errors:originalTrace.errors,
+          calibrationDifferences:registeredOutcomeDifferences(originalOutcome,traceOutcome),
           capturedEvents:capturedTrace,capturedEventsSHA256:digest(capturedTrace),
           untouchedOutcomeSHA256:originalOutcome?digest({initial:originalOutcome.initial,finalTwin:originalOutcome.finalTwin,result:originalOutcome.result}):null,
           tracedOutcomeSHA256:traceOutcome?digest({initial:traceOutcome.initial,finalTwin:traceOutcome.finalTwin,result:traceOutcome.result}):null,

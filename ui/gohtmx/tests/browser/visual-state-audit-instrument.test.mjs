@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import {transform,staticCoverageManifest,registrationInventory,actionModuleNames,prepareActionModule,synchronousTrace,compareActionTrace,synchronousTraceInit,registeredOutcomesEqual,traceContractStatus} from './visual-state-audit-instrument.mjs';
+import {transform,staticCoverageManifest,registrationInventory,actionModuleNames,prepareActionModule,synchronousTrace,compareActionTrace,synchronousTraceInit,registeredOutcomesEqual,registeredOutcomeDifferences,firstDifference,traceContractStatus} from './visual-state-audit-instrument.mjs';
 import {readFile,mkdtemp,writeFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
@@ -182,6 +182,24 @@ test('untouched calibration compares every existing semantic, result, payload an
   for(const field of ['initial','finalTwin']){const changed=structuredClone(reference);changed[field]={text:'changed'};assert(!registeredOutcomesEqual(reference,changed));}
   for(const field of ['checkResult','actions','hostEvents','finalState']){const changed=structuredClone(reference);changed.result[field]=null;assert(!registeredOutcomesEqual(reference,changed));}
   assert(!registeredOutcomesEqual(reference,null));
+});
+
+test('calibration diagnoses EventLogger time and twin changes without normalizing either',()=>{
+  const reference={initial:{text:'Type here'},finalTwin:{text:'Empty',controls:[{value:''}]},result:{checkResult:{assertions:9},actions:[],hostEvents:[],finalState:{text:'+0.00s key down 54'}}};
+  assert.deepEqual(registeredOutcomeDifferences(reference,structuredClone(reference)),[]);
+  const traced=structuredClone(reference);
+  traced.result.finalState.text='+0.01s key down 54';
+  assert(!registeredOutcomesEqual(reference,traced));
+  assert.deepEqual(registeredOutcomeDifferences(reference,traced),[{path:'$.result.finalState.text',original:'"+0.00s key down 54"',instrumented:'"+0.01s key down 54"'}]);
+  traced.finalTwin.controls[0].value='changed';
+  assert.deepEqual(registeredOutcomeDifferences(reference,traced).map(item=>item.path),['$.finalTwin.controls[0].value','$.result.finalState.text']);
+  assert.equal(registeredOutcomeDifferences(reference,null)[0].reason,'missing-registered-outcome');
+  for(const field of ['checkResult','actions','hostEvents','finalState'])traced.result[field]={changed:'x'.repeat(1000)};
+  traced.initial={changed:true};
+  const differences=registeredOutcomeDifferences(reference,traced);
+  assert.equal(differences.length,6,'At most one bounded first difference per exact calibration field');
+  assert(differences.every(item=>item.original.length<=180&&item.instrumented.length<=180));
+  assert.equal(firstDifference({items:[1,2]},{items:[1,3]}).path,'$.items[1]');
 });
 
 test('passing reached traces never close independent contracts or relax the three existing exact drivers',()=>{

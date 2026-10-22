@@ -40,6 +40,28 @@ export function registeredOutcomesEqual(reference,traced){
     &&['checkResult','actions','hostEvents','finalState'].every(field=>isDeepStrictEqual(reference.result[field],traced.result[field]));
 }
 
+// Keep exact equality separate from bounded diagnostics: clocks, caret state
+// and twin changes are observable state, not values to normalize away.
+export function firstDifference(left,right,path='$'){
+  if(isDeepStrictEqual(left,right))return null;
+  if(left&&right&&typeof left==='object'&&typeof right==='object'&&Array.isArray(left)===Array.isArray(right)){
+    for(const key of new Set([...Object.keys(left),...Object.keys(right)])){
+      const difference=firstDifference(left[key],right[key],`${path}${Array.isArray(left)?`[${key}]`:`.${key}`}`);
+      if(difference)return difference;
+    }
+  }
+  const compact=value=>JSON.stringify(value)?.slice(0,180)??String(value);
+  return {path,original:compact(left),instrumented:compact(right)};
+}
+
+export function registeredOutcomeDifferences(reference,traced){
+  if(!reference||!traced)return [{path:'$',reason:'missing-registered-outcome',referencePresent:Boolean(reference),tracedPresent:Boolean(traced)}];
+  return [
+    ...['initial','finalTwin'].map(field=>firstDifference(reference[field],traced[field],`$.${field}`)),
+    ...['checkResult','actions','hostEvents','finalState'].map(field=>firstDifference(reference.result[field],traced.result[field],`$.result.${field}`)),
+  ].filter(Boolean);
+}
+
 export function traceContractStatus(contract,events,calibrated,lateEvents){
   const stack=[];let balanced=true;
   for(const event of events){if(event.phase==='enter')stack.push(event.siteId);else if(event.phase==='exit'&&stack.pop()!==event.siteId)balanced=false;}
