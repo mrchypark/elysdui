@@ -111,7 +111,7 @@ async function basicAudit({cases,origin,captures,matrixInput,coverageInput,sourc
       result.initialTwinSHA256=initialTwin;
       await root.evaluate(node=>{
         node.__basicEvents=[];node.__basicClicks=[];node.__basicLifecycle=[];
-        for(const type of ['input','change','ui:select','ely:action','ely:change'])node.addEventListener(type,e=>node.__basicEvents.push({type,target:e.target.id||null,name:e.target.name||null,value:e.target.value??null,checked:e.target.checked??null,trusted:e.isTrusted,detail:e.detail===undefined?null:JSON.parse(JSON.stringify(e.detail))}));
+        for(const type of ['input','change','ui:select','ely:action','ely:change'])node.addEventListener(type,e=>node.__basicEvents.push({type,target:e.target.id||null,name:e.target.name||null,value:e.target.value??null,checked:e.target.checked??null,trusted:e.isTrusted,detail:e.detail===undefined?null:JSON.parse(JSON.stringify(e.detail)),...(e.target.tagName==='TEXTAREA'?{inputType:e.inputType??null,data:e.data??null}:{})}));
         node.addEventListener('click',e=>node.__basicClicks.push({trusted:e.isTrusted,target:e.target.id||null}));
         for(const type of ['toggle','close','cancel'])node.addEventListener(type,e=>node.__basicLifecycle.push({type,target:e.target.id||null,tag:e.target.tagName,trusted:e.isTrusted,oldState:e.oldState??null,newState:e.newState??null}),true);
       });
@@ -121,8 +121,8 @@ async function basicAudit({cases,origin,captures,matrixInput,coverageInput,sourc
         const receipt={action:id,control,source:expected,beforeState:await snapshot(root)};receipts.push(receipt);
         receipt.beforeCaptureOwnership=await captureOwnedState({page,record,root,caseId:item.caseId,siteId:id,checkpointIndex:receipts.length,phase:'before',captures,state:await state()});
         await root.evaluate(n=>{n.__basicCursor=n.__basicEvents.length;n.__basicClickCursor=n.__basicClicks.length;n.__basicLifecycleCursor=n.__basicLifecycle.length;});
-        await action();await sleepFrames(page);receipt.assertedState=await verify();receipt.assertionsPassed=true;
-        receipt.events=await root.evaluate(n=>n.__basicEvents.slice(n.__basicCursor));
+        try{await action(receipt);await sleepFrames(page);receipt.events=await root.evaluate(n=>n.__basicEvents.slice(n.__basicCursor));receipt.assertedState=await verify();receipt.assertionsPassed=true;}
+        finally{receipt.events=await root.evaluate(n=>n.__basicEvents.slice(n.__basicCursor));}
         receipt.lifecycleEvents=await root.evaluate(n=>n.__basicLifecycle.slice(n.__basicLifecycleCursor));
         receipt.nativeClicks=await root.evaluate(n=>n.__basicClicks.slice(n.__basicClickCursor));
         if(!['menu','map-view','coordinate-display'].includes(contract.template))assert(!receipt.events.some(e=>['ely:action','ely:change','ui:select'].includes(e.type)),'Basic native controls must not fabricate advanced public payloads');

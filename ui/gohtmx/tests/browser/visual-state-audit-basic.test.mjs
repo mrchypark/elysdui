@@ -157,11 +157,12 @@ test('phase2 source-only basic native button cannot pass a synthetic click or un
 
 test('phase2 source-only textarea uses explicit native newline edits with exact intermediate events and blur commit',async()=>{
   const contract=basicActionContract('basic/textarea');assert.deepEqual(contract.steps.map(s=>s.id),['edit','commit']);
-  for(const defect of [null,'wrong-intermediate','untrusted','missing-final','extra-input','early-change','wrong-final-value','missing-commit','wrong-commit']){
+  for(const defect of [null,'wrong-intermediate','untrusted','wrong-input-type','wrong-data','missing-final','extra-input','early-change','wrong-final-value','missing-commit','wrong-commit']){
     const state={__basicEvents:[],__basicCursor:0},id='basic-textarea-main',name=id+'_value',calls=[],receipts=[];let current='Caller text';
-    const emit=type=>{const event={type,target:id,name,value:current,checked:null,trusted:true,detail:type==='input'?0:null};
+    const emit=type=>{const event={type,target:id,name,value:current,checked:null,trusted:true,detail:type==='input'?0:null,inputType:type==='input'?(current.endsWith('\n')?'insertLineBreak':'insertText'):null,data:type==='input'&&!current.endsWith('\n')?current.split('\n').at(-1):null};
       if(defect==='wrong-intermediate'&&current==='first\n')event.value='first';if(defect==='untrusted')event.trusted=false;
       if(defect==='wrong-commit'&&type==='change')event.value='wrong';
+      if(defect==='wrong-input-type'&&type==='input')event.inputType='insertFromPaste';if(defect==='wrong-data'&&type==='input')event.data='wrong';
       if(!(defect==='missing-final'&&current.endsWith('fourth'))&&!(defect==='missing-commit'&&type==='change'))state.__basicEvents.push(event);
       if(defect==='extra-input'&&current==='first')state.__basicEvents.push({...event});
       if(defect==='early-change'&&current==='first')state.__basicEvents.push({...event,type:'change',detail:null});};
@@ -169,12 +170,23 @@ test('phase2 source-only textarea uses explicit native newline edits with exact 
       fill:async text=>{assert.equal(text,'first','Do not reintroduce ambiguous multiline fill');calls.push(['fill',text]);current=text;emit('input');},
       press:async key=>{calls.push(key);if(key==='Enter'){current+='\n';emit('input');}else{assert.equal(key,'Tab');emit('change');}}};
     const root={page:()=>({keyboard:{insertText:async text=>{calls.push(['insertText',text]);current+=defect==='wrong-final-value'&&text==='fourth'?'wrong':text;emit('input');}}}),locator:selector=>{assert.equal(selector,'textarea');return control;},evaluate:async fn=>fn(state)};
-    const execute=()=>runBasicActions(contract,root,async(action,selector,act,verify)=>{assert.equal(action,contract.steps[receipts.length].id);state.__basicCursor=state.__basicEvents.length;await act();const assertedState=await verify();receipts.push({action,assertedState,events:state.__basicEvents.slice(state.__basicCursor)});});
-    if(defect)await assert.rejects(execute,undefined,defect);
+    const execute=()=>runBasicActions(contract,root,async(action,selector,act,verify)=>{assert.equal(action,contract.steps[receipts.length].id);const receipt={action};receipts.push(receipt);state.__basicCursor=state.__basicEvents.length;try{await act(receipt);receipt.assertedState=await verify();}finally{receipt.events=state.__basicEvents.slice(state.__basicCursor);}});
+    if(defect){await assert.rejects(execute,undefined,defect);assert(receipts[0].nativeEditObservations.length>0,'Raw observations survive failed assertions');
+      if(defect==='wrong-final-value')assert.equal(receipts[0].nativeEditObservations.at(-1).value,'first\nsecond\nthird\nwrong');
+      if(defect==='untrusted')assert.equal(receipts[0].events[0].trusted,false);
+      if(defect==='wrong-intermediate')assert.equal(receipts[0].nativeEditObservations[1].events[1].value,'first');}
     else{await execute();assert.deepEqual(calls,[['fill','first'],'Enter',['insertText','second'],'Enter',['insertText','third'],'Enter',['insertText','fourth'],'Tab']);
       assert.deepEqual(receipts[0].events.map(e=>e.value),['first','first\n','first\nsecond','first\nsecond\n','first\nsecond\nthird','first\nsecond\nthird\n','first\nsecond\nthird\nfourth']);
       assert.equal(receipts[1].events.length,1);assert.equal(receipts[1].events[0].type,'change');assert.equal(receipts[1].events[0].value,'first\nsecond\nthird\nfourth');}
   }
+});
+
+test('phase2 source-only basic failure receipt retains native events even when action or verification throws',async()=>{
+  const runner=await source('ui/gohtmx/tests/browser/visual-state-audit-actions.mjs');
+  assert(runner.includes('try{await action(receipt);await sleepFrames(page);receipt.events=await root.evaluate(n=>n.__basicEvents.slice(n.__basicCursor));receipt.assertedState=await verify();receipt.assertionsPassed=true;}'));
+  assert(runner.includes('finally{receipt.events=await root.evaluate(n=>n.__basicEvents.slice(n.__basicCursor));}'));
+  assert(runner.includes("e.target.tagName==='TEXTAREA'?{inputType:e.inputType??null,data:e.data??null}:{}"));
+  const driver=runBasicActions.toString();assert(driver.includes("await nativeTypes(t==='date-picker'?['input','change']:['input'])"),'Input keeps its one-event edit oracle');
 });
 
 test('phase2 source-only radio variant records Gamma, disabled pointer, then native ArrowLeft skipping Beta',async()=>{

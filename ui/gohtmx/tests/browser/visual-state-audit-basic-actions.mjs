@@ -126,13 +126,18 @@ export async function runBasicActions(contract,root,runStep){
   if(t==='textarea'){
     const control=one('textarea'),id=await control.getAttribute('id'),name=await control.getAttribute('name');assert(id&&name);
     const values=['first','first\n','first\nsecond','first\nsecond\n','first\nsecond\nthird','first\nsecond\nthird\n','first\nsecond\nthird\nfourth'];
-    const exact=async(type,expected)=>assert.deepEqual(await nativeTypes(expected.map(()=>type)),expected.map(value=>({type,target:id,name,value,checked:null,trusted:true,detail:type==='input'?0:null})));
-    await step('edit','textarea',async()=>{
+    const exact=async(type,expected)=>assert.deepEqual(await nativeTypes(expected.map(()=>type)),expected.map((value,i)=>({type,target:id,name,value,checked:null,trusted:true,detail:type==='input'?0:null,inputType:type==='input'?(i%2?'insertLineBreak':'insertText'):null,data:type==='input'&&i%2===0?['first','second','third','fourth'][i/2]:null})));
+    await step('edit','textarea',async receipt=>{
+      receipt.nativeEditObservations=[];
+      const observe=async(api,expected)=>{
+        const actual=await control.inputValue(),events=await root.evaluate(n=>n.__basicEvents.slice(n.__basicCursor));
+        receipt.nativeEditObservations.push({api,value:actual,events});assert.equal(actual,expected);
+      };
       // Multiline fill is a single CDP insertText call, not a single-event guarantee.
-      await control.fill('first');await value('textarea',values[0]);
+      await control.fill('first');await observe('fill:first',values[0]);
       for(const [i,line]of ['second','third','fourth'].entries()){
-        await control.press('Enter');await value('textarea',values[i*2+1]);
-        await page.keyboard.insertText(line);await value('textarea',values[i*2+2]);
+        await control.press('Enter');await observe('Enter',values[i*2+1]);
+        await page.keyboard.insertText(line);await observe('insertText:'+line,values[i*2+2]);
       }
     },async()=>{await value('textarea',values.at(-1));await exact('input',values);return {nativeEditSequence:['fill:first','Enter','insertText:second','Enter','insertText:third','Enter','insertText:fourth'],inputValues:values};});
     await step('commit','textarea',()=>control.press('Tab'),async()=>{await value('textarea',values.at(-1));await exact('change',[values.at(-1)]);});
