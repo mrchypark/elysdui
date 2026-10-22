@@ -445,6 +445,7 @@
 [data-cs-panels] select[data-cs-field]{padding-inline-end:36px}
 /* Keep the source columns within the host's content width. */
 [data-ws-canvas-scene]{container-type:inline-size}
+@container (max-width:440px){[data-scene-kind=InfiniteCanvas] [data-cs-minimap]{bottom:60px;max-width:calc(100% - 24px)}}
 [data-scene-kind=LayerPanel] [data-cs-panels]{display:grid;grid-template-columns:minmax(0,240fr) minmax(0,300fr) minmax(0,256fr);gap:24px}
 [data-scene-kind=LayerPanel] [data-cs-panels]>*{width:auto;min-width:0}[data-cs-fields] input[data-cs-field]{width:calc(100% - 24px);min-width:0}
 [data-cs-field-row][data-cs-toggle]{justify-content:flex-start;gap:8px}
