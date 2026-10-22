@@ -100,7 +100,8 @@ test('action camera tall-page, outline and centered native-modal causal pixels',
         if(spacing==='320px')assert(captured.foreignDOMIntersections.some(p=>p.id===expectedForeign),'Existing unchanged guard must reject the causally intersecting foreign paint');
         else{
           assert.deepEqual(captured.foreignDOMIntersections,[]);
-          assert.notEqual(captured.bounds.focusOutline?.status,'unsupported','Positive modal evidence requires a bounded owned focus outline');
+          assert.equal(captured.bounds.focusOutline?.status,'bounded','Positive modal evidence requires a bounded owned focus outline');
+          assert.equal(await dialog.locator('#close').evaluate(node=>node===document.activeElement&&node.matches(':focus-visible')&&node.closest('dialog[open]:modal')?.id==='owned-dialog'),true,'The native Close control must actually own visible focus');
           const r=await dialog.boundingBox(),clip={x:Math.floor(r.x),y:Math.floor(r.y),width:Math.ceil(r.x+r.width)-Math.floor(r.x),height:Math.ceil(r.y+r.height)-Math.floor(r.y)};
           const independent=await screenshotWithoutCaretMutation(page,{path:join(output,'modal-independent-reference.png'),clip,animations:'disabled',scale:'css'});
           receipt.modalCausal.referenceSHA256=hash(independent);
