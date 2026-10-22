@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import test from 'node:test';
-import {requestedStateContract,runRequestedStateActions} from './visual-state-audit-drivers.mjs';
+import {requestedStateContract,runRequestedStateActions,assertStatusSelectDueEvents} from './visual-state-audit-drivers.mjs';
 
 const source=path=>readFile(new URL(`../../../../${path}`,import.meta.url),'utf8');
 
@@ -40,7 +40,36 @@ test('radio contract retains group isolation, reselection and settled event sema
   assert.match(interaction,/close\(true\);\s*change\(root, \{name: radio.dataset.interactionMenuRadio, value: radio.value, checked: true\}\);\s*menuAction\(root, event, radio\)/);
   assert.match(docs,/invokes the caller when reselecting/);
   const driver=runRequestedStateActions.toString();
-  for(const fragment of ["event.target!==node","detail.formData instanceof FormData","Independent audit twin is required","await due.fill('2026-10-20')","await due.press('Tab')","observed.length%2===0","formData:entries,values:entries","submitter:''","keys.slice(index+1)","repeat of [false,true]","row.group!==group","event.panelClosed===true&&event.focusReturned===true"])
+  for(const fragment of ["event.target!==node","detail.formData instanceof FormData","Independent audit twin is required","await due.fill('2026-10-20')","await due.press('Tab')","assertStatusSelectDueEvents(observed,{id,identity,entries,nativeChangeCount:await dueChanges()-dueChangesBefore})","submitter:''","keys.slice(index+1)","repeat of [false,true]","row.group!==group","event.panelClosed===true&&event.focusReturned===true"])
     assert(driver.includes(fragment),`Missing independently observable contract assertion: ${fragment}`);
   assert.match(driver,/await target.click\(\)/);assert.match(driver,/await control.click\(\)/);
+});
+
+test('StatusSelect due commit retains generic change then task change/action from actual handler bodies',async()=>{
+  const [api,project,template]=await Promise.all([source('ui/gohtmx/assets/ely-api.js'),source('ui/gohtmx/assets/ely-api-communication.js'),source('ui/gohtmx/templates/ely-api-communication.html')]);
+  assert.match(template,/<input type="date" name="due"[^>]+data-project-property/);
+  assert(api.indexOf("root.addEventListener('change', change)")<api.indexOf('registerCleanup(initialize(root,'),'Generic listener is registered before family initializer');
+  const generic=api.slice(api.indexOf('    const change = event => {'),api.indexOf("    root.addEventListener('click', click);"));
+  const projectChange=project.slice(project.indexOf("  root.addEventListener('change',event=>{const input=event.target;"),project.indexOf("  root.addEventListener('input',event=>{if(event.target.matches('[data-project-label-name]"));
+  assert(projectChange.length>0);
+  const entries=[['status','In progress'],['assignee','ana'],['due','2026-10-20']],identity='project/StatusSelect',id='actual-status';
+  class FixtureFormData{constructor(form){this.entries=form.entries;}[Symbol.iterator](){return this.entries[Symbol.iterator]();}}
+  const form={entries,dataset:{taskId:'brief'},reportValidity:()=>true};
+  const field={name:'due',value:'2026-10-20',type:'date',checked:false,closest:selector=>{assert.equal(selector,'form');return form;},matches:selector=>selector==='input,textarea,select'||selector==='[data-project-property]'};
+  const root=new EventTarget();root.id=id;root.dataset={elyComponent:identity};const observed=[],nativeListeners=[];
+  for(const type of ['ely:change','ely:action'])root.addEventListener(type,event=>{const detail={...event.detail};if(detail.formData instanceof FixtureFormData)detail.formData=[...detail.formData];observed.push({type,detail});});
+  nativeListeners.push(new Function('root','belongs',`${generic};return change;`)(root,()=>true));
+  const changedCode=project.match(/const changed=([^\n]+);/)[0];
+  const emitCode=api.slice(api.indexOf('export function emit('),api.indexOf('\nfunction belongs(')).replace('export ','');
+  const emit=new Function(`${emitCode};return emit;`)();
+  const registrationRoot={addEventListener(type,listener){assert.equal(type,'change');nativeListeners.push(listener);}};
+  new Function('root','options','FormData','changed','emit',projectChange)(registrationRoot,{},FixtureFormData,new Function(`${changedCode};return changed;`)(),(_root,...args)=>emit(root,...args));
+  // The real callback closes over the registration root; share its event identity.
+  registrationRoot.id=id;registrationRoot.dataset=root.dataset;registrationRoot.dispatchEvent=event=>root.dispatchEvent(event);
+  for(const listener of nativeListeners)listener({target:field});
+  const before=structuredClone(observed);assert.equal(observed.length,3);assert.deepEqual(assertStatusSelectDueEvents(observed,{id,identity,entries,nativeChangeCount:1}),before);assert.deepEqual(observed,before,'Raw event history is not normalized or filtered');
+  assertStatusSelectDueEvents([...observed,...observed],{id,identity,entries,nativeChangeCount:2});
+  assert.throws(()=>assertStatusSelectDueEvents([...observed,...observed],{id,identity,entries,nativeChangeCount:1}),'Duplicate complete triplets without another native change must fail');
+  for(const count of [0,-1,1.5,undefined])assert.throws(()=>assertStatusSelectDueEvents(observed,{id,identity,entries,nativeChangeCount:count}));
+  for(const mutate of [events=>events.shift(),events=>events.pop(),events=>events.reverse(),events=>events.push(events[0]),events=>{events[0].detail.checked=true;},events=>{events[0].detail.type='text';},events=>{events[1].detail.taskId='other';},events=>{events[2].detail.component='alias';},events=>{events[2].detail.formData=[['due','stale']];}]){const bad=structuredClone(observed);mutate(bad);assert.throws(()=>assertStatusSelectDueEvents(bad,{id,identity,entries,nativeChangeCount:1}));}
 });

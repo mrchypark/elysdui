@@ -320,6 +320,18 @@ export function assertFoundationPublicEvents(identity,id,observed,{value}){
   return observed;
 }
 
+export function assertStatusSelectDueEvents(observed,{id,identity,entries,nativeChangeCount}){
+  assert(Number.isInteger(nativeChangeCount)&&nativeChangeCount>=1,'Due commit requires an observed native change');
+  assert.equal(observed.length,nativeChangeCount*3,'Every native change must retain exactly one generic change, task change and action triplet');
+  const expected=[
+    ['ely:change',{id,component:identity,name:'due',value:'2026-10-20',checked:false,type:'date'}],
+    ['ely:change',{id,component:identity,name:'due',value:'2026-10-20',taskId:'brief'}],
+    ['ely:action',{id,component:identity,action:'update-task',taskId:'brief',field:'due',value:'2026-10-20',formData:entries,values:entries}],
+  ];
+  for(let index=0;index<observed.length;index+=3)assert.deepEqual(observed.slice(index,index+3).map(event=>[event.type,event.detail]),expected,'Each native change retains every public event in listener-registration order');
+  return observed;
+}
+
 export async function runRequestedStateActions(contract,root,runStep){
   if(['task-due-submit','remove-four-tags','radio-groups-reselection','eventlogger-public-timestamps','button-public-boundary','textarea-public-multiline'].includes(contract.focusedSequence)){
     const identity=await root.getAttribute('data-ely-component');
@@ -437,10 +449,11 @@ export async function runRequestedStateActions(contract,root,runStep){
       assert.equal(await due.inputValue(),'2026-10-12');assert.equal(await due.isEnabled(),true);
       assert.equal(await form.locator('[name="status"]').inputValue(),'In progress');assert.equal(await form.locator('[name="assignee"]').inputValue(),'ana');
       const entries=[['status','In progress'],['assignee','ana'],['due','2026-10-20']];
+      const dueChanges=()=>root.evaluate(()=>globalThis.__visualDirectDOMEvents.filter(event=>event.type==='change'&&event.target==='due').length);
+      let dueChangesBefore;
       const checkForm=async()=>{assert.equal(await due.inputValue(),'2026-10-20');assert.equal(await form.evaluate(node=>node.checkValidity()),true);assert.deepEqual(await form.evaluate(node=>[...new FormData(node)]),entries);};
-      await runStep('change-due',async()=>{await begin();await due.fill('2026-10-20');await due.press('Tab');},async()=>{
-        await checkForm();const observed=await fresh();assert(observed.length>=2&&observed.length%2===0,'Due commit must emit change/action pairs');
-        for(let index=0;index<observed.length;index+=2){assert.equal(observed[index].type,'ely:change');assert.deepEqual(observed[index].detail,{id,component:identity,name:'due',value:'2026-10-20',taskId:'brief'});assert.equal(observed[index+1].type,'ely:action');assert.deepEqual(observed[index+1].detail,{id,component:identity,action:'update-task',taskId:'brief',field:'due',value:'2026-10-20',formData:entries,values:entries});}
+      await runStep('change-due',async()=>{await begin();dueChangesBefore=await dueChanges();await due.fill('2026-10-20');await due.press('Tab');},async()=>{
+        await checkForm();const observed=await fresh();assertStatusSelectDueEvents(observed,{id,identity,entries,nativeChangeCount:await dueChanges()-dueChangesBefore});
         return {due:'2026-10-20',events:observed};
       });
       await runStep('submit-current-due',async()=>{await begin();await form.locator('button[type="submit"]').click();},async()=>{await checkForm();const observed=await fresh();assert.deepEqual(observed.map(event=>[event.type,event.detail]),[['ely:action',{id,component:identity,action:'update-task',formData:entries,values:entries,submitter:''}]]);return {due:'2026-10-20',events:observed};});
