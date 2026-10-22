@@ -4,6 +4,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.focus.FocusManager
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.test.espresso.Espresso
@@ -34,6 +36,7 @@ class ProfileScreenTest {
         val buttonID = findButton(ready.region)!!.id
         compose.onNodeWithTag(inputID).performScrollTo().performClick().performTextReplacement("Alice")
         finishComposition(focusManager)
+        awaitSaveReady("initial save", inputID, buttonID, "Alice") { state.value }
         compose.onNodeWithTag(buttonID).performScrollTo().assertIsEnabled().performClick()
         val pending = compose.runOnIdle {
             requireNotNull(state.value.pending) { "The enabled Save button must start a request" }.request.also {
@@ -59,6 +62,7 @@ class ProfileScreenTest {
         // The late edit may still be composing: completion clears pending, but
         // Save becomes enabled only after the user ends that composition.
         finishComposition(focusManager)
+        awaitSaveReady("save after late edit", inputID, buttonID, "Alice Cooper") { state.value }
         compose.onNodeWithTag(buttonID).assertIsEnabled()
     }
 
@@ -74,9 +78,11 @@ class ProfileScreenTest {
             }
         }
         val inputID = findInput(ready.region)!!.id
+        val buttonID = findButton(ready.region)!!.id
         compose.onNodeWithTag(inputID).performScrollTo().performClick().performTextClearance()
         finishComposition(focusManager)
-        compose.onNodeWithTag(findButton(ready.region)!!.id).performScrollTo().assertIsEnabled().performClick()
+        awaitSaveReady("empty-field validation save", inputID, buttonID, "") { state.value }
+        compose.onNodeWithTag(buttonID).performScrollTo().assertIsEnabled().performClick()
         compose.runOnIdle {
             val pending = requireNotNull(state.value.pending) { "The enabled Save button must start a request" }.request
             assertEquals("save-1", pending.requestID)
@@ -96,5 +102,45 @@ class ProfileScreenTest {
         compose.runOnIdle { focusManager.clearFocus(force = true) }
         Espresso.closeSoftKeyboard()
         compose.waitForIdle()
+    }
+
+    private fun awaitSaveReady(
+        phase: String,
+        inputID: String,
+        buttonID: String,
+        expectedText: String,
+        state: () -> ProfileState,
+    ) {
+        // Observe committed UI state after native focus/IME completion. Do not
+        // resend edits, click Save, or bypass the renderer's composition guard.
+        val expectedInput = hasTestTag(inputID) and SemanticsMatcher.expectValue(
+            SemanticsProperties.EditableText, AnnotatedString(expectedText))
+        try {
+            compose.waitUntil(timeoutMillis = 5_000) {
+                compose.onAllNodes(expectedInput).fetchSemanticsNodes().size == 1 &&
+                    compose.onAllNodes(hasTestTag(buttonID) and isEnabled()).fetchSemanticsNodes().size == 1
+            }
+        } catch (failure: Throwable) {
+            // Fixture-only diagnostics: never log the protocol envelope or its
+            // session/CSRF tokens, and never expose production test-only APIs.
+            val stateDetails = runCatching {
+                compose.runOnIdle {
+                    val snapshot = state()
+                    "screenPresent=${snapshot.screen != null}, canSave=${snapshot.canSave}, " +
+                        "pending=${snapshot.pending != null}, inFlight=${snapshot.pending?.inFlight}, " +
+                        "loading=${snapshot.loadingID != null}, hardError=${snapshot.hardError}, " +
+                        "drafts=${snapshot.drafts}, baseline=${snapshot.baseline}, editRevisions=${snapshot.editRevisions}"
+                }
+            }.getOrElse { "State diagnostics unavailable: ${it.message}" }
+            val compositionHint = runCatching {
+                compose.onAllNodesWithText("Finish composing text before saving.").fetchSemanticsNodes().isNotEmpty()
+            }.getOrNull()
+            val tree = runCatching { compose.onRoot(useUnmergedTree = true).printToString() }
+                .getOrElse { "Semantics diagnostics unavailable: ${it.message}" }
+            throw AssertionError(
+                "Save readiness timed out during $phase; input=$inputID, button=$buttonID, " +
+                    "expectedText=$expectedText, compositionHintVisible=$compositionHint; $stateDetails\n$tree",
+                failure)
+        }
     }
 }
