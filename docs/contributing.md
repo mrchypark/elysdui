@@ -69,7 +69,7 @@ sockets. If blocked, report the failing command and rely only on separately
 verified CI results, not an assumed browser pass. `dist/` and `test-results/` are
 build/test output; do not include them in a source PR.
 
-`test:visual-regressions` runs focused chart, tree, dialog, native-gallery and
+`test:visual-regressions` runs focused chart, heatmap contrast, tree, dialog, native-gallery and
 workspace/calendar layout regressions, including mobile and theme cases. It
 retains screenshots and source-hash receipts under `test-results/`; CI uploads
 these separately from the gallery evidence. Passing this finite regression set
