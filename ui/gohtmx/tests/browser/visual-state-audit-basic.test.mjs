@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {readFile} from 'node:fs/promises';
 import {baselineFixture, basicFixturePackage, basicFixtureRoute, basicRootSelector, basicSourcePrefixes, validateBasicMatrix} from './visual-state-audit-basic.mjs';
+import {basicActionContract,basicActionVariants,validateBasicActionMatrix,runBasicActions} from './visual-state-audit-basic-actions.mjs';
 
 const source = path => readFile(new URL(`../../../../${path}`, import.meta.url), 'utf8');
 async function metadata() {
@@ -94,4 +95,60 @@ test('canonical hook includes only the separate pure test file, not a new test/b
   assert.equal(pkg.scripts['test:visual-regressions'].split(argument).length, 2);
   const ownSource = await readFile(new URL('./visual-state-audit-basic.test.mjs', import.meta.url), 'utf8');
   assert(!/^import .*from ['"](?:node:child_process|playwright)['"]/m.test(ownSource));
+});
+
+test('phase2 source-only classification is exact48, with datalist conditional and actual data-table controls',async()=>{
+  const {manifest}=await metadata(),contracts=manifest.basicNames.map(name=>basicActionContract(`basic/${name}`));
+  assert(contracts.every(Boolean));
+  assert.equal(contracts.filter(c=>c.classification==='noninteractive-canonical-fixture').length,17);
+  assert.equal(contracts.filter(c=>c.classification==='finite-actions').length,30);
+  assert.equal(contracts.filter(c=>c.classification==='conditional-no-associated-input').length,1);
+  assert.equal(basicActionContract('basic/data-table').steps.length,6);
+  for(const identity of ['input','forms/Input','basic/unknown','basic/input@second-enabled-option','basic/select@other'])assert.equal(basicActionContract(identity),null);
+  for(const c of contracts){assert(c.source);assert(c.scope);for(const s of c.steps)assert.equal(s.sourceSiteId,`basic-action:${c.identity}:${s.id}`);}
+  assert.match(basicActionContract('basic/file-dropzone').boundaries.join(' '),/not OS file-picker/);
+  assert.match(basicActionContract('basic/coordinate-display').boundaries.join(' '),/never writes to the user clipboard/);
+  assert.match(basicActionContract('basic/dialog').boundaries.join(' '),/fixture-host/);
+  const driver=runBasicActions.toString();assert(!driver.includes('force:true'));assert(!driver.includes('requestSubmit'));
+  assert(driver.includes('Disabled Beta must actually be rendered unavailable'));
+});
+
+test('phase2 source-only named variants have independent identities/hashes, never canonical promotion',async()=>{
+  const {matrix,manifest,revision}=await metadata();matrix.actionFixture=true;manifest.variants=[];
+  for(const template of basicActionVariants){
+    const identity=`basic/${template}@second-enabled-option`,canonical=matrix.auditCases.find(c=>c.template===template);
+    manifest.variants.push({name:identity,template,propsSHA256:'c'.repeat(64)});
+    matrix.auditCases.push({...structuredClone(canonical),caseId:`basic:${template}@second-enabled-option`,componentIdentity:identity,fixtureIdentity:`basic-fixture:${identity}`,fixturePropsSHA256:'c'.repeat(64),aliasMapping:{requestedName:identity,relation:'named-basic-action-variant'}});
+    assert.equal(basicActionContract(identity).variant,'second-enabled-option');
+  }
+  validateBasicActionMatrix(matrix,manifest,revision);
+  for(const mutate of [m=>m.auditCases.pop(),m=>m.actionFixture=false,m=>m.auditCases.at(-1).fixturePropsSHA256='d'.repeat(64),m=>m.auditCases.at(-1).componentIdentity='basic/select',m=>m.auditCases.at(-1).profileIds=['live-desktop-light'],m=>m.auditCases.at(-1).sourceSHA='d'.repeat(40)]){const bad=structuredClone(matrix);mutate(bad);assert.throws(()=>validateBasicActionMatrix(bad,manifest,revision));}
+  const bad=structuredClone(manifest);bad.variants[0].propsSHA256=bad.cases[0].propsSHA256;assert.throws(()=>validateBasicActionMatrix(matrix,bad,revision));
+});
+
+test('phase2 source-only runner routes basic without advanced registries and preserves fail-closed ownership',async()=>{
+  const runner=await source('ui/gohtmx/tests/browser/visual-state-audit-actions.mjs'),go=await source('adapters/gohtmx/tests/fixtures/basic-audit/main.go');
+  assert(runner.includes('if(!basic){\n  assert.equal(coverageManifest.source?.revision'));
+  assert(runner.includes('validateBasicActionMatrix(matrix,coverageManifest,expectedRevision)'));
+  assert(runner.includes('basic?basicFixturePackage'));
+  assert(runner.includes('sourceBefore.status===\'\'&&sourceAfter.status===\'\''));
+  assert(runner.includes('Every finite action requires owned before/after pixels'));
+  assert(runner.includes("if(result.status==='failed')break"));
+  assert(runner.includes('canvases:[...n.querySelectorAll(\'canvas\')].map(c=>c.toDataURL())'));
+  assert(runner.includes("fullRunGate:{safe:false,fullMatrixComplete:false"));
+  assert(go.includes('f.Name += "@second-enabled-option"'));
+  assert(go.includes('"Value": "gamma", "Label": "Caller Gamma"'));
+  assert(!go.includes('"Disabled"] = false'));
+  const camera=await source('ui/gohtmx/tests/browser/visual-state-audit-drivers.mjs');
+  assert(camera.includes('[data-audit-main]>[data-basic-component],[data-audit-twin]>[data-basic-component]'));
+});
+
+test('phase2 source-only basic native button cannot pass a synthetic click or unexpected event',async()=>{
+  const contract=basicActionContract('basic/button');
+  for(const [trusted,unexpected,passes]of [[true,false,true],[false,false,false],[true,true,false]]){
+    const state={__basicEvents:[],__basicCursor:0,__basicClicks:[],__basicClickCursor:0};
+    const root={page:()=>({}),evaluate:async fn=>fn(state),locator:()=>({click:async()=>{state.__basicClicks.push({trusted});if(unexpected)state.__basicEvents.push({type:'ely:action'});}})};
+    const execute=()=>runBasicActions(contract,root,async(id,control,action,verify)=>{assert.equal(id,'activate');assert.equal(control,'button');await action();await verify();});
+    if(passes)await execute();else await assert.rejects(execute);
+  }
 });

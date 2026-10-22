@@ -21,8 +21,10 @@ import (
 )
 
 const fixturePath = "/basic-audit/"
+const actionPath = "/basic-actions/"
+const actionJS = `document.addEventListener('click',event=>{const button=event.target.closest('[data-basic-open-dialog]');if(button)button.closest('[data-basic-component]').querySelector('dialog').showModal();});`
 const fixtureCSS = `body{margin:0;background:var(--color-paper);color:var(--color-ink)}main{max-width:1280px;margin:auto;padding:16px}.basic-record{margin-block:24px}.basic-pair{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:24px}.basic-frame{min-width:0}.basic-context{font-size:12px;color:var(--color-muted)}@media(max-width:600px){.basic-pair{grid-template-columns:minmax(0,1fr)}}`
-const frameTemplates = `{{define "basic-head"}}<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Basic template audit fixtures</title>{{template "font-preloads"}}<link rel="stylesheet" href="/assets/app.css"><link rel="stylesheet" href="/assets/basic-audit.css">{{template "ui-component-assets"}}{{template "ui-map-assets"}}<script src="/assets/theme.js"></script></head><body><main><h1>Basic template audit fixtures</h1><p>Initial caller fixtures only. Captures are not visual or action approval.</p>{{end}}
+const frameTemplates = `{{define "basic-head"}}<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Basic template audit fixtures</title>{{template "font-preloads"}}<link rel="stylesheet" href="/assets/app.css"><link rel="stylesheet" href="/assets/basic-audit.css">{{template "ui-component-assets"}}{{template "ui-map-assets"}}<script src="/assets/theme.js"></script>{{if .Actions}}<script src="/assets/basic-audit-actions.js" defer></script>{{end}}</head><body><main><h1>Basic template audit fixtures</h1><p>Initial caller fixtures only. Captures are not visual or action approval.</p>{{end}}
 {{define "basic-record"}}<article class="basic-record" data-audit-name="{{.Name}}"><h2>{{.Name}}</h2><div class="basic-pair">{{end}}
 {{define "basic-instance"}}{{if .Twin}}<div data-audit-twin>{{else}}<div data-audit-main>{{end}}<section class="basic-frame" id="{{.Scope}}-frame" data-basic-component="{{.Name}}" data-basic-props-sha256="{{.PropsSHA256}}" data-basic-initial-state="{{.InitialState}}">{{if ne .InitialState "rendered"}}<p class="basic-context" data-basic-context>{{.InitialState}}: this initial image shows fixture context, not an opened control.</p>{{end}}<span id="{{.Scope}}-first"></span>{{end}}`
 
@@ -30,6 +32,34 @@ type basicCase struct {
 	Name        string `json:"name"`
 	Template    string `json:"template"`
 	PropsSHA256 string `json:"propsSHA256"`
+}
+
+// Opt-in action variants append Gamma; never enable the canonical disabled Beta.
+func actionFixtures() []sduicatalogue.Fixture {
+	fixtures := sduicatalogue.BasicFixtures()
+	for _, f := range sduicatalogue.BasicFixtures() {
+		switch f.Template {
+		case "select", "radio-group", "combobox", "multi-select", "selectable-list":
+			f.Props = scoped(f.Props).(map[string]any)
+			f.Props["Options"] = append(f.Props["Options"].([]map[string]any), map[string]any{"Value": "gamma", "Label": "Caller Gamma"})
+			f.Name += "@second-enabled-option"
+			fixtures = append(fixtures, f)
+		}
+	}
+	return fixtures
+}
+
+func actionInventory() ([]basicCase, error) {
+	rows := []basicCase{}
+	for _, f := range actionFixtures() {
+		data, err := json.Marshal(f.Props)
+		if err != nil {
+			return nil, err
+		}
+		digest := sha256.Sum256(data)
+		rows = append(rows, basicCase{f.Name, f.Template, hex.EncodeToString(digest[:])})
+	}
+	return rows, nil
 }
 
 func inventory() ([]basicCase, error) {
@@ -95,6 +125,10 @@ func instanceProps(f sduicatalogue.Fixture, scope string) map[string]any {
 }
 
 func render(w io.Writer) error {
+	return renderMode(w, false)
+}
+
+func renderMode(w io.Writer, actions bool) error {
 	tpl, err := ui.NewTemplates()
 	if err != nil {
 		return err
@@ -107,17 +141,26 @@ func render(w io.Writer) error {
 	if err != nil {
 		return err
 	}
-	if err = tpl.ExecuteTemplate(w, "basic-head", nil); err != nil {
+	fixtures := sduicatalogue.BasicFixtures()
+	if actions {
+		cases, err = actionInventory()
+		fixtures = actionFixtures()
+	}
+	if err != nil {
 		return err
 	}
-	for i, f := range sduicatalogue.BasicFixtures() {
+	if err = tpl.ExecuteTemplate(w, "basic-head", map[string]any{"Actions": actions}); err != nil {
+		return err
+	}
+	for i, f := range fixtures {
 		if err = tpl.ExecuteTemplate(w, "basic-record", cases[i]); err != nil {
 			return err
 		}
 		for _, twin := range []bool{false, true} {
-			scope := "basic-" + f.Template + "-main"
+			identity := strings.ReplaceAll(strings.TrimPrefix(f.Name, "basic/"), "@", "-")
+			scope := "basic-" + identity + "-main"
 			if twin {
-				scope = "basic-" + f.Template + "-twin"
+				scope = "basic-" + identity + "-twin"
 			}
 			state := "rendered"
 			if f.Template == "dialog" {
@@ -133,6 +176,11 @@ func render(w io.Writer) error {
 			if err = tpl.ExecuteTemplate(w, "basic-instance", frame); err != nil {
 				return err
 			}
+			if actions && f.Template == "dialog" {
+				if _, err = io.WriteString(w, `<button type="button" data-basic-open-dialog>Open dialog (fixture host)</button>`); err != nil {
+					return err
+				}
+			}
 			if err = tpl.ExecuteTemplate(w, f.Template, instanceProps(f, scope)); err != nil {
 				return fmt.Errorf("%s: %w", f.Name, err)
 			}
@@ -146,6 +194,31 @@ func render(w io.Writer) error {
 	}
 	_, err = io.WriteString(w, "</main></body></html>")
 	return err
+}
+
+func actionMatrix(revision string) (any, error) {
+	value, err := matrix(revision)
+	if err != nil {
+		return nil, err
+	}
+	m := value.(map[string]any)
+	rows := m["auditCases"].([]map[string]any)
+	variants, err := actionInventory()
+	if err != nil {
+		return nil, err
+	}
+	for _, c := range variants[48:] {
+		row := map[string]any{}
+		for k, v := range rows[0] {
+			row[k] = v
+		}
+		row["caseId"], row["componentIdentity"], row["template"] = "basic:"+strings.TrimPrefix(c.Name, "basic/"), c.Name, c.Template
+		row["fixtureIdentity"], row["fixturePropsSHA256"] = "basic-fixture:"+c.Name, c.PropsSHA256
+		row["aliasMapping"] = map[string]any{"requestedName": c.Name, "relation": "named-basic-action-variant"}
+		rows = append(rows, row)
+	}
+	m["auditCases"], m["actionFixture"], m["scope"] = rows, true, "48 unchanged canonical fixtures plus5 separately hashed selection variants; finite actions only, not all public props"
+	return m, nil
 }
 
 func matrix(revision string) (any, error) {
@@ -193,6 +266,32 @@ func handler() (http.Handler, error) {
 		w.Header().Set("Content-Type", "text/css")
 		io.WriteString(w, fixtureCSS)
 	})
+	mux.HandleFunc("GET /assets/basic-audit-actions.js", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/javascript")
+		io.WriteString(w, actionJS)
+	})
+	mux.HandleFunc("GET /action-manifest.json", func(w http.ResponseWriter, r *http.Request) {
+		rows, err := actionInventory()
+		if err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"basicNames": sduicatalogue.BasicNames(), "cases": rows[:48], "variants": rows[48:]})
+	})
+	var actions bytes.Buffer
+	if err = renderMode(&actions, true); err != nil {
+		return nil, err
+	}
+	mux.HandleFunc("GET "+actionPath, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != actionPath {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; connect-src 'self'; base-uri 'none'; form-action 'self'")
+		w.Write(actions.Bytes())
+	})
 	mux.HandleFunc("GET /manifest.json", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]any{"basicNames": sduicatalogue.BasicNames(), "cases": cases})
@@ -223,6 +322,27 @@ func export(dir string) error {
 	if err := os.WriteFile(filepath.Join(dir, "basic-audit", "index.html"), page.Bytes(), 0600); err != nil {
 		return err
 	}
+	var actions bytes.Buffer
+	if err := renderMode(&actions, true); err != nil {
+		return err
+	}
+	if err := os.Mkdir(filepath.Join(dir, "basic-actions"), 0700); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(dir, "basic-actions", "index.html"), actions.Bytes(), 0600); err != nil {
+		return err
+	}
+	rows, err := actionInventory()
+	if err != nil {
+		return err
+	}
+	manifest, err := json.Marshal(map[string]any{"basicNames": sduicatalogue.BasicNames(), "cases": rows[:48], "variants": rows[48:]})
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(dir, "action-manifest.json"), append(manifest, '\n'), 0600); err != nil {
+		return err
+	}
 	cases, err := inventory()
 	if err != nil {
 		return err
@@ -250,6 +370,9 @@ func export(dir string) error {
 	}); err != nil {
 		return err
 	}
+	if err := os.WriteFile(filepath.Join(dir, "assets", "basic-audit-actions.js"), []byte(actionJS), 0600); err != nil {
+		return err
+	}
 	return os.WriteFile(filepath.Join(dir, "assets", "basic-audit.css"), []byte(fixtureCSS), 0600)
 }
 
@@ -265,6 +388,20 @@ func main() {
 	}
 	var err error
 	switch {
+	case *dump == "/action-matrix.json":
+		var result any
+		result, err = actionMatrix(*revision)
+		if err == nil {
+			err = json.NewEncoder(os.Stdout).Encode(result)
+		}
+	case *dump == "/action-manifest.json":
+		var rows []basicCase
+		rows, err = actionInventory()
+		if err == nil {
+			err = json.NewEncoder(os.Stdout).Encode(map[string]any{"basicNames": sduicatalogue.BasicNames(), "cases": rows[:48], "variants": rows[48:]})
+		}
+	case *dump == actionPath:
+		err = renderMode(os.Stdout, true)
 	case *dump == "/matrix.json":
 		var result any
 		result, err = matrix(*revision)

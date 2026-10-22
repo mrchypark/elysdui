@@ -97,7 +97,7 @@ export function captureForeignPaint(node,{clip,checkedRootID}){
     let common=node.parentElement;while(common&&!common.contains(paint))common=common.parentElement;
     return common&&covers.length&&unclippedAncestors()&&Number(style.opacity)===1&&style.transform==='none'&&style.filter==='none'&&style.mixBlendMode==='normal'&&plainChain(node.parentElement,common)&&plainChain(paint,common);
   };
-  const rootSelector='[data-audit-main]>[data-ely-family],[data-audit-twin]>[data-ely-family]';
+  const rootSelector='[data-audit-main]>[data-ely-family],[data-audit-twin]>[data-ely-family],[data-audit-main]>[data-basic-component],[data-audit-twin]>[data-basic-component]';
   const checkedRoot=checkedRootID?document.getElementById(checkedRootID):node.closest(rootSelector);
   const owners=new Set(checkedRoot?[checkedRoot.id,...[...checkedRoot.querySelectorAll('[id]')].map(e=>e.id)]:[]);
   const references=new Set(checkedRoot?[...checkedRoot.querySelectorAll('[aria-controls]')].flatMap(e=>(e.getAttribute('aria-controls')||'').split(/\s+/)):[]);
@@ -820,7 +820,7 @@ export function ownedOverlayInventory(node){
     .filter(element=>{const rect=element.getBoundingClientRect();return rect.width>0&&rect.height>0&&element.checkVisibility({checkOpacity:true,checkVisibilityCSS:true});})
     .map(element=>{
       const selector=selectorAll;
-      const inside=node.contains(element),foreign=element.closest('[data-audit-main]>[data-ely-family],[data-audit-twin]>[data-ely-family]')||element.closest('[data-ely-family]');
+      const inside=node.contains(element),foreign=element.closest('[data-audit-main]>[data-ely-family],[data-audit-twin]>[data-ely-family],[data-audit-main]>[data-basic-component],[data-audit-twin]>[data-basic-component]')||element.closest('[data-ely-family]');
       const explicitOwner=element.getAttribute('data-ely-owner')?.replace(/^#/,'');
       const scope=foreign&&!inside&&foreign!==node&&!owners.has(foreign.id)?'foreign-component':explicitOwner&&!owners.has(explicitOwner)?'foreign-portal-owner':owners.has(explicitOwner)?'portal-owner-attribute':references.has(element.id)?'trigger-reference':inside&&!element.matches('[role=region]')?'component-root':'unowned';
       const rect=element.getBoundingClientRect();

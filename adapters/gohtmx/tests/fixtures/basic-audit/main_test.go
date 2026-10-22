@@ -227,3 +227,113 @@ func TestStaticAndLiveUseIdenticalRenderer(t *testing.T) {
 		}
 	}
 }
+
+func TestActionVariantsPreserveCanonical48AndDisabledBeta(t *testing.T) {
+	before, err := inventory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, err := actionInventory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 53 || !reflect.DeepEqual(rows[:48], before) {
+		t.Fatal("canonical inventory changed")
+	}
+	fixtures := actionFixtures()
+	seen := map[string]bool{}
+	for i, f := range fixtures[48:] {
+		if !strings.HasSuffix(f.Name, "@second-enabled-option") || seen[f.Name] {
+			t.Fatal(f.Name)
+		}
+		seen[f.Name] = true
+		options := f.Props["Options"].([]map[string]any)
+		if len(options) != 3 || options[1]["Value"] != "beta" || options[1]["Disabled"] != true || options[2]["Value"] != "gamma" || options[2]["Disabled"] == true {
+			t.Fatal(options)
+		}
+		for _, original := range before {
+			if original.Template == f.Template && original.PropsSHA256 == rows[48+i].PropsSHA256 {
+				t.Fatal("variant reused canonical props hash")
+			}
+		}
+		options[0]["Label"] = "variant-only mutation"
+	}
+	after, err := inventory()
+	if err != nil || !reflect.DeepEqual(before, after) {
+		t.Fatal("variant mutated canonical props")
+	}
+	value, err := actionMatrix(strings.Repeat("a", 40))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := value.(map[string]any)
+	if m["actionFixture"] != true || len(m["auditCases"].([]map[string]any)) != 53 {
+		t.Fatal("action matrix scope")
+	}
+}
+
+func TestActionPageHasSeparateScopedVariantsAndLabelledHostOpener(t *testing.T) {
+	var out bytes.Buffer
+	if err := renderMode(&out, true); err != nil {
+		t.Fatal(err)
+	}
+	frames, ids := map[string]int{}, map[string]bool{}
+	openers := 0
+	walk(parsed(t, out.String()), func(n *html.Node) {
+		if name := attr(n, "data-basic-component"); name != "" {
+			frames[name]++
+		}
+		if id := attr(n, "id"); id != "" {
+			if ids[id] {
+				t.Errorf("duplicate ID %s", id)
+			}
+			ids[id] = true
+		}
+		for _, a := range n.Attr {
+			if a.Key == "data-basic-open-dialog" {
+				openers++
+				if n.Data != "button" {
+					t.Error("host opener is not native button")
+				}
+			}
+		}
+	})
+	if len(frames) != 53 || openers != 2 {
+		t.Fatalf("frames%d openers%d", len(frames), openers)
+	}
+	for name, count := range frames {
+		if count != 2 {
+			t.Errorf("%s instance count%d", name, count)
+		}
+	}
+	var canonical bytes.Buffer
+	if err := render(&canonical); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(canonical.String(), "basic-audit-actions.js") || strings.Contains(canonical.String(), "data-basic-open-dialog") || strings.Contains(canonical.String(), "@second-enabled-option") {
+		t.Fatal("phase2 changed canonical page")
+	}
+	dir := filepath.Join(t.TempDir(), "export")
+	if err := export(dir); err != nil {
+		t.Fatal(err)
+	}
+	h, err := handler()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{actionPath, "/action-manifest.json", "/assets/basic-audit-actions.js"} {
+		response := httptest.NewRecorder()
+		h.ServeHTTP(response, httptest.NewRequest("GET", path, nil))
+		file := strings.TrimPrefix(path, "/")
+		if path == actionPath {
+			file += "index.html"
+		}
+		data, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(file)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if response.Code != 200 || !bytes.Equal(data, response.Body.Bytes()) {
+			t.Errorf("live/static action fixture mismatch %s", path)
+		}
+	}
+}

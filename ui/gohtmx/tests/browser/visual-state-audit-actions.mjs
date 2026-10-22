@@ -10,6 +10,8 @@ import {isDeepStrictEqual} from 'node:util';
 import {chromium} from 'playwright';
 import {actionModuleNames,prepareActionModule,synchronousTraceInit,registeredOutcomesEqual,registeredOutcomeDifferences,firstDifference,compareActionTrace,traceContractStatus} from './visual-state-audit-instrument.mjs';
 import {caseActionContract, requestedStateContract, runRequestedStateActions, ownedOverlayInventory, captureTargetPNG, screenshotWithoutCaretMutation, inventoryReceipt, inventoryDrift, unhandledBrowserErrors} from './visual-state-audit-drivers.mjs';
+import {basicFixturePackage,basicRootSelector} from './visual-state-audit-basic.mjs';
+import {basicActionContract,validateBasicActionMatrix,runBasicActions} from './visual-state-audit-basic-actions.mjs';
 
 const repo = fileURLToPath(new URL('../../../../', import.meta.url));
 const defaultEvidenceRoot = resolve(repo, 'ui/gohtmx/tests/browser/visual-state-audit-evidence');
@@ -37,9 +39,11 @@ const pilotNames = [
 ];
 
 function parseArgs(argv) {
-  const options = {evidenceRoot: environmentEvidenceRoot, output: defaultOutput, matrixPath: null, coverageManifestPath: null, families: [], caseIds: [], pilot: 20, full: false, baseURL: null, profileId: 'live-desktop-light', surface: 'live-audit', maxCaptureBytes: 1024 ** 3};
+  const options = {fixture:'advanced',fixtureManifest:null,evidenceRoot: environmentEvidenceRoot, output: defaultOutput, matrixPath: null, coverageManifestPath: null, families: [], caseIds: [], pilot: 20, full: false, baseURL: null, profileId: 'live-desktop-light', surface: 'live-audit', maxCaptureBytes: 1024 ** 3};
   for (const arg of argv) {
     if (arg === '--full') options.full = true;
+    else if(arg.startsWith('--fixture='))options.fixture=arg.slice('--fixture='.length);
+    else if(arg.startsWith('--fixture-manifest='))options.fixtureManifest=resolve(arg.slice('--fixture-manifest='.length));
     else if(arg==='--states-only')options.statesOnly=true;
     else if (arg.startsWith('--evidence-root=')) options.evidenceRoot = resolve(arg.slice('--evidence-root='.length));
     else if (arg.startsWith('--output-dir=')) options.output = resolve(arg.slice('--output-dir='.length));
@@ -59,10 +63,89 @@ function parseArgs(argv) {
   assert(!options.full || (!options.caseIds.length && !options.families.length), '--full cannot be combined with --case or --family');
   assert(!options.full||!options.statesOnly,'--states-only is a bounded proof mode, not --full');
   assert(profiles[options.profileId], `Unsupported profile: ${options.profileId}`);
-  assert(['live-audit', 'static-audit'].includes(options.surface), `Unsupported surface: ${options.surface}`);
+  assert(['advanced','basic'].includes(options.fixture),'Unsupported fixture');
+  assert((options.fixture==='basic'?['live-basic','static-basic']:['live-audit','static-audit']).includes(options.surface), `Unsupported surface: ${options.surface}`);
+  if(options.fixture==='basic'){assert(options.fixtureManifest,'Basic actions require --fixture-manifest=<action-manifest.json>');assert(!options.statesOnly,'Basic has its own finite action gate, not advanced --states-only');assert(!options.baseURL,'Basic actions require the owned compiled fixture/export, not --base-url');}
   assert(options.matrixPath, 'Pass --matrix=<acceptance-matrix.json> from the existing audit inventory; no matrix is bundled');
   options.coverageManifestPath ||= resolve(options.evidenceRoot, 'evidence/instrument-coverage.json');
   return options;
+}
+
+async function basicAudit({cases,origin,captures,matrixInput,coverageInput,sourceBefore,goEnv}){
+  const reports=[],browserErrors=[];
+  for(const item of cases){
+    const context=await browser.newContext({viewport:profile.viewport,colorScheme:profile.colorScheme}),page=await context.newPage();
+    const contract=basicActionContract(item.componentIdentity),receipts=[];
+    const result={caseId:item.caseId,componentIdentity:item.componentIdentity,fixtureIdentity:item.fixtureIdentity,fixturePropsSHA256:item.fixturePropsSHA256,contract,receipts,status:'running'};
+    reports.push(result);assert(contract,'Exact basic source contract required');
+    page.on('pageerror',error=>browserErrors.push({caseId:item.caseId,type:'pageerror',text:String(error)}));
+    page.on('response',response=>{if(response.status()>=400)browserErrors.push({caseId:item.caseId,type:'http-error',url:response.url(),status:response.status()});});
+    page.on('requestfailed',request=>browserErrors.push({caseId:item.caseId,type:'requestfailed',url:request.url(),error:request.failure()?.errorText}));
+    try{
+      // Test boundary only: never call the user clipboard, even after a real click.
+      await page.addInitScript(()=>{globalThis.__basicClipboardRequests=[];Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async value=>{globalThis.__basicClipboardRequests.push(String(value));}}});});
+      await page.route('**/*',route=>{if(new URL(route.request().url()).origin===origin)return route.continue();browserErrors.push({caseId:item.caseId,type:'external-dependency',url:route.request().url()});return route.abort();});
+      await page.goto(origin+'/basic-actions/',{waitUntil:'networkidle'});await sleepFrames(page);
+      const record=page.locator(`[data-audit-name=${JSON.stringify(item.componentIdentity)}]`),root=record.locator(basicRootSelector),twin=record.locator('[data-audit-twin]>[data-basic-component]');
+      assert.equal(await root.count(),1);assert.equal(await twin.count(),1);
+      assert.equal(await root.getAttribute('data-basic-component'),item.componentIdentity);assert.equal(await root.getAttribute('data-basic-props-sha256'),item.fixturePropsSHA256);
+      await page.waitForFunction(()=>[...document.querySelectorAll('[data-ui-component="map-view"]')].every(n=>n.dataset.mapReady==='true'));
+      const peer=async()=>digest(await twin.evaluate(n=>({html:n.innerHTML,fields:[...n.querySelectorAll('input,select,textarea')].map(e=>({id:e.id,name:e.name,value:e.value,checked:e.checked,disabled:e.disabled})),canvases:[...n.querySelectorAll('canvas')].map(c=>c.toDataURL())})));
+      const initialTwin=await peer();
+      result.initialTwinSHA256=initialTwin;
+      await root.evaluate(node=>{
+        node.__basicEvents=[];node.__basicClicks=[];node.__basicLifecycle=[];
+        for(const type of ['input','change','ui:select','ely:action','ely:change'])node.addEventListener(type,e=>node.__basicEvents.push({type,target:e.target.id||null,name:e.target.name||null,value:e.target.value??null,checked:e.target.checked??null,trusted:e.isTrusted,detail:e.detail===undefined?null:JSON.parse(JSON.stringify(e.detail))}));
+        node.addEventListener('click',e=>node.__basicClicks.push({trusted:e.isTrusted,target:e.target.id||null}));
+        for(const type of ['toggle','close','cancel'])node.addEventListener(type,e=>node.__basicLifecycle.push({type,target:e.target.id||null,tag:e.target.tagName,trusted:e.isTrusted,oldState:e.oldState??null,newState:e.newState??null}),true);
+      });
+      const state=async()=>({ownedOverlays:(await discoverOverlays(root)).filter(p=>p.owned)});
+      const step=async(id,control,action,verify)=>{
+        const expected=contract.steps[receipts.length];assert.equal(expected?.id,id,'Exact source sequence');
+        const receipt={action:id,control,source:expected,beforeState:await snapshot(root)};receipts.push(receipt);
+        receipt.beforeCaptureOwnership=await captureOwnedState({page,record,root,caseId:item.caseId,siteId:id,checkpointIndex:receipts.length,phase:'before',captures,state:await state()});
+        await root.evaluate(n=>{n.__basicCursor=n.__basicEvents.length;n.__basicClickCursor=n.__basicClicks.length;n.__basicLifecycleCursor=n.__basicLifecycle.length;});
+        await action();await sleepFrames(page);receipt.assertedState=await verify();receipt.assertionsPassed=true;
+        receipt.events=await root.evaluate(n=>n.__basicEvents.slice(n.__basicCursor));
+        receipt.lifecycleEvents=await root.evaluate(n=>n.__basicLifecycle.slice(n.__basicLifecycleCursor));
+        receipt.nativeClicks=await root.evaluate(n=>n.__basicClicks.slice(n.__basicClickCursor));
+        if(!['menu','map-view','coordinate-display'].includes(contract.template))assert(!receipt.events.some(e=>['ely:action','ely:change','ui:select'].includes(e.type)),'Basic native controls must not fabricate advanced public payloads');
+        const scope=(await root.getAttribute('id')).replace(/-frame$/,'')+'_value';
+        for(const e of receipt.events)if(e.name)assert(e.name.startsWith(scope),'Every named native event stays scoped to this actual main instance');
+        assert.deepEqual(await peer(),initialTwin,'Basic action must preserve exact independent twin');
+        receipt.afterState=await snapshot(root);
+        receipt.afterCaptureOwnership=await captureOwnedState({page,record,root,caseId:item.caseId,siteId:id,checkpointIndex:receipts.length,phase:'after',captures,state:await state()});
+        assert.deepEqual(await peer(),initialTwin,'Basic camera preparation must not mutate twin');
+        receipt.captureStatus=receipt.beforeCaptureOwnership.ownedStateEvidence&&receipt.afterCaptureOwnership.ownedStateEvidence?'captured':'context-only';
+        assert.equal(receipt.captureStatus,'captured','Every finite action requires owned before/after pixels');
+      };
+      if(contract.classification==='finite-actions')await runBasicActions(contract,root,step);
+      else{
+        assert.equal(contract.steps.length,0);
+        if(contract.classification==='noninteractive-canonical-fixture')assert.equal(await root.locator('button,input,select,textarea,summary,a[href],[tabindex]').count(),0,'No-action classification must fail if actual controls appear');
+        else{assert.equal(await root.locator('datalist').count(),1);assert.equal(await root.locator('input').count(),0,'Datalist resource classification requires no associated input');}
+        result.initialEvidence=await captureOwnedState({page,record,root,caseId:item.caseId,siteId:'explicit-no-action-fixture',checkpointIndex:0,phase:'initial',captures,state:await state()});
+        assert.equal(result.initialEvidence.ownedStateEvidence,true);
+      }
+      assert.equal(receipts.length,contract.steps.length);assert.deepEqual(await peer(),initialTwin);
+      result.finalTwinSHA256=await peer();
+      result.status=contract.classification==='finite-actions'?'passed-finite-actions':contract.classification;
+    }catch(error){result.status='failed';result.error=String(error);}
+    finally{await context.close();}
+    if(result.status==='failed')break; // Stop the bounded batch on the first new failure.
+  }
+  const sourceAfter=await sourceReceipt(),inventoryChecks=await Promise.all([inventoryDrift(matrixInput),inventoryDrift(coverageInput)]);
+  const sourceStableDuringRun=sourceBefore.treeSHA256===sourceAfter.treeSHA256&&sourceBefore.revision===sourceAfter.revision;
+  const files=await(await import('node:fs/promises')).readdir(captures);
+  const report={schemaVersion:1,evidenceKind:'basic-finite-native-action-receipts',fixture:'basic',sourceRevision:matrixInput.data.source.revision,sourceBefore,sourceAfter,sourceStableDuringRun,
+    matrix:{path:matrixInput.path,sha256:matrixInput.sha256},fixtureManifest:{path:coverageInput.path,sha256:coverageInput.sha256},inventoryChecks,profile,surface:options.surface,
+    runtime:{node:process.version,chromium:browser.version(),go:execFileSync('go',['version'],{cwd:repo,env:goEnv,encoding:'utf8'}).trim()},cases:reports,caseCount:reports.length,browserErrors,
+    imageCount:files.filter(f=>f.endsWith('.png')).length,captureBytes,registeredCheckEquivalence:'not-applicable: no advanced registered checks are fabricated',
+    basicActionGate:{safe:sourceBefore.status===''&&sourceAfter.status===''&&sourceStableDuringRun&&inventoryChecks.every(c=>c.stable)&&reports.length===cases.length&&!browserErrors.length&&reports.every(c=>c.status!=='failed'),scope:'Selected finite fixture actions, separately labelled noninteractive/conditional fixtures and explicit boundary exclusions only'},
+    fullRunGate:{safe:false,fullMatrixComplete:false,reason:'Finite basic fixture evidence never establishes all public control paths, native OS surfaces or all-prop coverage'}};
+  await writeFile(resolve(options.output,'report.json'),JSON.stringify(report,null,2)+'\n',{flag:'wx'});
+  await writeFile(resolve(options.output,'blockers.json'),JSON.stringify({failed:reports.filter(c=>c.status==='failed').map(c=>({caseId:c.caseId,error:c.error})),notRun:cases.slice(reports.length).map(c=>c.caseId),boundaries:reports.flatMap(c=>(c.contract.boundaries||[]).map(reason=>({caseId:c.caseId,reason}))),fullRunGate:report.fullRunGate},null,2)+'\n',{flag:'wx'});
+  assert(report.basicActionGate.safe,'Basic finite action gate blocked; inspect immutable report');
 }
 
 const options = parseArgs(process.argv.slice(2));
@@ -313,31 +396,36 @@ async function directCaseDriver({item, familyURL, captures, reference, semanticS
 }
 
 try {
-  const matrixInput=await inventoryReceipt(matrixPath),coverageInput=await inventoryReceipt(coverageManifestPath);
+  const basic=options.fixture==='basic';
+  const matrixInput=await inventoryReceipt(matrixPath),coverageInput=await inventoryReceipt(basic?options.fixtureManifest:coverageManifestPath);
   const matrix = matrixInput.data;
   const coverageManifest = coverageInput.data;
   const expectedRevision = matrix.source.revision;
   assert.equal(execFileSync('git', ['rev-parse', 'HEAD'], {cwd: repo, encoding: 'utf8'}).trim(), expectedRevision, 'checkout revision');
   const sourceBefore = await sourceReceipt();
-  if(options.full)assert.equal(sourceBefore.status,'','Full action audit requires the parent clean commit after the bounded source freeze');
+  if(options.full||basic)assert.equal(sourceBefore.status,'','Action audit requires the parent clean commit after the bounded source freeze');
+  if(basic)validateBasicActionMatrix(matrix,coverageManifest,expectedRevision);
   let cases = matrix.auditCases.filter(item => item.profileIds.includes(profile.id) && item.surface.includes(options.surface));
   if (options.families.length) cases = cases.filter(item => options.families.includes(item.family));
   if (options.caseIds.length) cases = cases.filter(item => options.caseIds.includes(item.caseId) || options.caseIds.includes(item.componentIdentity));
-  if(options.statesOnly)cases=cases.filter(item=>requestedStateContract(item.componentIdentity));
-  if (!options.statesOnly && !options.full && !options.families.length && !options.caseIds.length) {
+  if(basic)assert(options.caseIds.every(id=>cases.some(item=>id===item.caseId||id===item.componentIdentity)),'Every requested basic identity must exist for this surface/profile');
+  if(options.statesOnly&&!basic)cases=cases.filter(item=>requestedStateContract(item.componentIdentity));
+  if (!basic&&!options.statesOnly && !options.full && !options.families.length && !options.caseIds.length) {
     cases = pilotNames.map(name => matrix.auditCases.find(item => item.componentIdentity === name && item.aliasMapping.relation !== 'alias-shared-check')).filter(Boolean);
   } else if (!options.full && options.pilot) cases = cases.slice(0, options.pilot);
   assert(cases.length > 0, 'No cases selected');
   assert(new Set(cases.map(item => item.componentIdentity)).size === cases.length, 'pilot cases must use unique component names');
-  assert(cases.every(item => familyModule[item.family]), 'case uses an unsupported family');
+  assert(cases.every(item => basic?item.family==='basic':familyModule[item.family]), 'case uses an unsupported family');
 
+  const preparedByFamily=new Map();
+  if(!basic){
   assert.equal(coverageManifest.source?.revision,expectedRevision,'coverage manifest revision');
   for(const [name,path]of [['instrumenter','ui/gohtmx/tests/browser/visual-state-audit-instrument.mjs'],['drivers','ui/gohtmx/tests/browser/visual-state-audit-drivers.mjs'],['actions','ui/gohtmx/tests/browser/visual-state-audit-actions.mjs']])assert.equal(coverageManifest.source?.[`${name}SHA256`],sha256(await readFile(resolve(repo,path))),`coverage ${name} input hash`);
-  const preparedByFamily=new Map();
   for(const family of new Set(cases.map(item=>item.family))){
     const modules=[];
     for(const name of actionModuleNames(family))modules.push(prepareActionModule(name,await readFile(resolve(repo,`internal/gallery/assets/advanced-${name}-checks.js`),'utf8'),coverageManifest,options.surface));
     preparedByFamily.set(family,modules);
+  }
   }
 
   await mkdir(options.output, {recursive: false});
@@ -348,18 +436,18 @@ try {
   const goEnv = {...process.env, GOTOOLCHAIN: process.env.GOTOOLCHAIN || 'go1.26.9'};
   let origin = options.baseURL;
   const staticBasePath = '/visual-action-audit/';
-  if (options.surface === 'static-audit' && !origin) {
+  if (options.surface.startsWith('static-') && !origin) {
     const binary = resolve(runDir, 'gallery-static');
     const staticRoot = resolve(runDir, 'static');
-    execFileSync('go', ['build', '-o', binary, './cmd/ely-gallery-static'], {cwd: repo, env: goEnv, stdio: 'inherit'});
-    execFileSync(binary, ['-dir', staticRoot, '-base', staticBasePath], {cwd: repo, env: goEnv, stdio: 'inherit'});
+    execFileSync('go', ['build', '-o', binary, basic?basicFixturePackage:'./cmd/ely-gallery-static'], {cwd: repo, env: goEnv, stdio: 'inherit'});
+    execFileSync(binary, basic?['-dir',staticRoot]:['-dir', staticRoot, '-base', staticBasePath], {cwd: repo, env: goEnv, stdio: 'inherit'});
     const mime = {'.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.svg': 'image/svg+xml', '.woff2': 'font/woff2', '.png': 'image/png', '.jpg': 'image/jpeg', '.webp': 'image/webp', '.wasm': 'application/wasm'};
     staticServer = createServer(async (request, response) => {
       try {
         let pathname = decodeURIComponent(new URL(request.url, 'http://local').pathname);
         if (pathname === '/favicon.ico') { response.writeHead(204).end(); return; }
-        if (!pathname.startsWith(staticBasePath)) { response.writeHead(404).end(); return; }
-        pathname = pathname.slice(staticBasePath.length);
+        if (!basic&&!pathname.startsWith(staticBasePath)) { response.writeHead(404).end(); return; }
+        pathname = basic?pathname.slice(1):pathname.slice(staticBasePath.length);
         if (!pathname || pathname.endsWith('/')) pathname += 'index.html';
         const file = resolve(staticRoot, pathname);
         if (!file.startsWith(staticRoot + sep)) { response.writeHead(403).end(); return; }
@@ -372,7 +460,7 @@ try {
     origin = `http://127.0.0.1:${await listen(staticServer)}`;
   } else if (!origin) {
     const binary = resolve(runDir, 'gallery');
-    execFileSync('go', ['build', '-o', binary, './examples/gohtmx/gallery'], {cwd: repo, env: goEnv, stdio: 'inherit'});
+    execFileSync('go', ['build', '-o', binary, basic?basicFixturePackage:'./examples/gohtmx/gallery'], {cwd: repo, env: goEnv, stdio: 'inherit'});
     const reservation = createServer();
     await new Promise((accept, reject) => { reservation.once('error', reject); reservation.listen(0, '127.0.0.1', accept); });
     const port = reservation.address().port;
@@ -385,7 +473,7 @@ try {
     let ready = false;
     for (let i = 0; i < 200; i++) {
       if (child.exitCode !== null) throw new Error(`Gallery exited: ${serverOutput}`);
-      try { if ((await fetch(`${origin}/components`)).ok) { ready = true; break; } } catch {}
+      try { if ((await fetch(`${origin}${basic?'/action-manifest.json':'/components'}`)).ok) { ready = true; break; } } catch {}
       await delay(50);
     }
     assert(ready, `Gallery startup timed out: ${serverOutput}`);
@@ -393,6 +481,10 @@ try {
   assert(/^https?:\/\//.test(origin), 'base URL must be an absolute http(s) URL');
   browser = await chromium.launch({executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined});
 
+  if(basic){
+    const response=await fetch(origin+'/action-manifest.json');assert(response.ok);assert.deepEqual(await response.json(),coverageManifest,'Served fixture manifest equals pinned compiled props');
+    await basicAudit({cases,origin,captures,matrixInput,coverageInput,sourceBefore,goEnv});
+  }else{
   const byFamily = new Map();
   for (const item of cases) { if (!byFamily.has(item.family)) byFamily.set(item.family, []); byFamily.get(item.family).push(item); }
   const reports = [], transformReports = {}, browserErrors = [];
@@ -719,6 +811,7 @@ try {
   await writeFile(resolve(options.output, 'report.json'), JSON.stringify(report, null, 2) + '\n', {flag: 'wx'});
   await writeFile(resolve(options.output, 'blockers.json'), JSON.stringify({runtime: report.runtime, caseCount: report.caseCount, checkpointCount: report.checkpointCount, equivalentWithCheckpoints: report.equivalentWithCheckpoints, fullRunGate: report.fullRunGate}, null, 2) + '\n', {flag: 'wx'});
   console.log(`Evidence: ${resolve(options.output, 'report.json')}; cases=${report.caseCount}; checkpoints=${report.checkpointCount}; captures=${report.imageCount}; ${(report.captureBytes / 1048576).toFixed(2)} MiB`);
+  }
 } catch (error) {
   if (runDir) await writeFile(resolve(options.output, 'failure.json'), JSON.stringify({runtime: process.version, error: String(error), stack: error.stack, runnerPID: process.pid, galleryPID: child?.pid, runDir, serverOutput}, null, 2) + '\n', {flag: 'wx'});
   throw error;
