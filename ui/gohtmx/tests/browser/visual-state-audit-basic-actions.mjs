@@ -78,7 +78,7 @@ export function basicActionContract(identity){
   if(noninteractive.includes(template))return {identity,template,classification:'noninteractive-canonical-fixture',steps:[],source,scope:'Caller content only; no descendant host widgets are supplied'};
   if(template==='datalist')return {identity,template,classification:'conditional-no-associated-input',steps:[],source:'ui/gohtmx/templates/shadcn-field.html',scope:'Native datalist resource only; no associated input or standalone popup approval'};
   if(!actionIDs[template])return null;
-  const ids=variant&&['select','radio-group','selectable-list'].includes(template)?['select-gamma']:variant&&template==='multi-select'?['add-gamma','remove-gamma']:actionIDs[template];
+  const ids=variant&&template==='radio-group'?['select-gamma','disabled-beta-pointer','keyboard-skip-beta']:variant&&['select','selectable-list'].includes(template)?['select-gamma']:variant&&template==='multi-select'?['add-gamma','remove-gamma']:actionIDs[template];
   const boundaries={
     'file-dropzone':['Playwright setInputFiles is file injection, not OS file-picker or drag/drop approval'],
     'date-picker':['Native date-popup UI is outside DOM pixel evidence'],
@@ -138,6 +138,39 @@ export async function runBasicActions(contract,root,runStep){
       if(t==='radio-group')await checked(selector,true);else await value(selector,variant?'gamma':'alpha');
       await nativeTypes(t==='radio-group'&&!variant?[]:['input','change']);
     });
+    if(t==='radio-group'&&variant){
+      const alpha=one('input[value="alpha"]'),beta=one('input[value="beta"]'),gamma=one('input[value="gamma"]');
+      const selection=async selected=>{
+        assert.equal(await beta.isDisabled(),true);await checked('input[value="beta"]',false);
+        assert.equal(await alpha.isDisabled(),false);assert.equal(await gamma.isDisabled(),false);
+        await checked('input[value="alpha"]',selected==='alpha');await checked('input[value="gamma"]',selected==='gamma');
+      };
+      const name=await gamma.getAttribute('name');assert(name);assert.equal(await alpha.getAttribute('name'),name);assert.equal(await beta.getAttribute('name'),name);
+      const exactEvents=async selected=>assert.deepEqual(await nativeTypes(['input','change']),['input','change'].map(type=>({type,target:null,name,value:selected,checked:true,trusted:true,detail:null})));
+      // Strengthen the preceding positive pointer proof without adding an unrecorded reset.
+      await selection('gamma');await exactEvents('gamma');
+      let pointer;
+      await step('disabled-beta-pointer','input[value="beta"]',async()=>{
+        await selection('gamma');const box=await beta.boundingBox();assert(box&&box.width>0&&box.height>0,'Disabled Beta must have a painted pointer target');
+        pointer={x:box.x+box.width/2,y:box.y+box.height/2};
+        assert.equal(await beta.evaluate((n,p)=>document.elementFromPoint(p.x,p.y)===n,pointer),true,'Pointer must hit actual disabled Beta, not an occluder');
+        await page.mouse.click(pointer.x,pointer.y);
+      },async()=>{await selection('gamma');await nativeTypes([]);return {pointer,selected:'gamma',betaDisabled:true,betaChecked:false};});
+      const tabSetup=[];
+      await step('keyboard-skip-beta','input[value="gamma"] → ArrowLeft',async()=>{
+        await selection('gamma');
+        for(let i=0;!await gamma.evaluate(n=>n===document.activeElement)&&i<64;i++){
+          await page.keyboard.press('Tab');
+          tabSetup.push(await root.evaluate(()=>({id:document.activeElement.id||null,value:document.activeElement.value??null,tag:document.activeElement.tagName})));
+          await selection('gamma');await nativeTypes([]);
+        }
+        assert.equal(await gamma.evaluate(n=>n===document.activeElement),true,'Real Tab must reach selected Gamma before ArrowLeft');
+        await page.keyboard.press('ArrowLeft');
+      },async()=>{
+        await selection('alpha');assert.equal(await alpha.evaluate(n=>n===document.activeElement),true,'ArrowLeft must focus Alpha, skipping disabled Beta');await exactEvents('alpha');
+        return {tabSetup,preselection:'gamma',preArrowFocus:'gamma',key:'ArrowLeft',selected:'alpha',focused:'alpha',betaDisabled:true,betaChecked:false};
+      });
+    }
   }else if(t==='button'){
     await step('activate','button',()=>one('button').click(),async()=>{const clicks=await root.evaluate(n=>n.__basicClicks.slice(n.__basicClickCursor));assert.equal(clicks.length,1);assert.equal(clicks[0].trusted,true);await nativeTypes([]);});
   }else if(t==='slider'){

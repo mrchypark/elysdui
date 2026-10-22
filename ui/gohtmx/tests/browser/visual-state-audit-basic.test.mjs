@@ -155,6 +155,37 @@ test('phase2 source-only basic native button cannot pass a synthetic click or un
   }
 });
 
+test('phase2 source-only radio variant records Gamma, disabled pointer, then native ArrowLeft skipping Beta',async()=>{
+  const contract=basicActionContract('basic/radio-group@second-enabled-option');
+  assert.deepEqual(contract.steps.map(s=>s.id),['select-gamma','disabled-beta-pointer','keyboard-skip-beta']);
+  assert.deepEqual(basicActionContract('basic/radio-group').steps.map(s=>s.id),['selected-option']);
+  for(const defect of [null,'already-focused','pointer-change','pointer-occluded','beta-enabled','beta-checked','skip-beta-focus','wrong-order','untrusted','wrong-value','wrong-name','extra-event','tab-change','tab-unreachable']){
+    const name='basic-radio-group-second-enabled-option-main_value',state={__basicEvents:[],__basicCursor:0};
+    const nodes=Object.fromEntries(['alpha','beta','gamma'].map(value=>[value,{id:'',tagName:'INPUT',name,value,disabled:value==='beta',checked:value==='alpha'}]));
+    let focus=null;const calls=[],asserted=[];
+    const emit=value=>{const events=['input','change'].map(type=>({type,target:null,name,value,checked:true,trusted:true,detail:null}));
+      if(defect==='wrong-order')events.reverse();if(defect==='untrusted')events[0].trusted=false;if(defect==='wrong-value')events[0].value='beta';if(defect==='wrong-name')events[0].name='twin_value';if(defect==='extra-event')events.push({...events[0]});state.__basicEvents.push(...events);};
+    const select=value=>{for(const n of Object.values(nodes))n.checked=n.value===value;focus=nodes[value];};
+    // Evaluate only the driver's two focus observations; no DOM/browser globals are installed.
+    const locator=value=>({count:async()=>1,isDisabled:async()=>nodes[value].disabled,isChecked:async()=>nodes[value].checked,
+      getAttribute:async key=>nodes[value][key],boundingBox:async()=>({x:10,y:20,width:12,height:12}),
+      evaluate:async fn=>fn.toString().includes('elementFromPoint')?defect!=='pointer-occluded':fn.toString().includes('document.activeElement')?focus===nodes[value]:fn(nodes[value]),
+      click:async()=>{calls.push('select-gamma');select('gamma');emit('gamma');if(defect==='beta-enabled')nodes.beta.disabled=false;if(defect==='beta-checked')nodes.beta.checked=true;}});
+    const page={mouse:{click:async(x,y)=>{calls.push(['pointer',x,y]);if(defect==='pointer-change'){select('beta');emit('beta');}else if(defect!=='already-focused')focus=null;}},
+      keyboard:{press:async key=>{calls.push(key);if(key==='Tab'){if(defect!=='tab-unreachable')focus=nodes.gamma;if(defect==='tab-change'){select('alpha');emit('alpha');}}else if(key==='ArrowLeft'){select('alpha');emit('alpha');if(defect==='skip-beta-focus')focus=nodes.beta;}else assert.fail('Unexpected native key');}}};
+    const root={page:()=>page,locator:selector=>locator(selector.match(/value="(\w+)"/)[1]),evaluate:async fn=>fn.toString().includes('document.activeElement')?{id:focus?.id||null,value:focus?.value??null,tag:focus?.tagName||'BODY'}:fn(state)};
+    const execute=()=>runBasicActions(contract,root,async(id,control,action,verify)=>{
+      assert.equal(id,contract.steps[asserted.length].id);state.__basicCursor=state.__basicEvents.length;await action();asserted.push(await verify());
+    });
+    if(defect&&defect!=='already-focused')await assert.rejects(execute,undefined,defect);
+    else{await execute();assert.deepEqual(calls,['select-gamma',['pointer',16,26],...(defect==='already-focused'?[]:['Tab']),'ArrowLeft']);
+      assert.deepEqual(asserted[1],{pointer:{x:16,y:26},selected:'gamma',betaDisabled:true,betaChecked:false});
+      assert.deepEqual(asserted[2],{tabSetup:defect==='already-focused'?[]:[{id:null,value:'gamma',tag:'INPUT'}],preselection:'gamma',preArrowFocus:'gamma',key:'ArrowLeft',selected:'alpha',focused:'alpha',betaDisabled:true,betaChecked:false});}
+  }
+  const driver=runBasicActions.toString(),radio=driver.slice(driver.indexOf("if(t==='radio-group'&&variant)"),driver.indexOf("}else if(t==='button')"));
+  assert(!radio.includes('.focus('));assert(!radio.includes('force:'));assert(!radio.includes("press('ArrowRight')"));assert(radio.includes("press('ArrowLeft')"));
+});
+
 test('phase2 source-only profile/surface agreement and exact explicit selection precede allocation',async()=>{
   const {matrix}=await metadata();
   for(const mode of ['live','static'])for(const size of ['desktop','mobile'])for(const theme of ['light','dark']){
