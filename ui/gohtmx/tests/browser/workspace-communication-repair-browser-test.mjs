@@ -45,12 +45,13 @@ try{
   const reserve=createServer();await new Promise(r=>reserve.listen(0,'127.0.0.1',r));const port=reserve.address().port;await new Promise(r=>reserve.close(r));
   const base=`http://127.0.0.1:${port}`;child=spawn(join(temp,'gallery'),['-addr',`127.0.0.1:${port}`],{stdio:'ignore'});
   let ready=false;for(let i=0;i<200;i++){try{if((await fetch(base+'/components')).ok){ready=true;break;}}catch{}await new Promise(r=>setTimeout(r,50));}assert(ready,'owned gallery startup');
-  browser=await chromium.launch({headless:true,...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH?{executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH}:{})});
+  browser=await chromium.launch({headless:true,...(process.env.WORKSPACE_CLASSIC_SCROLLBAR==='1'?{ignoreDefaultArgs:['--hide-scrollbars']}:{}),...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH?{executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH}:{})});
   const page=await browser.newPage({viewport,colorScheme,timezoneId:'UTC'});page.setDefaultTimeout(10000);
   await page.addInitScript(mode=>{localStorage.setItem('ely-palette','ely');localStorage.setItem('ely-theme',mode);},colorScheme);
   page.on('console',m=>{if(['error','warning'].includes(m.type()))report.console.push({type:m.type(),text:m.text()});});page.on('pageerror',e=>report.console.push({type:'pageerror',text:e.message}));
   for(const family of ['workspace','communication']){
     await page.goto(`${base}/components/audit?family=${family}&aliases=1`);await page.waitForTimeout(200);
+    if(process.env.WORKSPACE_CLASSIC_SCROLLBAR==='1')await page.evaluate(()=>{const sheet=new CSSStyleSheet();sheet.replaceSync('::-webkit-scrollbar{width:15px;height:15px}');document.adoptedStyleSheets=[...document.adoptedStyleSheets,sheet];});
     const theme=await page.evaluate(mode=>{window.ElyTheme.apply('ely',mode);return window.ElyTheme.current();},colorScheme);assert.deepEqual(theme,{id:'ely',mode:colorScheme});
     await page.evaluate(()=>document.fonts.ready);
     await page.locator('img').evaluateAll(nodes=>Promise.all(nodes.map(async node=>{node.loading='eager';try{await node.decode();}catch{}})));
@@ -64,7 +65,14 @@ try{
         const fits=(a,b)=>a.x>=b.x-1&&a.right<=b.right+1;
         let ok=false,metrics;
         if(kind==='popup'){const menu=root.querySelector('[data-ws-completion-popup],[data-ws-code-action-menu]'),shell=menu.closest('.ely-workspace__code-shell');metrics={menu:rect(menu),shell:rect(shell),style:style(menu)};ok=fits(metrics.menu,metrics.shell);}
-        if(kind==='print'){const p=root.querySelector('[data-ws-print-page]:not([hidden])'),pre=p.querySelector('pre');metrics={page:rect(p),pre:rect(pre),textWidth:pre.scrollWidth,clientWidth:pre.clientWidth};ok=metrics.page.width>=240&&pre.scrollWidth<=pre.clientWidth+1;}
+        if(kind==='print'){
+          const p=root.querySelector('[data-ws-print-page]:not([hidden])'),pre=p.querySelector('pre'),sheet=p.closest('[data-ws-print-sheet]'),pages=sheet.parentElement,s=getComputedStyle(pages),bounds=rect(pages);
+          const left=bounds.x+parseFloat(s.borderLeftWidth)+parseFloat(s.paddingLeft),right=bounds.right-parseFloat(s.borderRightWidth)-parseFloat(s.paddingRight),available=right-left;
+          const paperFits=()=>{const paper=rect(p),track=rect(sheet);return available>0&&Math.abs(track.x-left)<=1&&Math.abs(track.right-right)<=1&&paper.width>=Math.min(240,available)-1&&fits(paper,track)&&pre.scrollWidth<=pre.clientWidth+1;};
+          metrics={page:rect(p),pre:rect(pre),sheet:rect(sheet),parent:bounds,available,textWidth:pre.scrollWidth,clientWidth:pre.clientWidth,innerWidth,rootWidth:document.documentElement.getBoundingClientRect().width};ok=paperFits();
+          const before=p.getAttribute('style');p.style.width='100px';metrics.narrowPaper={page:rect(p),parent:rect(pages)};metrics.rejectsNarrowPaper=!paperFits()&&Math.abs(metrics.narrowPaper.page.width-100)<=1&&Math.abs(metrics.narrowPaper.parent.width-bounds.width)<=1;if(before===null)p.removeAttribute('style');else p.setAttribute('style',before);
+          ok=ok&&metrics.rejectsNarrowPaper;
+        }
         if(kind==='comments'){const forms=[...root.querySelectorAll('[data-ws-thread-reply]')].filter(n=>n.getClientRects().length);metrics=forms.map(form=>{const input=form.elements.reply,button=form.querySelector('[type=submit]'),range=document.createRange();range.selectNodeContents(button);return {capture:rect(root),thread:rect(form.closest('[data-ws-threads]')),input:rect(input),button:rect(button),text:rect(range),style:style(form),label:style(input.closest('label'))};});ok=metrics.length>0&&metrics.every(m=>m.input.width>100&&m.button.width>=m.text.width&&fits(m.text,m.button)&&fits(m.button,m.capture)&&fits(m.thread,m.capture));}
         if(kind==='meter'){metrics=[...root.querySelectorAll('[data-dt-reading]')].filter(n=>n.querySelector('meter')).map(n=>({card:rect(n),meter:rect(n.querySelector('meter'))}));ok=metrics.length===3&&metrics.every(m=>fits(m.meter,m.card));}
         if(kind==='images'){metrics=[...root.querySelectorAll('img')].map(n=>({src:n.getAttribute('src'),loaded:n.complete&&n.naturalWidth>0}));ok=metrics.length===2&&metrics.every(m=>m.loaded);}
@@ -76,6 +84,7 @@ try{
         if(kind==='hue'){metrics=[...root.querySelectorAll('[data-project-label-hue]')].map(n=>{const s=getComputedStyle(n);return {bounds:rect(n),appearance:s.appearance,backgroundImage:s.backgroundImage,label:n.getAttribute('aria-label'),options:n.options.length};});ok=metrics.length===4&&metrics.every(m=>m.backgroundImage.includes('radial-gradient')&&m.appearance==='none'&&m.bounds.width>=20&&m.bounds.width<=32&&m.label&&m.options===8);}
         return {ok,metrics};
       },kind);
+      if(kind==='print'&&process.env.WORKSPACE_CLASSIC_SCROLLBAR==='1')assert(result.metrics.innerWidth-result.metrics.rootWidth>=14,'classic print regression must reserve a real scrollbar gutter');
       const screenshot=`${name.replaceAll('/','-')}.png`;await card.screenshot({path:join(output,screenshot)});report.checks.push({name,kind,...result,screenshot,sha256:digest(await readFile(join(output,screenshot)))});
     }
     if(phase==='after'){
