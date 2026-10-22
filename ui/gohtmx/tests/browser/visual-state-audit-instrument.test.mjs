@@ -1,11 +1,56 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import {transform,staticCoverageManifest,registrationInventory,actionModuleNames,prepareActionModule,synchronousTrace,compareActionTrace,synchronousTraceInit,registeredOutcomesEqual,registeredOutcomeDifferences,firstDifference,traceContractStatus} from './visual-state-audit-instrument.mjs';
+import {transform,staticCoverageManifest,registrationInventory,resolveCaseActionSites,actionModuleNames,prepareActionModule,synchronousTrace,compareActionTrace,synchronousTraceInit,registeredOutcomesEqual,registeredOutcomeDifferences,firstDifference,traceContractStatus} from './visual-state-audit-instrument.mjs';
 import {readFile,mkdtemp,writeFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {chromium} from 'playwright';
 import {caseActionContract,requestedStateContract,runRequestedStateActions,clickVisibleControl,ownedOverlayInventory,captureTargetPNG,inventoryReceipt,inventoryDrift,unhandledBrowserErrors} from './visual-state-audit-drivers.mjs';
+
+const returnFlowSites=body=>resolveCaseActionSites(`function entry(){${body}}`,'return-flow.js',{entry:'entry',facts:{selected:true}});
+const returnFlowControls=result=>result.sites.map(site=>site.control);
+test('resolver return flow pure: selected return excludes unreachable suffix',()=>{
+  const result=returnFlowSites('if(selected){first.click();return 7;}later.click();');
+  assert.deepEqual(returnFlowControls(result),['first']);assert.deepEqual(result.mappingGaps,[]);
+});
+test('resolver return flow pure: selected else and false no-else preserve reachability',()=>{
+  assert.deepEqual(returnFlowControls(returnFlowSites('if(!selected){wrong.click();}else{right.click();return;}later.click();')),['right']);
+  assert.deepEqual(returnFlowControls(returnFlowSites('if(!selected)return;later.click();')),['later']);
+});
+test('resolver return flow pure: return expression visited before termination',()=>{
+  const result=returnFlowSites('return first.click();later.click();');
+  assert.deepEqual(returnFlowControls(result),['first']);assert.deepEqual(result.mappingGaps,[]);
+});
+test('resolver return flow pure: helper-local return does not terminate caller',()=>{
+  const result=returnFlowSites('function helper(){first.click();return 9;wrong.click();}helper();later.click();');
+  assert.deepEqual(returnFlowControls(result),['first','later']);
+  assert.deepEqual(result.sites.map(site=>site.owner),['helper','entry']);
+});
+test('resolver return flow pure: reachable extra action cannot match two-site contract',()=>{
+  const original='first.click();if(selected){second.click();return;}wrong.click();';
+  assert.equal(returnFlowSites(original).sites.length,2);
+  const changed=returnFlowSites(original.replace('second.click();','extra.click();second.click();'));
+  assert.deepEqual(returnFlowControls(changed),['first','extra','second']);
+  assert.notEqual(changed.sites.length,2);
+});
+test('resolver return flow pure: unknown action-free return persists blocking gap',()=>{
+  for(const body of ['if(unknown)return;target.click();','if(unknown){left.click();return;}else{right.click();return;}target.click();']){
+    const result=returnFlowSites(body);
+    assert(returnFlowControls(result).includes('target'));
+    assert(result.mappingGaps.some(gap=>gap.reason==='unresolved-control-flow-guard'&&gap.guard==='unknown'));
+  }
+  const branches=returnFlowSites('if(unknown){left.click();return;}else{right.click();return;}target.click();');
+  assert.deepEqual(returnFlowControls(branches),['left','right','target']);
+  assert.equal(branches.mappingGaps.filter(gap=>gap.reason==='unresolved-action-guard').length,2);
+});
+test('resolver return flow pure: loop switch try and label boundaries stay conservative',()=>{
+  for(const boundary of ['for(;;){first.click();return;second.click();}','while(selected){first.click();return;second.click();}','do{first.click();return;second.click();}while(selected);','for(const item of items){first.click();return;second.click();}','for(const key in object){first.click();return;second.click();}','switch(selected){case true:{first.click();return;second.click();}}','try{first.click();return;second.click();}catch(error){caught.click();}finally{finalizer.click();}','label:{first.click();return;second.click();}']){
+    const result=returnFlowSites(boundary+'later.click();');
+    assert(returnFlowControls(result).includes('second'),boundary);
+    assert(returnFlowControls(result).includes('later'),boundary);
+    if(boundary.startsWith('try'))assert(returnFlowControls(result).includes('finalizer'));
+  }
+});
 
 test('non-workspace normalization pure: source bindings and atomic boundaries',async()=>{
   const sources={};

@@ -257,20 +257,41 @@ export function resolveCaseActionSites(source,filename,{entry,facts}){
   const root=declarations.find(item=>item.name===entry)?.fn||assigned?.right;
   const sites=[],mappingGaps=[];
   if(!root)return {sites,mappingGaps:[{reason:'entry-function-not-found',entry}]};
-  const execute=(node,stack=[],unknown=[])=>{
+  const execute=(node,stack=[],unknown=[],conservative=false)=>{
     if(!node||typeof node!=='object'||functionNode(node))return;
+    if(node.type==='BlockStatement'){
+      let flow='continues';
+      for(const statement of node.body){
+        const next=execute(statement,stack,unknown,conservative);
+        if(next==='returns'&&!conservative)return 'returns';
+        if(next==='unresolved')flow='unresolved';
+      }
+      return flow;
+    }
+    if(node.type==='ReturnStatement'){
+      execute(node.argument,stack,unknown,conservative);
+      return 'returns';
+    }
     if(node.type==='IfStatement'){
       const selected=value(node.test);
-      if(selected===undefined){const guard=source.slice(node.test.start,node.test.end);execute(node.consequent,stack,[...unknown,guard]);execute(node.alternate,stack,[...unknown,guard]);}
-      else execute(selected?node.consequent:node.alternate,stack,unknown);
-      return;
+      if(selected===undefined){
+        const guard=source.slice(node.test.start,node.test.end);
+        // A return can make later sites conditional even when this branch has no action.
+        mappingGaps.push({reason:'unresolved-control-flow-guard',guard,line:node.loc.start.line,column:node.loc.start.column});
+        execute(node.consequent,stack,[...unknown,guard],true);
+        execute(node.alternate,stack,[...unknown,guard],true);
+        return 'unresolved';
+      }
+      return execute(selected?node.consequent:node.alternate,stack,unknown,conservative);
     }
     if(node.type==='SwitchStatement'){
       const selected=value(node.discriminant);
-      if(selected===undefined){for(const branch of node.cases)for(const stmt of branch.consequent)execute(stmt,stack,[...unknown,'unresolved switch']);}
-      else {let active=false;for(const branch of node.cases){active ||= literal(branch.test)===selected;if(active){for(const stmt of branch.consequent)execute(stmt,stack,unknown);if(branch.consequent.some(stmt=>stmt.type==='BreakStatement'))break;}}}
-      return;
+      if(selected===undefined){for(const branch of node.cases)for(const stmt of branch.consequent)execute(stmt,stack,[...unknown,'unresolved switch'],true);}
+      else {let active=false;for(const branch of node.cases){active ||= literal(branch.test)===selected;if(active){for(const stmt of branch.consequent)execute(stmt,stack,unknown,true);if(branch.consequent.some(stmt=>stmt.type==='BreakStatement'))break;}}}
+      return 'unresolved';
     }
+    // No termination inference across iteration, exceptions, finalizers or labels.
+    const boundary=['ForStatement','ForInStatement','ForOfStatement','WhileStatement','DoWhileStatement','TryStatement','LabeledStatement'].includes(node.type);
     if(node.type==='CallExpression'){
       if(node.callee.type==='Identifier'){
         const target=binding(node.callee.name,node);
@@ -287,8 +308,9 @@ export function resolveCaseActionSites(source,filename,{entry,facts}){
     }
     for(const [key,child]of Object.entries(node)){
       if(['start','end','loc'].includes(key))continue;
-      if(Array.isArray(child))for(const item of child)execute(item,stack,unknown);else if(child&&typeof child==='object')execute(child,stack,unknown);
+      if(Array.isArray(child))for(const item of child)execute(item,stack,unknown,conservative||boundary);else if(child&&typeof child==='object')execute(child,stack,unknown,conservative||boundary);
     }
+    return boundary?'unresolved':'continues';
   };
   execute(root.body,[root]);
   for(const site of sites)if(site.unknownGuards.length)mappingGaps.push({reason:'unresolved-action-guard',siteId:site.siteId,guards:site.unknownGuards});
