@@ -185,6 +185,30 @@ export function caseActionContract(identity,source,filename){
 const settingsTargets={KeyboardShortcutsList:[1,'Keyboard'],ProxySettings:[2,'Network'],PrivacySettings:[3,'Privacy','telemetry'],NotificationSettings:[4,'Notifications','quiet'],StartupSettings:[5,'Startup','login'],StorageSettings:[6,'Storage'],ResetToDefault:[6,'Storage'],AdvancedSettings:[7,'Advanced','developer'],'DeveloperMode Toggle':[7,'Advanced','developer']};
 export function requestedStateContract(identity){
   const focused={
+    'buttons/ActionSheet':{kind:'ActionSheet',sequence:'sheet-native-actions',steps:[
+      ...['wallpaper','duplicate','delete'].flatMap(value=>[[`open-${value}`,'[data-interaction-dialog]','Native pointer opens the owned modal and focuses its enabled header Close control in actual DOM order'],[`choose-${value}`,`[data-interaction-sheet-action][value="${value}"]`,'One exact public action; native dialog closes and focus returns to its opener']]),
+      ['open-cancel','[data-interaction-dialog]','Open the owned modal again and focus its header Close control'],['cancel-sheet','.ely-interaction__sheet-cancel','Native Cancel closes without any public action'],
+      ['open-close','[data-interaction-dialog]','Open the owned modal again and focus its header Close control'],['close-sheet','dialog [aria-label="Close"]','Native close button closes without any public action'],
+    ]},
+    'buttons/BulkActionBar':{kind:'BulkActionBar',sequence:'bulk-canonical-zero',steps:[
+      ['select-first','[data-interaction-bulk-add]','Actual initial zero becomes one; all count surfaces agree and bar is visible'],
+      ['select-second','[data-interaction-bulk-add]','Selection becomes two through a second native pointer activation, not an initial-Value2 fixture'],
+      ['move-selection','[data-ely-action="move"]','Exact move action/value; count remains two, no persistence claimed'],
+      ['delete-selection','[data-ely-action="delete"]','Exact delete action/value; count remains two, no deletion fabricated'],
+      ['clear-selection','[data-interaction-bulk-clear]','All counts become zero and bar hides; exact bulk change'],
+      ['select-again','[data-interaction-bulk-add]','Hidden bar reopens with one selected'],
+      ['clear-again','[data-interaction-bulk-clear]','Repeated clear restores zero consistently'],
+    ]},
+    'layout/Collapsible':{kind:'Collapsible',sequence:'native-disclosure',steps:[
+      ['open-disclosure','summary','Native pointer opens the initially closed details; await captured native toggle and exact public open=true'],
+      ['close-disclosure','summary','Native pointer closes details; await captured native toggle and exact public open=false'],
+    ]},
+    ...Object.fromEntries(['layout/Accordion','layout/AccordionItem'].map(identity=>[identity,{kind:'Accordion',sequence:'native-disclosure',steps:[
+      ['open-second','details:nth-child(2) > summary','Second opens and first closes exclusively; await both exact public toggle actions'],
+      ['open-third','details:nth-child(3) > summary','Third opens and second closes exclusively; await both exact public toggle actions'],
+      ['close-third','details:nth-child(3) > summary','Third closes; all items closed; exact public toggle action'],
+      ['reopen-first','details:nth-child(1) > summary','First reopens alone; exact public toggle action with actual selected alias identity'],
+    ]}])),
     'buttons/Button':{kind:'Button',sequence:'button-public-boundary',steps:[
       ...['primary','secondary','outline','ghost','subtle','danger','link'].map(value=>[`click-${value}`,`button[value="${value}"]`,'Native click emits exactly the caller action/value; no form or persistence fabricated']),
       ['cancel-primary','button[value="primary"]','Canceling the public action prevents the originating native click default; no host operation is asserted'],
@@ -253,6 +277,11 @@ export function requestedStateContract(identity){
   }[identity];
   if(focused){
     const provenance={
+      'buttons/ActionSheet':'internal/gallery/advanced_interaction_fixtures.go ActionSheet; ely-api-interaction.html native dialog/actions; ely-api.js interactionSheetAction dispatch exclusion; ely-api-interaction.js sheetAction/closeDialog; no host application callback execution',
+      'buttons/BulkActionBar':'internal/gallery/advanced_interaction_fixtures.go explicitly SelectedCount0; ely-api-interaction.html effective-count rendering; ely-api-interaction.js bulk add/clear; separate initial Value2 render proof is TestBulkActionBarEffectiveInitialCount, NOT this gallery runtime fixture',
+      'layout/Collapsible':'internal/gallery/advanced_foundation_fixtures.go Collapsible; ely-api-foundation.html native details; ely-api-foundation.js captured nonbubbling toggle emits change action asynchronously',
+      'layout/Accordion':'internal/gallery/advanced_foundation_fixtures.go three AccordionItems; ely-api-foundation.html first details open; ely-api-foundation.js captured toggle enforces single-open before emitting change action',
+      'layout/AccordionItem':'Explicit separate layout/AccordionItem inventory row resolves Accordion fixture; public identity remains layout/AccordionItem; no other alias promotion; ely-api-foundation.js native captured toggle contract',
       'buttons/Button':'internal/gallery/advanced_interaction_fixtures.go Button Groups; ui/gohtmx/templates/ely-api-interaction.html ely-api-buttons; ui/gohtmx/assets/ely-api.js click/emit; public cancelable event boundary only, not application onClick execution',
       'forms/TextArea':'internal/gallery/advanced_forms_fixtures.go TextArea; ui/gohtmx/templates/ely-api-forms.html TextArea; ui/gohtmx/assets/ely-api-forms.js input autoresize; ui/gohtmx/assets/ely-api.js change; no disabled/readOnly/required fixture is claimed',
       'tooling/EventLogger':'internal/gallery/advanced_native_tooling_fixtures.go EventLogger; ui/gohtmx/templates/ely-api-native-tooling.html EventLogger; ui/gohtmx/assets/ely-api-native-tooling.js receive/recordInput; exact global trace calibration remains separate',
@@ -348,7 +377,7 @@ export function assertMinimapViewport(before,actual,{bounds,ratio,point}){
 }
 
 export async function runRequestedStateActions(contract,root,runStep){
-  if(['task-due-submit','remove-four-tags','radio-groups-reselection','eventlogger-public-timestamps','button-public-boundary','textarea-public-multiline','canvas-minimap-zoom-fit-hit-test'].includes(contract.focusedSequence)){
+  if(['task-due-submit','remove-four-tags','radio-groups-reselection','eventlogger-public-timestamps','button-public-boundary','textarea-public-multiline','canvas-minimap-zoom-fit-hit-test','sheet-native-actions','bulk-canonical-zero','native-disclosure'].includes(contract.focusedSequence)){
     const identity=await root.getAttribute('data-ely-component');
     assert.equal(identity,contract.identity,'Exact alias identity is required');
     assert.equal(await root.getAttribute('data-ely-kind'),contract.kind);
@@ -372,6 +401,57 @@ export async function runRequestedStateActions(contract,root,runStep){
     let cursor=0;
     const begin=async()=>{cursor=(await events()).length;};
     const fresh=async()=>{assert.deepEqual(await twinState(),initialTwin,'Public actions must preserve the independent twin');return (await events()).slice(cursor);};
+    if(['sheet-native-actions','bulk-canonical-zero','native-disclosure'].includes(contract.focusedSequence)){
+      await root.evaluate(node=>{
+        node.__visualFiniteClicks=[];
+        node.__visualFiniteClickObserver=event=>{const target=event.target.closest('button,summary');if(target?.closest('[data-ely-family]')===node)node.__visualFiniteClicks.push({trusted:event.isTrusted,tag:target.tagName,value:target.value,label:target.textContent});};
+        node.addEventListener('click',node.__visualFiniteClickObserver);
+      });
+      const clicks=()=>root.evaluate(node=>node.__visualFiniteClicks);
+      let clickCursor=0;
+      const start=async()=>{await begin();clickCursor=(await clicks()).length;};
+      const pointer=async()=>{const activated=(await clicks()).slice(clickCursor);assert.equal(activated.length,1,'Exactly one native control click is required');assert.equal(activated[0].trusted,true,'Real controls require trusted pointer input');return activated[0];};
+      try{
+        if(contract.focusedSequence==='sheet-native-actions'){
+          const opener=root.locator('[data-interaction-dialog]'),dialog=root.locator('dialog.is-sheet');
+          assert.equal(await opener.count(),1);assert.equal(await dialog.count(),1);assert.equal(await opener.isEnabled(),true);
+          const headerClose=dialog.locator('header > button[data-interaction-close][aria-label="Close"]');
+          assert.equal(await headerClose.count(),1);assert.equal(await headerClose.isEnabled(),true);
+          assert.equal(await dialog.evaluate(node=>node.open),false);assert.equal(await dialog.getAttribute('id'),await opener.getAttribute('data-interaction-dialog'));
+          assert.deepEqual(await dialog.locator('[data-interaction-sheet-action]').evaluateAll(nodes=>nodes.map(node=>[node.value,node.dataset.elyAction,node.disabled])),[['wallpaper','set-wallpaper',false],['duplicate','duplicate',false],['delete','delete',false]]);
+          for(const value of ['wallpaper','duplicate','delete','cancel','close']){
+            await runStep(`open-${value}`,async()=>{await start();return clickVisibleControl(opener);},async()=>{await pointer();assert.deepEqual(await fresh(),[]);assert.equal(await dialog.evaluate(node=>node.open&&node.matches(':modal')),true);assert.equal(await headerClose.evaluate(node=>document.activeElement===node),true,'Actual DOM-first enabled header Close control receives focus');return {open:true,focusedControl:'owned header Close'};});
+            const action=['wallpaper','duplicate','delete'].includes(value),control=action?dialog.locator(`[data-interaction-sheet-action][value="${value}"]`):value==='cancel'?dialog.locator('.ely-interaction__sheet-cancel'):dialog.locator('[aria-label="Close"]');
+            await runStep(action?`choose-${value}`:value==='cancel'?'cancel-sheet':'close-sheet',async()=>{await start();return clickVisibleControl(control);},async()=>{
+              await pointer();await root.page().waitForFunction(node=>!node.open,await dialog.elementHandle());await root.page().waitForFunction(node=>document.activeElement===node,await opener.elementHandle());
+              const observed=await fresh(),expected=action?[['ely:action',{id,component:identity,action:value==='wallpaper'?'set-wallpaper':value,value}]]:[];
+              assert.deepEqual(observed.map(event=>[event.type,event.detail]),expected,'Sheet selection emits once; close/cancel emits no action');return {open:false,focusReturned:true,events:observed};
+            });
+          }
+        }else if(contract.focusedSequence==='bulk-canonical-zero'){
+          const host=root.locator('[data-interaction-bulk]'),bar=host.locator('.ely-interaction__bar.is-bulk');
+          const checkCount=async count=>{assert.equal(await host.getAttribute('data-interaction-bulk-count'),String(count));assert.equal(await host.locator('[data-interaction-bulk-count]').textContent(),String(count));assert.equal(await host.locator('[data-interaction-bulk-summary]').textContent(),`${count} selected`);assert.equal(await bar.evaluate(node=>node.hidden),count===0);};
+          assert.equal(await host.count(),1);await checkCount(0);
+          assert.deepEqual(await bar.locator('[data-ely-action]').evaluateAll(nodes=>nodes.map(node=>[node.value,node.dataset.elyAction,node.disabled])),[['move','move',false],['delete','delete',false]]);
+          for(const [label,selector,count,action] of [['select-first','[data-interaction-bulk-add]',1],['select-second','[data-interaction-bulk-add]',2],['move-selection','[data-ely-action="move"]',2,'move'],['delete-selection','[data-ely-action="delete"]',2,'delete'],['clear-selection','[data-interaction-bulk-clear]',0],['select-again','[data-interaction-bulk-add]',1],['clear-again','[data-interaction-bulk-clear]',0]]){
+            await runStep(label,async()=>{await start();return clickVisibleControl(host.locator(selector));},async()=>{await pointer();await checkCount(count);const observed=await fresh();assert.deepEqual(observed.map(event=>[event.type,event.detail]),action?[['ely:action',{id,component:identity,action,value:action,formData:null,values:[]}]]:[['ely:change',{id,component:identity,name:'bulk',value:String(count),selected:count>0}]]);return {count,events:observed,fixtureScope:'Canonical initial SelectedCount0 only; reaching2 does not prove an initial Value2 fixture'};});
+          }
+        }else{
+          await root.page().evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+          const accordion=contract.kind==='Accordion',details=accordion?root.locator('[data-foundation-accordion] > details'):root.locator('details');
+          assert.equal(await details.count(),accordion?3:1);assert.deepEqual(await details.evaluateAll(nodes=>nodes.map(node=>node.open)),accordion?[true,false,false]:[false]);
+          if(accordion)assert.deepEqual(await details.locator('summary').allTextContents(),['What is Ely?','Does it animate?','Can I theme it?']);
+          const specs=accordion?[['open-second',1,[false,true,false],[true,false]],['open-third',2,[false,false,true],[true,false]],['close-third',2,[false,false,false],[false]],['reopen-first',0,[true,false,false],[true]]]:[['open-disclosure',0,[true],[true]],['close-disclosure',0,[false],[false]]];
+          for(const [label,index,state,opens] of specs){
+            await runStep(label,async()=>{await start();return clickVisibleControl(details.nth(index).locator('summary'));},async()=>{
+              await root.page().waitForFunction(({id,cursor,state,count,accordion})=>{const node=document.getElementById(id),items=[...node.querySelectorAll(accordion?'[data-foundation-accordion] > details':'details')];return JSON.stringify(items.map(item=>item.open))===JSON.stringify(state)&&node.__visualControlEvents.slice(cursor).length===count;},{id,cursor,state,count:opens.length,accordion});
+              await pointer();assert.deepEqual(await details.evaluateAll(nodes=>nodes.map(node=>node.open)),state);const observed=await fresh();assert.deepEqual(observed.map(event=>[event.type,event.detail]),opens.map(open=>['ely:action',{id,component:identity,action:'change',open}]),'Retain every asynchronous native toggle action with its exact alias identity');return {openStates:state,events:observed};
+            });
+          }
+        }
+      }finally{await root.evaluate(node=>{node.removeEventListener('click',node.__visualFiniteClickObserver);delete node.__visualFiniteClickObserver;});}
+      return;
+    }
     if(contract.focusedSequence==='canvas-minimap-zoom-fit-hit-test'){
       const scene=()=>root.evaluate(node=>{
         const host=node.querySelector('[data-ws-canvas-scene]'),stage=host?.querySelector('[data-cs-stage]'),world=host?.querySelector('[data-cs-world]'),map=host?.querySelector('[data-cs-minimap]');
