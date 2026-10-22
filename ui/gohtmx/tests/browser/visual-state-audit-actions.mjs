@@ -75,7 +75,7 @@ async function basicAudit({cases,origin,captures,matrixInput,coverageInput,sourc
   const reports=[],browserErrors=[];
   const expectedAssets=coverageInput.data.assetHashes;
   for(const [path,expectedSHA256]of Object.entries(expectedAssets)){
-    if(['/assets/basic-audit.css','/assets/basic-audit-actions.js'].includes(path))continue; // Compiled test-host constants are pinned by the immutable manifest/fixture source.
+    if(['/assets/basic-audit.css','/assets/basic-audit-actions.js','/assets/basic-audit-actions.css'].includes(path))continue; // Compiled test-host constants are pinned by the immutable manifest/fixture source.
     assert.equal(sourceBefore.files.find(f=>f.path==='ui/gohtmx'+path)?.sha256,expectedSHA256,'Embedded asset must match frozen checkout: '+path);
   }
   for(const item of cases){

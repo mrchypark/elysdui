@@ -302,6 +302,7 @@ test('phase2 pure table oracle rejects wrong filtered row and no-op descending s
 });
 
 test('phase2 pure loaded-asset gate rejects missing wrong failed and incomplete delivery',()=>{
+  assert.equal(requiredBasicActionAssets.length,11);assert.equal(requiredBasicActionAssets.at(-1),'/assets/basic-audit-actions.css');
   const expected=Object.fromEntries(requiredBasicActionAssets.map(path=>[path,'a'.repeat(64)]));
   const good=requiredBasicActionAssets.map(path=>({path,bytes:8,sha256:expected[path],expectedSHA256:expected[path],loadedProof:'owned-route identical bytes; exact browser requestfinished'}));
   assertBasicActionAssets(good,expected);
@@ -311,23 +312,40 @@ test('phase2 pure loaded-asset gate rejects missing wrong failed and incomplete 
 });
 
 test('phase2 pure delivery mechanism requires the exact requestfinished object and unchanged response bytes',async()=>{
-  const bytes=Buffer.from('owned asset'),path='/assets/app.css',url='http://owned.test'+path,sha=createHash('sha256').update(bytes).digest('hex');
-  for(const mode of ['ok','wrong-bytes','missing','wrong-request','failed','closed','http-error','redirect']){
-    const page=new EventEmitter(),context=new EventEmitter();page.context=()=>context;
-    const request={url:()=>url,failure:()=>mode==='failed'?{errorText:'failed'}:null};let delivered;
-    const route={request:()=>request,fetch:async()=>({ok:()=>mode!=='http-error',url:()=>mode==='redirect'?url+'?redirected':url,body:async()=>bytes}),fulfill:async options=>{delivered=options.body;
-      if(mode==='missing')return;
-      if(mode==='closed'){context.emit('close');return;}
-      page.emit(mode==='failed'?'requestfailed':'requestfinished',mode==='wrong-request'?{...request}:request);
-    }};
-    const run=()=>fulfillBasicActionAsset(route,page,{[path]:mode==='wrong-bytes'?'b'.repeat(64):sha},5);
-    if(mode==='ok'){const proof=await run();assert.equal(proof.sha256,sha);assert.deepEqual(delivered,bytes);}
-    else await assert.rejects(run(),undefined,mode);
-    assert.equal(page.listenerCount('requestfinished'),0);assert.equal(page.listenerCount('requestfailed'),0);assert.equal(context.listenerCount('close'),0);
+  for(const path of ['/assets/app.css','/assets/basic-audit-actions.css']){
+    const bytes=Buffer.from('owned asset'),url='http://owned.test'+path,sha=createHash('sha256').update(bytes).digest('hex');
+    for(const mode of ['ok','wrong-bytes','missing','wrong-request','failed','closed','http-error','redirect']){
+      const page=new EventEmitter(),context=new EventEmitter();page.context=()=>context;
+      const request={url:()=>url,failure:()=>mode==='failed'?{errorText:'failed'}:null};let delivered;
+      const route={request:()=>request,fetch:async()=>({ok:()=>mode!=='http-error',url:()=>mode==='redirect'?url+'?redirected':url,body:async()=>bytes}),fulfill:async options=>{delivered=options.body;
+        if(mode==='missing')return;
+        if(mode==='closed'){context.emit('close');return;}
+        page.emit(mode==='failed'?'requestfailed':'requestfinished',mode==='wrong-request'?{...request}:request);
+      }};
+      const run=()=>fulfillBasicActionAsset(route,page,{[path]:mode==='wrong-bytes'?'b'.repeat(64):sha},5);
+      if(mode==='ok'){const proof=await run();assert.equal(proof.sha256,sha);assert.deepEqual(delivered,bytes);}
+      else await assert.rejects(run(),undefined,mode);
+      assert.equal(page.listenerCount('requestfinished'),0);assert.equal(page.listenerCount('requestfailed'),0);assert.equal(context.listenerCount('close'),0);
+    }
   }
   const runner=await source('ui/gohtmx/tests/browser/visual-state-audit-actions.mjs');
   assert(runner.includes('fulfillBasicActionAsset(route,page,expectedAssets)'));
   assert(runner.includes('assertBasicActionAssets(result.productionAssets,expectedAssets)'));
   assert(runner.includes("c.status!=='failed'&&c.assetsVerified"));
   assert(runner.includes("sourceBefore.files.find(f=>f.path==='ui/gohtmx'+path)?.sha256"));
+});
+
+test('phase2 source-only spacing CSS is action-only and required by the existing frozen asset proof',async()=>{
+  const fixture=await source('adapters/gohtmx/tests/fixtures/basic-audit/main.go');
+  const css=fixture.match(/const fixtureCSS = `([^`]+)`/)[1];
+  assert.equal(createHash('sha256').update(css).digest('hex'),'70dcc04d1c99b164f180c10049674f54af2bdcdb5b8a001686809c7a263e8b65');
+  assert(fixture.includes('const actionCSS = `.basic-record{margin-block-end:320px}.basic-pair{row-gap:320px}`'));
+  assert(fixture.includes('{{if .Actions}}<link rel="stylesheet" href="/assets/basic-audit-actions.css">'));
+  assert(fixture.includes('add("assets/basic-audit-actions.css", []byte(actionCSS))'));
+  const expected=Object.fromEntries(requiredBasicActionAssets.map(path=>[path,'a'.repeat(64)]));
+  const delivered=requiredBasicActionAssets.map(path=>({path,bytes:8,sha256:expected[path],expectedSHA256:expected[path],loadedProof:'owned-route identical bytes; exact browser requestfinished'}));
+  assert.throws(()=>assertBasicActionAssets(delivered.filter(r=>!r.path.endsWith('basic-audit-actions.css')),expected));
+  const bad=structuredClone(delivered);bad.at(-1).sha256='b'.repeat(64);assert.throws(()=>assertBasicActionAssets(bad,expected));
+  const runner=await source('ui/gohtmx/tests/browser/visual-state-audit-actions.mjs');
+  assert(runner.includes("['/assets/basic-audit.css','/assets/basic-audit-actions.js','/assets/basic-audit-actions.css']"));
 });

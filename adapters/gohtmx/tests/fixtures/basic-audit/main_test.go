@@ -312,7 +312,7 @@ func TestActionPageHasSeparateScopedVariantsAndLabelledHostOpener(t *testing.T) 
 	if err := render(&canonical); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(canonical.String(), "basic-audit-actions.js") || strings.Contains(canonical.String(), "data-basic-open-dialog") || strings.Contains(canonical.String(), "@second-enabled-option") {
+	if strings.Contains(canonical.String(), "basic-audit-actions.js") || strings.Contains(canonical.String(), "basic-audit-actions.css") || strings.Contains(canonical.String(), "data-basic-open-dialog") || strings.Contains(canonical.String(), "@second-enabled-option") {
 		t.Fatal("phase2 changed canonical page")
 	}
 	dir := filepath.Join(t.TempDir(), "export")
@@ -323,7 +323,7 @@ func TestActionPageHasSeparateScopedVariantsAndLabelledHostOpener(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, path := range []string{actionPath, "/action-manifest.json", "/assets/basic-audit-actions.js"} {
+	for _, path := range []string{actionPath, "/action-manifest.json", "/assets/basic-audit-actions.js", "/assets/basic-audit-actions.css"} {
 		response := httptest.NewRecorder()
 		h.ServeHTTP(response, httptest.NewRequest("GET", path, nil))
 		file := strings.TrimPrefix(path, "/")
@@ -346,7 +346,7 @@ func TestActionManifestPinsEmbeddedAndHostAssetBytes(t *testing.T) {
 		t.Fatal(err)
 	}
 	hashes := manifest["assetHashes"].(map[string]string)
-	for _, path := range []string{"/assets/app.css", "/assets/ely-controls.css", "/assets/ely-patterns.css", "/assets/ely-map.css", "/assets/ely-controls.js", "/assets/ely-patterns.js", "/assets/ely-map.js", "/assets/theme.js", "/assets/basic-audit.css", "/assets/basic-audit-actions.js"} {
+	for _, path := range []string{"/assets/app.css", "/assets/ely-controls.css", "/assets/ely-patterns.css", "/assets/ely-map.css", "/assets/ely-controls.js", "/assets/ely-patterns.js", "/assets/ely-map.js", "/assets/theme.js", "/assets/basic-audit.css", "/assets/basic-audit-actions.js", "/assets/basic-audit-actions.css"} {
 		if hashes[path] == "" {
 			t.Errorf("missing expected asset %s", path)
 		}
@@ -358,6 +358,8 @@ func TestActionManifestPinsEmbeddedAndHostAssetBytes(t *testing.T) {
 			data = []byte(fixtureCSS)
 		case "/assets/basic-audit-actions.js":
 			data = []byte(actionJS)
+		case "/assets/basic-audit-actions.css":
+			data = []byte(actionCSS)
 		default:
 			data, err = ui.Files.ReadFile(strings.TrimPrefix(path, "/"))
 			if err != nil {
@@ -399,5 +401,44 @@ func TestActionManifestPinsEmbeddedAndHostAssetBytes(t *testing.T) {
 	})
 	if maps != 2 {
 		t.Errorf("canonical map instances%d", maps)
+	}
+}
+
+func TestActionSpacingLeavesInitialRouteAndCSSUnchanged(t *testing.T) {
+	const cssPath = "/assets/basic-audit-actions.css"
+	const initialCSSHash = "70dcc04d1c99b164f180c10049674f54af2bdcdb5b8a001686809c7a263e8b65"
+	digest := sha256.Sum256([]byte(fixtureCSS))
+	if hex.EncodeToString(digest[:]) != initialCSSHash {
+		t.Fatal("initial fixture CSS bytes changed")
+	}
+	if actionCSS != `.basic-record{margin-block-end:320px}.basic-pair{row-gap:320px}` {
+		t.Fatal("action spacing must not resize, hide or clip component roots")
+	}
+	var initial, actions bytes.Buffer
+	if err := render(&initial); err != nil {
+		t.Fatal(err)
+	}
+	if err := renderMode(&actions, true); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(initial.String(), cssPath) || strings.Count(actions.String(), `<link rel="stylesheet" href="`+cssPath+`">`) != 1 {
+		t.Fatal("spacing stylesheet must load exactly once on the action route only")
+	}
+	h, err := handler()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		path string
+		want []byte
+	}{{fixturePath, initial.Bytes()}, {"/assets/basic-audit.css", []byte(fixtureCSS)}, {cssPath, []byte(actionCSS)}} {
+		response := httptest.NewRecorder()
+		h.ServeHTTP(response, httptest.NewRequest("GET", tc.path, nil))
+		if response.Code != 200 || !bytes.Equal(response.Body.Bytes(), tc.want) {
+			t.Errorf("route bytes mismatch %s", tc.path)
+		}
+		if strings.HasSuffix(tc.path, ".css") && response.Header().Get("Content-Type") != "text/css" {
+			t.Errorf("stylesheet content type %s", tc.path)
+		}
 	}
 }

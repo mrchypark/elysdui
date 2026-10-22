@@ -37,7 +37,7 @@ export function selectBasicActionCases(matrix,options){
   return cases;
 }
 
-export const requiredBasicActionAssets=Object.freeze(['/assets/app.css','/assets/ely-controls.css','/assets/ely-patterns.css','/assets/ely-map.css','/assets/ely-controls.js','/assets/ely-patterns.js','/assets/ely-map.js','/assets/theme.js','/assets/basic-audit.css','/assets/basic-audit-actions.js']);
+export const requiredBasicActionAssets=Object.freeze(['/assets/app.css','/assets/ely-controls.css','/assets/ely-patterns.css','/assets/ely-map.css','/assets/ely-controls.js','/assets/ely-patterns.js','/assets/ely-map.js','/assets/theme.js','/assets/basic-audit.css','/assets/basic-audit-actions.js','/assets/basic-audit-actions.css']);
 const assetSHA=bytes=>createHash('sha256').update(bytes).digest('hex');
 
 // Same exact-request completion mechanism as baseline fulfillAsset; baseline stays frozen.

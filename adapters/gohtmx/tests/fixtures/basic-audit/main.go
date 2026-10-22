@@ -24,7 +24,10 @@ const fixturePath = "/basic-audit/"
 const actionPath = "/basic-actions/"
 const actionJS = `document.addEventListener('click',event=>{const button=event.target.closest('[data-basic-open-dialog]');if(button)button.closest('[data-basic-component]').querySelector('dialog').showModal();});`
 const fixtureCSS = `body{margin:0;background:var(--color-paper);color:var(--color-ink)}main{max-width:1280px;margin:auto;padding:16px}.basic-record{margin-block:24px}.basic-pair{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:24px}.basic-frame{min-width:0}.basic-context{font-size:12px;color:var(--color-muted)}@media(max-width:600px){.basic-pair{grid-template-columns:minmax(0,1fr)}}`
-const frameTemplates = `{{define "basic-head"}}<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Basic template audit fixtures</title>{{template "font-preloads"}}<link rel="stylesheet" href="/assets/app.css"><link rel="stylesheet" href="/assets/basic-audit.css">{{template "ui-component-assets"}}{{template "ui-map-assets"}}<script src="/assets/theme.js"></script>{{if .Actions}}<script src="/assets/basic-audit-actions.js" defer></script>{{end}}</head><body><main><h1>Basic template audit fixtures</h1><p>Initial caller fixtures only. Captures are not visual or action approval.</p>{{end}}
+
+// Reserve paint space for the 280px combobox popup, offset and focus outline.
+const actionCSS = `.basic-record{margin-block-end:320px}.basic-pair{row-gap:320px}`
+const frameTemplates = `{{define "basic-head"}}<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Basic template audit fixtures</title>{{template "font-preloads"}}<link rel="stylesheet" href="/assets/app.css"><link rel="stylesheet" href="/assets/basic-audit.css">{{template "ui-component-assets"}}{{template "ui-map-assets"}}<script src="/assets/theme.js"></script>{{if .Actions}}<link rel="stylesheet" href="/assets/basic-audit-actions.css"><script src="/assets/basic-audit-actions.js" defer></script>{{end}}</head><body><main><h1>Basic template audit fixtures</h1><p>Initial caller fixtures only. Captures are not visual or action approval.</p>{{end}}
 {{define "basic-record"}}<article class="basic-record" data-audit-name="{{.Name}}"><h2>{{.Name}}</h2><div class="basic-pair">{{end}}
 {{define "basic-instance"}}{{if .Twin}}<div data-audit-twin>{{else}}<div data-audit-main>{{end}}<section class="basic-frame" id="{{.Scope}}-frame" data-basic-component="{{.Name}}" data-basic-props-sha256="{{.PropsSHA256}}" data-basic-initial-state="{{.InitialState}}">{{if ne .InitialState "rendered"}}<p class="basic-context" data-basic-context>{{.InitialState}}: this initial image shows fixture context, not an opened control.</p>{{end}}<span id="{{.Scope}}-first"></span>{{end}}`
 
@@ -91,6 +94,7 @@ func actionManifest() (map[string]any, error) {
 		return nil, err
 	}
 	add("assets/basic-audit.css", []byte(fixtureCSS))
+	add("assets/basic-audit-actions.css", []byte(actionCSS))
 	add("assets/basic-audit-actions.js", []byte(actionJS))
 	return map[string]any{"basicNames": sduicatalogue.BasicNames(), "cases": rows[:48], "variants": rows[48:], "assetHashes": hashes}, nil
 }
@@ -303,6 +307,10 @@ func handler() (http.Handler, error) {
 		w.Header().Set("Content-Type", "text/javascript")
 		io.WriteString(w, actionJS)
 	})
+	mux.HandleFunc("GET /assets/basic-audit-actions.css", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/css")
+		io.WriteString(w, actionCSS)
+	})
 	mux.HandleFunc("GET /action-manifest.json", func(w http.ResponseWriter, r *http.Request) {
 		manifest, err := actionManifest()
 		if err != nil {
@@ -404,6 +412,9 @@ func export(dir string) error {
 		return err
 	}
 	if err := os.WriteFile(filepath.Join(dir, "assets", "basic-audit-actions.js"), []byte(actionJS), 0600); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(dir, "assets", "basic-audit-actions.css"), []byte(actionCSS), 0600); err != nil {
 		return err
 	}
 	return os.WriteFile(filepath.Join(dir, "assets", "basic-audit.css"), []byte(fixtureCSS), 0600)
