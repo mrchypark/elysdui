@@ -164,7 +164,10 @@ const contracts={
 };
 
 export function caseActionContract(identity,source,filename){
-  const definition=contracts[identity];if(!definition)return null;
+  // MiniMap deliberately renders a different read-only control and takes an early return.
+  const editorAliases=['EditorGutter','LineNumbers','FoldingControl','Ruler','IndentGuide','BracketMatcher','RainbowBrackets','MultiCursor','SelectionHighlight','StickyScroll','Breadcrumb','InlayHints','CodeLens','InlineDecoration'];
+  const editor=identity==='editor/CodeEditor'||editorAliases.some(name=>identity===`editor/${name}`);
+  const definition=contracts[editor?'editor/CodeEditor':identity];if(!definition)return null;
   const facts={root:{dataset:{elyKind:definition.kind,elyComponent:identity}},kind:definition.kind,variant:identity.split('/')[1],twin:true,
     selectors:{'[data-ws-devtools-source]':false,'[data-ws-canvas-scene]':false},form:{dataset:{wsRequired:'true'}},node:{tagName:'INPUT',type:'password'}};
   const resolved=resolveCaseActionSites(source,filename,{entry:definition.entry,facts});
@@ -176,7 +179,7 @@ export function caseActionContract(identity,source,filename){
     return {...expected,source:actual||null};
   });
   return {identity,entry:definition.entry,kind:definition.kind,steps,mappingGaps,
-    fixtureGuards:{component:identity,kind:definition.kind,devtoolsSourceAbsent:identity!=='forms/PasswordInput',canvasSceneAbsent:identity==='files/ArchiveViewer',requiredEditor:identity==='editor/CodeEditor'}};
+    fixtureGuards:{component:identity,kind:definition.kind,devtoolsSourceAbsent:identity!=='forms/PasswordInput',canvasSceneAbsent:identity==='files/ArchiveViewer',requiredEditor:editor}};
 }
 
 const settingsTargets={KeyboardShortcutsList:[1,'Keyboard'],ProxySettings:[2,'Network'],PrivacySettings:[3,'Privacy','telemetry'],NotificationSettings:[4,'Notifications','quiet'],StartupSettings:[5,'Startup','login'],StorageSettings:[6,'Storage'],ResetToDefault:[6,'Storage'],AdvancedSettings:[7,'Advanced','developer'],'DeveloperMode Toggle':[7,'Advanced','developer']};

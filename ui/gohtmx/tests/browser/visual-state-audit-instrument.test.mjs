@@ -537,6 +537,29 @@ test('maps only ArchiveViewer branch and called helpers; rejects new or missing 
   const other=caseActionContract('files/ArchiveViewer',source.replace('start.click();','start.click();start.click();'),'workspace.js');
   assert.deepEqual(other.mappingGaps,[],'Unselected RenameInline branch cannot add ArchiveViewer actions');
 });
+test('CodeEditor alias contracts preserve exact branches, invocation order and public identity',async()=>{
+  const source=await fixtureSource('workspace');
+  const catalogue=JSON.parse(await readFile(new URL('../../components.json',import.meta.url),'utf8'));
+  const story=catalogue.pages.find(page=>page.slug==='editor').stories.find(story=>story.name==='CodeEditor');
+  const names=[...new Set([story.name,...story.components])];assert.equal(names.length,16);
+  const canonical=caseActionContract('editor/CodeEditor',source,'workspace.js');
+  for(const name of names){
+    const identity=`editor/${name}`,contract=caseActionContract(identity,source,'workspace.js');
+    if(name==='MiniMap'){assert.equal(contract,null,'Distinct read-only MiniMap is not an editable CodeEditor contract');continue;}
+    assert.equal(contract.identity,identity);assert.equal(contract.fixtureGuards.component,identity);
+    assert.equal(contract.fixtureGuards.requiredEditor,true);assert.equal(contract.kind,'CodeEditor');
+    assert.deepEqual(contract.mappingGaps,[]);assert.deepEqual(contract.steps,canonical.steps);
+    const changed=caseActionContract(identity,source.replace("root.dataset.elyKind==='CodeEditor'","root.dataset.unreviewedKind==='CodeEditor'"),'workspace.js');
+    assert(changed.mappingGaps.length,'Unknown guard cannot inherit equivalence');
+  }
+  assert.equal(caseActionContract('editor/NotAnAlias',source,'workspace.js'),null);
+  assert.match(source,/make\(\['editor\/CodeEditor','devtools\/QueryEditor'\], code\)/);
+  const runtime=await readFile(new URL('../../assets/ely-api.js',import.meta.url),'utf8');
+  assert.match(runtime,/detail: \{ \.\.\.detail, id: root.id, component: root.dataset.elyComponent, action \}/);
+  const actions=await readFile(new URL('./visual-state-audit-actions.mjs',import.meta.url),'utf8');
+  assert.match(actions,/assert.equal\(event.component,contract.identity,/);
+  assert.match(actions,/assert.equal\(event.id,await root.getAttribute\('id'\),/);
+});
 test('maps both synchronous editor submissions and both password helper events exactly',async()=>{
   const editor=caseActionContract('editor/CodeEditor',await fixtureSource('workspace'),'workspace.js');
   const password=caseActionContract('forms/PasswordInput',await fixtureSource('forms'),'forms.js');

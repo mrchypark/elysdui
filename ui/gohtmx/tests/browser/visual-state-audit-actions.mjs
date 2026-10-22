@@ -239,6 +239,10 @@ async function directCaseDriver({item, familyURL, captures, reference, semanticS
         receipt[`${phase}CaptureOwnership`] = await captureOwnedState({page, record, root, caseId: `${item.caseId}-direct`, siteId, checkpointIndex: index, phase, captures, state: await state()});
       }
       receipt.afterState=await observe();
+      for(const event of receipt.afterState.actions.slice(receipt.beforeState.actions.length)){
+        assert.equal(event.component,contract.identity,'Public action retains the actual alias identity');
+        assert.equal(event.id,await root.getAttribute('id'),'Public action retains the actual instance ID');
+      }
       receipt.assertedTarget=await verify(receipt.afterState,receipt.beforeState);
       receipt.assertionsPassed=true;
       receipt.visualEvidenceGap=!receipt.beforeCaptureOwnership.ownedStateEvidence||!receipt.afterCaptureOwnership.ownedStateEvidence?'Target painted union intersects another audit instance; PNG is context evidence, not owned visual proof':null;
