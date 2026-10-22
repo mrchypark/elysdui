@@ -3,6 +3,7 @@ package uiexamples
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -37,6 +38,28 @@ func TestInteractionVisualFixturesHaveStableVisibleInitialStates(t *testing.T) {
 	}
 	if strings.Contains(renderedTabs.String(), `role="tab" disabled`) || !strings.Contains(renderedTabs.String(), `value="activity"`) || !strings.Contains(renderedTabs.String(), `aria-selected="true"`) {
 		t.Fatalf("Tabs fixture did not render an enabled selected tab: %s", renderedTabs.String())
+	}
+
+	previews := storyPreviewComponents(*tabs)
+	wantPreviewSelections := []struct {
+		value string
+		index int
+	}{{"activity", 1}, {"general", 0}, {"console", 0}}
+	if len(previews) != len(wantPreviewSelections) {
+		t.Fatalf("Tabs preview count = %d, want %d", len(previews), len(wantPreviewSelections))
+	}
+	for i, want := range wantPreviewSelections {
+		if previews[i].Props["Value"] != want.value {
+			t.Errorf("Tabs preview %d value = %v, want %q", i, previews[i].Props["Value"], want.value)
+		}
+		var rendered bytes.Buffer
+		if err := ui.RenderComponent(tpl, &rendered, previews[i]); err != nil {
+			t.Fatalf("render Tabs preview %d: %v", i, err)
+		}
+		selectedTab := fmt.Sprintf(`value="%s" aria-controls="component-preview-%d-panel-%d" aria-selected="true"`, want.value, i+1, want.index)
+		if !strings.Contains(rendered.String(), selectedTab) || strings.Count(rendered.String(), `aria-selected="true"`) != 1 {
+			t.Errorf("Tabs preview %d did not render exactly the %q tab selected: %s", i, want.value, rendered.String())
+		}
 	}
 
 	animation, ok := lottie.Props["Animation"].(string)
