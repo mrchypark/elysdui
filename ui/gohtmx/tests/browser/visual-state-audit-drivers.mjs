@@ -204,7 +204,8 @@ export function requestedStateContract(identity){
     ]},
     'project/StatusSelect':{kind:'StatusSelect',sequence:'task-due-submit',steps:[
       ['change-due','input[type="date"][name="due"][data-project-property]','Native due edit emits current task property and complete form values; peers unchanged'],
-      ['submit-current-due','button[type="submit"]','Visible Update submits the changed due and unchanged peers without claiming persistence'],
+      ['reveal-update','button[type="submit"]','Real Tab navigation from due reveals the focus-visible Update button; painted owned pixels are reachable'],
+      ['submit-current-due','button[type="submit"]','Native Enter on the keyboard-revealed Update submits exact current values; unfocused pointer activation unsupported'],
     ]},
     'data/Tag':{kind:'Tag',sequence:'remove-four-tags',steps:[
       ['remove-design','[data-ely-tag-remove][value="design"]','Only Design removed; exact tag-remove payload'],
@@ -250,7 +251,7 @@ export function requestedStateContract(identity){
       'buttons/Button':'internal/gallery/advanced_interaction_fixtures.go Button Groups; ui/gohtmx/templates/ely-api-interaction.html ely-api-buttons; ui/gohtmx/assets/ely-api.js click/emit; public cancelable event boundary only, not application onClick execution',
       'forms/TextArea':'internal/gallery/advanced_forms_fixtures.go TextArea; ui/gohtmx/templates/ely-api-forms.html TextArea; ui/gohtmx/assets/ely-api-forms.js input autoresize; ui/gohtmx/assets/ely-api.js change; no disabled/readOnly/required fixture is claimed',
       'tooling/EventLogger':'internal/gallery/advanced_native_tooling_fixtures.go EventLogger; ui/gohtmx/templates/ely-api-native-tooling.html EventLogger; ui/gohtmx/assets/ely-api-native-tooling.js receive/recordInput; exact global trace calibration remains separate',
-      'project/StatusSelect':'ui/gohtmx/templates/ely-api-communication.html:108,115; ui/gohtmx/assets/ely-api-communication.js:258; ui/gohtmx/assets/ely-api.js submit handler',
+      'project/StatusSelect':'ui/gohtmx/templates/ely-api-communication.html:108,115; ui/gohtmx/assets/ely-api-communication.css:296-297 focus-visible-only Update; ui/gohtmx/assets/ely-api-communication.js:258; ui/gohtmx/assets/ely-api.js submit handler',
       'data/Tag':'internal/gallery/advanced_data_fixtures.go Tag; ui/gohtmx/templates/ely-api-data.html ely-api-tag; ui/gohtmx/assets/ely-api-data.js tag-remove handler',
       'menus/RadioMenuItem':'docs/gohtmx/menu-alias-contracts.md; internal/gallery/assets/advanced-interaction-checks.js radioMenuItemCheck; ui/gohtmx/assets/ely-api-interaction.js radio handler',
       'forms/HotkeyInput':'Explicit focused action contract from ui/gohtmx/templates/ely-controls.html, ui/gohtmx/assets/ely-controls.js and ui/gohtmx/assets/ely-api-forms.css',
@@ -261,7 +262,7 @@ export function requestedStateContract(identity){
     }[identity];
     const steps=focused.steps.map(([id,control,expectedState])=>({id,control,expectedState,event:identity==='tooling/EventLogger'?'synthetic public DOM event via Playwright':id.startsWith('disabled-')?'native HTMLButtonElement.click (disabled negative; not trusted pointer input)':'native Playwright action',source:{siteId:`focused-state:${identity}:${id}`,sourceAnchor:null,provenance}}));
     return {identity,kind:focused.kind,target:null,variant:identity.split('/')[1],focusedSequence:focused.sequence,steps,mappingGaps:[],requestedStateOnly:true,
-      fixtureGuards:{component:identity,kind:focused.kind},scope:'Explicit finite focused sequence from the case fixture; separate from registered-check coverage, aliases, and all-catalog approval'+(identity==='tooling/EventLogger'?'; four grouped scenario checkpoints, not per-event pixel coverage or trusted physical input; exact trace calibration remains separate':'')};
+      fixtureGuards:{component:identity,kind:focused.kind},...(identity==='project/StatusSelect'?{inputSupport:{submit:'real Tab reveal followed by native Enter',unfocusedPointer:'unsupported: Update is 1px and clipped until focus-visible'}}:{}),scope:'Explicit finite focused sequence from the case fixture; separate from registered-check coverage, aliases, and all-catalog approval'+(identity==='tooling/EventLogger'?'; four grouped scenario checkpoints, not per-event pixel coverage or trusted physical input; exact trace calibration remains separate':identity==='project/StatusSelect'?'; keyboard-only submit; no unfocused pointer activation approval':'')};
   }
   const variant=identity.split('/')[1],target=identity.startsWith('settings/')?settingsTargets[variant]:null;
   if(identity!=='maps/MapPopup'&&!target)return null;
@@ -452,11 +453,25 @@ export async function runRequestedStateActions(contract,root,runStep){
       const dueChanges=()=>root.evaluate(()=>globalThis.__visualDirectDOMEvents.filter(event=>event.type==='change'&&event.target==='due').length);
       let dueChangesBefore;
       const checkForm=async()=>{assert.equal(await due.inputValue(),'2026-10-20');assert.equal(await form.evaluate(node=>node.checkValidity()),true);assert.deepEqual(await form.evaluate(node=>[...new FormData(node)]),entries);};
-      await runStep('change-due',async()=>{await begin();dueChangesBefore=await dueChanges();await due.fill('2026-10-20');await due.press('Tab');},async()=>{
+      await runStep('change-due',async()=>{await begin();dueChangesBefore=await dueChanges();await due.fill('2026-10-20');},async()=>{
         await checkForm();const observed=await fresh();assertStatusSelectDueEvents(observed,{id,identity,entries,nativeChangeCount:await dueChanges()-dueChangesBefore});
         return {due:'2026-10-20',events:observed};
       });
-      await runStep('submit-current-due',async()=>{await begin();await form.locator('button[type="submit"]').click();},async()=>{await checkForm();const observed=await fresh();assert.deepEqual(observed.map(event=>[event.type,event.detail]),[['ely:action',{id,component:identity,action:'update-task',formData:entries,values:entries,submitter:''}]]);return {due:'2026-10-20',events:observed};});
+      const submit=form.locator('button[type="submit"]');
+      const focused=()=>submit.evaluate(node=>document.activeElement===node);
+      const paintedUpdate=()=>submit.evaluate(node=>{
+        const rect=node.getBoundingClientRect(),style=getComputedStyle(node),x=rect.left+rect.width/2,y=rect.top+rect.height/2,hit=document.elementFromPoint(x,y);
+        return {focused:document.activeElement===node,focusVisible:node.matches(':focus-visible'),disabled:node.disabled,position:style.position,clipPath:style.clipPath,width:rect.width,height:rect.height,reachable:!!hit&&(hit===node||node.contains(hit))};
+      });
+      const assertPainted=state=>{assert.equal(state.focused,true);assert.equal(state.focusVisible,true);assert.equal(state.disabled,false);assert.equal(state.position,'static');assert.equal(state.clipPath,'none');assert(state.width>1&&state.height>1);assert.equal(state.reachable,true,'Keyboard-revealed submit must have reachable owned painted pixels');};
+      await runStep('reveal-update',async()=>{
+        await begin();assert.equal(await due.evaluate(node=>document.activeElement===node),true,'Tab navigation starts at the actual filled due field');
+        let tabs=0;
+        while(!await focused()&&tabs<8){await root.page().keyboard.press('Tab');tabs++;assert(await focused()||await due.evaluate(node=>document.activeElement===node),'Tab must not escape to another control or twin');}
+        assert(tabs>0&&await focused(),'Bounded real Tab navigation must reach Update');
+        return {method:'real Tab navigation from due',tabs,unfocusedPointer:contract.inputSupport.unfocusedPointer};
+      },async()=>{await checkForm();assert.deepEqual(await fresh(),[],'Keyboard reveal must not fabricate public changes or host actions');const painted=await paintedUpdate();assertPainted(painted);return {painted,unfocusedPointer:contract.inputSupport.unfocusedPointer};});
+      await runStep('submit-current-due',async()=>{await begin();assertPainted(await paintedUpdate());await root.page().keyboard.press('Enter');return {method:'native keyboard Enter',unfocusedPointer:contract.inputSupport.unfocusedPointer};},async()=>{await checkForm();const observed=await fresh();assert.deepEqual(observed.map(event=>[event.type,event.detail]),[['ely:action',{id,component:identity,action:'update-task',formData:entries,values:entries,submitter:''}]]);return {due:'2026-10-20',events:observed,unfocusedPointer:contract.inputSupport.unfocusedPointer};});
     }else if(contract.focusedSequence==='remove-four-tags'){
       const keys=['design','motion','accessibility','rust'],labels=['Design','Motion','Accessibility','Rust'];
       const tagLabels=()=>root.locator('.ely-data__tag > span').allTextContents();
