@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {readFile} from 'node:fs/promises';
 import {runInNewContext} from 'node:vm';
-import {captureTargetPNG,captureForeignPaint,screenshotWithoutCaretMutation} from './visual-state-audit-drivers.mjs';
+import {captureTargetPNG,captureForeignPaint,screenshotWithoutCaretMutation,activeOutlineBounds} from './visual-state-audit-drivers.mjs';
 
 // No Playwright import or browser launch: exercise the real capture function
 // with explicit geometry and a synthetic PNG header, not pixel evidence.
@@ -56,6 +56,38 @@ test('action camera matches the frozen baseline rule without importing its execu
   for(const scroll of [{x:0,y:64072},{x:86,y:64072},{x:0,y:63000}]){
     assert.deepEqual(await capture(clip,scroll,viewport),JSON.parse(JSON.stringify(baseline(clip,scroll,viewport))));
   }
+});
+
+test('source-only active owned outline union respects axis clips and fails closed for complex paint',async()=>{
+  const box={left:85,top:100,right:285,bottom:140},bounds={clip:{x:85,y:1100,width:200,height:40},root:box,extendsRoot:false,viewportTruncated:false};
+  const plain={outlineStyle:'solid',outlineWidth:'2px',outlineOffset:'4px',outlineColor:'rgb(0,0,255)',display:'block',visibility:'visible',opacity:'1',contentVisibility:'visible',transform:'none',perspective:'none',filter:'none',clipPath:'none',clip:'auto',maskImage:'none',contain:'none',zoom:'1',overflowX:'visible',overflowY:'visible',borderTopLeftRadius:'0px',borderTopRightRadius:'0px',borderBottomLeftRadius:'0px',borderBottomRightRadius:'0px'};
+  const owner={},foreign={},parent={style:{...plain},parentElement:null,clientLeft:0,clientTop:0,clientWidth:200,clientHeight:40,getBoundingClientRect:()=>box};
+  const active={style:{...plain},parentElement:parent,closest:()=>owner,getBoundingClientRect:()=>box,getClientRects:()=>[box]};
+  const node={contains:value=>value===active,closest:()=>owner};
+  const context={document:{activeElement:active},getComputedStyle:value=>value.style,scrollX:0,scrollY:1000,innerWidth:1440,innerHeight:1000,node,bounds};
+  const run=()=>JSON.parse(JSON.stringify(runInNewContext(`(${activeOutlineBounds.toString()})(node,bounds)`,context)));
+  assert.deepEqual(run().clip,{x:79,y:1094,width:212,height:52});
+  assert.equal(run().focusOutline.status,'bounded');assert.equal(run().extendsRoot,true);
+  parent.style.overflowX='hidden';assert.deepEqual(run().clip,{x:85,y:1094,width:200,height:52},'Horizontal clip must not incorrectly clip the vertical outline');
+  parent.style.overflowY='hidden';assert.deepEqual(run().clip,bounds.clip);
+  for(const [key,value]of [['transform','matrix(1,0,0,1,0,0)'],['clipPath','inset(1px)'],['maskImage','url(mask)'],['contain','paint'],['borderTopLeftRadius','5px']]){
+    parent.style={...plain,overflowX:'hidden',[key]:value};assert.equal(run().focusOutline.status,'unsupported',key);assert.deepEqual(run().clip,bounds.clip);
+  }
+  parent.style={...plain};active.closest=()=>foreign;assert.equal(run().focusOutline.status,'unsupported');active.closest=()=>owner;
+  active.getClientRects=()=>[box,box];assert.equal(run().focusOutline.status,'unsupported');active.getClientRects=()=>[box];
+  parent.style={...plain,overflowX:'clip',overflowClipMargin:'3px'};assert.equal(run().focusOutline.status,'unsupported');parent.style={...plain};
+  parent.style.visibility='hidden';assert.equal(run().focusOutline.status,'unsupported','A visible focused child can override its hidden ancestor');assert.deepEqual(run().clip,bounds.clip);parent.style={...plain};
+  for(const outlineColor of ['rgb(255, 0, 0)','rgb(0, 0, 0)','rgba(255, 0, 0, 1)','rgb(255 0 0 / 100%)']){active.style={...plain,outlineColor};assert.equal(run().focusOutline.status,'bounded',outlineColor);assert.deepEqual(run().clip,{x:79,y:1094,width:212,height:52});}
+  for(const outlineColor of ['transparent','rgba(255, 0, 0, 0)','rgb(255 0 0 / 0)','rgb(0 0 0 / 0%)']){active.style={...plain,outlineColor};assert.deepEqual(run(),bounds,outlineColor);}
+  for(const change of [{outlineWidth:'0px'},{outlineStyle:'none'},{outlineColor:'rgba(0, 0, 255, 0)'},{visibility:'hidden'}]){active.style={...plain,...change};assert.deepEqual(run(),bounds);}
+  active.style={...plain,outlineStyle:'auto'};assert.equal(run().focusOutline.status,'unsupported');
+  context.document.activeElement={};assert.deepEqual(run(),bounds,'Non-target twin focus must not expand this camera');
+  const source=await readFile(new URL('./visual-state-audit-actions.mjs',import.meta.url),'utf8');
+  assert.match(source,/countsAsOwnedEvidence:!foreignDOMIntersections\.length&&!focusOutlineGap/);
+  assert.match(source,/if \(overlays\.length \|\| component\.focusOutlineGap/,'Unsupported outline requests existing viewport context');
+  assert.match(source,/ownedStateEvidence:!component\.focusOutlineGap&&/,'Context cannot silently approve unsupported outline paint');
+  const driver=await readFile(new URL('./visual-state-audit-drivers.mjs',import.meta.url),'utf8');
+  assert.match(driver,/captureForeignPaint,\{clip:bounds\.clip,checkedRootID\}/,'Foreign ownership must use the expanded clip');
 });
 
 test('caret preparation preserves exact style presence and bytes on all controls and twins, even on throw',async()=>{

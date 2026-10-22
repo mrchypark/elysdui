@@ -126,7 +126,8 @@ async function imageReceipt(path) {
 async function captureComponent(page,root,path,checkedRootID) {
   const {bounds,foreignDOMIntersections,occludedForeignPaint}=await captureTargetPNG(page,root,path,{checkedRootID});
   const receipt=await imageReceipt(path);
-  return {scope:foreignDOMIntersections.length?'target-painted-union-with-foreign-context':'component-painted-union',countsAsOwnedEvidence:!foreignDOMIntersections.length,bounds,foreignDOMIntersections,occludedForeignPaint,...receipt};
+  const focusOutlineGap=bounds.focusOutline?.status==='unsupported'?bounds.focusOutline.reason:null;
+  return {scope:foreignDOMIntersections.length?'target-painted-union-with-foreign-context':'component-painted-union',countsAsOwnedEvidence:!foreignDOMIntersections.length&&!focusOutlineGap,focusOutlineGap,bounds,foreignDOMIntersections,occludedForeignPaint,...receipt};
 }
 
 async function captureOwnedState({page, record, root, caseId, siteId, checkpointIndex, phase, captures, state}) {
@@ -145,13 +146,13 @@ async function captureOwnedState({page, record, root, caseId, siteId, checkpoint
     overlays.push({...await captureComponent(page,locator,path,item.checkedRootID),scope:'visible-owned-panel',overlay:item});
   }
   let viewport = null;
-  if (overlays.length || component.bounds.extendsRoot || component.bounds.viewportTruncated || component.bounds.clippedCount) {
+  if (overlays.length || component.focusOutlineGap || overlays.some(item=>item.focusOutlineGap) || component.bounds.extendsRoot || component.bounds.viewportTruncated || component.bounds.clippedCount) {
     const path = resolve(captures, `${stem}-${phase}-viewport.png`);
     await screenshotWithoutCaretMutation(page,{path, animations: 'disabled'});
     const size = page.viewportSize();
     viewport = {scope: 'viewport-context', countsAsOwnedEvidence:false, bounds: {x: 0, y: 0, width: size.width, height: size.height}, ...(await imageReceipt(path))};
   }
-  return {component, ownedOverlays: overlays, viewport,ownedStateEvidence:overlays.length?overlays.every(item=>item.countsAsOwnedEvidence):component.countsAsOwnedEvidence};
+  return {component, ownedOverlays: overlays, viewport,ownedStateEvidence:!component.focusOutlineGap&&(overlays.length?overlays.every(item=>item.countsAsOwnedEvidence):component.countsAsOwnedEvidence)};
 }
 
 async function executeCheck(page, item, onCheckpoint) {

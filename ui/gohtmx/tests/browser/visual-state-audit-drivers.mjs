@@ -28,8 +28,45 @@ const actionBounds=new Function('node',`
     const style=nativeStyle(element);
     return /^inset\\(50%(?: 50%){0,3}\\)$/.test(style.clipPath)?{display:'none'}:style;
   };
-  return (${captureBounds.toString()})(node);
+  return (${activeOutlineBounds.toString()})(node, (${captureBounds.toString()})(node));
 `);
+
+// Only the active owned control's simple outline; not generic shadow/paint padding.
+export function activeOutlineBounds(node,bounds){
+  const active=document.activeElement;
+  if(!active||!node.contains(active))return bounds;
+  const style=getComputedStyle(active),width=parseFloat(style.outlineWidth),offset=parseFloat(style.outlineOffset);
+  const alpha=style.outlineColor.match(/\/\s*([\d.]+%?)\s*\)$/)?.[1]??style.outlineColor.match(/^rgba\([^,]+,[^,]+,[^,]+,\s*([\d.]+%?)\s*\)$/)?.[1];
+  if(style.outlineStyle==='none'||style.outlineStyle==='hidden'||width===0||style.outlineColor==='transparent'||(alpha!==undefined&&parseFloat(alpha)===0))return bounds;
+  const gap=reason=>({...bounds,focusOutline:{status:'unsupported',reason}});
+  if(active.closest('[data-ely-family]')!==node.closest('[data-ely-family]'))return gap('nested component focus ownership');
+  if(style.outlineStyle==='auto'||!Number.isFinite(width)||!Number.isFinite(offset))return gap('unbounded outline style');
+  if(active.getClientRects().length!==1)return gap('fragmented focus outline');
+  const margin=Math.max(0,width+offset),r=active.getBoundingClientRect();
+  const paint={left:r.left-margin,top:r.top-margin,right:r.right+margin,bottom:r.bottom+margin};
+  for(let ancestor=active;ancestor;ancestor=ancestor.parentElement){
+    const s=getComputedStyle(ancestor);
+    if(s.display==='none'||Number(s.opacity)===0||s.contentVisibility==='hidden'||(ancestor===active&&s.visibility!=='visible'))return bounds;
+    if(ancestor!==active&&s.visibility!=='visible')return gap('ancestor visibility overridden by visible focused child');
+    if(s.transform!=='none'||s.perspective!=='none'||s.filter !== 'none'||s.clipPath!=='none'||s.clip!=='auto'||s.maskImage!=='none'||s.contain.split(/\s+/).some(value=>['paint','strict','content'].includes(value))||(s.zoom!=='normal'&&Number(s.zoom)!==1))return gap('complex outline geometry or clipping');
+    if(ancestor===active)continue;
+    const clipX=s.overflowX!=='visible',clipY=s.overflowY!=='visible';
+    if(!clipX&&!clipY)continue;
+    if((s.overflowX==='clip'||s.overflowY==='clip')&&s.overflowClipMargin!=='0px')return gap('nonzero overflow clip margin');
+    if(['borderTopLeftRadius','borderTopRightRadius','borderBottomLeftRadius','borderBottomRightRadius'].some(key=>parseFloat(s[key])!==0))return gap('rounded ancestor clip');
+    const box=ancestor.getBoundingClientRect(),left=box.left+ancestor.clientLeft,top=box.top+ancestor.clientTop;
+    if(clipX){paint.left=Math.max(paint.left,left);paint.right=Math.min(paint.right,left+ancestor.clientWidth);}
+    if(clipY){paint.top=Math.max(paint.top,top);paint.bottom=Math.min(paint.bottom,top+ancestor.clientHeight);}
+  }
+  if(paint.right<=paint.left||paint.bottom<=paint.top)return bounds;
+  if(paint.left+scrollX<0||paint.top+scrollY<0)return gap('outline extends outside document camera');
+  const left=Math.min(bounds.clip.x,Math.floor(paint.left+scrollX)),top=Math.min(bounds.clip.y,Math.floor(paint.top+scrollY));
+  const right=Math.max(bounds.clip.x+bounds.clip.width,Math.ceil(paint.right+scrollX)),bottom=Math.max(bounds.clip.y+bounds.clip.height,Math.ceil(paint.bottom+scrollY));
+  return {...bounds,clip:{x:left,y:top,width:right-left,height:bottom-top},
+    extendsRoot:bounds.extendsRoot||paint.left<bounds.root.left||paint.right>bounds.root.right||paint.top<bounds.root.top||paint.bottom>bounds.root.bottom,
+    viewportTruncated:bounds.viewportTruncated||paint.left<0||paint.top<0||paint.right>innerWidth||paint.bottom>innerHeight,
+    focusOutline:{status:'bounded',width,offset,paint}};
+}
 
 // A layout box is not painted evidence. Only an opaque, higher-stacked owned
 // panel can cover foreign paint; rounded/transparent corners remain checked.
