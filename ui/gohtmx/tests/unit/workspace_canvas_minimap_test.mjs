@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 
 const css=readFileSync(new URL('../../assets/ely-api-workspace.css',import.meta.url),'utf8');
-const rule='@container (max-width:440px){[data-scene-kind=InfiniteCanvas] [data-cs-minimap]{bottom:60px;max-width:calc(100% - 24px)}}';
+const rule='\x40container (max-width:440px){[data-scene-kind=InfiniteCanvas] [data-cs-minimap]{bottom:60px;max-width:calc(100% - 24px)}}';
 assert(css.includes(rule),'narrow scene must separate minimap from zoom without hiding either');
 assert(css.includes('[data-ws-canvas-scene]{container-type:inline-size}'));
 const aliases=JSON.parse(readFileSync(new URL('../../components.json',import.meta.url),'utf8')).pages

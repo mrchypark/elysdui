@@ -31,7 +31,7 @@ const actionBounds=new Function('node',`
   return (${activeOutlineBounds.toString()})(node, (${captureBounds.toString()})(node));
 `);
 
-// Only the active owned control's simple outline; not generic shadow/paint padding.
+// Only the active owned control's simple outline; not generic shadow or paint padding.
 export function activeOutlineBounds(node,bounds){
   const active=document.activeElement;
   if(!active||!node.contains(active))return bounds;
