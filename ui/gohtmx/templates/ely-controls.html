@@ -107,7 +107,7 @@
 {{define "tabs"}}
 <div id="{{.ID}}" data-ui-component="tabs"{{range $k, $v := .Attrs}} {{attrName $k}}="{{attrValue $k $v}}"{{end}}>
   {{if .Label}}<p id="{{.ID}}-label" class="ely-control-label">{{.Label}}</p>{{end}}
-  <div role="tablist"{{if .Label}} aria-labelledby="{{.ID}}-label"{{end}}>{{range $i, $item := .Items}}{{template "button" (dict "ID" (printf "%s-tab-%d" $.ID $i) "Type" "button" "Role" "tab" "Label" $item.Label "Disabled" $.Disabled "Attrs" (dict "data-ui-tab" "true" "aria-controls" (printf "%s-panel-%d" $.ID $i) "aria-selected" (printf "%t" (or (eq $item.Value $.Value) (and (not $.Value) (eq $i 0))))))}}{{end}}</div>
+  <div role="tablist"{{if .Label}} aria-labelledby="{{.ID}}-label"{{end}}>{{range $i, $item := .Items}}{{template "button" (dict "ID" (printf "%s-tab-%d" $.ID $i) "Type" "button" "Variant" "ghost" "Role" "tab" "Label" $item.Label "Disabled" $.Disabled "Attrs" (dict "data-ui-tab" "true" "aria-controls" (printf "%s-panel-%d" $.ID $i) "aria-selected" (printf "%t" (or (eq $item.Value $.Value) (and (not $.Value) (eq $i 0))))))}}{{end}}</div>
   {{range $i, $item := .Items}}<section id="{{$.ID}}-panel-{{$i}}" role="tabpanel" aria-labelledby="{{$.ID}}-tab-{{$i}}" data-ui-tab-panel{{if not (or (eq $item.Value $.Value) (and (not $.Value) (eq $i 0)))}} hidden{{end}}>{{$item.Content}}</section>{{end}}
 </div>
 {{end}}

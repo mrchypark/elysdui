@@ -4,7 +4,7 @@
 {{define "grid"}}<div class="ui-grid{{if .Class}} {{.Class}}{{end}}">{{.Content}}</div>{{end}}
 {{define "code-block"}}<pre class="ui-code"><code>{{.Content}}</code></pre>{{end}}
 {{define "avatar"}}<span class="ui-avatar"{{if .Label}} role="img" aria-label="{{.Label}}"{{end}}>{{if .Src}}<img src="{{.Src}}" alt="{{.Label}}">{{else}}{{.Text}}{{end}}</span>{{end}}
-{{define "alert"}}<aside class="ui-alert" role="{{if .Urgent}}alert{{else}}status{{end}}">{{if .Title}}<strong>{{.Title}}</strong>{{end}}{{.Content}}</aside>{{end}}
+{{define "alert"}}<aside class="ui-alert" role="{{if .Urgent}}alert{{else}}status{{end}}">{{if .Title}}<strong>{{.Title}}</strong> {{end}}{{.Content}}</aside>{{end}}
 {{define "empty-state"}}<section class="ui-empty">{{if .Title}}<h3>{{.Title}}</h3>{{end}}<p>{{.Description}}</p>{{.Content}}</section>{{end}}
 {{define "accordion"}}<div class="ui-stack"{{if .ID}} id="{{.ID}}"{{end}}>{{range .Items}}<details class="ui-card"{{if .Open}} open{{end}}><summary>{{.Label}}</summary><div>{{.Content}}</div></details>{{end}}</div>{{end}}
 {{define "breadcrumb"}}<nav aria-label="{{or .Label "Breadcrumb"}}"><ol class="ui-breadcrumb">{{range .Items}}<li>{{if .Href}}<a href="{{.Href}}">{{.Label}}</a>{{else}}<span aria-current="page">{{.Label}}</span>{{end}}</li>{{end}}</ol></nav>{{end}}
