@@ -2,8 +2,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {readFile} from 'node:fs/promises';
+import {createHash} from 'node:crypto';
+import {EventEmitter} from 'node:events';
 import {baselineFixture, basicFixturePackage, basicFixtureRoute, basicRootSelector, basicSourcePrefixes, validateBasicMatrix} from './visual-state-audit-basic.mjs';
-import {basicActionContract,basicActionVariants,validateBasicActionMatrix,runBasicActions} from './visual-state-audit-basic-actions.mjs';
+import {basicActionContract,basicActionVariants,validateBasicActionMatrix,runBasicActions,basicActionSurface,selectBasicActionCases,requiredBasicActionAssets,fulfillBasicActionAsset,assertBasicActionAssets,assertBasicTableRows} from './visual-state-audit-basic-actions.mjs';
 
 const source = path => readFile(new URL(`../../../../${path}`, import.meta.url), 'utf8');
 async function metadata() {
@@ -13,7 +15,7 @@ async function metadata() {
   const profiles = ['live', 'static'].flatMap(mode => ['desktop', 'mobile'].flatMap(size => ['light', 'dark'].map(theme => `${mode}-${size}-${theme}`)));
   return {
     revision,
-    manifest: {basicNames: names, cases: names.map(name => ({name: `basic/${name}`, template: name, propsSHA256: hash}))},
+    manifest: {basicNames: names, cases: names.map(name => ({name: `basic/${name}`, template: name, propsSHA256: hash})),assetHashes:Object.fromEntries(requiredBasicActionAssets.map(path=>[path,hash]))},
     matrix: {fixture: 'basic', source: {revision}, auditCases: names.map(name => ({caseId: `basic:${name}`, componentIdentity: `basic/${name}`, fixtureIdentity: `basic-fixture:basic/${name}`, template: name, fixturePropsSHA256: hash, family: 'basic', sourceSHA: revision, surface: ['live-basic', 'static-basic'], profileIds: profiles, aliasMapping: {requestedName: `basic/${name}`, relation: 'canonical-basic-template'}}))},
   };
 }
@@ -103,7 +105,7 @@ test('phase2 source-only classification is exact48, with datalist conditional an
   assert.equal(contracts.filter(c=>c.classification==='noninteractive-canonical-fixture').length,17);
   assert.equal(contracts.filter(c=>c.classification==='finite-actions').length,30);
   assert.equal(contracts.filter(c=>c.classification==='conditional-no-associated-input').length,1);
-  assert.equal(basicActionContract('basic/data-table').steps.length,6);
+  assert.equal(basicActionContract('basic/data-table').steps.length,7);
   for(const identity of ['input','forms/Input','basic/unknown','basic/input@second-enabled-option','basic/select@other'])assert.equal(basicActionContract(identity),null);
   for(const c of contracts){assert(c.source);assert(c.scope);for(const s of c.steps)assert.equal(s.sourceSiteId,`basic-action:${c.identity}:${s.id}`);}
   assert.match(basicActionContract('basic/file-dropzone').boundaries.join(' '),/not OS file-picker/);
@@ -151,4 +153,71 @@ test('phase2 source-only basic native button cannot pass a synthetic click or un
     const execute=()=>runBasicActions(contract,root,async(id,control,action,verify)=>{assert.equal(id,'activate');assert.equal(control,'button');await action();await verify();});
     if(passes)await execute();else await assert.rejects(execute);
   }
+});
+
+test('phase2 source-only profile/surface agreement and exact explicit selection precede allocation',async()=>{
+  const {matrix}=await metadata();
+  for(const mode of ['live','static'])for(const size of ['desktop','mobile'])for(const theme of ['light','dark']){
+    const profileId=`${mode}-${size}-${theme}`;basicActionSurface(profileId,`${mode}-basic`);
+    assert.throws(()=>basicActionSurface(profileId,`${mode==='live'?'static':'live'}-basic`));
+  }
+  const options={profileId:'live-desktop-light',surface:'live-basic',families:[],caseIds:matrix.auditCases.slice(0,21).map(c=>c.caseId),full:false,pilot:20};
+  assert.deepEqual(selectBasicActionCases(matrix,options).map(c=>c.caseId),options.caseIds,'Implicit default pilot must preserve all21 explicit IDs');
+  assert.equal(selectBasicActionCases(matrix,{...options,caseIds:[]}).length,20);
+  assert.equal(selectBasicActionCases(matrix,{...options,caseIds:[],full:true}).length,48);
+  const expanded=structuredClone(matrix);for(let i=0;i<5;i++)expanded.auditCases.push({...matrix.auditCases[0],caseId:`variant:${i}`,componentIdentity:`variant/${i}`});
+  assert.equal(selectBasicActionCases(expanded,{...options,caseIds:[],full:true}).length,53);
+  assert.throws(()=>selectBasicActionCases(matrix,{...options,caseIds:[...options.caseIds,'basic:missing']}));
+  const sourceRunner=await source('ui/gohtmx/tests/browser/visual-state-audit-actions.mjs');
+  assert(sourceRunner.includes('if(!basic){\n  if (options.families.length)'));
+  assert(sourceRunner.includes('isDeepStrictEqual(reports.map(c=>c.caseId),cases.map(c=>c.caseId))'));
+});
+
+test('phase2 source-only map reset preserves canonical absence and uses actual native canvas keyboard path',async()=>{
+  const driver=runBasicActions.toString(),template=await source('ui/gohtmx/templates/ely-map.html'),runtime=await source('ui/gohtmx/assets/ely-map.js');
+  assert(template.includes('{{if .ShowReset}}'));
+  assert(driver.includes("assert.equal(await one('[data-map-zoom=\"reset\"]').count(),0"));
+  assert(driver.includes("page.keyboard.press('Shift+Tab')"));assert(driver.includes("page.keyboard.press('0')"));
+  assert(!driver.includes("one('[data-map-zoom=\"reset\"]').click()"));
+  assert(runtime.includes("event.target !== canvas"));assert(runtime.includes("event.key === '0'"));
+  assert(runtime.includes('center = initialCenter.slice(); zoom = initialZoom; apply(true)'));
+});
+
+test('phase2 pure table oracle rejects wrong filtered row and no-op descending sort',()=>{
+  const alice=['Caller Alice','Ready'],bob=['Caller Bob','Pending'];
+  assertBasicTableRows([alice],[alice]);assertBasicTableRows([bob,alice],[bob,alice]);
+  assert.throws(()=>assertBasicTableRows([bob],[alice]));
+  assert.throws(()=>assertBasicTableRows([alice,bob],[bob,alice]));
+  assert(basicActionContract('basic/data-table').steps.some(s=>s.id==='sort-descending'));
+});
+
+test('phase2 pure loaded-asset gate rejects missing wrong failed and incomplete delivery',()=>{
+  const expected=Object.fromEntries(requiredBasicActionAssets.map(path=>[path,'a'.repeat(64)]));
+  const good=requiredBasicActionAssets.map(path=>({path,bytes:8,sha256:expected[path],expectedSHA256:expected[path],loadedProof:'owned-route identical bytes; exact browser requestfinished'}));
+  assertBasicActionAssets(good,expected);
+  for(const mutate of [rows=>rows.pop(),rows=>rows[0].sha256='b'.repeat(64),rows=>rows[0].error='failed',rows=>delete rows[0].loadedProof,rows=>rows[0].bytes=0,rows=>rows[0].expectedSHA256='b'.repeat(64),rows=>rows.push({path:'/assets/unmapped.js',bytes:8,loadedProof:rows[0].loadedProof})]){
+    const bad=structuredClone(good);mutate(bad);assert.throws(()=>assertBasicActionAssets(bad,expected));
+  }
+});
+
+test('phase2 pure delivery mechanism requires the exact requestfinished object and unchanged response bytes',async()=>{
+  const bytes=Buffer.from('owned asset'),path='/assets/app.css',url='http://owned.test'+path,sha=createHash('sha256').update(bytes).digest('hex');
+  for(const mode of ['ok','wrong-bytes','missing','wrong-request','failed','closed','http-error','redirect']){
+    const page=new EventEmitter(),context=new EventEmitter();page.context=()=>context;
+    const request={url:()=>url,failure:()=>mode==='failed'?{errorText:'failed'}:null};let delivered;
+    const route={request:()=>request,fetch:async()=>({ok:()=>mode!=='http-error',url:()=>mode==='redirect'?url+'?redirected':url,body:async()=>bytes}),fulfill:async options=>{delivered=options.body;
+      if(mode==='missing')return;
+      if(mode==='closed'){context.emit('close');return;}
+      page.emit(mode==='failed'?'requestfailed':'requestfinished',mode==='wrong-request'?{...request}:request);
+    }};
+    const run=()=>fulfillBasicActionAsset(route,page,{[path]:mode==='wrong-bytes'?'b'.repeat(64):sha},5);
+    if(mode==='ok'){const proof=await run();assert.equal(proof.sha256,sha);assert.deepEqual(delivered,bytes);}
+    else await assert.rejects(run(),undefined,mode);
+    assert.equal(page.listenerCount('requestfinished'),0);assert.equal(page.listenerCount('requestfailed'),0);assert.equal(context.listenerCount('close'),0);
+  }
+  const runner=await source('ui/gohtmx/tests/browser/visual-state-audit-actions.mjs');
+  assert(runner.includes('fulfillBasicActionAsset(route,page,expectedAssets)'));
+  assert(runner.includes('assertBasicActionAssets(result.productionAssets,expectedAssets)'));
+  assert(runner.includes("c.status!=='failed'&&c.assetsVerified"));
+  assert(runner.includes("sourceBefore.files.find(f=>f.path==='ui/gohtmx'+path)?.sha256"));
 });

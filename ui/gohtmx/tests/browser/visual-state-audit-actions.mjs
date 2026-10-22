@@ -11,7 +11,7 @@ import {chromium} from 'playwright';
 import {actionModuleNames,prepareActionModule,synchronousTraceInit,registeredOutcomesEqual,registeredOutcomeDifferences,firstDifference,compareActionTrace,traceContractStatus} from './visual-state-audit-instrument.mjs';
 import {caseActionContract, requestedStateContract, runRequestedStateActions, ownedOverlayInventory, captureTargetPNG, screenshotWithoutCaretMutation, inventoryReceipt, inventoryDrift, unhandledBrowserErrors} from './visual-state-audit-drivers.mjs';
 import {basicFixturePackage,basicRootSelector} from './visual-state-audit-basic.mjs';
-import {basicActionContract,validateBasicActionMatrix,runBasicActions} from './visual-state-audit-basic-actions.mjs';
+import {basicActionContract,validateBasicActionMatrix,runBasicActions,basicActionSurface,selectBasicActionCases,fulfillBasicActionAsset,assertBasicActionAssets} from './visual-state-audit-basic-actions.mjs';
 
 const repo = fileURLToPath(new URL('../../../../', import.meta.url));
 const defaultEvidenceRoot = resolve(repo, 'ui/gohtmx/tests/browser/visual-state-audit-evidence');
@@ -65,7 +65,7 @@ function parseArgs(argv) {
   assert(profiles[options.profileId], `Unsupported profile: ${options.profileId}`);
   assert(['advanced','basic'].includes(options.fixture),'Unsupported fixture');
   assert((options.fixture==='basic'?['live-basic','static-basic']:['live-audit','static-audit']).includes(options.surface), `Unsupported surface: ${options.surface}`);
-  if(options.fixture==='basic'){assert(options.fixtureManifest,'Basic actions require --fixture-manifest=<action-manifest.json>');assert(!options.statesOnly,'Basic has its own finite action gate, not advanced --states-only');assert(!options.baseURL,'Basic actions require the owned compiled fixture/export, not --base-url');}
+  if(options.fixture==='basic'){basicActionSurface(options.profileId,options.surface);assert(options.fixtureManifest,'Basic actions require --fixture-manifest=<action-manifest.json>');assert(!options.statesOnly,'Basic has its own finite action gate, not advanced --states-only');assert(!options.baseURL,'Basic actions require the owned compiled fixture/export, not --base-url');}
   assert(options.matrixPath, 'Pass --matrix=<acceptance-matrix.json> from the existing audit inventory; no matrix is bundled');
   options.coverageManifestPath ||= resolve(options.evidenceRoot, 'evidence/instrument-coverage.json');
   return options;
@@ -73,10 +73,17 @@ function parseArgs(argv) {
 
 async function basicAudit({cases,origin,captures,matrixInput,coverageInput,sourceBefore,goEnv}){
   const reports=[],browserErrors=[];
+  const expectedAssets=coverageInput.data.assetHashes;
+  for(const [path,expectedSHA256]of Object.entries(expectedAssets)){
+    if(['/assets/basic-audit.css','/assets/basic-audit-actions.js'].includes(path))continue; // Compiled test-host constants are pinned by the immutable manifest/fixture source.
+    assert.equal(sourceBefore.files.find(f=>f.path==='ui/gohtmx'+path)?.sha256,expectedSHA256,'Embedded asset must match frozen checkout: '+path);
+  }
   for(const item of cases){
     const context=await browser.newContext({viewport:profile.viewport,colorScheme:profile.colorScheme}),page=await context.newPage();
     const contract=basicActionContract(item.componentIdentity),receipts=[];
-    const result={caseId:item.caseId,componentIdentity:item.componentIdentity,fixtureIdentity:item.fixtureIdentity,fixturePropsSHA256:item.fixturePropsSHA256,contract,receipts,status:'running'};
+    const result={caseId:item.caseId,componentIdentity:item.componentIdentity,fixtureIdentity:item.fixtureIdentity,fixturePropsSHA256:item.fixturePropsSHA256,contract,receipts,status:'running',assetsVerified:false};
+    const assetTasks=[];
+    const verifyAssets=async()=>{result.productionAssets=await Promise.all(assetTasks);assertBasicActionAssets(result.productionAssets,expectedAssets);result.assetsVerified=true;};
     reports.push(result);assert(contract,'Exact basic source contract required');
     page.on('pageerror',error=>browserErrors.push({caseId:item.caseId,type:'pageerror',text:String(error)}));
     page.on('response',response=>{if(response.status()>=400)browserErrors.push({caseId:item.caseId,type:'http-error',url:response.url(),status:response.status()});});
@@ -84,12 +91,21 @@ async function basicAudit({cases,origin,captures,matrixInput,coverageInput,sourc
     try{
       // Test boundary only: never call the user clipboard, even after a real click.
       await page.addInitScript(()=>{globalThis.__basicClipboardRequests=[];Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async value=>{globalThis.__basicClipboardRequests.push(String(value));}}});});
-      await page.route('**/*',route=>{if(new URL(route.request().url()).origin===origin)return route.continue();browserErrors.push({caseId:item.caseId,type:'external-dependency',url:route.request().url()});return route.abort();});
+      await page.route('**/*',route=>{
+        const url=new URL(route.request().url());
+        if(url.origin!==origin){browserErrors.push({caseId:item.caseId,type:'external-dependency',url:url.href});return route.abort();}
+        if(/^\/assets\/.*\.(?:js|css)$/.test(url.pathname)){
+          const proof=fulfillBasicActionAsset(route,page,expectedAssets).catch(async error=>{await route.abort().catch(()=>{});return {path:url.pathname,error:String(error)};});
+          assetTasks.push(proof);return proof;
+        }
+        return route.continue();
+      });
       await page.goto(origin+'/basic-actions/',{waitUntil:'networkidle'});await sleepFrames(page);
       const record=page.locator(`[data-audit-name=${JSON.stringify(item.componentIdentity)}]`),root=record.locator(basicRootSelector),twin=record.locator('[data-audit-twin]>[data-basic-component]');
       assert.equal(await root.count(),1);assert.equal(await twin.count(),1);
       assert.equal(await root.getAttribute('data-basic-component'),item.componentIdentity);assert.equal(await root.getAttribute('data-basic-props-sha256'),item.fixturePropsSHA256);
       await page.waitForFunction(()=>[...document.querySelectorAll('[data-ui-component="map-view"]')].every(n=>n.dataset.mapReady==='true'));
+      await verifyAssets();
       const peer=async()=>digest(await twin.evaluate(n=>({html:n.innerHTML,fields:[...n.querySelectorAll('input,select,textarea')].map(e=>({id:e.id,name:e.name,value:e.value,checked:e.checked,disabled:e.disabled})),canvases:[...n.querySelectorAll('canvas')].map(c=>c.toDataURL())})));
       const initialTwin=await peer();
       result.initialTwinSHA256=initialTwin;
@@ -118,6 +134,7 @@ async function basicAudit({cases,origin,captures,matrixInput,coverageInput,sourc
         assert.deepEqual(await peer(),initialTwin,'Basic camera preparation must not mutate twin');
         receipt.captureStatus=receipt.beforeCaptureOwnership.ownedStateEvidence&&receipt.afterCaptureOwnership.ownedStateEvidence?'captured':'context-only';
         assert.equal(receipt.captureStatus,'captured','Every finite action requires owned before/after pixels');
+        await verifyAssets();
       };
       if(contract.classification==='finite-actions')await runBasicActions(contract,root,step);
       else{
@@ -129,9 +146,13 @@ async function basicAudit({cases,origin,captures,matrixInput,coverageInput,sourc
       }
       assert.equal(receipts.length,contract.steps.length);assert.deepEqual(await peer(),initialTwin);
       result.finalTwinSHA256=await peer();
+      await verifyAssets();
       result.status=contract.classification==='finite-actions'?'passed-finite-actions':contract.classification;
     }catch(error){result.status='failed';result.error=String(error);}
-    finally{await context.close();}
+    finally{
+      await context.close();result.productionAssets=await Promise.all(assetTasks);
+      try{assertBasicActionAssets(result.productionAssets,expectedAssets);}catch(error){result.assetsVerified=false;result.status='failed';result.error=String(error);}
+    }
     if(result.status==='failed')break; // Stop the bounded batch on the first new failure.
   }
   const sourceAfter=await sourceReceipt(),inventoryChecks=await Promise.all([inventoryDrift(matrixInput),inventoryDrift(coverageInput)]);
@@ -141,7 +162,8 @@ async function basicAudit({cases,origin,captures,matrixInput,coverageInput,sourc
     matrix:{path:matrixInput.path,sha256:matrixInput.sha256},fixtureManifest:{path:coverageInput.path,sha256:coverageInput.sha256},inventoryChecks,profile,surface:options.surface,
     runtime:{node:process.version,chromium:browser.version(),go:execFileSync('go',['version'],{cwd:repo,env:goEnv,encoding:'utf8'}).trim()},cases:reports,caseCount:reports.length,browserErrors,
     imageCount:files.filter(f=>f.endsWith('.png')).length,captureBytes,registeredCheckEquivalence:'not-applicable: no advanced registered checks are fabricated',
-    basicActionGate:{safe:sourceBefore.status===''&&sourceAfter.status===''&&sourceStableDuringRun&&inventoryChecks.every(c=>c.stable)&&reports.length===cases.length&&!browserErrors.length&&reports.every(c=>c.status!=='failed'),scope:'Selected finite fixture actions, separately labelled noninteractive/conditional fixtures and explicit boundary exclusions only'},
+    requestedCaseIDs:cases.map(c=>c.caseId),completedCaseIDs:reports.map(c=>c.caseId),
+    basicActionGate:{safe:sourceBefore.status===''&&sourceAfter.status===''&&sourceStableDuringRun&&inventoryChecks.every(c=>c.stable)&&isDeepStrictEqual(reports.map(c=>c.caseId),cases.map(c=>c.caseId))&&!browserErrors.length&&reports.every(c=>c.status!=='failed'&&c.assetsVerified),scope:'Exact selected finite fixture case set, successful actual browser-delivered JS/CSS proofs, separately labelled noninteractive/conditional fixtures and explicit boundary exclusions only'},
     fullRunGate:{safe:false,fullMatrixComplete:false,reason:'Finite basic fixture evidence never establishes all public control paths, native OS surfaces or all-prop coverage'}};
   await writeFile(resolve(options.output,'report.json'),JSON.stringify(report,null,2)+'\n',{flag:'wx'});
   await writeFile(resolve(options.output,'blockers.json'),JSON.stringify({failed:reports.filter(c=>c.status==='failed').map(c=>({caseId:c.caseId,error:c.error})),notRun:cases.slice(reports.length).map(c=>c.caseId),boundaries:reports.flatMap(c=>(c.contract.boundaries||[]).map(reason=>({caseId:c.caseId,reason}))),fullRunGate:report.fullRunGate},null,2)+'\n',{flag:'wx'});
@@ -405,14 +427,15 @@ try {
   const sourceBefore = await sourceReceipt();
   if(options.full||basic)assert.equal(sourceBefore.status,'','Action audit requires the parent clean commit after the bounded source freeze');
   if(basic)validateBasicActionMatrix(matrix,coverageManifest,expectedRevision);
-  let cases = matrix.auditCases.filter(item => item.profileIds.includes(profile.id) && item.surface.includes(options.surface));
+  let cases = basic?selectBasicActionCases(matrix,options):matrix.auditCases.filter(item => item.profileIds.includes(profile.id) && item.surface.includes(options.surface));
+  if(!basic){
   if (options.families.length) cases = cases.filter(item => options.families.includes(item.family));
   if (options.caseIds.length) cases = cases.filter(item => options.caseIds.includes(item.caseId) || options.caseIds.includes(item.componentIdentity));
-  if(basic)assert(options.caseIds.every(id=>cases.some(item=>id===item.caseId||id===item.componentIdentity)),'Every requested basic identity must exist for this surface/profile');
   if(options.statesOnly&&!basic)cases=cases.filter(item=>requestedStateContract(item.componentIdentity));
   if (!basic&&!options.statesOnly && !options.full && !options.families.length && !options.caseIds.length) {
     cases = pilotNames.map(name => matrix.auditCases.find(item => item.componentIdentity === name && item.aliasMapping.relation !== 'alias-shared-check')).filter(Boolean);
   } else if (!options.full && options.pilot) cases = cases.slice(0, options.pilot);
+  }
   assert(cases.length > 0, 'No cases selected');
   assert(new Set(cases.map(item => item.componentIdentity)).size === cases.length, 'pilot cases must use unique component names');
   assert(cases.every(item => basic?item.family==='basic':familyModule[item.family]), 'case uses an unsupported family');

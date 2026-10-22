@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {createHash} from 'node:crypto';
 import {validateBasicMatrix} from './visual-state-audit-basic.mjs';
 
 export const basicActionVariants=Object.freeze(['select','radio-group','combobox','multi-select','selectable-list']);
@@ -13,11 +14,59 @@ const actionIDs={
   combobox:['open-options','choose-option'],'multi-select':['toggle-alpha-off','toggle-alpha-on'],
   'selectable-list':['selected-option'],dialog:['host-open','close','host-reopen','escape'],tabs:['second-tab','first-tab'],
   accordion:['open-second','close-second'],breadcrumb:['local-link'],menu:['open-menu','choose-first'],
-  'data-table':['filter','clear-filter','density','sort','hide-column','show-column'],
+  'data-table':['filter','clear-filter','density','sort-ascending','sort-descending','hide-column','show-column'],
   calendar:['next-month','previous-month','choose-day','keyboard-next-day'],
   'map-view':['zoom-in','reset-view','select-marker','close-popup'],
   'coordinate-display':['copy-boundary'],
 };
+
+export function basicActionSurface(profileId,surface){
+  assert(/^(live|static)-(desktop|mobile)-(light|dark)$/.test(profileId),'Exact basic profile required');
+  assert.equal(surface,profileId.split('-')[0]+'-basic','Basic profile and render surface must agree');
+}
+
+export function selectBasicActionCases(matrix,options){
+  basicActionSurface(options.profileId,options.surface);
+  let cases=matrix.auditCases.filter(c=>c.profileIds.includes(options.profileId)&&c.surface.includes(options.surface));
+  if(options.families.length)cases=cases.filter(c=>options.families.includes(c.family));
+  if(options.caseIds.length){
+    cases=cases.filter(c=>options.caseIds.includes(c.caseId)||options.caseIds.includes(c.componentIdentity));
+    assert(options.caseIds.every(id=>cases.some(c=>id===c.caseId||id===c.componentIdentity)),'Every explicitly requested basic case must be preserved');
+  }else if(!options.full)cases=cases.slice(0,options.pilot);
+  assert(cases.length>0,'No basic cases selected');
+  return cases;
+}
+
+export const requiredBasicActionAssets=Object.freeze(['/assets/app.css','/assets/ely-controls.css','/assets/ely-patterns.css','/assets/ely-map.css','/assets/ely-controls.js','/assets/ely-patterns.js','/assets/ely-map.js','/assets/theme.js','/assets/basic-audit.css','/assets/basic-audit-actions.js']);
+const assetSHA=bytes=>createHash('sha256').update(bytes).digest('hex');
+
+// Same exact-request completion mechanism as baseline fulfillAsset; baseline stays frozen.
+export async function fulfillBasicActionAsset(route,page,expected,timeout=30000){
+  const request=route.request(),path=new URL(request.url()).pathname,context=page.context();
+  let finish;
+  const completed=new Promise(resolve=>{finish=resolve;});
+  const done=candidate=>{if(candidate===request)finish(request.failure()?{error:'asset request completion failed'}:{});};
+  const failed=candidate=>{if(candidate===request)finish({error:'asset request failed'});};
+  const closed=()=>finish({error:'asset target closed before request completion'});
+  page.on('requestfinished',done);page.on('requestfailed',failed);page.on('close',closed);context.on('close',closed);
+  const timer=setTimeout(()=>finish({error:'asset request completion missing'}),timeout);
+  try{
+    assert.match(expected[path]||'',/^[a-f0-9]{64}$/,'Frozen expected asset bytes required');
+    const response=await route.fetch();assert(response.ok(),`asset response failed: ${path}`);
+    assert.equal(response.url(),request.url(),'Asset redirect changed request identity');
+    const bytes=await response.body();assert.equal(assetSHA(bytes),expected[path],`Loaded asset differs from frozen source: ${path}`);
+    await route.fulfill({response,body:bytes});
+    const completion=await completed;assert(!completion.error,completion.error);
+    return {path,bytes:bytes.length,sha256:assetSHA(bytes),expectedSHA256:expected[path],loadedProof:'owned-route identical bytes; exact browser requestfinished'};
+  }finally{clearTimeout(timer);page.off('requestfinished',done);page.off('requestfailed',failed);page.off('close',closed);context.off('close',closed);}
+}
+
+export function assertBasicActionAssets(records,expected){
+  for(const path of requiredBasicActionAssets)assert(records.some(r=>r.path===path),'Required browser-delivered asset missing: '+path);
+  for(const r of records){assert(!r.error,r.error);assert.match(expected[r.path]||'',/^[a-f0-9]{64}$/,'Unmapped delivered asset');assert.equal(r.loadedProof,'owned-route identical bytes; exact browser requestfinished');assert(r.bytes>0);assert.equal(r.sha256,expected[r.path]);assert.equal(r.expectedSHA256,expected[r.path]);}
+}
+
+export function assertBasicTableRows(actual,expected){assert.deepEqual(actual,expected,'Exact caller table row identity/order');}
 export function basicActionContract(identity){
   const match=/^basic\/([a-z][a-z0-9-]*)(@second-enabled-option)?$/.exec(identity);
   if(!match)return null;
@@ -49,6 +98,7 @@ export function validateBasicActionMatrix(matrix,manifest,revision){
   assert.equal(matrix.actionFixture,true,'Opt-in action fixture matrix required');
   validateBasicMatrix({...matrix,auditCases:matrix.auditCases.filter(row=>!row.componentIdentity.includes('@'))},manifest,revision);
   assert.equal(manifest.variants?.length,5);assert.equal(matrix.auditCases.length,53);
+  for(const path of requiredBasicActionAssets)assert.match(manifest.assetHashes?.[path]||'',/^[a-f0-9]{64}$/,'Pinned basic runtime asset required: '+path);
   for(const template of basicActionVariants){
     const identity=`basic/${template}@second-enabled-option`,row=matrix.auditCases.find(row=>row.componentIdentity===identity),fixture=manifest.variants.find(row=>row.name===identity);
     assert(row&&fixture,identity);assert.equal(row.caseId,`basic:${template}@second-enabled-option`);assert.equal(row.template,template);assert.equal(fixture.template,template);assert.equal(row.sourceSHA,revision);assert.equal(row.family,'basic');
@@ -132,10 +182,11 @@ export async function runBasicActions(contract,root,runStep){
     await step('open-menu','[data-ui-menu-trigger]',()=>one('[data-ui-menu-trigger]').click(),async()=>{await page.waitForFunction(id=>document.getElementById(id).querySelector('[popover]').matches(':popover-open'),await root.getAttribute('id'));assert.equal(await one('[popover] [aria-disabled=true]').count(),1);assert.equal(await one('[popover] [aria-disabled=true]').getAttribute('href'),null);await nativeTypes([]);});
     await step('choose-first','[role=menuitem]',()=>one('[role=menuitem]').first().click(),async()=>{await page.waitForFunction(id=>!document.getElementById(id).querySelector('[popover]').matches(':popover-open'),await root.getAttribute('id'));const events=await nativeTypes(['ui:select']);assert.deepEqual(events[0].detail,{value:href});assert.equal(new URL(page.url()).hash,href);});
   }else if(t==='data-table'){
-    await step('filter','[data-ui-table-filter]',()=>one('[data-ui-table-filter]').fill('Alice'),async()=>{assert.equal(await one('tbody tr:visible').count(),1);assert.match(await one('[data-ui-table-summary]').textContent(),/^1 \/ 2 rows$/);});
-    await step('clear-filter','[data-ui-table-filter]',()=>one('[data-ui-table-filter]').fill(''),async()=>assert.equal(await one('tbody tr:visible').count(),2));
+    const alice=['Caller Alice','Ready'],bob=['Caller Bob','Pending'],rows=()=>one('tbody tr:visible').evaluateAll(nodes=>nodes.map(n=>[...n.cells].map(c=>c.textContent.trim())));
+    await step('filter','[data-ui-table-filter]',()=>one('[data-ui-table-filter]').fill('Alice'),async()=>{assertBasicTableRows(await rows(),[alice]);assert.match(await one('[data-ui-table-summary]').textContent(),/^1 \/ 2 rows$/);});
+    await step('clear-filter','[data-ui-table-filter]',()=>one('[data-ui-table-filter]').fill(''),async()=>assertBasicTableRows(await rows(),[alice,bob]));
     await step('density','[data-ui-table-density]',()=>one('[data-ui-table-density]').click(),async()=>assert.equal(await one('[data-ui-component=data-table]').getAttribute('data-density'),'compact'));
-    await step('sort','[data-ui-table-sort="0"]',()=>one('[data-ui-table-sort="0"]').click(),async()=>{assert.equal(await one('th').first().getAttribute('aria-sort'),'ascending');assert.match(await one('tbody tr').first().textContent(),/Caller Alice/);});
+    for(const [id,sort,expected]of [['sort-ascending','ascending',[alice,bob]],['sort-descending','descending',[bob,alice]]])await step(id,'[data-ui-table-sort="0"]',()=>one('[data-ui-table-sort="0"]').click(),async()=>{assert.equal(await one('th').first().getAttribute('aria-sort'),sort);assertBasicTableRows(await rows(),expected);});
     for(const [id,visible]of [['hide-column',false],['show-column',true]])await step(id,'[data-ui-table-column="1"]',()=>one('[data-ui-table-column="1"]').click(),async()=>assert.equal(await one('tbody tr').first().locator('td').nth(1).isVisible(),visible));
   }else if(t==='calendar'){
     const initial=await one('[data-ui-calendar-title]').textContent();
@@ -146,9 +197,10 @@ export async function runBasicActions(contract,root,runStep){
   }else if(t==='map-view'){
     const map=one('[data-ui-component="map-view"]'),zoom=Number(await map.getAttribute('data-map-zoom')),center=await map.getAttribute('data-map-center'),mapID=await map.getAttribute('id');
     assert.equal(zoom,1,'Canonical missing Zoom uses the existing source default1');assert.equal(center,'37.5665, 126.9780');
+    assert.equal(await one('[data-map-zoom="reset"]').count(),0,'Canonical ShowReset is absent; do not fabricate a Reset button');
     const action=async name=>{const events=await nativeTypes(['ely:action']);assert.equal(events[0].detail.action,name);assert.equal(events[0].detail.id,mapID);assert.equal(events[0].detail.component,'maps/MapView');return events[0].detail;};
     await step('zoom-in','[data-map-zoom="in"]',()=>one('[data-map-zoom="in"]').click(),async()=>{assert.equal(Number(await map.getAttribute('data-map-zoom')),zoom+1);const detail=await action('change-viewport');assert.deepEqual(detail,{action:'change-viewport',viewport:{latitude:37.5665,longitude:126.978,zoom:2},value:center,id:mapID,component:'maps/MapView'});});
-    await step('reset-view','[data-map-zoom="reset"]',()=>one('[data-map-zoom="reset"]').click(),async()=>{assert.equal(Number(await map.getAttribute('data-map-zoom')),zoom);assert.equal(await map.getAttribute('data-map-center'),center);const detail=await action('change-viewport');assert.deepEqual(detail,{action:'change-viewport',viewport:{latitude:37.5665,longitude:126.978,zoom:1},value:center,id:mapID,component:'maps/MapView'});});
+    await step('reset-view','[data-map-canvas]',async()=>{assert.equal(await one('[data-map-zoom="in"]').evaluate(n=>n===document.activeElement),true);await page.keyboard.press('Shift+Tab');assert.equal(await one('[data-map-canvas]').evaluate(n=>n===document.activeElement),true,'Native Shift+Tab from Zoom in must reach the focusable map canvas');await page.keyboard.press('0');},async()=>{assert.equal(await one('[data-map-canvas]').evaluate(n=>n===document.activeElement),true);assert.equal(Number(await map.getAttribute('data-map-zoom')),zoom);assert.equal(await map.getAttribute('data-map-center'),center);const detail=await action('change-viewport');assert.deepEqual(detail,{action:'change-viewport',viewport:{latitude:37.5665,longitude:126.978,zoom:1},value:center,id:mapID,component:'maps/MapView'});});
     await step('select-marker','[data-map-markers] [data-map-point]',()=>one('[data-map-markers] [data-map-point]').click(),async()=>{assert.equal(await one('[data-map-popup]').isVisible(),true);const detail=await action('select-marker');assert.deepEqual(detail,{action:'select-marker',key:'Caller Seoul',value:'seoul',latitude:37.5665,longitude:126.978,id:mapID,component:'maps/MapView'});});
     await step('close-popup','[data-map-close]',()=>one('[data-map-close]').click(),async()=>{assert.equal(await one('[data-map-popup]').isVisible(),false);const detail=await action('close-map-popup');assert.deepEqual(detail,{action:'close-map-popup',key:'Caller Seoul',id:mapID,component:'maps/MapView'});});
   }else if(t==='coordinate-display'){

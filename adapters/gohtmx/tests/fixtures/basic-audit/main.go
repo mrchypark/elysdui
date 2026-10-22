@@ -62,6 +62,39 @@ func actionInventory() ([]basicCase, error) {
 	return rows, nil
 }
 
+// Compiled embedded assets and test-host constants are pinned before browser delivery.
+func actionManifest() (map[string]any, error) {
+	rows, err := actionInventory()
+	if err != nil {
+		return nil, err
+	}
+	hashes := map[string]string{}
+	add := func(path string, data []byte) {
+		digest := sha256.Sum256(data)
+		hashes["/"+path] = hex.EncodeToString(digest[:])
+	}
+	err = fs.WalkDir(ui.Files, "assets", func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || !(strings.HasSuffix(path, ".js") || strings.HasSuffix(path, ".css")) {
+			return nil
+		}
+		data, err := ui.Files.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		add(path, data)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	add("assets/basic-audit.css", []byte(fixtureCSS))
+	add("assets/basic-audit-actions.js", []byte(actionJS))
+	return map[string]any{"basicNames": sduicatalogue.BasicNames(), "cases": rows[:48], "variants": rows[48:], "assetHashes": hashes}, nil
+}
+
 func inventory() ([]basicCase, error) {
 	fixtures, names := sduicatalogue.BasicFixtures(), sduicatalogue.BasicNames()
 	if len(fixtures) != 48 || len(names) != 48 {
@@ -271,13 +304,13 @@ func handler() (http.Handler, error) {
 		io.WriteString(w, actionJS)
 	})
 	mux.HandleFunc("GET /action-manifest.json", func(w http.ResponseWriter, r *http.Request) {
-		rows, err := actionInventory()
+		manifest, err := actionManifest()
 		if err != nil {
 			http.Error(w, err.Error(), 500)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{"basicNames": sduicatalogue.BasicNames(), "cases": rows[:48], "variants": rows[48:]})
+		json.NewEncoder(w).Encode(manifest)
 	})
 	var actions bytes.Buffer
 	if err = renderMode(&actions, true); err != nil {
@@ -332,11 +365,11 @@ func export(dir string) error {
 	if err := os.WriteFile(filepath.Join(dir, "basic-actions", "index.html"), actions.Bytes(), 0600); err != nil {
 		return err
 	}
-	rows, err := actionInventory()
+	metadata, err := actionManifest()
 	if err != nil {
 		return err
 	}
-	manifest, err := json.Marshal(map[string]any{"basicNames": sduicatalogue.BasicNames(), "cases": rows[:48], "variants": rows[48:]})
+	manifest, err := json.Marshal(metadata)
 	if err != nil {
 		return err
 	}
@@ -395,10 +428,10 @@ func main() {
 			err = json.NewEncoder(os.Stdout).Encode(result)
 		}
 	case *dump == "/action-manifest.json":
-		var rows []basicCase
-		rows, err = actionInventory()
+		var manifest map[string]any
+		manifest, err = actionManifest()
 		if err == nil {
-			err = json.NewEncoder(os.Stdout).Encode(map[string]any{"basicNames": sduicatalogue.BasicNames(), "cases": rows[:48], "variants": rows[48:]})
+			err = json.NewEncoder(os.Stdout).Encode(manifest)
 		}
 	case *dump == actionPath:
 		err = renderMode(os.Stdout, true)

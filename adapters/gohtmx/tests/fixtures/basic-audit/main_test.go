@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"net/http/httptest"
 	"os"
@@ -335,5 +337,67 @@ func TestActionPageHasSeparateScopedVariantsAndLabelledHostOpener(t *testing.T) 
 		if response.Code != 200 || !bytes.Equal(data, response.Body.Bytes()) {
 			t.Errorf("live/static action fixture mismatch %s", path)
 		}
+	}
+}
+
+func TestActionManifestPinsEmbeddedAndHostAssetBytes(t *testing.T) {
+	manifest, err := actionManifest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	hashes := manifest["assetHashes"].(map[string]string)
+	for _, path := range []string{"/assets/app.css", "/assets/ely-controls.css", "/assets/ely-patterns.css", "/assets/ely-map.css", "/assets/ely-controls.js", "/assets/ely-patterns.js", "/assets/ely-map.js", "/assets/theme.js", "/assets/basic-audit.css", "/assets/basic-audit-actions.js"} {
+		if hashes[path] == "" {
+			t.Errorf("missing expected asset %s", path)
+		}
+	}
+	for path, expected := range hashes {
+		var data []byte
+		switch path {
+		case "/assets/basic-audit.css":
+			data = []byte(fixtureCSS)
+		case "/assets/basic-audit-actions.js":
+			data = []byte(actionJS)
+		default:
+			data, err = ui.Files.ReadFile(strings.TrimPrefix(path, "/"))
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+		digest := sha256.Sum256(data)
+		if hex.EncodeToString(digest[:]) != expected {
+			t.Errorf("expected bytes mismatch %s", path)
+		}
+	}
+	var output bytes.Buffer
+	if err = renderMode(&output, true); err != nil {
+		t.Fatal(err)
+	}
+	maps := 0
+	walk(parsed(t, output.String()), func(n *html.Node) {
+		if attr(n, "data-basic-component") != "basic/map-view" {
+			return
+		}
+		maps++
+		canvas, reset := 0, 0
+		walk(n, func(child *html.Node) {
+			for _, a := range child.Attr {
+				if a.Key == "data-map-canvas" {
+					canvas++
+					if attr(child, "tabindex") != "0" {
+						t.Error("map canvas not natively focusable")
+					}
+				}
+			}
+			if attr(child, "data-map-zoom") == "reset" {
+				reset++
+			}
+		})
+		if canvas != 1 || reset != 0 {
+			t.Errorf("canonical canvas%d reset%d", canvas, reset)
+		}
+	})
+	if maps != 2 {
+		t.Errorf("canonical map instances%d", maps)
 	}
 }
