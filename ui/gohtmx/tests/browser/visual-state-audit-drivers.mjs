@@ -185,6 +185,17 @@ export function caseActionContract(identity,source,filename){
 const settingsTargets={KeyboardShortcutsList:[1,'Keyboard'],ProxySettings:[2,'Network'],PrivacySettings:[3,'Privacy','telemetry'],NotificationSettings:[4,'Notifications','quiet'],StartupSettings:[5,'Startup','login'],StorageSettings:[6,'Storage'],ResetToDefault:[6,'Storage'],AdvancedSettings:[7,'Advanced','developer'],'DeveloperMode Toggle':[7,'Advanced','developer']};
 export function requestedStateContract(identity){
   const focused={
+    'buttons/Button':{kind:'Button',sequence:'button-public-boundary',steps:[
+      ...['primary','secondary','outline','ghost','subtle','danger','link'].map(value=>[`click-${value}`,`button[value="${value}"]`,'Native click emits exactly the caller action/value; no form or persistence fabricated']),
+      ['cancel-primary','button[value="primary"]','Canceling the public action prevents the originating native click default; no host operation is asserted'],
+      ...['primary','secondary','outline','ghost','subtle','danger','link'].map(value=>[`disabled-${value}`,`button[value="${value}-disabled"]`,'Native HTMLButtonElement.click on an actually disabled control emits neither click nor public events']),
+    ]},
+    'forms/TextArea':{kind:'TextArea',sequence:'textarea-public-multiline',steps:[
+      ['fill-multiline','textarea[data-ely-autoresize]','Native input preserves exact multiline caller text and grows height; no change before commit'],
+      ['commit-multiline','textarea[data-ely-autoresize]','Native blur commits exactly one public change with actual name/type/value'],
+      ['clear-text','textarea[data-ely-autoresize]','Native input clears caller text without fabricating required validation or host action'],
+      ['commit-empty','textarea[data-ely-autoresize]','Native blur commits the exact empty value; optional field remains valid'],
+    ]},
     'tooling/EventLogger':{kind:'EventLogger',sequence:'eventlogger-public-timestamps',steps:[
       ['coalesce-pointer','[data-tool-event-target]','Two public pointer moves coalesce; exact observed-event elapsed display'],
       ['capture-consumed-key','[data-tool-event-target] input','Capture-phase Ctrl+K survives child stopPropagation'],
@@ -236,6 +247,8 @@ export function requestedStateContract(identity){
   }[identity];
   if(focused){
     const provenance={
+      'buttons/Button':'internal/gallery/advanced_interaction_fixtures.go Button Groups; ui/gohtmx/templates/ely-api-interaction.html ely-api-buttons; ui/gohtmx/assets/ely-api.js click/emit; public cancelable event boundary only, not application onClick execution',
+      'forms/TextArea':'internal/gallery/advanced_forms_fixtures.go TextArea; ui/gohtmx/templates/ely-api-forms.html TextArea; ui/gohtmx/assets/ely-api-forms.js input autoresize; ui/gohtmx/assets/ely-api.js change; no disabled/readOnly/required fixture is claimed',
       'tooling/EventLogger':'internal/gallery/advanced_native_tooling_fixtures.go EventLogger; ui/gohtmx/templates/ely-api-native-tooling.html EventLogger; ui/gohtmx/assets/ely-api-native-tooling.js receive/recordInput; exact global trace calibration remains separate',
       'project/StatusSelect':'ui/gohtmx/templates/ely-api-communication.html:108,115; ui/gohtmx/assets/ely-api-communication.js:258; ui/gohtmx/assets/ely-api.js submit handler',
       'data/Tag':'internal/gallery/advanced_data_fixtures.go Tag; ui/gohtmx/templates/ely-api-data.html ely-api-tag; ui/gohtmx/assets/ely-api-data.js tag-remove handler',
@@ -246,7 +259,7 @@ export function requestedStateContract(identity){
       'navigation/Tabs':'Explicit selected-tab/panel contract from ui/gohtmx/templates/ely-api-interaction.html and ui/gohtmx/assets/ely-api-interaction.js',
       'motion/Lottie Player':'Explicit deterministic player contract from internal/gallery/advanced_interaction_fixtures.go, ui/gohtmx/templates/ely-api-interaction.html and ui/gohtmx/assets/ely-api-interaction.js',
     }[identity];
-    const steps=focused.steps.map(([id,control,expectedState])=>({id,control,expectedState,event:identity==='tooling/EventLogger'?'synthetic public DOM event via Playwright':'native Playwright action',source:{siteId:`focused-state:${identity}:${id}`,sourceAnchor:null,provenance}}));
+    const steps=focused.steps.map(([id,control,expectedState])=>({id,control,expectedState,event:identity==='tooling/EventLogger'?'synthetic public DOM event via Playwright':id.startsWith('disabled-')?'native HTMLButtonElement.click (disabled negative; not trusted pointer input)':'native Playwright action',source:{siteId:`focused-state:${identity}:${id}`,sourceAnchor:null,provenance}}));
     return {identity,kind:focused.kind,target:null,variant:identity.split('/')[1],focusedSequence:focused.sequence,steps,mappingGaps:[],requestedStateOnly:true,
       fixtureGuards:{component:identity,kind:focused.kind},scope:'Explicit finite focused sequence from the case fixture; separate from registered-check coverage, aliases, and all-catalog approval'+(identity==='tooling/EventLogger'?'; four grouped scenario checkpoints, not per-event pixel coverage or trusted physical input; exact trace calibration remains separate':'')};
   }
@@ -299,8 +312,16 @@ export function assertEventLoggerPublicState(stage,observation){
   return {...observation,timestampOrigin:rawEvents[0].timeStamp,timestampRule:'first accepted public event.timeStamp; exact two-decimal elapsed seconds',eventProvenance:'Synthetic public DOM events through actual component listeners; trusted physical input is not established'};
 }
 
+export function assertFoundationPublicEvents(identity,id,observed,{value}){
+  assert.equal(typeof id,'string');assert(id.length>0);
+  if(identity==='buttons/Button')assert.deepEqual(observed.map(event=>[event.type,event.detail]),[['ely:action',{id,component:identity,action:value,value,formData:null,values:[]}]]);
+  else if(identity==='forms/TextArea')assert.deepEqual(observed.map(event=>[event.type,event.detail]),[['ely:change',{id,component:identity,name:'caller_value',value,checked:undefined,type:'textarea'}]]);
+  else assert.fail('No finite foundation public event contract for '+identity);
+  return observed;
+}
+
 export async function runRequestedStateActions(contract,root,runStep){
-  if(['task-due-submit','remove-four-tags','radio-groups-reselection','eventlogger-public-timestamps'].includes(contract.focusedSequence)){
+  if(['task-due-submit','remove-four-tags','radio-groups-reselection','eventlogger-public-timestamps','button-public-boundary','textarea-public-multiline'].includes(contract.focusedSequence)){
     const identity=await root.getAttribute('data-ely-component');
     assert.equal(identity,contract.identity,'Exact alias identity is required');
     assert.equal(await root.getAttribute('data-ely-kind'),contract.kind);
@@ -324,6 +345,56 @@ export async function runRequestedStateActions(contract,root,runStep){
     let cursor=0;
     const begin=async()=>{cursor=(await events()).length;};
     const fresh=async()=>{assert.deepEqual(await twinState(),initialTwin,'Public actions must preserve the independent twin');return (await events()).slice(cursor);};
+    if(['button-public-boundary','textarea-public-multiline'].includes(contract.focusedSequence)){
+      await root.evaluate(node=>{
+        node.__visualNativeControls=[];
+        node.__visualNativeObserver=event=>node.__visualNativeControls.push({type:event.type,value:event.target.value,isTrusted:event.isTrusted,defaultPrevented:event.defaultPrevented});
+        for(const type of ['click','input','change'])node.addEventListener(type,node.__visualNativeObserver);
+      });
+      const native=()=>root.evaluate(node=>node.__visualNativeControls);
+      try{
+        if(contract.focusedSequence==='button-public-boundary'){
+          assert.equal(await root.locator('button').count(),14);
+          for(const value of ['primary','secondary','outline','ghost','subtle','danger','link']){
+            const control=root.locator(`button[value="${value}"]`);
+            assert.equal(await control.isEnabled(),true);assert.equal(await control.getAttribute('data-ely-action'),value);
+            await runStep(`click-${value}`,async()=>{await begin();await control.click();},async()=>{
+              const observed=await fresh();assertFoundationPublicEvents(identity,id,observed,{value});
+              assert.deepEqual((await native()).at(-1),{type:'click',value,isTrusted:true,defaultPrevented:false});return {events:observed};
+            });
+          }
+          await runStep('cancel-primary',async()=>{
+            await begin();await root.evaluate(node=>{node.__visualCancelAction=event=>event.preventDefault();node.addEventListener('ely:action',node.__visualCancelAction);});
+            try{await root.locator('button[value="primary"]').click();}
+            finally{await root.evaluate(node=>{node.removeEventListener('ely:action',node.__visualCancelAction);delete node.__visualCancelAction;});}
+          },async()=>{const observed=await fresh();assertFoundationPublicEvents(identity,id,observed,{value:'primary'});assert.deepEqual((await native()).at(-1),{type:'click',value:'primary',isTrusted:true,defaultPrevented:true});return {events:observed,scope:'Public cancellation only; application onClick callback not executed by harness'};});
+          for(const value of ['primary','secondary','outline','ghost','subtle','danger','link']){
+            const control=root.locator(`button[value="${value}-disabled"]`);assert.equal(await control.isDisabled(),true);
+            let before;
+            await runStep(`disabled-${value}`,async()=>{await begin();before=await native();await control.evaluate(node=>node.click());},async()=>{assert.deepEqual(await fresh(),[]);assert.deepEqual(await native(),before);return {disabled:true,scope:'native disabled DOM click; no trusted pointer action claimed'};});
+          }
+        }else{
+          const field=root.locator('textarea[data-ely-autoresize]');assert.equal(await field.count(),1);
+          const initial=await field.evaluate(node=>({name:node.name,value:node.value,disabled:node.disabled,readOnly:node.readOnly,required:node.required,rows:node.rows}));
+          assert.deepEqual(initial,{name:'caller_value',value:'',disabled:false,readOnly:false,required:false,rows:3});
+          const initialHeight=await field.evaluate(node=>node.getBoundingClientRect().height);
+          let multilineHeight;
+          for(const [suffix,value] of [['multiline','one\ntwo\nthree\nfour'],['empty','']]){
+            await runStep(suffix==='multiline'?'fill-multiline':'clear-text',async()=>{await begin();await field.fill(value);},async()=>{
+              assert.deepEqual(await fresh(),[]);assert.equal(await field.inputValue(),value);
+              const painted=await field.evaluate(node=>({height:parseFloat(node.style.height),scrollHeight:node.scrollHeight,valid:node.checkValidity()}));
+              assert(painted.height>0&&painted.height<=600&&Math.abs(painted.height-Math.min(600,painted.scrollHeight))<=2,'Textarea autoresize follows its actual scroll height');assert.equal(painted.valid,true);
+              const height=await field.evaluate(node=>node.getBoundingClientRect().height);
+              if(suffix==='multiline'){assert(height>initialHeight,'Four lines must grow the initial three-row fixture');multilineHeight=height;}
+              else assert(height<multilineHeight,'Clearing the fixture must shrink its multiline height');
+              assert.deepEqual((await native()).at(-1),{type:'input',value,isTrusted:true,defaultPrevented:false});return {value,painted};
+            });
+            await runStep(`commit-${suffix}`,async()=>{await begin();await field.press('Tab');},async()=>{const observed=await fresh();assertFoundationPublicEvents(identity,id,observed,{value});assert.deepEqual((await native()).at(-1),{type:'change',value,isTrusted:true,defaultPrevented:false});return {value,events:observed};});
+          }
+        }
+      }finally{await root.evaluate(node=>{for(const type of ['click','input','change'])node.removeEventListener(type,node.__visualNativeObserver);delete node.__visualNativeObserver;});}
+      return;
+    }
     if(contract.focusedSequence==='eventlogger-public-timestamps'){
       await root.evaluate(node=>{
         const target=node.querySelector('[data-tool-event-target]'),log=node.querySelector('[data-tool-event-log]');
