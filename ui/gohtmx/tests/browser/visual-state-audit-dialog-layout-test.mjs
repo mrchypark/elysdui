@@ -68,6 +68,21 @@ function record(id, ok, details) {
   if (!ok) failures.push({id, details});
 }
 
+function horizontalCenterError(box) {
+  return Math.abs(box.x - (box.viewport.width - box.width) / 2);
+}
+
+if (process.env.DIALOG_GEOMETRY_SELF_CHECK === '1') {
+  for (const [layoutWidth, width, x] of [[1440, 440, 500], [1425, 440, 492.5], [390, 390, 0], [375, 375, 0]]) {
+    const box = {x, width, viewport: {width: layoutWidth}};
+    assert.equal(horizontalCenterError(box), 0);
+    assert(horizontalCenterError({...box, x: x + 2}) > 1.5, 'Off-center dialog must still fail');
+  }
+  assert.equal(horizontalCenterError({x: 492.5, width: 440, viewport: {width: 1440}}), 7.5, 'Inner width must not replace layout width with classic scrollbars');
+  console.log('Dialog geometry: overlay/classic scrollbar layout widths and off-center rejection passed');
+  process.exit(0);
+}
+
 async function inspectOpenDialog(page, theme, size, view) {
   const dialog = page.locator('[data-ely-component="overlays/Dialog"] dialog').first();
   const expected = await dialog.evaluate(node => {
@@ -75,7 +90,8 @@ async function inspectOpenDialog(page, theme, size, view) {
     return {
       x: r.x, y: r.y, width: r.width, height: r.height,
       right: r.right, bottom: r.bottom,
-      viewport: {width: innerWidth, height: innerHeight},
+      viewport: {width: document.documentElement.clientWidth, height: innerHeight},
+      innerWidth,
       title: node.querySelector('h2')?.textContent?.trim(),
       text: node.innerText,
       activeIsFirstInput: document.activeElement === node.querySelector('input'),
@@ -86,7 +102,7 @@ async function inspectOpenDialog(page, theme, size, view) {
     };
   });
   const centerError = {
-    x: Math.abs(expected.x - (expected.viewport.width - expected.width) / 2),
+    x: horizontalCenterError(expected),
     y: Math.abs(expected.y - (expected.viewport.height - expected.height) / 2)
   };
   const centered = centerError.x <= 1.5 && centerError.y <= 1.5;
@@ -146,8 +162,8 @@ try {
     await sheetRoot.locator('[data-interaction-dialog]').first().click();
     const sheet = sheetRoot.locator('dialog.is-sheet');
     await sheet.waitFor({state: 'visible'});
-    const sheetBox = await sheet.evaluate(node => { const r = node.getBoundingClientRect(); return {x:r.x,y:r.y,width:r.width,height:r.height,bottom:r.bottom,viewport:innerHeight}; });
-    record(`${theme}/sheet-remains-bottom-centered`, Math.abs(sheetBox.bottom - sheetBox.viewport) <= 1.5 && Math.abs(sheetBox.x - (390 - sheetBox.width) / 2) <= 1.5, sheetBox);
+    const sheetBox = await sheet.evaluate(node => { const r = node.getBoundingClientRect(); return {x:r.x,y:r.y,width:r.width,height:r.height,bottom:r.bottom,viewport:{width:document.documentElement.clientWidth,height:innerHeight},innerWidth}; });
+    record(`${theme}/sheet-remains-bottom-centered`, Math.abs(sheetBox.bottom - sheetBox.viewport.height) <= 1.5 && horizontalCenterError(sheetBox) <= 1.5, sheetBox);
     await sheet.locator('[data-interaction-close]').last().click();
     await page.waitForFunction(() => !document.querySelector('[data-ely-component="buttons/ActionSheet"] dialog').open);
 
