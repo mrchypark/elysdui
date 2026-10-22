@@ -74,6 +74,7 @@ workspace/calendar layout regressions, including mobile, theme and classic-scrol
 retains screenshots and source-hash receipts under `test-results/`; CI uploads
 these separately from the gallery evidence. Passing this finite regression set
 does not establish visual coverage of every component or action state.
+The same command includes the source-only action-camera checks; set `RUN_ACTION_CAMERA_BROWSER=1` (as CI does) to run the bounded tall-page pixel regression and retain its PNGs, source hashes, and cleanup receipt under `test-results/action-camera/`.
 
 The static build compiles the Go renderer to WASM and writes a base-path-aware
 Pages bundle. Building/testing it does not deploy. Deployment is the main-branch
