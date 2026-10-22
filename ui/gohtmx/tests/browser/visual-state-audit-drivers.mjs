@@ -47,10 +47,10 @@ export function captureForeignPaint(node,{clip,checkedRootID}){
     {x:a.x,y:i.y,width:i.x-a.x,height:i.height},
     {x:i.x+i.width,y:i.y,width:a.x+a.width-i.x-i.width,height:i.height},
   ].filter(b=>b.width>0.01&&b.height>0.01);};
-  const plainChain=(start,end)=>{for(let p=start;p&&p!==end;p=p.parentElement){const s=getComputedStyle(p);if(p.matches(':modal,:popover-open')||['sticky','fixed'].includes(s.position)||s.zIndex!=='auto'||Number(s.opacity)!==1||s.transform!=='none'||s.filter!=='none'||s.perspective!=='none'||s.maskImage!=='none'||s.backdropFilter!=='none'||s.containerType!=='normal'||s.isolation==='isolate'||s.mixBlendMode!=='normal'||s.contain!=='none'||s.willChange!=='auto'||s.clipPath!=='none'||s.overflowX!=='visible'||s.overflowY!=='visible')return false;}return true;};
+  const plainChain=(start,end)=>{for(let p=start;p&&p!==end;p=p.parentElement){const s=getComputedStyle(p);if(p.matches(':modal,:popover-open')||['sticky','fixed'].includes(s.position)||s.zIndex!=='auto'||Number(s.opacity)!==1||s.transform!=='none'||s.filter !== 'none'||s.perspective!=='none'||s.maskImage!=='none'||s.backdropFilter!=='none'||s.containerType!=='normal'||s.isolation !== 'auto'||s.mixBlendMode!=='normal'||s.contain!=='none'||s.willChange!=='auto'||s.clipPath!=='none'||s.overflowX!=='visible'||s.overflowY!=='visible')return false;}return true;};
   // Even a shared ancestor can clip the purported opaque cover. Decline the
   // proof instead of attempting to model ancestor paint clips or masks.
-  const unclippedAncestors=()=>{for(let p=node.parentElement;p;p=p.parentElement){const s=getComputedStyle(p);if(s.overflowX!=='visible'||s.overflowY!=='visible'||s.clipPath!=='none'||s.clip!=='auto'||s.maskImage!=='none'||s.filter!=='none'||s.backdropFilter!=='none'||s.perspective!=='none')return false;}return true;};
+  const unclippedAncestors=()=>{for(let p=node.parentElement;p;p=p.parentElement){const s=getComputedStyle(p);if(s.overflowX!=='visible'||s.overflowY!=='visible'||s.clipPath!=='none'||s.clip!=='auto'||s.maskImage!=='none'||s.filter !== 'none'||s.backdropFilter!=='none'||s.perspective!=='none')return false;}return true;};
   const canCover=paint=>{
     let common=node.parentElement;while(common&&!common.contains(paint))common=common.parentElement;
     return common&&covers.length&&unclippedAncestors()&&Number(style.opacity)===1&&style.transform==='none'&&style.filter==='none'&&style.mixBlendMode==='normal'&&plainChain(node.parentElement,common)&&plainChain(paint,common);
