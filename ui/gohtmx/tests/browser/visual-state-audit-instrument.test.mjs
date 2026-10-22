@@ -5,7 +5,7 @@ import {readFile,mkdtemp,writeFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {chromium} from 'playwright';
-import {caseActionContract,requestedStateContract,runRequestedStateActions,clickVisibleControl,ownedOverlayInventory,captureTargetPNG,inventoryReceipt,inventoryDrift,unhandledBrowserErrors} from './visual-state-audit-drivers.mjs';
+import {caseActionContract,requestedStateContract,runRequestedStateActions,runRegisteredCanvasActions,assertRegisteredCanvasTransition,clickVisibleControl,ownedOverlayInventory,captureTargetPNG,inventoryReceipt,inventoryDrift,unhandledBrowserErrors} from './visual-state-audit-drivers.mjs';
 
 const returnFlowSites=body=>resolveCaseActionSites(`function entry(){${body}}`,'return-flow.js',{entry:'entry',facts:{selected:true}});
 const returnFlowControls=result=>result.sites.map(site=>site.control);
@@ -705,12 +705,13 @@ test('explicit async domain tail awaits seal capture before helper return or rej
   }
 });
 
-test('workspace domain keeps exactly the two explicit async source tail awaits',async()=>{
+test('workspace domain and canvas keep exactly three explicit async source tail awaits',async()=>{
   const source=await readFile(new URL('../../../../internal/gallery/assets/advanced-workspace-checks.js',import.meta.url),'utf8');
   const domain=source.slice(source.indexOf('const domain = async '),source.indexOf('const domain = async ')+350);
   assert.match(domain,/return await devtoolsSource\(\{root,actions\}\);/);
   assert.match(domain,/return await canvasScene\(\{root,actions\}\);/);
-  assert.equal((source.match(/return await (?:devtoolsSource|canvasScene)\(/g)||[]).length,2);
+  assert.equal((source.match(/return await (?:devtoolsSource|canvasScene)\(/g)||[]).length,3);
+  assert.match(source,/const canvas = async [\s\S]*?return await canvasScene\(\{root,actions\}\);/);
   assert.match(source,/const code = async [\s\S]*?return devtoolsSource\(\{root,actions\}\);/,'Other callers are not normalized by this bounded change');
 });
 
@@ -744,6 +745,77 @@ test('connected native mask and forms checklist loop sites remain checkpointable
 });
 
 const fixtureSource=family=>readFile(new URL(`../../../../internal/gallery/assets/advanced-${family}-checks.js`,import.meta.url),'utf8');
+test('registered canvas pure: exact eight identities map only two ordered scene sites',async()=>{
+  const source=await fixtureSource('workspace');
+  const identities=['InfiniteCanvas','CanvasGrid','Guides','Ruler','ArtboardFrame','ZoomControls','ZoomIndicator','MiniMap'].map(name=>`canvas/${name}`);
+  for(const identity of identities){
+    const contract=caseActionContract(identity,source,'workspace.js');
+    assert.equal(contract.identity,identity);assert.equal(contract.kind,'InfiniteCanvas');assert.equal(contract.entry,'canvas');
+    assert.equal(contract.registeredCanvas,true);assert.deepEqual(contract.mappingGaps,[]);
+    assert.deepEqual(contract.steps.map(step=>[step.id,step.source.owner,step.source.controlSelector,step.source.method,step.source.event]),[
+      ['zoom-in','canvasScene','[data-cs-zoom-in]','click','click'],['minimap-arrow-right','canvasScene','[data-cs-minimap]','dispatchEvent','keydown'],
+    ]);
+    assert(contract.steps.every(step=>step.source.sourceAnchor.text&&step.source.unknownGuards.length===0));
+    assert.equal(new Set(contract.steps.map(step=>step.source.siteId)).size,2);
+    assert.deepEqual(requestedStateContract(identity).steps.map(step=>step.id),['zoom-in','fit-canvas','navigate-minimap']);
+    assert.equal(requestedStateContract(identity).requestedStateOnly,true);
+  }
+  for(const identity of ['canvas/Unknown','editor/MiniMap','canvas/InfiniteCanvasExtra','canvas/FlowChart'])assert.equal(caseActionContract(identity,source,'workspace.js'),null);
+});
+test('registered canvas pure: extra missing reordered and unknown actions remain blocked',async()=>{
+  const source=await fixtureSource('workspace'),start=source.indexOf("  if(kind==='InfiniteCanvas'){"),end=source.indexOf("  if(kind==='MindMap'){",start);
+  const prefix=source.slice(0,start),branch=source.slice(start,end),suffix=source.slice(end);
+  const zoom="one(root,'[data-cs-zoom-in]').click();",arrow="one(root,'[data-cs-minimap]').dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true}));";
+  assert(branch.includes(zoom)&&branch.includes(arrow));
+  for(const changed of [branch.replace(zoom,zoom+zoom),branch.replace(arrow,''),branch.replace(zoom,'').replace(arrow,arrow+zoom),branch.replace(zoom,'if(unknown)return;'+zoom),branch.replace(zoom,'if(unknown){'+zoom+'}')]){
+    const contract=caseActionContract('canvas/InfiniteCanvas',prefix+changed+suffix,'workspace.js');
+    assert(contract.mappingGaps.length>0,'Reachable extra/missing/reordered/unknown sites cannot be promoted');
+  }
+  const untouched=caseActionContract('canvas/InfiniteCanvas',source.replace("if(kind==='MindMap'){","if(kind==='MindMap'){extra.click();"),'workspace.js');
+  assert.deepEqual(untouched.mappingGaps,[],'A proven unreachable sibling must not add sites');
+});
+test('registered canvas pure: viewport oracle rejects wrong direction zoom payload and clipping basis',()=>{
+  const before={stage:{width:820,height:460},view:{x:-60,y:-60,zoom:.7}};
+  const zoom={x:-60+410/.7-410/.75,y:-60+230/.7-230/.75,zoom:.75};
+  const after={stage:before.stage,view:zoom},detail={action:'change-viewport',view:zoom};
+  assert.deepEqual(assertRegisteredCanvasTransition('zoom-in',before,after,detail),zoom);
+  const right={...zoom,x:zoom.x+40/.75};
+  assert.deepEqual(assertRegisteredCanvasTransition('minimap-arrow-right',after,{stage:before.stage,view:right},{action:'change-viewport',view:right}),right);
+  for(const wrong of [{...right,x:zoom.x-40/.75},{...right,zoom:1},{...right,y:right.y+1}])assert.throws(()=>assertRegisteredCanvasTransition('minimap-arrow-right',after,{stage:before.stage,view:wrong},{action:'change-viewport',view:wrong}));
+  assert.throws(()=>assertRegisteredCanvasTransition('zoom-in',before,after,{action:'change-viewport',scene:{view:zoom}}),'The public payload is view, not an invented scene wrapper');
+  assert.throws(()=>assertRegisteredCanvasTransition('zoom-in',before,{stage:{width:390,height:460},view:zoom},detail));
+  assert.throws(()=>assertRegisteredCanvasTransition('fit-canvas',before,after,detail));
+});
+test('registered canvas pure: direct dispatch remains fresh native and separate from supplement',async()=>{
+  const driver=runRegisteredCanvasActions.toString(),runner=await readFile(new URL('./visual-state-audit-actions.mjs',import.meta.url),'utf8');
+  assert(driver.includes("view:{zoom:.7,x:-60,y:-60}"));
+  assert(driver.includes("['zoom-in','minimap-arrow-right']"));
+  assert(driver.includes("await map.focus();await map.press('ArrowRight')"));
+  assert(driver.includes("clickVisibleControl(root.locator('[data-cs-zoom-in]'))"));
+  assert(driver.includes('trusted:true'));assert(driver.includes('assert.equal(events.length,1)'));
+  assert(!driver.includes("runStep('fit-canvas'"));assert(!driver.includes('dispatchEvent('));
+  assert(runner.includes('await runRegisteredCanvasActions(contract,root,step)'));
+  for(const veto of ['unknownReached.length>0','unexpectedRuntimeOccurrences.length>0','missingRuntimeOccurrences.length>0','directFallback?.status'])assert(runner.includes(veto));
+});
+test('registered canvas pure: awaited entry preserves return rejection and capture order',async()=>{
+  for(const rejects of [false,true]){
+    const source=`
+      globalThis.__visualCheckpoint=async()=>{events.push('capture-start');await Promise.resolve();events.push('capture-end');};
+      const failure=new Error('canvas failed');
+      const canvasScene=async()=>{target.click();events.push('helper-complete');${rejects?'throw failure;':'return 29;'}};
+      const canvas=async({root,actions})=>{if(root.querySelector('[data-ws-canvas-scene]'))return await canvasScene({root,actions});};
+      const root={querySelector:()=>true};
+      try{events.push('returned:'+await canvas({root,actions:[]}));}catch(error){assert(error===failure);events.push('rejected');}
+    `;
+    const original=await execute(source),result=transform(source,'canvas-tail.js');
+    assert.equal(result.unsupported.length,0);assert.equal(result.interactionSites.length,1);
+    assert.deepEqual(await execute(result.source),['before:click','click','capture-start','capture-end','helper-complete',rejects?'rejected':'returned:29']);
+    assert.deepEqual(original,['click','helper-complete',rejects?'rejected':'returned:29']);
+    const old=transform(source.replace('return await canvasScene','return canvasScene'),'canvas-tail-old.js');
+    assert.equal(old.interactionSites.length,0);assert(old.unsupported.length>0);
+    assert.deepEqual(await execute(old.source),original);
+  }
+});
 test('maps only ArchiveViewer branch and called helpers; rejects new or missing exact actions',async()=>{
   const source=await fixtureSource('workspace');
   const contract=caseActionContract('files/ArchiveViewer',source,'workspace.js');

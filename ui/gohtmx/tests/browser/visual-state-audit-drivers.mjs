@@ -175,7 +175,12 @@ export async function clickVisibleControl(control,{allowKeyboard=false}={}){
 }
 
 const step=(id,owner,control,method,event,expectedState)=>({id,owner,control,method,event,expectedState});
+const registeredCanvasIDs=['canvas/InfiniteCanvas','canvas/CanvasGrid','canvas/Guides','canvas/Ruler','canvas/ArtboardFrame','canvas/ZoomControls','canvas/ZoomIndicator','canvas/MiniMap'];
 const contracts={
+  'canvas/InfiniteCanvas':{entry:'canvas',kind:'InfiniteCanvas',steps:[
+    step('zoom-in','canvasScene','[data-cs-zoom-in]','click','click','zoom=.75; center held; public view equals rendered transform'),
+    step('minimap-arrow-right','canvasScene','[data-cs-minimap]','dispatchEvent','keydown','ArrowRight adds 40/.75 to viewport x; y and zoom unchanged'),
+  ]},
   'files/ArchiveViewer':{entry:'domain',kind:'ArchiveViewer',steps:[
     step('expand-folder','domain','folder','click','click','aria-expanded=true; child list visible'),
     step('open-entry','domain','[data-ws-archive-node="Atrium/Design/Palette.json"]','dispatchEvent','keydown','open-archive-entry.path=Atrium/Design/Palette.json'),
@@ -204,9 +209,10 @@ export function caseActionContract(identity,source,filename){
   // MiniMap deliberately renders a different read-only control and takes an early return.
   const editorAliases=['EditorGutter','LineNumbers','FoldingControl','Ruler','IndentGuide','BracketMatcher','RainbowBrackets','MultiCursor','SelectionHighlight','StickyScroll','Breadcrumb','InlayHints','CodeLens','InlineDecoration'];
   const editor=identity==='editor/CodeEditor'||editorAliases.some(name=>identity===`editor/${name}`);
-  const definition=contracts[editor?'editor/CodeEditor':identity];if(!definition)return null;
+  const canvas=registeredCanvasIDs.includes(identity);
+  const definition=contracts[canvas?'canvas/InfiniteCanvas':editor?'editor/CodeEditor':identity];if(!definition)return null;
   const facts={root:{dataset:{elyKind:definition.kind,elyComponent:identity}},kind:definition.kind,variant:identity.split('/')[1],twin:true,
-    selectors:{'[data-ws-devtools-source]':false,'[data-ws-canvas-scene]':false},form:{dataset:{wsRequired:'true'}},node:{tagName:'INPUT',type:'password'}};
+    selectors:{'[data-ws-devtools-source]':false,'[data-ws-canvas-scene]':canvas},form:{dataset:{wsRequired:'true'}},node:{tagName:'INPUT',type:'password'}};
   const resolved=resolveCaseActionSites(source,filename,{entry:definition.entry,facts});
   const mappingGaps=[...resolved.mappingGaps];
   if(resolved.sites.length!==definition.steps.length)mappingGaps.push({reason:'exact-action-count-changed',expected:definition.steps.length,actual:resolved.sites.length});
@@ -216,7 +222,62 @@ export function caseActionContract(identity,source,filename){
     return {...expected,source:actual||null};
   });
   return {identity,entry:definition.entry,kind:definition.kind,steps,mappingGaps,
+    ...(canvas?{registeredCanvas:true}:{}),
     fixtureGuards:{component:identity,kind:definition.kind,devtoolsSourceAbsent:identity!=='forms/PasswordInput',canvasSceneAbsent:identity==='files/ArchiveViewer',requiredEditor:editor}};
+}
+
+export function assertRegisteredCanvasTransition(label,before,after,detail){
+  assert.deepEqual(before.stage,{width:820,height:460});
+  assert.deepEqual(after.stage,before.stage);
+  assert.equal(detail.action,'change-viewport');
+  const view=before.view;
+  const expected=label==='zoom-in'?{zoom:.75,x:view.x+410/view.zoom-410/.75,y:view.y+230/view.zoom-230/.75}
+    :label==='minimap-arrow-right'?{zoom:view.zoom,x:view.x+40/view.zoom,y:view.y}:null;
+  assert(expected,'Unknown registered canvas action');
+  for(const key of ['x','y','zoom']){
+    assert(Number.isFinite(detail.view?.[key])&&Math.abs(detail.view[key]-expected[key])<=1e-6,`Public canvas ${key} differs from independent transition`);
+    assert(Number.isFinite(after.view[key])&&Math.abs(after.view[key]-expected[key])<=1e-6,`Rendered canvas ${key} differs from independent transition`);
+  }
+  return expected;
+}
+
+// Separate fresh two-action replay; the three supplemental fit/pointer actions stay distinct.
+export async function runRegisteredCanvasActions(contract,root,runStep){
+  assert(registeredCanvasIDs.includes(contract.identity)&&contract.registeredCanvas===true);
+  assert.equal(await root.getAttribute('data-ely-component'),contract.identity);
+  const scene=()=>root.evaluate(node=>{
+    const host=node.querySelector('[data-ws-canvas-scene]'),stage=host?.querySelector('[data-cs-stage]'),world=host?.querySelector('[data-cs-world]');
+    if(host?.dataset.sceneKind!=='InfiniteCanvas'||!stage||!world)throw new Error('Exact InfiniteCanvas scene required');
+    const match=(world.getAttribute('transform')||'').match(/^scale\(([-+\d.e]+)\) translate\(([-+\d.e]+) ([-+\d.e]+)\)$/);
+    if(!match)throw new Error('Unknown canvas world transform');
+    return {stage:{width:stage.viewBox.baseVal.width,height:stage.viewBox.baseVal.height},view:{zoom:Number(match[1]),x:-Number(match[2]),y:-Number(match[3])},artboards:host.querySelectorAll('[data-cs-artboard]').length,shapes:host.querySelectorAll('[data-cs-shape]').length};
+  });
+  const initial=await scene();
+  assert.deepEqual(initial,{stage:{width:820,height:460},view:{zoom:.7,x:-60,y:-60},artboards:2,shapes:8});
+  const id=await root.getAttribute('id');
+  await root.evaluate(node=>{
+    node.__registeredCanvasInput=[];
+    node.__registeredCanvasObserver=event=>{const target=event.target.closest('[data-cs-zoom-in],[data-cs-minimap]');if(target)node.__registeredCanvasInput.push({type:event.type,key:event.key||null,trusted:event.isTrusted,control:target.hasAttribute('data-cs-zoom-in')?'zoom':'minimap'});};
+    node.addEventListener('click',node.__registeredCanvasObserver,true);node.addEventListener('keydown',node.__registeredCanvasObserver,true);
+  });
+  try{
+    for(const label of ['zoom-in','minimap-arrow-right']){
+      let before;
+      await runStep(label,async()=>{
+        before=await scene();
+        if(label==='zoom-in')return clickVisibleControl(root.locator('[data-cs-zoom-in]'));
+        const map=root.locator('[data-cs-minimap]');await map.focus();await map.press('ArrowRight');
+      },async(state,previous)=>{
+        const events=state.actions.slice(previous.actions.length);assert.equal(events.length,1);
+        const detail=events[0];assert.equal(detail.id,id);assert.equal(detail.component,contract.identity);
+        const after=await scene(),expected=assertRegisteredCanvasTransition(label,before,after,detail);
+        assert.equal(after.artboards,2);assert.equal(after.shapes,8);
+        const inputs=await root.evaluate(node=>node.__registeredCanvasInput);
+        assert.deepEqual(inputs,label==='zoom-in'?[{type:'click',key:null,trusted:true,control:'zoom'}]:[{type:'click',key:null,trusted:true,control:'zoom'},{type:'keydown',key:'ArrowRight',trusted:true,control:'minimap'}]);
+        return {expected,rendered:after.view,input:inputs.at(-1)};
+      });
+    }
+  }finally{await root.evaluate(node=>{node.removeEventListener('click',node.__registeredCanvasObserver,true);node.removeEventListener('keydown',node.__registeredCanvasObserver,true);delete node.__registeredCanvasInput;delete node.__registeredCanvasObserver;});}
 }
 
 const settingsTargets={KeyboardShortcutsList:[1,'Keyboard'],ProxySettings:[2,'Network'],PrivacySettings:[3,'Privacy','telemetry'],NotificationSettings:[4,'Notifications','quiet'],StartupSettings:[5,'Startup','login'],StorageSettings:[6,'Storage'],ResetToDefault:[6,'Storage'],AdvancedSettings:[7,'Advanced','developer'],'DeveloperMode Toggle':[7,'Advanced','developer']};

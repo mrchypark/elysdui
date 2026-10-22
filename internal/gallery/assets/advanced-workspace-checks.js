@@ -244,7 +244,7 @@ const canvasScene = async ({root,actions}) => {
   if(kind==='ToolPalette'){one(root,'[data-cs-tool="rect"]').click();assert(actions.findLast(a=>a.action==='select-canvas-tool')?.tool==='rect','tool selection missing');assert(root.querySelectorAll('[data-cs-tool]').length===12,'tool palette incomplete');}
 };
 const canvas = async ({root,actions}) => {
-  if(root.querySelector("[data-ws-canvas-scene]"))return canvasScene({root,actions});
+  if(root.querySelector("[data-ws-canvas-scene]"))return await canvasScene({root,actions});
   const zoom = one(root, '[data-workspace-zoom="in"]'); zoom.click(); assert(one(root, 'output[data-workspace-zoom]').textContent === '110%', 'canvas zoom did not change');
   assert(Math.abs(new DOMMatrix(getComputedStyle(one(root,'[data-workspace-stage]')).transform).a - 1.1) < 0.001, 'visible canvas scale did not change');
   const shape = one(root, '[data-workspace-shape]'); shape.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', bubbles: true}));
