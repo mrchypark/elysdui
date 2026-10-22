@@ -135,10 +135,10 @@ async function imageReceipt(path) {
   return {path, bytes: bytes.length, sha256: sha256(bytes)};
 }
 
-async function captureComponent(page,root,path) {
-  const {bounds,foreignDOMIntersections}=await captureTargetPNG(page,root,path);
+async function captureComponent(page,root,path,checkedRootID) {
+  const {bounds,foreignDOMIntersections,occludedForeignPaint}=await captureTargetPNG(page,root,path,{checkedRootID});
   const receipt=await imageReceipt(path);
-  return {scope:foreignDOMIntersections.length?'target-painted-union-with-foreign-context':'component-painted-union',countsAsOwnedEvidence:!foreignDOMIntersections.length,bounds,foreignDOMIntersections,...receipt};
+  return {scope:foreignDOMIntersections.length?'target-painted-union-with-foreign-context':'component-painted-union',countsAsOwnedEvidence:!foreignDOMIntersections.length,bounds,foreignDOMIntersections,occludedForeignPaint,...receipt};
 }
 
 async function captureOwnedState({page, record, root, caseId, siteId, checkpointIndex, phase, captures, state}) {
@@ -154,7 +154,7 @@ async function captureOwnedState({page, record, root, caseId, siteId, checkpoint
     const overlayBounds = await locator.boundingBox();
     assert(overlayBounds && overlayBounds.width > 0 && overlayBounds.height > 0, `Owned overlay has visible bounds: ${item.id || item.tag}`);
     const path = resolve(captures, `${stem}-${phase}-overlay-${String(index + 1).padStart(2, '0')}.png`);
-    overlays.push({...await captureComponent(page,locator,path),scope:'visible-owned-panel',overlay:item});
+    overlays.push({...await captureComponent(page,locator,path,item.checkedRootID),scope:'visible-owned-panel',overlay:item});
   }
   let viewport = null;
   if (overlays.length || component.bounds.extendsRoot || component.bounds.viewportTruncated || component.bounds.clippedCount) {
@@ -163,7 +163,7 @@ async function captureOwnedState({page, record, root, caseId, siteId, checkpoint
     const size = page.viewportSize();
     viewport = {scope: 'viewport-context', countsAsOwnedEvidence:false, bounds: {x: 0, y: 0, width: size.width, height: size.height}, ...(await imageReceipt(path))};
   }
-  return {component, ownedOverlays: overlays, viewport,ownedStateEvidence:component.countsAsOwnedEvidence||overlays.some(item=>item.countsAsOwnedEvidence)};
+  return {component, ownedOverlays: overlays, viewport,ownedStateEvidence:overlays.length?overlays.every(item=>item.countsAsOwnedEvidence):component.countsAsOwnedEvidence};
 }
 
 async function executeCheck(page, item, onCheckpoint) {

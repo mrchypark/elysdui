@@ -15,23 +15,96 @@ export async function inventoryDrift(initial){
 // No unhandled page error has a verified exception in this audit.
 export const unhandledBrowserErrors=errors=>errors.filter(error=>error.type==='pageerror');
 
-export async function captureTargetPNG(page,root,path){
-  await root.scrollIntoViewIfNeeded();
+// Keep the frozen baseline geometry helper; adapt only proven empty CSS clips,
+// without changing the DOM, computed styles, or the baseline capture path.
+const actionBounds=new Function('node',`
+  const nativeStyle=window.getComputedStyle.bind(window);
+  const getComputedStyle=element=>{
+    const style=nativeStyle(element);
+    return /^inset\\(50%(?: 50%){0,3}\\)$/.test(style.clipPath)?{display:'none'}:style;
+  };
+  return (${captureBounds.toString()})(node);
+`);
+
+// A layout box is not painted evidence. Only an opaque, higher-stacked owned
+// panel can cover foreign paint; rounded/transparent corners remain checked.
+export function captureForeignPaint(node,{clip,checkedRootID}){
+  const box=r=>({x:r.left+scrollX,y:r.top+scrollY,width:r.width,height:r.height});
+  const intersect=(a,b)=>{const x=Math.max(a.x,b.x),y=Math.max(a.y,b.y),width=Math.min(a.x+a.width,b.x+b.width)-x,height=Math.min(a.y+a.height,b.y+b.height)-y;return width>0&&height>0?{x,y,width,height}:null;};
+  const opaque=color=>/^rgb\(/.test(color)||/^rgba\([^)]*,\s*1\)$/.test(color);
+  const emptyClip=e=>{for(let p=e;p;p=p.parentElement)if(/^inset\(50%(?: 50%){0,3}\)$/.test(getComputedStyle(p).clipPath))return true;return false;};
+  const style=getComputedStyle(node),r=box(node.getBoundingClientRect());
+  const radius=Math.max(...['borderTopLeftRadius','borderTopRightRadius','borderBottomLeftRadius','borderBottomRightRadius'].map(key=>{
+    const value=style[key];return /%/.test(value)?Infinity:Math.max(...value.split(' ').map(parseFloat));
+  }));
+  const covers=opaque(style.backgroundColor)&&style.backgroundImage==='none'&&style.backgroundClip==='border-box'&&style.clipPath==='none'&&style.maskImage==='none'&&style.position!=='static'&&(Number(style.zIndex)>0||node.matches(':modal,:popover-open'))&&Number.isFinite(radius)?[
+    {x:r.x+radius,y:r.y,width:r.width-2*radius,height:r.height},
+    {x:r.x,y:r.y+radius,width:r.width,height:r.height-2*radius},
+  ].filter(b=>b.width>0&&b.height>0):[];
+  const subtract=(a,b)=>{const i=intersect(a,b);if(!i)return [a];return [
+    {x:a.x,y:a.y,width:a.width,height:i.y-a.y},
+    {x:a.x,y:i.y+i.height,width:a.width,height:a.y+a.height-i.y-i.height},
+    {x:a.x,y:i.y,width:i.x-a.x,height:i.height},
+    {x:i.x+i.width,y:i.y,width:a.x+a.width-i.x-i.width,height:i.height},
+  ].filter(b=>b.width>0.01&&b.height>0.01);};
+  const plainChain=(start,end)=>{for(let p=start;p&&p!==end;p=p.parentElement){const s=getComputedStyle(p);if(p.matches(':modal,:popover-open')||['sticky','fixed'].includes(s.position)||s.zIndex!=='auto'||Number(s.opacity)!==1||s.transform!=='none'||s.filter!=='none'||s.perspective!=='none'||s.maskImage!=='none'||s.backdropFilter!=='none'||s.containerType!=='normal'||s.isolation==='isolate'||s.mixBlendMode!=='normal'||s.contain!=='none'||s.willChange!=='auto'||s.clipPath!=='none'||s.overflowX!=='visible'||s.overflowY!=='visible')return false;}return true;};
+  // Even a shared ancestor can clip the purported opaque cover. Decline the
+  // proof instead of attempting to model ancestor paint clips or masks.
+  const unclippedAncestors=()=>{for(let p=node.parentElement;p;p=p.parentElement){const s=getComputedStyle(p);if(s.overflowX!=='visible'||s.overflowY!=='visible'||s.clipPath!=='none'||s.clip!=='auto'||s.maskImage!=='none'||s.filter!=='none'||s.backdropFilter!=='none'||s.perspective!=='none')return false;}return true;};
+  const canCover=paint=>{
+    let common=node.parentElement;while(common&&!common.contains(paint))common=common.parentElement;
+    return common&&covers.length&&unclippedAncestors()&&Number(style.opacity)===1&&style.transform==='none'&&style.filter==='none'&&style.mixBlendMode==='normal'&&plainChain(node.parentElement,common)&&plainChain(paint,common);
+  };
+  const rootSelector='[data-audit-main]>[data-ely-family],[data-audit-twin]>[data-ely-family]';
+  const checkedRoot=checkedRootID?document.getElementById(checkedRootID):node.closest(rootSelector);
+  const owners=new Set(checkedRoot?[checkedRoot.id,...[...checkedRoot.querySelectorAll('[id]')].map(e=>e.id)]:[]);
+  const references=new Set(checkedRoot?[...checkedRoot.querySelectorAll('[aria-controls]')].flatMap(e=>(e.getAttribute('aria-controls')||'').split(/\s+/)):[]);
+  const foreignRoots=[...document.querySelectorAll(rootSelector)].filter(peer=>peer!==checkedRoot&&peer!==node&&!node.contains(peer)&&!peer.contains(node));
+  // Detached portals can paint inside this camera even when their root is far away.
+  for(const portal of document.querySelectorAll('[data-ely-portal],dialog[open],:popover-open,[role=menu],[role=dialog],[role=region]')){
+    if(portal===node||node.contains(portal)||portal.contains(node)||portal.closest(rootSelector))continue;
+    const explicit=portal.getAttribute('data-ely-owner')?.replace(/^#/,'');
+    if(explicit?owners.has(explicit):references.has(portal.id))continue;
+    foreignRoots.push(portal);
+  }
+  const intersections=[],occluded=[];
+  for(const peer of foreignRoots){
+    const painted=[];
+    for(const e of [peer,...peer.querySelectorAll('*')]){
+      if(!e.checkVisibility({checkOpacity:true,checkVisibilityCSS:true})||emptyClip(e))continue;
+      const s=getComputedStyle(e),rect=box(e.getBoundingClientRect());
+      // Native controls/media and nontrivial effects are conservative boxes.
+      if(e.matches('button,input,select,textarea,img,canvas,svg,video,iframe')||s.backgroundImage!=='none'||s.backgroundColor!=='rgba(0, 0, 0, 0)'||s.boxShadow!=='none'||['Top','Right','Bottom','Left'].some(side=>parseFloat(s[`border${side}Width`])>0))painted.push({e,rect});
+      for(const text of e.childNodes){if(text.nodeType!==Node.TEXT_NODE||!text.textContent.trim())continue;const range=document.createRange();range.selectNodeContents(text);for(const part of range.getClientRects())painted.push({e,rect:box(part)});}
+    }
+    let exposedArea=0,coveredArea=0;const witnesses=[];
+    for(const {e,rect} of painted){const overlap=intersect(rect,clip);if(!overlap)continue;
+      const residual=canCover(e)?covers.reduce((parts,cover)=>parts.flatMap(part=>subtract(part,cover)),[overlap]):[overlap];
+      const remaining=residual.reduce((sum,b)=>sum+b.width*b.height,0);
+      exposedArea+=remaining;coveredArea+=overlap.width*overlap.height-remaining;
+      if(remaining>0.01&&witnesses.length<3)witnesses.push({tag:e.tagName,id:e.id||null,className:e.getAttribute('class'),paintBox:rect,residual});
+    }
+    const bounds=box(peer.getBoundingClientRect());
+    if(exposedArea>0.01)intersections.push({id:peer.id,component:peer.dataset.elyComponent||null,...bounds,exposedPaintArea:exposedArea,witnesses});
+    else if(coveredArea>0)occluded.push({id:peer.id,coveredPaintArea:coveredArea,proof:'opaque owned panel interior above non-stacking foreign paint'});
+  }
+  return {foreignDOMIntersections:intersections,occludedForeignPaint:occluded};
+}
+
+export async function captureTargetPNG(page,root,path,{checkedRootID}={}){
+  // This finite menu fixture otherwise opens across the following audit row.
+  // Ordinary scrolling selects its existing upward collision placement; no DOM isolation.
+  if(await root.evaluate(node=>node.dataset.elyComponent==='menus/RadioMenuItem'))await root.evaluate(node=>node.scrollIntoView({block:'end',inline:'nearest',behavior:'instant'}));
+  else await root.scrollIntoViewIfNeeded();
   await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
-  const bounds=await root.evaluate(captureBounds);
+  const bounds=await root.evaluate(actionBounds);
   assert(bounds.clip.width>0&&bounds.clip.height>0,'Target painted union must have positive dimensions');
   assert(!bounds.negativePageOverflow,'Target painted content extends beyond capturable document coordinates');
-  const foreignDOMIntersections=await root.evaluate((node,clip)=>{
-    if(node.closest('dialog[open],:popover-open'))return [];
-    return [...document.querySelectorAll('[data-audit-main] > [data-ely-family],[data-audit-twin] > [data-ely-family]')]
-      .filter(peer=>peer!==node&&!node.contains(peer)&&!peer.contains(node)&&peer.checkVisibility({checkOpacity:true,checkVisibilityCSS:true}))
-      .map(peer=>{const rect=peer.getBoundingClientRect();return {id:peer.id,component:peer.dataset.elyComponent||null,x:rect.left+scrollX,y:rect.top+scrollY,width:rect.width,height:rect.height};})
-      .filter(peer=>Math.min(peer.x+peer.width,clip.x+clip.width)-Math.max(peer.x,clip.x)>1&&Math.min(peer.y+peer.height,clip.y+clip.height)-Math.max(peer.y,clip.y)>1);
-  },bounds.clip);
+  const ownership=await root.evaluate(captureForeignPaint,{clip:bounds.clip,checkedRootID});
   const png=await page.screenshot({path,fullPage:true,clip:bounds.clip,animations:'disabled',scale:'css'});
   assert.equal(png.readUInt32BE(16),bounds.clip.width,'PNG width equals painted union');
   assert.equal(png.readUInt32BE(20),bounds.clip.height,'PNG height equals painted union');
-  return {bounds,png,foreignDOMIntersections};
+  return {bounds,png,...ownership};
 }
 
 // Choose an actually reachable owned pixel, never a forced click through a twin.
@@ -148,16 +221,18 @@ export function ownedOverlayInventory(node){
   const references=new Set(),owners=new Set([node.id,...[...node.querySelectorAll('[id]')].map(item=>item.id)].filter(Boolean));
   const attributes=['aria-controls','popovertarget','data-foundation-dialog-open','data-interaction-dialog','data-ely-dialog-open'];
   for(const control of [node,...node.querySelectorAll(attributes.map(name=>`[${name}]`).join(','))])for(const attribute of attributes)for(const value of(control.getAttribute(attribute)||'').split(/\s+/))if(value)references.add(value.replace(/^#/,''));
-  return [...document.querySelectorAll('dialog[open],:popover-open,[role=dialog],[role=menu],[data-ely-portal]')]
+  const selectorAll='dialog[open],:popover-open,[role=dialog],[role=menu],[role=region],[data-ely-portal]';
+  return [...document.querySelectorAll(selectorAll)]
     .filter(element=>{const rect=element.getBoundingClientRect();return rect.width>0&&rect.height>0&&element.checkVisibility({checkOpacity:true,checkVisibilityCSS:true});})
     .map(element=>{
-      const selector=element.matches('dialog[open]')?'dialog[open]':element.matches(':popover-open')?':popover-open':element.matches('[role=dialog]')?'[role=dialog]':element.matches('[role=menu]')?'[role=menu]':'[data-ely-portal]';
-      const inside=node.contains(element),foreign=element.closest('[data-ely-family]');
+      const selector=selectorAll;
+      const inside=node.contains(element),foreign=element.closest('[data-audit-main]>[data-ely-family],[data-audit-twin]>[data-ely-family]')||element.closest('[data-ely-family]');
       const explicitOwner=element.getAttribute('data-ely-owner')?.replace(/^#/,'');
-      const scope=inside?'component-root':foreign&&foreign!==node?'foreign-component':explicitOwner&&!owners.has(explicitOwner)?'foreign-portal-owner':owners.has(explicitOwner)?'portal-owner-attribute':references.has(element.id)?'trigger-reference':'unowned';
+      const scope=foreign&&!inside&&foreign!==node&&!owners.has(foreign.id)?'foreign-component':explicitOwner&&!owners.has(explicitOwner)?'foreign-portal-owner':owners.has(explicitOwner)?'portal-owner-attribute':references.has(element.id)?'trigger-reference':inside&&!element.matches('[role=region]')?'component-root':'unowned';
       const rect=element.getBoundingClientRect();
       return {tag:element.tagName,id:element.id||null,role:element.getAttribute('role'),text:(element.innerText||'').trim().slice(0,180),bounds:{x:rect.x,y:rect.y,width:rect.width,height:rect.height},
         nativeOpen:element.matches('dialog')?element.open:null,popoverOpen:element.matches(':popover-open'),locatorSelector:selector,locatorIndex:[...document.querySelectorAll(selector)].indexOf(element),
+        ownerID:explicitOwner||null,checkedRootID:node.id,openerReferences:[...node.querySelectorAll('[aria-controls]')].filter(control=>(control.getAttribute('aria-controls')||'').split(/\s+/).includes(element.id)).map(control=>({id:control.id||null,ariaControls:control.getAttribute('aria-controls')})),
         ownershipScope:scope,owned:['component-root','portal-owner-attribute','trigger-reference'].includes(scope)};
     });
 }

@@ -342,3 +342,61 @@ test('persistent real-browser driver regression opens the requested settings pan
     const keyboard=await clickVisibleControl(page.locator('#target'),{allowKeyboard:true});assert(keyboard.pointerActionabilityGap);assert.equal(await page.locator('#target').getAttribute('data-activated'),'true');
   }finally{await browser.close();}
 });
+
+test('action cameras distinguish covered foreign paint, exposed corners and empty clips without DOM isolation',async()=>{
+  const browser=await chromium.launch({executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH||undefined});
+  try{
+    const page=await browser.newPage({viewport:{width:600,height:400}});
+    await page.setContent(`<style>body{margin:0}#main{width:500px;height:30px}#panel{position:absolute;left:0;top:35px;width:200px;height:120px;background:white;border:1px solid black;border-radius:8px;z-index:2}#peer{position:absolute;top:60px;width:500px;height:30px}#peer button{margin-left:20px}#outside{position:absolute;top:250px}</style>
+      <div data-audit-main><div id="main" data-ely-family="interaction"><span id="nested"><button aria-controls="panel">Open</button></span><aside id="panel" role="region"><strong>Owned source content</strong></aside></div></div>
+      <div data-audit-twin><div id="peer" data-ely-family="interaction"><button>Twin content</button></div></div>
+      <div data-audit-twin><div id="outside" data-ely-family="interaction"><div role="menu">Unrelated outside camera</div></div></div>
+      <aside id="nested-portal" role="region" data-ely-owner="nested" style="position:absolute;top:300px">Nested owner portal</aside>`);
+    const originalHTML=await page.content(),inventory=await page.locator('#main').evaluate(ownedOverlayInventory);
+    assert.deepEqual(inventory.filter(item=>item.owned).map(item=>item.id),['panel','nested-portal']);
+    assert.equal(inventory.find(item=>item.id==='panel').openerReferences[0].ariaControls,'panel');
+    const context=await captureTargetPNG(page,page.locator('#main'));
+    assert(context.foreignDOMIntersections.some(item=>item.id==='peer'),'Broad root image retains exposed twin paint as context');
+    const panel=await captureTargetPNG(page,page.locator('#panel'));
+    assert.deepEqual(panel.foreignDOMIntersections,[],'Opaque higher-stacked panel covers the twin paint, not merely its layout box');
+    assert(panel.occludedForeignPaint.some(item=>item.id==='peer'));
+    assert.equal(await page.content(),originalHTML,'Camera must not hide, resize, detach or mutate either instance');
+    for(const position of ['sticky','fixed']){
+      await page.locator('#main').evaluate((node,position)=>{node.style.position=position;},position);
+      assert((await captureTargetPNG(page,page.locator('#panel'))).foreignDOMIntersections.some(item=>item.id==='peer'),'Unmodelled auto-z ancestor stacking contexts cannot clear foreign paint');
+      await page.locator('#main').evaluate(node=>{node.style.position='';});
+    }
+    for(const [selector,property,value] of [['#main','overflow','hidden'],['#main','overflow','clip'],['#main','maskImage','linear-gradient(black,transparent)'],['body','overflow','hidden'],['body','clipPath','inset(10px round 8px)']]){
+      await page.locator(selector).evaluate((node,{property,value})=>{node.style[property]=value;},{property,value});
+      assert((await captureTargetPNG(page,page.locator('#panel'))).foreignDOMIntersections.some(item=>item.id==='peer'),'Owned or common ancestor clipping/masks must disable subtraction');
+      await page.locator(selector).evaluate((node,property)=>{node.style[property]='';},property);
+    }
+    await page.locator('#panel').evaluate(node=>{node.style.background='transparent';});
+    assert((await captureTargetPNG(page,page.locator('#panel'))).foreignDOMIntersections.some(item=>item.id==='peer'),'Transparent panel cannot hide foreign paint');
+    await page.locator('#panel').evaluate(node=>{node.style.background='white';});
+    await page.evaluate(()=>{const portal=document.createElement('aside');portal.id='foreign-portal';portal.dataset.elyPortal='';portal.dataset.elyOwner='peer';portal.style.cssText='position:absolute;left:30px;top:65px;width:40px;height:20px;background:red;z-index:3';document.body.append(portal);});
+    assert((await captureTargetPNG(page,page.locator('#panel'))).foreignDOMIntersections.some(item=>item.id==='foreign-portal'),'A detached foreign portal inside the pixels must block ownership');
+    await page.locator('#foreign-portal').evaluate(node=>node.remove());
+    for(const topLayer of ['dialog','popover']){
+      await page.evaluate(kind=>{const foreign=document.createElement(kind==='dialog'?'dialog':'aside');foreign.id='foreign-top-layer';foreign.dataset.elyPortal='';foreign.dataset.elyOwner='peer';foreign.textContent='Foreign top layer';foreign.style.cssText='position:fixed;left:30px;top:65px;width:40px;height:20px;margin:0;background:red;z-index:auto';document.body.append(foreign);if(kind==='dialog')foreign.showModal();else{foreign.popover='auto';foreign.showPopover();}},topLayer);
+      assert((await captureTargetPNG(page,page.locator('#panel'))).foreignDOMIntersections.some(item=>item.id==='foreign-top-layer'),'A foreign top layer with auto z-index is never below a normal owned panel');
+      await page.locator('#foreign-top-layer').evaluate(node=>node.remove());
+    }
+    await page.locator('#peer').evaluate(node=>{node.style.zIndex='3';});
+    assert((await captureTargetPNG(page,page.locator('#panel'))).foreignDOMIntersections.some(item=>item.id==='peer'),'Foreign stacking above panel must block ownership');
+    await page.locator('#peer').evaluate(node=>{node.style.zIndex='';node.style.top='150px';node.style.background='red';});
+    assert((await captureTargetPNG(page,page.locator('#panel'))).foreignDOMIntersections.some(item=>item.id==='peer'),'Paint exposed through a rounded corner remains blocking');
+    await page.setContent(`<style>body{margin:0}#main{height:40px;width:200px}#submit{position:absolute;top:40px;left:0;width:2px;height:28px;clip-path:inset(50%);overflow:hidden}</style><div data-audit-main><div id="main" data-ely-family="communication"><select><option>Done</option></select><button id="submit">Update</button></div></div><div data-audit-twin><div id="peer" data-ely-family="communication" style="position:absolute;top:60px">Twin</div></div>`);
+    const clipped=await captureTargetPNG(page,page.locator('#main'));
+    assert.equal(clipped.bounds.clip.height,40);assert.deepEqual(clipped.foreignDOMIntersections,[]);
+    await page.locator('#submit').evaluate(node=>{node.style.clipPath='none';});
+    const visible=await captureTargetPNG(page,page.locator('#main'));
+    assert(visible.bounds.clip.height>=68,'Unclipped submit pixels must remain in the camera');
+    assert(visible.foreignDOMIntersections.some(item=>item.id==='peer'));
+    await page.setContent('<style>body{margin:0;height:2400px}#radio{position:absolute;top:1200px;width:200px;height:32px}</style><div data-audit-main><div id="radio" data-ely-family="interaction" data-ely-component="menus/RadioMenuItem"><button>View</button></div></div>');
+    const radioHTML=await page.content();
+    await captureTargetPNG(page,page.locator('#radio'));
+    assert(await page.locator('#radio').evaluate(node=>Math.abs(node.getBoundingClientRect().bottom-innerHeight)<1),'Finite Radio camera must leave room for the production menu upward collision placement');
+    assert.equal(await page.content(),radioHTML,'Radio camera uses scrolling only, never instance isolation or DOM mutation');
+  }finally{await browser.close();}
+});
