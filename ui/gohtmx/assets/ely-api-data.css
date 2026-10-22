@@ -139,3 +139,5 @@
 [data-ely-family="data"] .ely-data__renko i[data-direction=down]{background:color-mix(in srgb,#cf5151 24%,var(--surface-muted))}
 [data-ely-family="data"] .ely-data__multi{display:grid;gap:.75rem}
 [data-ely-family="data"] .ely-data__multi figure{display:grid;gap:.25rem;margin:0}
+.ely-data__chart text{fill:currentColor}
+@media(max-width:36rem){.ely-data__dashboard{grid-template-columns:minmax(0,1fr);grid-auto-rows:auto}.ely-data__measures{grid-template-columns:minmax(0,1fr)}.ely-data__measures>.ely-data__gauge{width:7rem;max-width:100%;margin:0}}
