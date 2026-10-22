@@ -15,6 +15,11 @@ export async function inventoryDrift(initial){
 // No unhandled page error has a verified exception in this audit.
 export const unhandledBrowserErrors=errors=>errors.filter(error=>error.type==='pageerror');
 
+// Playwright's default caret hiding writes inline styles on every control,
+// including twins; its cleanup can leave an added empty style attribute.
+// Avoid that preparation rather than restoring over real application changes.
+export const screenshotWithoutCaretMutation=(surface,options)=>surface.screenshot({...options,caret:'initial'});
+
 // Keep the frozen baseline geometry helper; adapt only proven empty CSS clips,
 // without changing the DOM, computed styles, or the baseline capture path.
 const actionBounds=new Function('node',`
@@ -106,7 +111,7 @@ export async function captureTargetPNG(page,root,path,{checkedRootID}={}){
   const fits=viewportClip.x>=0&&viewportClip.y>=0&&viewportClip.x+bounds.clip.width<=viewport.width&&viewportClip.y+bounds.clip.height<=viewport.height;
   const camera={fullPage:!fits,clip:fits?viewportClip:bounds.clip};
   const ownership=await root.evaluate(captureForeignPaint,{clip:bounds.clip,checkedRootID});
-  const png=await page.screenshot({path,...camera,animations:'disabled',scale:'css'});
+  const png=await screenshotWithoutCaretMutation(page,{path,...camera,animations:'disabled',scale:'css'});
   assert.equal(png.readUInt32BE(16),bounds.clip.width,'PNG width equals painted union');
   assert.equal(png.readUInt32BE(20),bounds.clip.height,'PNG height equals painted union');
   return {bounds:{...bounds,scroll,viewport,camera,coordinateSpace:'document clip; camera.clip is viewport-relative when fullPage=false'},png,...ownership};

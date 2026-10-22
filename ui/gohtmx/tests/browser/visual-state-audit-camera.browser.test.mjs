@@ -6,7 +6,7 @@ import {join} from 'node:path';
 import {createHash} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
 import {chromium} from 'playwright';
-import {captureTargetPNG} from './visual-state-audit-drivers.mjs';
+import {captureTargetPNG,screenshotWithoutCaretMutation} from './visual-state-audit-drivers.mjs';
 
 // Separate explicit grant only: RUN_ACTION_CAMERA_BROWSER=1 node --test <this file>.
 test('tall-page action camera pixels equal an independent target screenshot',{
@@ -27,7 +27,7 @@ test('tall-page action camera pixels equal an independent target screenshot',{
     page.setDefaultTimeout(10000);
     await page.setContent('<style>body{margin:0;background:magenta}#spacer{height:64419px}#target{margin-left:85px;width:400px;height:180px;background:rgb(0,128,0)}#target>div{width:150px;height:90px;background:rgb(0,0,255)}#tail{height:2000px}</style><div id="spacer"></div><div id="target"><div></div></div><div id="tail"></div>');
     const root=page.locator('#target');
-    const reference=await root.screenshot({path:join(output,'reference.png'),animations:'disabled',scale:'css'});
+    const reference=await screenshotWithoutCaretMutation(root,{path:join(output,'reference.png'),animations:'disabled',scale:'css'});
     receipt.referenceSHA256=hash(reference);
     for(let index=0;index<3;index++){
       const path=join(output,`capture-${index}.png`),capture=await captureTargetPNG(page,root,path);

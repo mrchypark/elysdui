@@ -9,7 +9,7 @@ import {setTimeout as delay} from 'node:timers/promises';
 import {isDeepStrictEqual} from 'node:util';
 import {chromium} from 'playwright';
 import {actionModuleNames,prepareActionModule,synchronousTraceInit,registeredOutcomesEqual,registeredOutcomeDifferences,firstDifference,compareActionTrace,traceContractStatus} from './visual-state-audit-instrument.mjs';
-import {caseActionContract, requestedStateContract, runRequestedStateActions, ownedOverlayInventory, captureTargetPNG, inventoryReceipt, inventoryDrift, unhandledBrowserErrors} from './visual-state-audit-drivers.mjs';
+import {caseActionContract, requestedStateContract, runRequestedStateActions, ownedOverlayInventory, captureTargetPNG, screenshotWithoutCaretMutation, inventoryReceipt, inventoryDrift, unhandledBrowserErrors} from './visual-state-audit-drivers.mjs';
 
 const repo = fileURLToPath(new URL('../../../../', import.meta.url));
 const defaultEvidenceRoot = resolve(repo, 'ui/gohtmx/tests/browser/visual-state-audit-evidence');
@@ -147,7 +147,7 @@ async function captureOwnedState({page, record, root, caseId, siteId, checkpoint
   let viewport = null;
   if (overlays.length || component.bounds.extendsRoot || component.bounds.viewportTruncated || component.bounds.clippedCount) {
     const path = resolve(captures, `${stem}-${phase}-viewport.png`);
-    await page.screenshot({path, animations: 'disabled'});
+    await screenshotWithoutCaretMutation(page,{path, animations: 'disabled'});
     const size = page.viewportSize();
     viewport = {scope: 'viewport-context', countsAsOwnedEvidence:false, bounds: {x: 0, y: 0, width: size.width, height: size.height}, ...(await imageReceipt(path))};
   }
