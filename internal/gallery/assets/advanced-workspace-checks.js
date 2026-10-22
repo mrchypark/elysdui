@@ -412,8 +412,8 @@ const semantic = async ({root,actions,twin}) => {
   }
 };
 const domain = async ({root,actions}) => {
-  if(root.querySelector("[data-ws-devtools-source]"))return devtoolsSource({root,actions});
-  if(root.querySelector("[data-ws-canvas-scene]"))return canvasScene({root,actions});
+  if(root.querySelector("[data-ws-devtools-source]"))return await devtoolsSource({root,actions});
+  if(root.querySelector("[data-ws-canvas-scene]"))return await canvasScene({root,actions});
   const kind=root.dataset.elyKind, variant=root.dataset.elyComponent.split('/')[1];
   switch(kind) {
     case 'RenameInline': {

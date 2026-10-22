@@ -496,6 +496,47 @@ test('awaits a curried action helper through its final checkpoint and assertions
   assert.deepEqual(got,['before:click','click','checkpoint:click','submitted:update-task','returned']);
 });
 
+test('explicit async domain tail awaits seal capture before helper return or rejection',async()=>{
+  for(const branch of ['devtoolsSource','canvasScene'])for(const rejects of [false,true]){
+    const source=`
+      globalThis.__visualCheckpoint=async()=>{events.push('capture-start');await Promise.resolve();events.push('capture-end');};
+      const failure=new Error('helper rejected');
+      const devtoolsSource=async()=>{target.click();events.push('helper-complete');${rejects?"throw failure;":"return 23;"}};
+      const canvasScene=async()=>{target.click();events.push('helper-complete');${rejects?"throw failure;":"return 29;"}};
+      const domain=async({root,actions})=>{
+        if(root.querySelector('[data-ws-devtools-source]'))return await devtoolsSource({root,actions});
+        if(root.querySelector('[data-ws-canvas-scene]'))return await canvasScene({root,actions});
+        throw new Error('wrong branch');
+      };
+      const root={querySelector:selector=>selector==='[data-ws-${branch==='devtoolsSource'?'devtools-source':'canvas-scene'}]'};
+      try{const value=await domain({root,actions:[]});events.push('returned:'+value);}
+      catch(error){assert(error===failure);events.push('rejected:'+error.message);}
+    `;
+    const original=await execute(source),result=transform(source,'domain-tail.js');
+    assert.equal(result.unsupported.length,0);
+    assert.equal(result.interactionSites.length,2);
+    const expected=rejects?'rejected:helper rejected':`returned:${branch==='devtoolsSource'?23:29}`;
+    assert.deepEqual(original,['click','helper-complete',expected]);
+    const observed=await execute(result.source);
+    assert.deepEqual(observed,['before:click','click','capture-start','capture-end','helper-complete',expected]);
+    assert.deepEqual(observed.filter(event=>!event.startsWith('before:')&&!event.startsWith('capture-')),original);
+
+    const old=transform(source.replaceAll('return await ','return '),'domain-tail-negative.js');
+    assert.equal(old.interactionSites.length,0);
+    assert(old.unsupported.some(site=>site.reason.includes('nested or passed as a callback')));
+    assert.deepEqual(await execute(old.source),original,'Old tail shape must remain fail-closed, preserving return/rejection behavior');
+  }
+});
+
+test('workspace domain keeps exactly the two explicit async source tail awaits',async()=>{
+  const source=await readFile(new URL('../../../../internal/gallery/assets/advanced-workspace-checks.js',import.meta.url),'utf8');
+  const domain=source.slice(source.indexOf('const domain = async '),source.indexOf('const domain = async ')+350);
+  assert.match(domain,/return await devtoolsSource\(\{root,actions\}\);/);
+  assert.match(domain,/return await canvasScene\(\{root,actions\}\);/);
+  assert.equal((source.match(/return await (?:devtoolsSource|canvasScene)\(/g)||[]).length,2);
+  assert.match(source,/const code = async [\s\S]*?return devtoolsSource\(\{root,actions\}\);/,'Other callers are not normalized by this bounded change');
+});
+
 test('braces eligible unbraced for, for-of, for-in, while and do loops without moving actions',async()=>{
   for(const loop of ['for(let i=0;i<2;i++)target.click();','for(const item of [1,2])target.click();','for(const key in {a:1,b:2})target.click();','let n=0;while(n++<2)target.click();','let n=0;do target.click();while(++n<2);']){
     const source=`function check(){${loop}events.push('after');}check();`;
