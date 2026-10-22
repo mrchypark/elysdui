@@ -223,6 +223,8 @@ try {
         const target = group === 'chart' ? root.locator('.ely-data__chart text').first() : root.locator(group === 'dashboard' ? '[data-ely-dashboard]' : mode==='clipped-gauge'?'.ely-data__gauge':'.ely-data__measures').first();
         const original = await target.getAttribute('style');
         const tileStyles=mode==='columns'?await target.locator('[data-ely-dashboard-tile]').evaluateAll(nodes => nodes.map(node => node.getAttribute('style'))):null;
+        const negative = {profile,identity,group,mode,beforeStyles:{target:original,tiles:tileStyles}};
+        report.negatives.push(negative);
         await target.evaluate((node,mode) => {
           if(mode==='fill')node.style.setProperty('fill','rgb(255, 0, 255)','important');
           else if(mode==='hidden')node.style.setProperty('opacity','0','important');
@@ -240,17 +242,20 @@ try {
           }
         },mode);
         const broken = await measure(root,group);
+        Object.assign(negative,{metrics:broken,rejected:!valid(broken,group,mobile)});
         if(mode==='columns')assert.equal(broken.columns,4,'negative must produce four actual used columns, not implicit caller-coordinate tracks');
         if(mode==='hidden')assert.equal(broken.labels[0].visible,false);
         if(mode==='offscreen')assert.equal(broken.labels[0].contained,false);
         if(mode==='clipped-gauge')assert.equal(broken.gauges[0].textFits,false);
-        report.negatives.push({profile,identity,group,mode,metrics:broken,rejected:!valid(broken,group,mobile)});
         await capture(root,`${profile}-negative-${group}-${mode}`);
         assert(!valid(broken,group,mobile),`${profile} ${group}/${mode} negative must be rejected`);
         await target.evaluate((node,style) => {if(style===null)node.removeAttribute('style');else node.setAttribute('style',style);},original);
         if(tileStyles)await target.locator('[data-ely-dashboard-tile]').evaluateAll((nodes,styles) => nodes.forEach((node,index) => {if(styles[index]===null)node.removeAttribute('style');else node.setAttribute('style',styles[index]);}),tileStyles);
         await page.evaluate(() => window.scrollTo(0,window.scrollY));
-        assert(valid(await measure(root,group),group,mobile),`${group} restored after negative`);
+        negative.afterStyles = {target:await target.getAttribute('style'),tiles:tileStyles ? await target.locator('[data-ely-dashboard-tile]').evaluateAll(nodes => nodes.map(node => node.getAttribute('style'))) : null};
+        negative.restoredMetrics = await measure(root,group);
+        assert.deepEqual(negative.afterStyles,negative.beforeStyles,`${group}/${mode} exact style restoration`);
+        assert(valid(negative.restoredMetrics,group,mobile),`${group} restored after negative: ${JSON.stringify(negative.restoredMetrics)}`);
         }
       }
     }
