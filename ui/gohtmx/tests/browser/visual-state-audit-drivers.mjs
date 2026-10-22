@@ -171,6 +171,46 @@ export function caseActionContract(identity,source,filename){
 
 const settingsTargets={KeyboardShortcutsList:[1,'Keyboard'],ProxySettings:[2,'Network'],PrivacySettings:[3,'Privacy','telemetry'],NotificationSettings:[4,'Notifications','quiet'],StartupSettings:[5,'Startup','login'],StorageSettings:[6,'Storage'],ResetToDefault:[6,'Storage'],AdvancedSettings:[7,'Advanced','developer'],'DeveloperMode Toggle':[7,'Advanced','developer']};
 export function requestedStateContract(identity){
+  const focused={
+    'forms/HotkeyInput':{kind:'HotkeyInput',sequence:'hotkey-record-clear-restore',steps:[
+      ['record-shortcut','[data-ui-hotkey]','Control+K is recorded; glyph remains visible and text inset clears its painted bounds'],
+      ['clear-shortcut','[data-ui-hotkey]','Backspace clears the recorded shortcut'],
+      ['restore-shortcut','[data-ui-hotkey]','Escape restores the value present when the input received focus'],
+    ]},
+    'forms/ShortcutRecorder':{kind:'HotkeyInput',sequence:'hotkey-record-clear-restore',steps:[
+      ['record-shortcut','[data-ui-hotkey]','Control+K is recorded; glyph remains visible and text inset clears its painted bounds'],
+      ['clear-shortcut','[data-ui-hotkey]','Backspace clears the recorded shortcut'],
+      ['restore-shortcut','[data-ui-hotkey]','Escape restores the value present when the input received focus'],
+    ]},
+    'account/SignupForm':{kind:'SignupForm',sequence:'signup-terms-label',steps:[
+      ['fill-name','input[name="name"]','Caller name is entered'],
+      ['fill-email','input[name="email"]','Valid email is entered'],
+      ['fill-password','input[name="password"]','Password rules pass while required unchecked terms keep the form invalid'],
+      ['accept-terms-label','label.ely-suite-terms','Hit-tested visible label checks the required checkbox, focuses it, and completes form validity'],
+    ]},
+    'navigation/Tabs':{kind:'Tabs',sequence:'tabs-panel-selection',steps:[
+      ['select-tab','[data-interaction-tab]:not(:disabled)','A different enabled tab selects and reveals only its associated panel'],
+      ['keyboard-select-tab','[data-interaction-tab]:not(:disabled)','Orientation-aware arrow key selects another enabled tab and its associated panel'],
+    ]},
+    'motion/Lottie Player':{kind:'ParticleBackground',sequence:'lottie-play-pause-frame-reset',steps:[
+      ['play-animation','[data-interaction-lottie-play]','Visible deterministic SVG animation enters playing state'],
+      ['pause-animation','[data-interaction-lottie-pause]','Visible SVG animation enters paused state'],
+      ['seek-visible-frame','[data-interaction-lottie-seek]','Frame control and progress output both show 50%; SVG remains visible'],
+      ['reset-visible-frame','[data-interaction-lottie-seek]','Frame control and progress output return to 0%; SVG remains painted'],
+    ]},
+  }[identity];
+  if(focused){
+    const provenance={
+      'forms/HotkeyInput':'Explicit focused action contract from ui/gohtmx/templates/ely-controls.html, ui/gohtmx/assets/ely-controls.js and ui/gohtmx/assets/ely-api-forms.css',
+      'forms/ShortcutRecorder':'Explicit alias action contract from ui/gohtmx/components.json and the HotkeyInput template, handler and stylesheet',
+      'account/SignupForm':'Explicit focused form contract from ui/gohtmx/templates/ely-api-forms.html and ui/gohtmx/assets/ely-api-forms.js',
+      'navigation/Tabs':'Explicit selected-tab/panel contract from ui/gohtmx/templates/ely-api-interaction.html and ui/gohtmx/assets/ely-api-interaction.js',
+      'motion/Lottie Player':'Explicit deterministic player contract from internal/gallery/advanced_interaction_fixtures.go, ui/gohtmx/templates/ely-api-interaction.html and ui/gohtmx/assets/ely-api-interaction.js',
+    }[identity];
+    const steps=focused.steps.map(([id,control,expectedState])=>({id,control,expectedState,event:'native Playwright action',source:{siteId:`focused-state:${identity}:${id}`,sourceAnchor:null,provenance}}));
+    return {identity,kind:focused.kind,target:null,variant:identity.split('/')[1],focusedSequence:focused.sequence,steps,mappingGaps:[],requestedStateOnly:true,
+      fixtureGuards:{component:identity,kind:focused.kind},scope:'Explicit finite focused sequence from the case fixture; separate from registered-check coverage, aliases, and all-catalog approval'};
+  }
   const variant=identity.split('/')[1],target=identity.startsWith('settings/')?settingsTargets[variant]:null;
   if(identity!=='maps/MapPopup'&&!target)return null;
   const steps=[];
@@ -189,6 +229,66 @@ export function requestedStateContract(identity){
 }
 
 export async function runRequestedStateActions(contract,root,runStep){
+  if(contract.focusedSequence==='hotkey-record-clear-restore'){
+    const input=root.locator('[data-ui-hotkey]'),glyph=root.locator('.ely-api-hotkey-glyph');
+    assert.equal(await input.count(),1,'Hotkey case must expose one recorder input');
+    assert.equal(await glyph.count(),1,'Hotkey case must expose its visible shortcut glyph');
+    const original=await input.inputValue();
+    await runStep('record-shortcut',async()=>{await input.focus();await input.press('Control+k');},async()=>{
+      assert.equal(await input.inputValue(),'Ctrl+K','Control+K must be recorded in the field');
+      const clearance=await input.evaluate(node=>{const glyph=node.closest('.ely-api-hotkey-control')?.querySelector('.ely-api-hotkey-glyph');if(!glyph)return null;const field=node.getBoundingClientRect(),mark=glyph.getBoundingClientRect(),style=getComputedStyle(node),reach=style.direction==='rtl'?field.right-mark.left:mark.right-field.left;return {padding:parseFloat(style.paddingInlineStart),reach,glyphVisible:glyph.getClientRects().length>0&&getComputedStyle(glyph).visibility!=='hidden'};});
+      assert(clearance?.glyphVisible,'Shortcut glyph must remain visible while recording');
+      assert(clearance.padding>clearance.reach,'Shortcut text inset must clear the painted glyph');
+      return {value:await input.inputValue(),glyphClearance:clearance};
+    });
+    await runStep('clear-shortcut',()=>input.press('Backspace'),async()=>{assert.equal(await input.inputValue(),'','Backspace must clear the recorded shortcut');return {value:''};});
+    await runStep('restore-shortcut',()=>input.press('Escape'),async()=>{assert.equal(await input.inputValue(),original,'Escape must restore the value captured on focus');return {value:original};});
+    return;
+  }
+  if(contract.focusedSequence==='signup-terms-label'){
+    const form=root.locator('form[data-suite-validate="SignupForm"]'),name=form.locator('input[name="name"]'),email=form.locator('input[name="email"]'),password=form.locator('input[name="password"]'),terms=form.locator('input[name="terms"]'),label=form.locator('label.ely-suite-terms'),submit=form.locator('button[type="submit"]');
+    assert.equal(await form.count(),1,'Signup fixture form must be unique');
+    await runStep('fill-name',()=>name.fill('Ada Lovelace'),async()=>{assert.equal(await name.inputValue(),'Ada Lovelace');return {name:await name.inputValue()};});
+    await runStep('fill-email',()=>email.fill('ada@example.test'),async()=>{assert.equal(await email.inputValue(),'ada@example.test');assert.equal(await email.evaluate(node=>node.checkValidity()),true);return {email:await email.inputValue(),valid:true};});
+    await runStep('fill-password',()=>password.fill('Example-only-123'),async()=>{assert.equal(await password.inputValue(),'Example-only-123');assert.equal(await form.evaluate(node=>node.checkValidity()),false,'Required terms must still block a complete signup draft');assert.equal(await terms.isChecked(),false);assert.equal(await submit.isDisabled(),true);return {passwordRules:await form.locator('[data-suite-rule]').evaluateAll(nodes=>nodes.map(node=>node.dataset.kept)),termsChecked:false,formValid:false,submitDisabled:true};});
+    await runStep('accept-terms-label',()=>clickVisibleControl(label),async()=>{assert.equal(await terms.isChecked(),true,'Activating the visible terms label must check its control');assert.equal(await form.evaluate(node=>node.checkValidity()),true,'The required checkbox must complete native form validity');assert.equal(await submit.isDisabled(),false,'A complete valid signup draft must enable its submit control');assert.equal(await terms.evaluate(node=>document.activeElement===node),true,'Label activation must move focus to the checkbox');return {termsChecked:true,focused:true,formValid:true,submitDisabled:false};});
+    return;
+  }
+  if(contract.focusedSequence==='tabs-panel-selection'){
+    const tabs=root.locator('[data-interaction-tab]:not(:disabled)'),enabled=await tabs.count();
+    assert(enabled>=2,'Tabs fixture must provide at least two enabled tabs');
+    const selected=root.locator('[data-interaction-tab][aria-selected="true"]');
+    assert.equal(await selected.count(),1,'Tabs fixture must begin with one selected tab');
+    let targetIndex=0;if(await tabs.nth(0).getAttribute('aria-selected')==='true')targetIndex=1;
+    const target=tabs.nth(targetIndex),forward=await target.evaluate(node=>node.closest('[role="tablist"]')?.getAttribute('aria-orientation')==='vertical'?'ArrowDown':'ArrowRight');
+    const assertSelectedPanel=async expected=>{
+      const chosen=root.locator('[data-interaction-tab][aria-selected="true"]'),panels=root.locator('[role="tabpanel"]:not([hidden])');
+      assert.equal(await chosen.count(),1,'Exactly one tab remains selected');assert.equal(await panels.count(),1,'Exactly one associated tab panel remains visible');
+      assert.equal(await chosen.getAttribute('aria-controls'),await panels.first().getAttribute('id'),'Visible panel must be the selected tab target');
+      if(expected)assert.equal(await chosen.getAttribute('value'),expected);
+      return {selected:await chosen.getAttribute('value'),panel:await panels.first().getAttribute('id'),visiblePanels:1};
+    };
+    await runStep('select-tab',()=>target.click(),async()=>{assert.equal(await target.getAttribute('aria-selected'),'true');return assertSelectedPanel(await target.getAttribute('value'));});
+    await runStep('keyboard-select-tab',()=>target.press(forward),async()=>{const state=await assertSelectedPanel();assert.notEqual(state.selected,await target.getAttribute('value'),'Arrow navigation must move selection to another enabled tab');return {...state,key:forward};});
+    return;
+  }
+  if(contract.focusedSequence==='lottie-play-pause-frame-reset'){
+    const host=root.locator('[data-interaction-lottie]'),play=root.locator('[data-interaction-lottie-play]'),pause=root.locator('[data-interaction-lottie-pause]'),seek=root.locator('[data-interaction-lottie-seek]'),progress=root.locator('[data-interaction-lottie-progress]'),status=root.locator('[data-interaction-lottie-status]'),svg=root.locator('[data-lottie-canvas] svg');
+    assert.equal(await host.getAttribute('data-lottie-autoplay'),'false','Deterministic fixture must not autoplay');
+    assert.equal(await host.getAttribute('data-lottie-loop'),'false','Deterministic fixture must not loop');
+    await svg.waitFor({state:'visible',timeout:5000});
+    const visibleFrame=async()=>{
+      assert(await svg.isVisible(),'Lottie SVG must remain visible');
+      const frame=await svg.evaluate(node=>{const paths=[...node.querySelectorAll('path')];const painted=paths.filter(path=>{const box=path.getBBox(),style=getComputedStyle(path);return box.width>0&&box.height>0&&style.display!=='none'&&style.visibility!=='hidden'&&Number(style.opacity)>0&&style.fill!=='none';});return {pathCount:paths.length,paintedPathCount:painted.length};});
+      assert(frame.paintedPathCount>0,'Current Lottie frame must contain a visible painted path');
+      return frame;
+    };
+    await runStep('play-animation',()=>play.click(),async()=>{assert.equal((await status.textContent()).trim(),'Animation playing');const frame=await visibleFrame();return {status:(await status.textContent()).trim(),svgVisible:true,...frame};});
+    await runStep('pause-animation',()=>pause.click(),async()=>{assert.equal((await status.textContent()).trim(),'Animation paused');const frame=await visibleFrame();return {status:(await status.textContent()).trim(),svgVisible:true,...frame};});
+    await runStep('seek-visible-frame',async()=>{await seek.focus();await seek.press('Home');for(let index=0;index<50;index++)await seek.press('ArrowRight');},async()=>{assert.equal(await seek.inputValue(),'50');assert.equal((await progress.textContent()).trim(),'50%');const frame=await visibleFrame();return {frame:50,progress:(await progress.textContent()).trim(),svgVisible:true,...frame};});
+    await runStep('reset-visible-frame',()=>seek.press('Home'),async()=>{assert.equal(await seek.inputValue(),'0');assert.equal((await progress.textContent()).trim(),'0%');const frame=await visibleFrame(),box=await svg.boundingBox();assert(box&&box.width>0&&box.height>0,'Reset frame must retain a painted SVG');return {frame:0,progress:(await progress.textContent()).trim(),svgVisible:true,svgBounds:box,...frame};});
+    return;
+  }
   if(!contract.target){
     await root.locator('[data-ui-component=map-view][data-map-ready=true]').waitFor();
     const marker=root.locator('button[data-map-point]:not([hidden])').first(),popup=root.locator('[data-map-popup]');
