@@ -34,7 +34,11 @@ async function restoreStyles(locator, snapshots) {
     // The gallery CSP rejects style attributes; restore through the initializer's CSSOM path.
     node.style.cssText='';
     for(const [property,value,priority] of original.properties)node.style.setProperty(property,value,priority);
-    if(original.attribute===null)node.removeAttribute('style');
+    if(original.attribute===null){
+      // Flush Chromium's pending CSSOM serialization before restoring attribute absence under strict CSP.
+      node.getAttribute('style');
+      node.removeAttribute('style');
+    }
   }),snapshots);
 }
 // The same measured oracle is used for production and deliberately broken DOM styles.
@@ -126,7 +130,15 @@ if (process.env.DATA_PIXEL_SELF_CHECK === '1') {
   assert.deepEqual(styleMeaning(styles),styleMeaning([{...styles[0],attribute:'color:red;'}]));
   assert.notDeepEqual(styleMeaning(styles),styleMeaning([{...styles[0],properties:[['color','red','']]}]));
   assert.notDeepEqual(styleMeaning([{attribute:null,properties:[]}]),styleMeaning([{attribute:'',properties:[]}]));
-  console.log('23 measured-oracle/style-contract self-checks passed; no files, server or browser started');
+  // Verify call ordering only; the real strict-CSP browser proof remains separate.
+  const order=[],node={style:{set cssText(value){order.push('clear');},setProperty(){order.push('set');}},getAttribute(){order.push('serialize');return '';},removeAttribute(){order.push('remove');}};
+  const locator={evaluateAll:(callback,snapshots)=>callback([node],snapshots)};
+  await restoreStyles(locator,[{attribute:null,properties:[]}]);
+  assert.deepEqual(order,['clear','serialize','remove']);
+  order.length=0;
+  await restoreStyles(locator,[{attribute:'',properties:[]}]);
+  assert.deepEqual(order,['clear']);
+  console.log('25 measured-oracle/style-contract/ordering self-checks passed; no files, server or browser started');
   process.exit(0);
 }
 await mkdir(outputRoot, {recursive: true});
