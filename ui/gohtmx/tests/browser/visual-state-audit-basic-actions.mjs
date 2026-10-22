@@ -110,6 +110,29 @@ export function validateBasicActionMatrix(matrix,manifest,revision){
   assert.equal(new Set(matrix.auditCases.map(row=>row.caseId)).size,53);
 }
 
+// Browser callback: native modality alone never establishes ownership.
+export function basicOwnedModal(node){
+  const doc=node.ownerDocument,opened=[...doc.querySelectorAll('dialog[open]')];
+  if(!opened.length)return null;
+  const primary='[data-audit-main]>[data-basic-component]';
+  if(!node.matches(primary)||!node.id||opened.length!==1)throw new Error('Basic modal camera requires one exact primary-owned open dialog');
+  const panel=opened[0],owner=panel.getAttribute('data-ely-owner')?.replace(/^#/,'');
+  if(!panel.id||!panel.open||!panel.matches('dialog[open]:modal')||!node.contains(panel)||panel.closest(primary)!==node||(owner&&owner!==node.id))throw new Error('Foreign, nonmodal or ambiguous dialog cannot become owned evidence');
+  const ids=[...doc.querySelectorAll('[id]')];
+  if(ids.filter(n=>n.id===node.id).length!==1||ids.filter(n=>n.id===panel.id).length!==1)throw new Error('Basic modal camera IDs must resolve uniquely');
+  return {id:panel.id,checkedRootID:node.id};
+}
+
+export async function basicModalCaptureTarget(root,selection){
+  assert.deepEqual(await root.evaluate(basicOwnedModal),selection,'Exact modal ownership must hold before framing');
+  assert(selection,'Owned modal selection required');
+  await root.evaluate(node=>{const active=node.ownerDocument.activeElement;node.scrollIntoView({block:'start',inline:'nearest',behavior:'instant'});if(node.ownerDocument.activeElement!==active)throw new Error('Modal camera scrolling changed native focus');});
+  assert.deepEqual(await root.evaluate(basicOwnedModal),selection,'Exact modal ownership must survive framing');
+  const target=root.page().locator(`[id=${JSON.stringify(selection.id)}]`);
+  assert.equal(await target.count(),1,'Owned modal resolves uniquely');
+  return target;
+}
+
 // Diagnostic evidence never changes a failed assertion into an acceptance pass.
 export async function retainBasicFailureEvidence(result,error,peer,capture){
   result.status='failed';result.error=String(error);

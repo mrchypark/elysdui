@@ -411,7 +411,7 @@ func TestActionSpacingLeavesInitialRouteAndCSSUnchanged(t *testing.T) {
 	if hex.EncodeToString(digest[:]) != initialCSSHash {
 		t.Fatal("initial fixture CSS bytes changed")
 	}
-	if actionCSS != `.basic-record{margin-block-end:320px}.basic-pair{row-gap:320px}` {
+	if actionCSS != `.basic-record{margin-block-end:100vh}.basic-pair{row-gap:100vh}` {
 		t.Fatal("action spacing must not resize, hide or clip component roots")
 	}
 	var initial, actions bytes.Buffer

@@ -11,7 +11,7 @@ import {chromium} from 'playwright';
 import {actionModuleNames,prepareActionModule,synchronousTraceInit,registeredOutcomesEqual,registeredOutcomeDifferences,firstDifference,compareActionTrace,traceContractStatus} from './visual-state-audit-instrument.mjs';
 import {caseActionContract, requestedStateContract, runRequestedStateActions, ownedOverlayInventory, captureTargetPNG, screenshotWithoutCaretMutation, inventoryReceipt, inventoryDrift, unhandledBrowserErrors} from './visual-state-audit-drivers.mjs';
 import {basicFixturePackage,basicRootSelector} from './visual-state-audit-basic.mjs';
-import {basicActionContract,validateBasicActionMatrix,runBasicActions,basicActionSurface,selectBasicActionCases,fulfillBasicActionAsset,assertBasicActionAssets,retainBasicFailureEvidence} from './visual-state-audit-basic-actions.mjs';
+import {basicActionContract,validateBasicActionMatrix,runBasicActions,basicActionSurface,selectBasicActionCases,fulfillBasicActionAsset,assertBasicActionAssets,retainBasicFailureEvidence,basicOwnedModal,basicModalCaptureTarget} from './visual-state-audit-basic-actions.mjs';
 
 const repo = fileURLToPath(new URL('../../../../', import.meta.url));
 const defaultEvidenceRoot = resolve(repo, 'ui/gohtmx/tests/browser/visual-state-audit-evidence');
@@ -254,10 +254,20 @@ async function captureComponent(page,root,path,checkedRootID) {
 async function captureOwnedState({page, record, root, caseId, siteId, checkpointIndex, phase, captures, state}) {
   const stem = `${slug(caseId)}-${String(checkpointIndex).padStart(3, '0')}-${slug(siteId)}`;
   const componentPath = resolve(captures, `${stem}-${phase}-component.png`);
-  const component = await captureComponent(page,root,componentPath);
+  const modal=await root.evaluate(node=>node.matches('[data-audit-main]>[data-basic-component]'))?await root.evaluate(basicOwnedModal):null;
+  let target=root,beforeFramingViewport=null;
+  if(modal){
+    assert.equal(state.ownedOverlays.filter(item=>item.tag==='DIALOG'&&item.id===modal.id&&item.checkedRootID===modal.checkedRootID&&item.ownershipScope==='component-root'&&item.owned).length,1,'Existing overlay inventory must independently own this modal');
+    const path=resolve(captures,`${stem}-${phase}-before-framing-viewport.png`);
+    await screenshotWithoutCaretMutation(page,{path,animations:'disabled'});
+    beforeFramingViewport={scope:'viewport-context-before-framing',countsAsOwnedEvidence:false,bounds:{x:0,y:0,...page.viewportSize()},...await imageReceipt(path)};
+    target=await basicModalCaptureTarget(root,modal);
+  }
+  const component = await captureComponent(page,target,componentPath,modal?.checkedRootID);
   const overlays = [];
   for (let index = 0; index < state.ownedOverlays.length; index++) {
     const item = state.ownedOverlays[index];
+    if(modal&&item.id===modal.id){overlays.push({...component,scope:'visible-owned-panel',overlay:item});continue;}
     const locator = item.id ? page.locator(`[id="${item.id.replaceAll('"', '\\"')}"]`) : page.locator(item.locatorSelector).nth(item.locatorIndex);
     assert(item.locatorIndex < await page.locator(item.locatorSelector).count(), `Overlay locator index exists: ${item.locatorSelector}[${item.locatorIndex}]`);
     assert.equal(await locator.count(), 1, `Overlay resolves uniquely: ${item.id || item.tag}`);
@@ -273,7 +283,7 @@ async function captureOwnedState({page, record, root, caseId, siteId, checkpoint
     const size = page.viewportSize();
     viewport = {scope: 'viewport-context', countsAsOwnedEvidence:false, bounds: {x: 0, y: 0, width: size.width, height: size.height}, ...(await imageReceipt(path))};
   }
-  return {component, ownedOverlays: overlays, viewport,ownedStateEvidence:!component.focusOutlineGap&&(overlays.length?overlays.every(item=>item.countsAsOwnedEvidence):component.countsAsOwnedEvidence)};
+  return {component,primaryTarget:modal?{scope:'exact-owned-native-modal',...modal}:null,beforeFramingViewport,ownedOverlays: overlays, viewport,ownedStateEvidence:!component.focusOutlineGap&&(overlays.length?overlays.every(item=>item.countsAsOwnedEvidence):component.countsAsOwnedEvidence)};
 }
 
 async function executeCheck(page, item, onCheckpoint) {

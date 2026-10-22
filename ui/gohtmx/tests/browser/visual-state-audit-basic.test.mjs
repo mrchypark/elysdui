@@ -5,7 +5,7 @@ import {readFile} from 'node:fs/promises';
 import {createHash} from 'node:crypto';
 import {EventEmitter} from 'node:events';
 import {baselineFixture, basicFixturePackage, basicFixtureRoute, basicRootSelector, basicSourcePrefixes, validateBasicMatrix} from './visual-state-audit-basic.mjs';
-import {basicActionContract,basicActionVariants,validateBasicActionMatrix,runBasicActions,basicActionSurface,selectBasicActionCases,requiredBasicActionAssets,fulfillBasicActionAsset,assertBasicActionAssets,assertBasicTableRows,retainBasicFailureEvidence} from './visual-state-audit-basic-actions.mjs';
+import {basicActionContract,basicActionVariants,validateBasicActionMatrix,runBasicActions,basicActionSurface,selectBasicActionCases,requiredBasicActionAssets,fulfillBasicActionAsset,assertBasicActionAssets,assertBasicTableRows,retainBasicFailureEvidence,basicOwnedModal,basicModalCaptureTarget} from './visual-state-audit-basic-actions.mjs';
 
 const source = path => readFile(new URL(`../../../../${path}`, import.meta.url), 'utf8');
 async function metadata() {
@@ -339,7 +339,7 @@ test('phase2 source-only spacing CSS is action-only and required by the existing
   const fixture=await source('adapters/gohtmx/tests/fixtures/basic-audit/main.go');
   const css=fixture.match(/const fixtureCSS = `([^`]+)`/)[1];
   assert.equal(createHash('sha256').update(css).digest('hex'),'70dcc04d1c99b164f180c10049674f54af2bdcdb5b8a001686809c7a263e8b65');
-  assert(fixture.includes('const actionCSS = `.basic-record{margin-block-end:320px}.basic-pair{row-gap:320px}`'));
+  assert(fixture.includes('const actionCSS = `.basic-record{margin-block-end:100vh}.basic-pair{row-gap:100vh}`'));
   assert(fixture.includes('{{if .Actions}}<link rel="stylesheet" href="/assets/basic-audit-actions.css">'));
   assert(fixture.includes('add("assets/basic-audit-actions.css", []byte(actionCSS))'));
   const expected=Object.fromEntries(requiredBasicActionAssets.map(path=>[path,'a'.repeat(64)]));
@@ -348,4 +348,24 @@ test('phase2 source-only spacing CSS is action-only and required by the existing
   const bad=structuredClone(delivered);bad.at(-1).sha256='b'.repeat(64);assert.throws(()=>assertBasicActionAssets(bad,expected));
   const runner=await source('ui/gohtmx/tests/browser/visual-state-audit-actions.mjs');
   assert(runner.includes("['/assets/basic-audit.css','/assets/basic-audit-actions.js','/assets/basic-audit-actions.css']"));
+});
+
+test('phase2 pure modal selector rejects foreign, multiple, nonmodal and duplicate-ID targets; framing preserves focus',async()=>{
+  for(const defect of [null,'closed','foreign','nested-root','multiple','nonmodal','peer-root','missing-id','missing-root-id','duplicate-panel-id','duplicate-root-id','foreign-owner','focus-changed','ownership-changed']){
+    const active={id:'native-close'},peer={id:'peer'},node={id:'main-frame'};let scrolled=0;
+    const panel={id:'owned-dialog',open:defect!=='closed',getAttribute:()=>defect==='foreign-owner'?'peer':null,matches:()=>defect!=='nonmodal',closest:()=>['foreign','nested-root'].includes(defect)?peer:node};
+    const doc={activeElement:active,querySelectorAll:selector=>selector==='dialog[open]'?(panel.open?[panel,...(defect==='multiple'?[{id:'foreign-dialog',open:true}]:[])]:[]):[node,panel,...(defect==='duplicate-panel-id'?[{id:panel.id}]:[]),...(defect==='duplicate-root-id'?[{id:node.id}]:[])]};
+    Object.assign(node,{ownerDocument:doc,matches:()=>defect!=='peer-root',contains:element=>element===panel&&defect!=='foreign',scrollIntoView:options=>{assert.deepEqual(options,{block:'start',inline:'nearest',behavior:'instant'});scrolled++;if(defect==='focus-changed')doc.activeElement=peer;if(defect==='ownership-changed')panel.open=false;}});
+    if(defect==='missing-id')panel.id='';
+    if(defect==='missing-root-id')node.id='';
+    if(defect==='closed'){assert.equal(basicOwnedModal(node),null);continue;}
+    if(defect&&!['focus-changed','ownership-changed'].includes(defect)){assert.throws(()=>basicOwnedModal(node),undefined,defect);continue;}
+    const selection=basicOwnedModal(node);assert.deepEqual(selection,{id:'owned-dialog',checkedRootID:'main-frame'});
+    const target={count:async()=>1},root={evaluate:async fn=>fn(node),page:()=>({locator:selector=>{assert.equal(selector,'[id="owned-dialog"]');return target;}})};
+    const frame=()=>basicModalCaptureTarget(root,selection);
+    if(defect)await assert.rejects(frame,undefined,defect);else{assert.equal(await frame(),target);assert.equal(doc.activeElement,active);assert.equal(scrolled,1);}
+  }
+  const runner=await source('ui/gohtmx/tests/browser/visual-state-audit-actions.mjs');
+  assert(runner.includes('await basicModalCaptureTarget(root,modal)'));assert(runner.includes('captureComponent(page,target,componentPath,modal?.checkedRootID)'));
+  assert(runner.includes("scope:'viewport-context-before-framing',countsAsOwnedEvidence:false"));
 });
