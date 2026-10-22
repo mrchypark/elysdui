@@ -45,5 +45,7 @@ const luminance=hex=>{assert.match(hex,/^#[\da-f]{6}$/i);return [1,3,5].map(i=>p
 for(const [name,tokens] of [['light',baseTokens],['dark',darkTokens]]){const bg=luminance(resolve('var(--surface-sunken)',tokens)),fg=luminance(resolve('var(--foreground)',tokens)),ratio=(Math.max(bg,fg)+.05)/(Math.min(bg,fg)+.05);assert.ok(ratio>=7,`${name} license contrast ${ratio} is below 7:1`)}
 assert.match(miscCSS,/component-examples:has\(> \[data-ely-family='native'\] \[data-misc-clock\]\)\{[^}]*align-items:flex-end/);
 assert.match(miscCSS,/component-examples:has\(> \[data-ely-family='native'\] \[data-misc-transfer\]\)\{[^}]*gap:8px/);
-assert.equal(fixture.BarcodeDisplay.SourceDescriptionOnly,true);assert.equal(fixture.PrintButton.SourceNote,'PrintButton: gpui has no print API.');assert.equal(fixture.PrintButton.SourceWarning,true);
-console.log('Native misc visual regression: light/dark license contrast ≥7:1, scoped source rows, description-only barcode and short print warning passed.');
+assert.equal(fixture.BarcodeDisplay.SourceDescriptionOnly,undefined);assert.match(fixture.BarcodeDisplay.SourceNote,/source-only in this native demo/);assert.equal(fixture['Rating Widget'],undefined);assert.equal(fixture.ShareSheet,undefined);assert.equal(fixture.PrintButton.SourceNote,'PrintButton: gpui has no print API.');assert.equal(fixture.PrintButton.SourceWarning,true);
+for(const props of Object.values(fixture))assert.equal(Object.hasOwn(props,'GallerySourceOnlyNotice'),false,'gallery fixture flag must not become caller/schema data');
+assert.doesNotMatch(readFileSync('ui/gohtmx/templates/ely-api-native.html','utf8'),/GallerySourceOnlyNotice/,'public templates must render SourceNote without a gallery-specific property');
+console.log('Native misc visual regression: light/dark license contrast ≥7:1, scoped gallery-only notices, caller SourceNote preservation, and ShareSheet action rendering passed.');

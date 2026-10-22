@@ -13,6 +13,8 @@ assert.equal(stored,'1234567.8900');
 assert.equal((await foundationClipboard('read','',{readText(){throw Error('denied')}})).ok,false);
 assert.equal((await foundationClipboard('write','kept',undefined)).value,'kept');
 const css=readFileSync('ui/gohtmx/assets/ely-api-foundation.css','utf8');
+assert.match(css,/\[data-ely-family='foundation'\] \.ely-foundation__section-items span,\[data-ely-family='foundation'\] fieldset span\{padding:\.4rem \.5rem;border:1px solid var\(--border,#777\);border-radius:\.25rem\}/);
+assert.doesNotMatch(css,/,fieldset span\{/,'foundation chip styling must not leak into other families');
 // Guard the explicit resets required to beat the older element/nth-child selectors.
 assert.match(css,/\.ely-foundation__layers \[data-foundation-layer\]:nth-child\(n\)\{[^}]*translate:none/);
 assert.match(css,/\.ely-foundation__scroll-well>\.ely-foundation__scroll\{max-block-size:none;padding:0;border:0\}/);

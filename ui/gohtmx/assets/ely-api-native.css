@@ -438,6 +438,11 @@
 @media(prefers-reduced-motion:reduce){[data-ely-family='native'] .ely-native-status-list [data-state='loading'] header>i{animation:none}}
 @media(max-width:400px){[data-ely-family='native'] .ely-native-model-card dl{grid-template-columns:1fr 1fr}[data-ely-family='native'] .ely-native-prompt-history article{min-width:0;flex-basis:100%}}
 
+/* Keep prompt history panels and diff text inside narrow native gallery cards. */
+[data-ely-family='native'] .ely-native-prompt-history{width:100%;max-width:640px;min-width:0;box-sizing:border-box}
+[data-ely-family='native'] .ely-native-prompt-history nav,[data-ely-family='native'] .ely-native-prompt-history article{min-width:0;box-sizing:border-box}
+[data-ely-family='native'] [data-native-version-diff]{overflow-wrap:break-word;word-break:normal}
+
 [data-ely-family="native"]{--native-gen-1:#5182c1;--native-gen-2:#009589;--native-gen-3:#aa732b;--native-gen-4:#b8636b}
 [data-theme="dark"] [data-ely-family="native"]{--native-gen-1:#79a7e2;--native-gen-2:#4eb9ad;--native-gen-3:#cd995c;--native-gen-4:#dc8a90}
 [data-ely-family="native"] :is(.ely-native-downloads,.ely-native-status-list) li{grid-template-columns:minmax(0,1fr)}
@@ -448,7 +453,7 @@
 [data-ely-family='native'] :is(.ely-native-viewer,.ely-native-annotator) nav>div{display:flex;gap:2px}
 [data-ely-family='native'] :is(.ely-native-viewer,.ely-native-annotator,.ely-native-volume-control,.ely-native-transport,.ely-native-video-bar) button{display:grid;place-items:center;width:28px;height:28px;min-height:0;padding:0;border:0;background:transparent;color:inherit;border-radius:4px}
 [data-ely-family='native'] :is(.ely-native-viewer,.ely-native-annotator,.ely-native-volume-control,.ely-native-transport,.ely-native-video-bar) button:hover{background:color-mix(in srgb,currentColor 8%,transparent)}
-[data-ely-family='native'] .ely-native-viewer{width:640px;height:440px;display:flex;flex-direction:column;gap:8px}
+[data-ely-family='native'] .ely-native-viewer{width:min(640px,100%);height:440px;display:flex;flex-direction:column;gap:8px}
 [data-ely-family='native'] .ely-native-viewer output{font-size:12px;min-width:38px;text-align:center}
 [data-ely-family='native'] .ely-native-viewer .ely-native-image{flex:1;min-height:0;margin:0;display:flex;flex-direction:column}
 [data-ely-family='native'] .ely-native-viewer .ely-native-image-viewport{position:relative;flex:1;min-height:0;background:color-mix(in srgb,currentColor 3%,transparent);touch-action:none}

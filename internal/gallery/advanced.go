@@ -87,13 +87,13 @@ func (s *Server) advancedAudit(w http.ResponseWriter, r *http.Request) {
 			}
 			component := fixture.Component
 			component.Name, component.ID = name, fmt.Sprintf("audit-instance-%d", len(p.Cases))
-			component.Props = aliasFixtureProps(component.Props, name)
+			component.Props = aliasFixtureProps(component.Props, key)
 			var preview, twin bytes.Buffer
 			if err = ui.RenderComponent(s.templates, &preview, component); err != nil {
 				break
 			}
 			component.ID += "-twin"
-			component.Props = aliasFixtureProps(component.Props, name)
+			component.Props = aliasFixtureProps(component.Props, key)
 			if field, ok := component.Props["Name"].(string); ok {
 				component.Props["Name"] = field + "_twin"
 			}
@@ -118,6 +118,10 @@ func (s *Server) advancedAudit(w http.ResponseWriter, r *http.Request) {
 }
 
 func aliasFixtureProps(source map[string]any, name string) map[string]any {
+	key := name
+	if _, bareName, qualified := strings.Cut(name, "/"); qualified {
+		name = bareName
+	}
 	props := make(map[string]any, len(source))
 	for key, value := range source {
 		props[key] = value
@@ -148,6 +152,42 @@ func aliasFixtureProps(source map[string]any, name string) map[string]any {
 		props["Value"], props["Type"] = "https://example.test/source", "url"
 	case "RadioCard":
 		props["Type"] = "radio"
+	}
+	// Qualified fixture consumers opt into target-state examples, not public defaults.
+	switch key {
+	case "misc/Signature", "misc/Rating Widget":
+		if props["SourceNote"] == "BarcodeDisplay, Signature, and Rating Widget are source-only in this native demo; their platform controls are not implemented here." {
+			control := "signature"
+			if name == "Rating Widget" {
+				control = "rating"
+			}
+			props["SourceNote"] = fmt.Sprintf("%s is source-only in this native demo; no %s control is implemented here.", name, control)
+		}
+	case "misc/ShareSheet":
+		if props["SourceNote"] == "PrintButton: gpui has no print API." {
+			props["SourceNote"] = "ShareSheet is source-only in this native demo; the reusable component can request sharing from a host, but this page does not invoke platform share UI."
+			props["SourceWarning"] = false
+		}
+	case "forms/PercentInput":
+		props["Suffix"] = "%"
+	case "forms/UnitInput":
+		props["Suffix"], props["Units"] = "px", []string{"px", "%", "em"}
+	case "forms/MaskedInput":
+		props["Mask"], props["Value"], props["Placeholder"] = "aa-9999", "ab-1234", "__-____"
+	case "forms/InputAddon":
+		props["Prefix"] = "@"
+	case "forms/EmojiPicker":
+		if props["Value"] == "alpha" {
+			props["Value"] = "✨"
+			props["Options"] = []map[string]any{{"Value": "✨", "Glyph": "✨", "Label": "Sparkles"}, {"Value": "👩‍💻", "Glyph": "👩‍💻", "Label": "Woman technologist"}}
+		}
+	case "forms/DirtyIndicator":
+		props["Dirty"], props["Text"] = true, "Unsaved changes"
+	case "forms/FormError":
+		props["Error"] = "Example: email could not be saved."
+	case "account/OrgSwitcher":
+		props["Label"], props["Value"] = "Organizations", "atlas"
+		props["Items"] = []map[string]any{{"Value": "atlas", "Label": "Atlas Studio", "Text": "Pro · 12 members"}, {"Value": "field", "Label": "Field Notes", "Text": "Free · 3 members"}}
 	}
 	return props
 }

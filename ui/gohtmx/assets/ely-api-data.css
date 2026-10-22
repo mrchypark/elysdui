@@ -60,9 +60,10 @@
 .ely-data__tree li{min-height:1.65rem}
 .ely-data__tree summary{list-style:none}
 .ely-data__tree summary::-webkit-details-marker{display:none}
-.ely-data__tree [data-ely-tree-node]{display:grid;grid-template-columns:1rem minmax(0,1fr) auto;align-items:center;width:100%;min-height:1.65rem;padding:.1rem .2rem;border:0;border-radius:.2rem;background:transparent;color:inherit;text-align:left}
+.ely-data__tree [data-ely-tree-node]{display:grid;grid-template-columns:max-content minmax(0,1fr) auto;column-gap:.4rem;align-items:center;width:100%;min-height:1.65rem;padding:.1rem .2rem;border:0;border-radius:.2rem;background:transparent;color:inherit;text-align:left}
 .ely-data__tree [role="treeitem"][aria-selected=true]>[data-ely-tree-node],.ely-data__tree [role="treeitem"][aria-selected=true]>details>summary>[data-ely-tree-node],.ely-data__tree [data-ely-tree-node]:focus-visible{outline:0;background:var(--surface-muted)}
-.ely-data__node-icon{color:var(--muted-foreground);font-size:11px;line-height:1}
+.ely-data__node-icon{min-width:1rem;white-space:nowrap;color:var(--muted-foreground);font-size:11px;line-height:1}
+.ely-data__node-label{min-width:0;overflow-wrap:anywhere}
 .ely-data__tree details[open]>summary .ely-data__node-icon{transform:rotate(90deg)}
 .ely-data__tree [data-ely-tree-node] small{color:var(--muted-foreground);font-size:10px;line-height:14px}
 .ely-data__tree [data-ely-tree-node] small[data-status=M]{color:#c58b27}.ely-data__tree [data-ely-tree-node] small[data-status=A]{color:#36a269}.ely-data__tree [data-ely-tree-node] small[data-status=D]{color:#cf5151}.ely-data__tree [data-ely-tree-node] small[data-status=U]{color:var(--primary)}

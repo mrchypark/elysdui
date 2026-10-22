@@ -306,7 +306,7 @@
 [data-ely-family="interaction"] .ely-interaction__hover small{display:block;color:var(--color-muted,#687087);font-size:12px}
 [data-ely-family="interaction"] .ely-interaction__avatar{display:grid;place-items:center;flex:none;width:40px;height:40px;border-radius:50%;background:var(--accent-tint,#eef0f8)}
 [data-ely-family="interaction"] .ely-interaction__hover aside>button{margin-top:12px;background:var(--color-accent,#5967c9);border-color:var(--color-accent,#5967c9);color:var(--on-accent,#fff)}
-[data-ely-family="interaction"] .ely-interaction__dialog{background:var(--surface,#fff);color:inherit;width:440px;max-width:calc(100vw - 32px);max-height:calc(100dvh - 64px);box-sizing:border-box;padding:24px;overflow:auto}
+[data-ely-family="interaction"] .ely-interaction__dialog{background:var(--surface,#fff);color:inherit;width:440px;max-width:calc(100vw - 32px);max-height:calc(100dvh - 64px);box-sizing:border-box;margin:auto;padding:24px;overflow:auto}
 [data-ely-family="interaction"] .ely-interaction__dialog h2{margin:0;font-size:18px}
 [data-ely-family="interaction"] .ely-interaction__dialog form{display:grid;gap:12px}
 [data-ely-family="interaction"] .ely-interaction__dialog label{display:grid;gap:4px}

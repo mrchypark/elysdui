@@ -56,6 +56,7 @@ interaction and regression tests rather than testing only documentation wording.
 ```sh
 npx playwright install --with-deps chromium
 npm run test:browser
+npm run test:visual-regressions
 node scripts/sdui-static-unit-test.mjs
 bash scripts/build-pages.sh dist /elysdui/
 node adapters/gohtmx/tests/browser/sdui-static-browser-test.mjs
@@ -67,6 +68,12 @@ their ports. Tests may need OS browser dependencies and permission to bind local
 sockets. If blocked, report the failing command and rely only on separately
 verified CI results, not an assumed browser pass. `dist/` and `test-results/` are
 build/test output; do not include them in a source PR.
+
+`test:visual-regressions` runs focused chart, tree, dialog, native-gallery and
+workspace/calendar layout regressions, including mobile and theme cases. It
+retains screenshots and source-hash receipts under `test-results/`; CI uploads
+these separately from the gallery evidence. Passing this finite regression set
+does not establish visual coverage of every component or action state.
 
 The static build compiles the Go renderer to WASM and writes a base-path-aware
 Pages bundle. Building/testing it does not deploy. Deployment is the main-branch

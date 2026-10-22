@@ -105,7 +105,7 @@
 [data-ely-family='foundation'] .ely-foundation__card footer{justify-content:flex-end}
 [data-ely-family='foundation'] .ely-foundation__panel{inline-size:20rem;min-block-size:10rem}
 [data-ely-family='foundation'] .ely-foundation__panel-body{display:grid;gap:.5rem;padding:.75rem}
-[data-ely-family='foundation'] .ely-foundation__panel-body span,[data-ely-family='foundation'] .ely-foundation__section-items span,fieldset span{padding:.4rem .5rem;border:1px solid var(--border,#777);border-radius:.25rem}
+[data-ely-family='foundation'] .ely-foundation__panel-body span,[data-ely-family='foundation'] .ely-foundation__section-items span,[data-ely-family='foundation'] fieldset span{padding:.4rem .5rem;border:1px solid var(--border,#777);border-radius:.25rem}
 [data-ely-family='foundation'] .ely-foundation__section{inline-size:min(100%,32.5rem)}
 [data-ely-family='foundation'] .ely-foundation__section-items{display:flex;gap:.5rem;margin-block-start:.75rem}
 [data-ely-family='foundation'] fieldset{inline-size:min(100%,26.25rem);padding:1rem}

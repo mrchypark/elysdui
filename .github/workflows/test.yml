@@ -40,6 +40,19 @@ jobs:
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       - run: npm run test:browser
+      - run: npm run test:visual-regressions
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: visual-regression-evidence
+          path: |
+            test-results/svg-repair/
+            test-results/visual-audit-bounds/
+            test-results/visual-state-audit-dialog-layout-*/
+            test-results/data-tree-layout/
+            test-results/workspace-communication-recovery/
+            test-results/native-issue-regressions/
+          if-no-files-found: warn
       - uses: actions/upload-artifact@v4
         if: always()
         with:

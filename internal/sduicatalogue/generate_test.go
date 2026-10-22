@@ -1,10 +1,40 @@
 package sduicatalogue
 
 import (
+	"fmt"
 	ui "github.com/mrchypark/elysdui/ui/gohtmx"
 	"html/template"
+	"strconv"
 	"testing"
 )
+
+func TestGeneratedStepperAndStateFixtureValues(t *testing.T) {
+	manifest, fixtures, err := Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if manifest.QualifiedNames != 1313 {
+		t.Fatalf("qualified inventory = %d, want 1313", manifest.QualifiedNames)
+	}
+	steppers, dirty, formError := 0, false, false
+	for _, fixture := range fixtures {
+		switch fixture.Name {
+		case "forms/Stepper":
+			steppers++
+			value := fmt.Sprint(fixture.Props["value"])
+			if _, err := strconv.ParseFloat(value, 64); err != nil {
+				t.Errorf("generated Stepper %s has invalid numeric value %q", fixture.Source, value)
+			}
+		case "forms/DirtyIndicator":
+			dirty = dirty || fixture.Props["dirty"] == true
+		case "forms/FormError":
+			formError = formError || fixture.Props["error"] == "Example: email could not be saved."
+		}
+	}
+	if steppers == 0 || !dirty || !formError {
+		t.Fatalf("missing generated target fixtures: Stepper=%d dirty=%t error=%t", steppers, dirty, formError)
+	}
+}
 
 func TestASTSelectsRendererBranchesAndMapsHelperFields(t *testing.T) {
 	tpl, err := template.New("test").Funcs(ui.Funcs()).Parse(`{{define "component"}}{{if eq .Kind "One"}}{{template "helper" (dict "Heading" .Title "Rows" .Rows)}}{{else}}{{.Unrelated}}{{end}}{{if .Optional}}{{.Optional}}{{else}}{{.Fallback}}{{end}}{{end}}{{define "helper"}}<h2>{{or .Heading "Fallback title"}}</h2>{{range $i,$row := .Rows}}{{$row.Label}}{{range $row.Cells}}{{.}}{{end}}{{end}}{{end}}`)
