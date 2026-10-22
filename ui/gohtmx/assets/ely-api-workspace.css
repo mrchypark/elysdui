@@ -684,3 +684,8 @@
 [data-ws-ansi-tone='13']{color:#d5b9e8}
 [data-ws-ansi-tone='14']{color:#9cddd6}
 [data-ws-ansi-tone='15']{color:#fff}
+[data-ely-family='workspace'] [data-ws-trash]{grid-template-columns:minmax(0,1fr);min-width:0}
+[data-ely-family='workspace'] [data-ws-trash] .ely-workspace__trash-head{flex-wrap:wrap}
+[data-ely-family='workspace'] [data-ws-trash-item]{flex-wrap:wrap}
+[data-ely-family='workspace'] [data-ws-trash-item]>div{flex:1 1 10rem;overflow-wrap:anywhere}
+[data-ely-family='workspace'] [data-ws-trash] button{flex-shrink:0}
