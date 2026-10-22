@@ -172,6 +172,22 @@ export function caseActionContract(identity,source,filename){
 const settingsTargets={KeyboardShortcutsList:[1,'Keyboard'],ProxySettings:[2,'Network'],PrivacySettings:[3,'Privacy','telemetry'],NotificationSettings:[4,'Notifications','quiet'],StartupSettings:[5,'Startup','login'],StorageSettings:[6,'Storage'],ResetToDefault:[6,'Storage'],AdvancedSettings:[7,'Advanced','developer'],'DeveloperMode Toggle':[7,'Advanced','developer']};
 export function requestedStateContract(identity){
   const focused={
+    'project/StatusSelect':{kind:'StatusSelect',sequence:'task-due-submit',steps:[
+      ['change-due','input[type="date"][name="due"][data-project-property]','Native due edit emits current task property and complete form values; peers unchanged'],
+      ['submit-current-due','button[type="submit"]','Visible Update submits the changed due and unchanged peers without claiming persistence'],
+    ]},
+    'data/Tag':{kind:'Tag',sequence:'remove-four-tags',steps:[
+      ['remove-design','[data-ely-tag-remove][value="design"]','Only Design removed; exact tag-remove payload'],
+      ['remove-motion','[data-ely-tag-remove][value="motion"]','Only Motion removed; exact tag-remove payload'],
+      ['remove-accessibility','[data-ely-tag-remove][value="accessibility"]','Only Accessibility removed; exact tag-remove payload'],
+      ['remove-rust','[data-ely-tag-remove][value="rust"]','Only static Research, Pinned, Urgent remain'],
+    ]},
+    'menus/RadioMenuItem':{kind:'CheckboxMenuItem',sequence:'radio-groups-reselection',steps:[
+      ['select-default','[data-interaction-menu-radio="default"][value="minimap"]','Exclusive default selection; density unchanged; settled change then action'],
+      ['reselect-default','[data-interaction-menu-radio="default"][value="minimap"]','Reselection remains selected and notifies again'],
+      ['select-density','[data-interaction-menu-radio="density"][value="compact"]','Exclusive density selection; default unchanged; settled change then action'],
+      ['reselect-density','[data-interaction-menu-radio="density"][value="compact"]','Reselection remains selected and notifies again'],
+    ]},
     'forms/HotkeyInput':{kind:'HotkeyInput',sequence:'hotkey-record-clear-restore',steps:[
       ['record-shortcut','[data-ui-hotkey]','Control+K is recorded; glyph remains visible and text inset clears its painted bounds'],
       ['clear-shortcut','[data-ui-hotkey]','Backspace clears the recorded shortcut'],
@@ -201,6 +217,9 @@ export function requestedStateContract(identity){
   }[identity];
   if(focused){
     const provenance={
+      'project/StatusSelect':'ui/gohtmx/templates/ely-api-communication.html:108,115; ui/gohtmx/assets/ely-api-communication.js:258; ui/gohtmx/assets/ely-api.js submit handler',
+      'data/Tag':'internal/gallery/advanced_data_fixtures.go Tag; ui/gohtmx/templates/ely-api-data.html ely-api-tag; ui/gohtmx/assets/ely-api-data.js tag-remove handler',
+      'menus/RadioMenuItem':'docs/gohtmx/menu-alias-contracts.md; internal/gallery/assets/advanced-interaction-checks.js radioMenuItemCheck; ui/gohtmx/assets/ely-api-interaction.js radio handler',
       'forms/HotkeyInput':'Explicit focused action contract from ui/gohtmx/templates/ely-controls.html, ui/gohtmx/assets/ely-controls.js and ui/gohtmx/assets/ely-api-forms.css',
       'forms/ShortcutRecorder':'Explicit alias action contract from ui/gohtmx/components.json and the HotkeyInput template, handler and stylesheet',
       'account/SignupForm':'Explicit focused form contract from ui/gohtmx/templates/ely-api-forms.html and ui/gohtmx/assets/ely-api-forms.js',
@@ -229,6 +248,71 @@ export function requestedStateContract(identity){
 }
 
 export async function runRequestedStateActions(contract,root,runStep){
+  if(['task-due-submit','remove-four-tags','radio-groups-reselection'].includes(contract.focusedSequence)){
+    const identity=await root.getAttribute('data-ely-component');
+    assert.equal(identity,contract.identity,'Exact alias identity is required');
+    assert.equal(await root.getAttribute('data-ely-kind'),contract.kind);
+    await root.evaluate(node=>{
+      node.__visualControlEvents=[];
+      for(const type of ['ely:change','ely:action'])node.addEventListener(type,event=>{
+        if(event.target!==node)return;
+        const detail={...event.detail};
+        if(detail.formData instanceof FormData)detail.formData=[...detail.formData];
+        const trigger=node.querySelector('[data-interaction-menu]'),panel=trigger&&node.querySelector('#'+CSS.escape(trigger.getAttribute('aria-controls')));
+        node.__visualControlEvents.push({type,detail,panelClosed:panel?.hidden,focusReturned:trigger?document.activeElement===trigger:undefined});
+      });
+    });
+    const events=()=>root.evaluate(node=>node.__visualControlEvents);
+    const twinState=()=>root.evaluate(node=>{
+      const twin=node.closest('[data-audit-name]')?.querySelector('[data-audit-twin] > [data-ely-family]');
+      if(!twin)throw new Error('Independent audit twin is required');
+      return {html:twin.innerHTML,fields:[...twin.querySelectorAll('input,select,textarea')].map(field=>[field.name,field.value,field.checked])};
+    });
+    const initialTwin=await twinState(),id=await root.getAttribute('id');
+    let cursor=0;
+    const begin=async()=>{cursor=(await events()).length;};
+    const fresh=async()=>{assert.deepEqual(await twinState(),initialTwin,'Public actions must preserve the independent twin');return (await events()).slice(cursor);};
+    if(contract.focusedSequence==='task-due-submit'){
+      const form=root.locator('form[data-project-properties][data-ely-submit="update-task"]'),due=form.locator('input[type="date"][name="due"][data-project-property]');
+      assert.equal(await form.getAttribute('data-task-id'),'brief');
+      assert.equal(await due.inputValue(),'2026-10-12');assert.equal(await due.isEnabled(),true);
+      assert.equal(await form.locator('[name="status"]').inputValue(),'In progress');assert.equal(await form.locator('[name="assignee"]').inputValue(),'ana');
+      const entries=[['status','In progress'],['assignee','ana'],['due','2026-10-20']];
+      const checkForm=async()=>{assert.equal(await due.inputValue(),'2026-10-20');assert.equal(await form.evaluate(node=>node.checkValidity()),true);assert.deepEqual(await form.evaluate(node=>[...new FormData(node)]),entries);};
+      await runStep('change-due',async()=>{await begin();await due.fill('2026-10-20');await due.press('Tab');},async()=>{
+        await checkForm();const observed=await fresh();assert(observed.length>=2&&observed.length%2===0,'Due commit must emit change/action pairs');
+        for(let index=0;index<observed.length;index+=2){assert.equal(observed[index].type,'ely:change');assert.deepEqual(observed[index].detail,{id,component:identity,name:'due',value:'2026-10-20',taskId:'brief'});assert.equal(observed[index+1].type,'ely:action');assert.deepEqual(observed[index+1].detail,{id,component:identity,action:'update-task',taskId:'brief',field:'due',value:'2026-10-20',formData:entries,values:entries});}
+        return {due:'2026-10-20',events:observed};
+      });
+      await runStep('submit-current-due',async()=>{await begin();await form.locator('button[type="submit"]').click();},async()=>{await checkForm();const observed=await fresh();assert.deepEqual(observed.map(event=>[event.type,event.detail]),[['ely:action',{id,component:identity,action:'update-task',formData:entries,values:entries,submitter:''}]]);return {due:'2026-10-20',events:observed};});
+    }else if(contract.focusedSequence==='remove-four-tags'){
+      const keys=['design','motion','accessibility','rust'],labels=['Design','Motion','Accessibility','Rust'];
+      const tagLabels=()=>root.locator('.ely-data__tag > span').allTextContents();
+      assert.deepEqual(await tagLabels(),['Research','Pinned','Urgent',...labels]);
+      assert.deepEqual(await root.locator('[data-ely-tag-remove]').evaluateAll(nodes=>nodes.map(node=>node.value)),keys);
+      for(let index=0;index<keys.length;index++){
+        const key=keys[index],control=root.locator(`[data-ely-tag-remove][value="${key}"]`);
+        assert.equal(await control.getAttribute('aria-label'),`Remove ${labels[index]}`);
+        await runStep(`remove-${key}`,async()=>{await begin();await control.click();},async()=>{assert.equal(await control.count(),0);assert.deepEqual(await tagLabels(),['Research','Pinned','Urgent',...labels.slice(index+1)]);assert.deepEqual(await root.locator('[data-ely-tag-remove]').evaluateAll(nodes=>nodes.map(node=>node.value)),keys.slice(index+1));const observed=await fresh();assert.deepEqual(observed.map(event=>[event.type,event.detail]),[['ely:action',{id,component:identity,action:'tag-remove',value:key}]]);return {remaining:keys.slice(index+1),events:observed};});
+      }
+    }else{
+      const trigger=root.locator('[data-interaction-menu][aria-haspopup="menu"]'),panelID=await trigger.getAttribute('aria-controls');
+      const panel=root.locator(`[id=${JSON.stringify(panelID)}][role="menu"]`);
+      assert.equal(await panel.getAttribute('id'),panelID);assert.equal(await panel.getAttribute('hidden'),'');
+      const state=()=>panel.locator('[data-interaction-menu-radio]').evaluateAll(nodes=>nodes.map(node=>({value:node.value,group:node.dataset.interactionMenuRadio,checked:node.getAttribute('aria-checked'),role:node.getAttribute('role')})));
+      const initial=await state();assert.equal(initial.length,6);assert(initial.every(row=>row.role==='menuitemradio'));
+      assert.deepEqual(initial.map(row=>[row.value,row.group,row.checked]),[['sidebar','default','true'],['minimap','default','false'],['status-bar','default','true'],['compact','density','false'],['standard','density','true'],['comfortable','density','false']]);
+      for(const [group,value] of [['default','minimap'],['density','compact']]){
+        const peers=(await state()).filter(row=>row.group!==group),target=panel.locator(`[data-interaction-menu-radio="${group}"][value="${value}"]`);
+        for(const repeat of [false,true])await runStep(`${repeat?'reselect':'select'}-${group}`,async()=>{await trigger.click();assert.equal(await trigger.getAttribute('aria-expanded'),'true');assert.equal(await panel.isVisible(),true);await begin();await target.click();},async()=>{
+          const current=await state();assert.deepEqual(current.filter(row=>row.group!==group),peers);assert(current.filter(row=>row.group===group).every(row=>row.checked===String(row.value===value)));
+          assert.equal(await panel.isVisible(),false);assert.equal(await trigger.getAttribute('aria-expanded'),'false');assert.equal(await trigger.evaluate(node=>document.activeElement===node),true);
+          const observed=await fresh();assert.deepEqual(observed.map(event=>[event.type,event.detail]),[['ely:change',{id,component:identity,name:group,value,checked:true}],['ely:action',{id,component:identity,action:'select',value,formData:null,values:[]}]]);assert(observed.every(event=>event.panelClosed===true&&event.focusReturned===true),'Dismissal and focus must settle before observers');return {group,value,reselected:repeat,state:current,events:observed};
+        });
+      }
+    }
+    return;
+  }
   if(contract.focusedSequence==='hotkey-record-clear-restore'){
     const input=root.locator('[data-ui-hotkey]'),glyph=root.locator('.ely-api-hotkey-glyph');
     assert.equal(await input.count(),1,'Hotkey case must expose one recorder input');
