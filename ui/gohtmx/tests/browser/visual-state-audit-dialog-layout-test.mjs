@@ -72,6 +72,17 @@ function horizontalCenterError(box) {
   return Math.abs(box.x - (box.viewport.width - box.width) / 2);
 }
 
+function measureViewport() {
+  const root = document.documentElement, style = getComputedStyle(root);
+  // Root client dimensions may include a reserved gutter; measure the fixed containing block directly.
+  const probe = document.createElement('div');
+  probe.style.cssText = 'all:initial;position:fixed;inset:0;visibility:hidden;pointer-events:none';
+  root.append(probe);
+  const rect = probe.getBoundingClientRect();
+  probe.remove();
+  return {width:rect.width,height:rect.height,innerWidth,innerHeight,clientWidth:root.clientWidth,clientHeight:root.clientHeight,offsetWidth:root.offsetWidth,rootRectWidth:root.getBoundingClientRect().width,bodyRectWidth:document.body.getBoundingClientRect().width,rootWidth:style.width,rootPadding:style.padding,rootOverflow:style.overflow,rootGutter:style.scrollbarGutter};
+}
+
 if (process.env.DIALOG_GEOMETRY_SELF_CHECK === '1') {
   for (const [layoutWidth, width, x] of [[1440, 440, 500], [1425, 440, 492.5], [390, 390, 0], [375, 375, 0]]) {
     const box = {x, width, viewport: {width: layoutWidth}};
@@ -85,13 +96,14 @@ if (process.env.DIALOG_GEOMETRY_SELF_CHECK === '1') {
 
 async function inspectOpenDialog(page, theme, size, view) {
   const dialog = page.locator('[data-ely-component="overlays/Dialog"] dialog').first();
-  const expected = await dialog.evaluate(node => {
+  const expected = await dialog.evaluate((node, layout) => {
     const r = node.getBoundingClientRect();
     return {
       x: r.x, y: r.y, width: r.width, height: r.height,
       right: r.right, bottom: r.bottom,
-      viewport: {width: document.documentElement.clientWidth, height: innerHeight},
+      viewport: {width: layout.width, height: layout.height},
       innerWidth,
+      layoutDiagnostics: layout,
       title: node.querySelector('h2')?.textContent?.trim(),
       text: node.innerText,
       activeIsFirstInput: document.activeElement === node.querySelector('input'),
@@ -100,7 +112,7 @@ async function inspectOpenDialog(page, theme, size, view) {
       background: getComputedStyle(node).backgroundColor,
       color: getComputedStyle(node).color
     };
-  });
+  }, await page.evaluate(measureViewport));
   const centerError = {
     x: horizontalCenterError(expected),
     y: Math.abs(expected.y - (expected.viewport.height - expected.height) / 2)
@@ -117,6 +129,17 @@ async function inspectOpenDialog(page, theme, size, view) {
   await dialog.screenshot({path: panelPath, animations: 'disabled'});
   await page.screenshot({path: viewportPath, animations: 'disabled'});
   captures.push({caseId: 'interaction/overlays/Dialog', profile: {theme, viewport: expected.viewport}, state: 'open-before-cancel', reference: ['docs/gohtmx/advanced-interaction.md:187-189 (440px card and modal fixture variants)', 'native modal viewport-centering expectation; geometry calculated from measured box'], bounds: {x: expected.x, y: expected.y, width: expected.width, height: expected.height}, computedMargin: expected.computedMargin, computedBackground: expected.background, computedColor: expected.color, panel: panelPath, viewport: viewportPath});
+  if (process.env.DIALOG_CLASSIC_SCROLLBAR === '1') {
+    record(`${theme}/${size}.nonzero-classic-gutter`, expected.innerWidth - expected.viewport.width >= 14, expected.layoutDiagnostics);
+    const shifted = await dialog.evaluate(node => {
+      const before = node.getAttribute('style');
+      node.style.transform = 'translateX(8px)';
+      const r = node.getBoundingClientRect();
+      if (before === null) node.removeAttribute('style'); else node.setAttribute('style', before);
+      return {x:r.x,width:r.width};
+    });
+    record(`${theme}/${size}.rejects-off-center-control`, horizontalCenterError({...shifted,viewport:expected.viewport}) > 1.5, shifted);
+  }
 }
 
 try {
@@ -130,7 +153,7 @@ try {
   child.once('error', error => { startupError = error; });
   const origin = `http://127.0.0.1:${port}`;
   await eventually(async () => { try { return (await fetch(`${origin}/components/audit?family=interaction`)).ok; } catch { return false; } }, 'own gallery server did not become ready');
-  browser = await chromium.launch({executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined});
+  browser = await chromium.launch({executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined, ...(process.env.DIALOG_CLASSIC_SCROLLBAR === '1' ? {ignoreDefaultArgs: ['--hide-scrollbars']} : {})});
 
   for (const theme of ['light', 'dark']) {
     const context = await browser.newContext({viewport: {width: 1440, height: 1000}, colorScheme: theme});
@@ -138,6 +161,13 @@ try {
     const pageErrors = [];
     page.on('pageerror', error => pageErrors.push(String(error)));
     await page.goto(`${origin}/components/audit?family=interaction`, {waitUntil: 'domcontentloaded'});
+    if (process.env.DIALOG_CLASSIC_SCROLLBAR === '1') await page.evaluate(() => {
+      const sheet = new CSSStyleSheet();
+      sheet.replaceSync('::-webkit-scrollbar{width:15px;height:15px}');
+      document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
+    });
+    const beforeModal = await page.evaluate(measureViewport);
+    record(`${theme}/before-modal-layout`, beforeModal.width > 0 && beforeModal.height > 0 && Math.abs(beforeModal.width - beforeModal.rootRectWidth) <= 1.5, beforeModal);
     await page.waitForFunction(theme => document.documentElement.dataset.theme === theme, theme);
     const root = page.locator('[data-ely-family="interaction"][data-ely-component="overlays/Dialog"]').first();
     await root.waitFor({state: 'visible'});
@@ -162,7 +192,7 @@ try {
     await sheetRoot.locator('[data-interaction-dialog]').first().click();
     const sheet = sheetRoot.locator('dialog.is-sheet');
     await sheet.waitFor({state: 'visible'});
-    const sheetBox = await sheet.evaluate(node => { const r = node.getBoundingClientRect(); return {x:r.x,y:r.y,width:r.width,height:r.height,bottom:r.bottom,viewport:{width:document.documentElement.clientWidth,height:innerHeight},innerWidth}; });
+    const sheetBox = await sheet.evaluate((node,layout) => { const r = node.getBoundingClientRect(); return {x:r.x,y:r.y,width:r.width,height:r.height,bottom:r.bottom,viewport:{width:layout.width,height:layout.height},layoutDiagnostics:layout}; },await page.evaluate(measureViewport));
     record(`${theme}/sheet-remains-bottom-centered`, Math.abs(sheetBox.bottom - sheetBox.viewport.height) <= 1.5 && horizontalCenterError(sheetBox) <= 1.5, sheetBox);
     await sheet.locator('[data-interaction-close]').last().click();
     await page.waitForFunction(() => !document.querySelector('[data-ely-component="buttons/ActionSheet"] dialog').open);
