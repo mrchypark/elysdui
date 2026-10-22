@@ -101,12 +101,13 @@ if (process.env.DATA_PIXEL_SELF_CHECK === '1') {
   assert(!valid({...dashboard,columns:4},'dashboard',true));
   assert(!valid({...dashboard,tiles:tiles.map((tile,i) => i===1 ? {...tile,textFits:false} : tile)},'dashboard',true));
   assert(valid({...dashboard,columns:12},'dashboard',false));
+  assert(!valid({...dashboard,columns:4},'dashboard',false));
   assert(valid(measures,'measures',true));
   assert(!valid({...measures,contained:false},'measures',true));
   assert(!valid({...measures,viewportContained:false},'measures',true));
   assert(!valid({...measures,gauges:[{...measures.gauges[0],textFits:false},measures.gauges[1]]},'measures',true));
   assert(!valid({...measures,gauges:[{...measures.gauges[0],height:0},measures.gauges[1]]},'measures',true));
-  console.log('19 measured-oracle self-checks passed; no files, server or browser started');
+  console.log('20 measured-oracle self-checks passed; no files, server or browser started');
   process.exit(0);
 }
 await mkdir(outputRoot, {recursive: true});
@@ -221,12 +222,17 @@ try {
         for(const mode of modes){
         const target = group === 'chart' ? root.locator('.ely-data__chart text').first() : root.locator(group === 'dashboard' ? '[data-ely-dashboard]' : mode==='clipped-gauge'?'.ely-data__gauge':'.ely-data__measures').first();
         const original = await target.getAttribute('style');
+        const tileStyles=mode==='columns'?await target.locator('[data-ely-dashboard-tile]').evaluateAll(nodes => nodes.map(node => node.getAttribute('style'))):null;
         await target.evaluate((node,mode) => {
           if(mode==='fill')node.style.setProperty('fill','rgb(255, 0, 255)','important');
           else if(mode==='hidden')node.style.setProperty('opacity','0','important');
           else if(mode==='offscreen')node.style.setProperty('transform','translate(10000px,10000px)','important');
           else if(mode==='clipped-gauge'){node.style.setProperty('height','16px','important');node.style.setProperty('max-height','16px','important');node.style.setProperty('overflow','hidden','important');}
-          else if(mode==='columns'){node.style.setProperty('grid-template-columns','repeat(4,minmax(0,1fr))','important');node.style.setProperty('grid-auto-rows','5.5rem','important');}
+          else if(mode==='columns'){
+            node.style.setProperty('grid-template-columns','repeat(4,minmax(0,1fr))','important');node.style.setProperty('grid-auto-rows','5.5rem','important');
+            // Caller coordinates otherwise create implicit desktop columns beyond the four explicit tracks.
+            for(const tile of node.querySelectorAll('[data-ely-dashboard-tile]')){tile.style.setProperty('grid-column','auto','important');tile.style.setProperty('grid-row','auto','important');}
+          }
           else {
             const widerThanRoot = node.closest('[data-ely-family]').getBoundingClientRect().width + 100;
             node.style.setProperty('grid-template-columns','minmax(14rem,2fr) repeat(2,7rem)','important');
@@ -234,6 +240,7 @@ try {
           }
         },mode);
         const broken = await measure(root,group);
+        if(mode==='columns')assert.equal(broken.columns,4,'negative must produce four actual used columns, not implicit caller-coordinate tracks');
         if(mode==='hidden')assert.equal(broken.labels[0].visible,false);
         if(mode==='offscreen')assert.equal(broken.labels[0].contained,false);
         if(mode==='clipped-gauge')assert.equal(broken.gauges[0].textFits,false);
@@ -241,6 +248,7 @@ try {
         await capture(root,`${profile}-negative-${group}-${mode}`);
         assert(!valid(broken,group,mobile),`${profile} ${group}/${mode} negative must be rejected`);
         await target.evaluate((node,style) => {if(style===null)node.removeAttribute('style');else node.setAttribute('style',style);},original);
+        if(tileStyles)await target.locator('[data-ely-dashboard-tile]').evaluateAll((nodes,styles) => nodes.forEach((node,index) => {if(styles[index]===null)node.removeAttribute('style');else node.setAttribute('style',styles[index]);}),tileStyles);
         await page.evaluate(() => window.scrollTo(0,window.scrollY));
         assert(valid(await measure(root,group),group,mobile),`${group} restored after negative`);
         }
