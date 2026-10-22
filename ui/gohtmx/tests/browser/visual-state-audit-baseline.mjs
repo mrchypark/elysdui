@@ -9,6 +9,7 @@ import {fileURLToPath} from 'node:url';
 import {setTimeout as delay} from 'node:timers/promises';
 import {chromium} from 'playwright';
 import {captureBounds} from './visual-state-audit-bounds.mjs';
+import {baselineFixture, basicFixturePackage, basicFixtureRoute, basicRootSelector, basicSourcePrefixes, validateBasicMatrix} from './visual-state-audit-basic.mjs';
 
 const repo = fileURLToPath(new URL('../../../../', import.meta.url));
 function pinnedSourceRoot(sourceRoot, revision) {
@@ -67,6 +68,7 @@ function argsFrom(argv) {
   const options = {sourceRoot: null, sourceRevision: null, matrix: process.env.VISUAL_AUDIT_MATRIX ? resolve(process.env.VISUAL_AUDIT_MATRIX) : null, output: process.env.VISUAL_AUDIT_OUTPUT_DIR ? resolve(process.env.VISUAL_AUDIT_OUTPUT_DIR) : resolve(repo, 'test-results', 'visual-audit', `${stamp}-${process.pid}`), profile: 'live-desktop-light', mode: null, families: [], caseIds: [], contextCases: [], baseURL: null, help: false};
   for (const arg of argv) {
     if (arg === '--help' || arg === '-h') options.help = true;
+    else if (arg.startsWith('--fixture=')) options.fixture = baselineFixture(arg.slice('--fixture='.length));
     else if (arg.startsWith('--source-root=')) options.sourceRoot = resolve(arg.slice('--source-root='.length));
     else if (arg.startsWith('--source-revision=')) options.sourceRevision = arg.slice('--source-revision='.length);
     else if (arg.startsWith('--matrix=')) options.matrix = resolve(arg.slice('--matrix='.length));
@@ -80,7 +82,7 @@ function argsFrom(argv) {
     else throw new Error(`Unknown option: ${arg}`);
   }
   if (options.help) {
-    console.log('Usage: node visual-state-audit-baseline.mjs --matrix=/path/to/acceptance-matrix.json [--source-root=/production/repo --source-revision=<fullSHA>] [--profile=<profile>] [--mode=live|static] [--family=a,b] [--case=id,...] [--context-case=id,...] [--output-dir=path] [--base-url=http://127.0.0.1:port]');
+    console.log('Usage: node visual-state-audit-baseline.mjs --matrix=/path/to/acceptance-matrix.json [--fixture=advanced|basic] [--source-root=/production/repo --source-revision=<fullSHA>] [--profile=<profile>] [--mode=live|static] [--family=a,b] [--case=id,...] [--context-case=id,...] [--output-dir=path] [--base-url=http://127.0.0.1:port]');
     console.log(`Profiles: ${Object.keys(profiles).join(', ')}`);
     return null;
   }
@@ -88,6 +90,8 @@ function argsFrom(argv) {
     console.error('Error: missing required --matrix=/path/to/acceptance-matrix.json (or set VISUAL_AUDIT_MATRIX). No default inventory is bundled.');
     process.exit(2);
   }
+  options.fixture = baselineFixture(options.fixture);
+  if (options.fixture === 'basic') assert(!options.baseURL, 'basic phase1 requires an owned compiled fixture/export, not --base-url');
   assert(profiles[options.profile], `Unknown profile: ${options.profile}`);
   assert(!options.mode || ['live', 'static'].includes(options.mode), '--mode must be live or static');
   if (options.mode) assert.equal(options.mode, profiles[options.profile].mode, `Profile requires --mode=${profiles[options.profile].mode}`);
@@ -106,7 +110,7 @@ async function sourceBaseSnapshot(matrixBytes, matrix) {
   const sourceFiles = [];
   for (const path of paths) {
     if (path.startsWith('ui/gohtmx/tests/browser/')) continue;
-    if (!/^(?:go\.(?:mod|sum|work|work\.sum)$|ui\/gohtmx\/|internal\/gallery\/|examples\/gohtmx\/gallery\/|cmd\/ely-gallery-static\/)/.test(path)) continue;
+    if (!/^(?:go\.(?:mod|sum|work|work\.sum)$|ui\/gohtmx\/|internal\/gallery\/|examples\/gohtmx\/gallery\/|cmd\/ely-gallery-static\/)/.test(path) && !(options.fixture === 'basic' && basicSourcePrefixes.some(prefix => path.startsWith(prefix)))) continue;
     let contentHash;
     try { contentHash = sha256(await readFile(resolve(sourceRepo, path))); }
     catch (error) { if (error.code !== 'ENOENT') throw error; contentHash = 'deleted'; }
@@ -117,7 +121,7 @@ async function sourceBaseSnapshot(matrixBytes, matrix) {
   if (options.sourceRoot) assert.equal(currentRevision, options.sourceRevision, 'production source pin changed');
   const branch = execFileSync('git', ['branch', '--show-current'], {cwd: sourceRepo, encoding: 'utf8'}).trim();
   const matrixSHA256 = sha256(await readFile(options.matrix));
-  const harnessFiles = await Promise.all(['visual-state-audit-baseline.mjs', 'visual-state-audit-bounds.mjs'].map(async name => ({path: name, sha256: sha256(await readFile(new URL(name, import.meta.url)))})));
+  const harnessFiles = await Promise.all(['visual-state-audit-baseline.mjs', 'visual-state-audit-bounds.mjs', 'visual-state-audit-basic.mjs'].map(async name => ({path: name, sha256: sha256(await readFile(new URL(name, import.meta.url)))})));
   const harnessSource = {root: repo, revision: execFileSync('git', ['rev-parse', 'HEAD'], {cwd: repo, encoding: 'utf8'}).trim(), files: harnessFiles};
   return {
     productionRoot: sourceRepo,
@@ -200,7 +204,13 @@ try {
   sourceBase = await sourceBaseSnapshot(matrixBytes, matrix);
   const currentRevision = sourceBase.currentRevision;
   const profile = profiles[options.profile];
-  let cases = matrix.auditCases.filter(item => item.profileIds.includes(options.profile) && item.surface.includes(`${options.mode}-audit`));
+  if (options.fixture === 'basic') {
+    assert.equal(matrix.fixture, 'basic', 'basic fixture requires separate basic matrix');
+    assert.equal(matrix.source?.revision, currentRevision, 'basic matrix source revision');
+    assert.equal(sourceBase.sourceFiles.length, 0, 'basic captures require committed fixture and production sources');
+  }
+  const fixtureSurface = options.fixture === 'basic' ? `${options.mode}-basic` : `${options.mode}-audit`;
+  let cases = matrix.auditCases.filter(item => item.profileIds.includes(options.profile) && item.surface.includes(fixtureSurface));
   if (options.families.length) cases = cases.filter(item => options.families.includes(item.family));
   if (options.caseIds.length) cases = cases.filter(item => options.caseIds.includes(item.caseId) || options.caseIds.includes(item.componentIdentity));
   for (const id of options.contextCases) assert(cases.some(item => item.caseId === id || item.componentIdentity === id), `requested context case not selected: ${id}`);
@@ -224,7 +234,7 @@ try {
   let origin = options.baseURL;
   if (!origin && options.mode === 'live') {
     const binary = join(runDir, 'gallery');
-    const build = spawnSync('go', ['build', '-o', binary, './examples/gohtmx/gallery'], {cwd: sourceRepo, env: {...process.env, GOTOOLCHAIN: 'go1.26.9'}, encoding: 'utf8'});
+    const build = spawnSync('go', ['build', '-o', binary, options.fixture === 'basic' ? basicFixturePackage : './examples/gohtmx/gallery'], {cwd: sourceRepo, env: {...process.env, GOTOOLCHAIN: 'go1.26.9'}, encoding: 'utf8'});
     if (build.status !== 0) throw new Error(`Gallery build failed: ${build.stderr || build.stdout}`);
     buildArtifactSHA256 = sha256(await readFile(binary));
     const reservation = createServer();
@@ -237,13 +247,14 @@ try {
     let ready = false;
     for (let i = 0; i < 300; i++) {
       if (child.exitCode !== null) throw new Error(`Gallery exited before ready: ${serverOutput}`);
-      try { if ((await fetch(origin + '/components')).ok) { ready = true; break; } } catch {}
+      try { if ((await fetch(origin + (options.fixture === 'basic' ? basicFixtureRoute : '/components'))).ok) { ready = true; break; } } catch {}
       await delay(50);
     }
     assert(ready, `Gallery startup timeout: ${serverOutput}`);
   } else if (!origin && options.mode === 'static') {
     staticDir = join(runDir, 'static');
-    const exported = spawnSync('go', ['run', './cmd/ely-gallery-static', '-dir', staticDir, '-base', '/'], {cwd: sourceRepo, env: {...process.env, GOTOOLCHAIN: 'go1.26.9'}, encoding: 'utf8'});
+    const exportArgs = options.fixture === 'basic' ? ['run', basicFixturePackage, '-dir', staticDir] : ['run', './cmd/ely-gallery-static', '-dir', staticDir, '-base', '/'];
+    const exported = spawnSync('go', exportArgs, {cwd: sourceRepo, env: {...process.env, GOTOOLCHAIN: 'go1.26.9'}, encoding: 'utf8'});
     if (exported.status !== 0) throw new Error(`Static export failed: ${exported.stderr || exported.stdout}`);
     staticHTTPServer = createServer(async (request, response) => {
       try {
@@ -253,6 +264,7 @@ try {
         if (!file.startsWith(staticDir + sep)) { response.writeHead(403).end(); return; }
         const mime = {'.html':'text/html','.js':'text/javascript','.css':'text/css','.json':'application/json','.svg':'image/svg+xml','.woff2':'font/woff2'};
         response.setHeader('Content-Type', mime[extname(file)] || 'application/octet-stream');
+        if (options.fixture === 'basic') response.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; connect-src 'self'; base-uri 'none'; form-action 'self'");
         response.end(await readFile(file));
       } catch { response.writeHead(404).end(); }
     });
@@ -300,8 +312,13 @@ try {
     activeCaseId = null;
     familyErrors = [];
     console.log(`LOAD_FAMILY ${family}`);
-    const url = options.mode === 'live' ? new URL('/components/audit', origin) : new URL(`/components/audit/${family}/aliases/`, origin);
-    if (options.mode === 'live') { url.searchParams.set('aliases', '1'); url.searchParams.set('family', family); }
+    const url = options.fixture === 'basic' ? new URL(basicFixtureRoute, origin) : options.mode === 'live' ? new URL('/components/audit', origin) : new URL(`/components/audit/${family}/aliases/`, origin);
+    if (options.fixture !== 'basic' && options.mode === 'live') { url.searchParams.set('aliases', '1'); url.searchParams.set('family', family); }
+    if (options.fixture === 'basic') {
+      const manifestResponse = await fetch(new URL('/manifest.json', origin));
+      assert(manifestResponse.ok, 'actual basic manifest must load');
+      validateBasicMatrix(matrix, await manifestResponse.json(), currentRevision);
+    }
     const response = await page.goto(url.href, {waitUntil: 'domcontentloaded', timeout: 120000});
     assert(response?.ok(), `audit route ${family} returned ${response?.status()}`);
     await page.evaluate(() => document.fonts.ready);
@@ -392,7 +409,7 @@ try {
       aliasMapping: item.aliasMapping,
       fixtureIdentity: item.fixtureIdentity,
       profile: {id: options.profile, viewport: profile.viewport, colorScheme: profile.colorScheme, deviceScaleFactor: profile.deviceScaleFactor},
-      surface: `${options.mode}-audit primary fixture root`,
+      surface: `${fixtureSurface} primary fixture root`,
       actionCheckpoint: 'initial-render-before-interaction',
       sourceSHA: currentRevision,
       matrixSourceSHA: item.sourceSHA,
@@ -407,8 +424,20 @@ try {
     };
     try {
       assert.equal(await record.count(), 1, `case record ${item.componentIdentity} must occur once on ${currentFamily} route`);
-      const root = record.locator('[data-audit-main] > [data-ely-family]');
+      const rootSelector = options.fixture === 'basic' ? basicRootSelector : '[data-audit-main] > [data-ely-family]';
+      const root = record.locator(rootSelector);
       assert.equal(await root.count(), 1, `primary component root missing for ${item.componentIdentity}`);
+      if (options.fixture === 'basic') {
+        assert.equal(await root.getAttribute('data-basic-component'), item.componentIdentity);
+        assert.equal(await root.getAttribute('data-basic-props-sha256'), item.fixturePropsSHA256);
+        const twin = record.locator('[data-audit-twin] > [data-basic-component]');
+        assert.equal(await twin.count(), 1, 'separate basic twin required');
+        assert.equal(await twin.getAttribute('data-basic-component'), item.componentIdentity);
+        assert.equal(await twin.getAttribute('data-basic-props-sha256'), item.fixturePropsSHA256);
+        if (item.template === 'map-view') {
+          await page.waitForFunction(node => node.querySelector('[data-ui-component="map-view"]')?.dataset.mapReady === 'true', await root.elementHandle());
+        }
+      }
       await root.scrollIntoViewIfNeeded();
       await root.waitFor({state: 'attached', timeout: 15000});
       const readyBefore = await root.getAttribute('data-ely-ready');
@@ -489,13 +518,14 @@ try {
         }
         return {rootBounds: box(element), fixtureSnapshot: {recordSHA256: null, rootSHA256: null}, viewport: {width: innerWidth, height: innerHeight, devicePixelRatio}, scroll: {x: scrollX, y: scrollY, documentWidth: document.documentElement.scrollWidth, documentHeight: document.documentElement.scrollHeight}, readyMarker: element.getAttribute('data-ely-ready'), fonts: {documentStatus: document.fonts.status, rootFamily: style.fontFamily, rootSize: style.fontSize, faces}, visibleOverlays: overlays, componentText: (element.innerText || '').trim().replace(/\s+/g, ' ').slice(0, 1200), controlInventory: {count: controlsInRoot.length, maxRows: 300, truncated: controlsInRoot.length > 300, controls: controlsSnapshot}, svgGeometryDiagnostics: {svgCount: svgRoots.length, invalidViewBoxes, malformedNumericGeometry}};
       }, {element: await root.elementHandle(), caseId: item.caseId});
-      const fixtureHTML = await record.evaluate(node => ({record: node.outerHTML, root: node.querySelector('[data-audit-main] > [data-ely-family]')?.outerHTML || ''}));
+      const fixtureHTML = await record.evaluate((node, selector) => ({record: node.outerHTML, root: node.querySelector(selector)?.outerHTML || ''}), rootSelector);
       metadata.fixtureSnapshot = {recordSHA256: sha256(fixtureHTML.record), rootSHA256: sha256(fixtureHTML.root)};
       metadata.themeVerification = currentThemeVerification;
+      if (options.fixture === 'basic') metadata.basicFixture = {template: item.template, canonicalPropsSHA256: item.fixturePropsSHA256, initialState: await root.getAttribute('data-basic-initial-state'), scope: 'fixture wrapper plus actual basic template; hidden native templates explicitly context-only; no actions executed'};
       const bounds = await root.evaluate(captureBounds);
       assert(bounds.visibleCount > 0 && bounds.clip.width > 0 && bounds.clip.height > 0, 'target has no visible painted bounds');
       metadata.captureBounds = bounds;
-      metadata.captureIdentity = {requested: item.componentIdentity, rendered: await root.getAttribute('data-ely-component'), behaviorKey: item.aliasMapping?.behaviorKey || null, visualAssessment: 'pending; capture success is not a component visual pass'};
+      metadata.captureIdentity = {requested: item.componentIdentity, rendered: await root.getAttribute(options.fixture === 'basic' ? 'data-basic-component' : 'data-ely-component'), behaviorKey: item.aliasMapping?.behaviorKey || null, visualAssessment: 'pending; capture success is not a component visual pass'};
       result.actual = metadata;
       const caseSlug = slug(item.componentIdentity) || String(index + 1);
       const initialFile = `${String(index + 1).padStart(4, '0')}-${caseSlug}-initial.png`;
