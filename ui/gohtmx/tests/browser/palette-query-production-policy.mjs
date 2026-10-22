@@ -33,6 +33,7 @@ export const paletteAuditCandidateProduction = [
 // keeps the same source-owned boundary as the source loop.
 export const paletteAuditCandidateAssets = [
   'ui/gohtmx/assets/ely-api-interaction.css',
+  'ui/gohtmx/assets/ely-controls.css',
 ];
 // The runtime and core digests the audited candidate carries. They are the
 // clean HEAD bytes of the reviewed revision, so they describe the committed
