@@ -245,6 +245,11 @@ export function requestedStateContract(identity){
       ['seek-visible-frame','[data-interaction-lottie-seek]','Frame control and progress output both show 50%; SVG remains visible'],
       ['reset-visible-frame','[data-interaction-lottie-seek]','Frame control and progress output return to 0%; SVG remains painted'],
     ]},
+    'canvas/InfiniteCanvas':{kind:'InfiniteCanvas',sequence:'canvas-minimap-zoom-fit-hit-test',steps:[
+      ['zoom-in','[data-cs-zoom-in]','Native hit-tested zoom action increases zoom and keeps the rendered world transform in sync'],
+      ['fit-canvas','[data-cs-fit]','Fit centers and scales the actual rendered artboard union within the actual stage viewBox'],
+      ['navigate-minimap','[data-cs-minimap]','Trusted pointer hit navigates to the point represented by the rendered minimap; target remains reachable'],
+    ]},
   }[identity];
   if(focused){
     const provenance={
@@ -259,10 +264,11 @@ export function requestedStateContract(identity){
       'account/SignupForm':'Explicit focused form contract from ui/gohtmx/templates/ely-api-forms.html and ui/gohtmx/assets/ely-api-forms.js',
       'navigation/Tabs':'Explicit selected-tab/panel contract from ui/gohtmx/templates/ely-api-interaction.html and ui/gohtmx/assets/ely-api-interaction.js',
       'motion/Lottie Player':'Explicit deterministic player contract from internal/gallery/advanced_interaction_fixtures.go, ui/gohtmx/templates/ely-api-interaction.html and ui/gohtmx/assets/ely-api-interaction.js',
+      'canvas/InfiniteCanvas':'Canonical gallery:canvas/InfiniteCanvas case from ui/gohtmx/components.json and internal/gallery/advanced_workspace_canvas.go; action behavior from ui/gohtmx/assets/ely-api-workspace-canvas.js; seven other alias inventory IDs remain separate and untested; action geometry is read from rendered SVG, not a presumed fit percentage',
     }[identity];
     const steps=focused.steps.map(([id,control,expectedState])=>({id,control,expectedState,event:identity==='tooling/EventLogger'?'synthetic public DOM event via Playwright':id.startsWith('disabled-')?'native HTMLButtonElement.click (disabled negative; not trusted pointer input)':'native Playwright action',source:{siteId:`focused-state:${identity}:${id}`,sourceAnchor:null,provenance}}));
     return {identity,kind:focused.kind,target:null,variant:identity.split('/')[1],focusedSequence:focused.sequence,steps,mappingGaps:[],requestedStateOnly:true,
-      fixtureGuards:{component:identity,kind:focused.kind},...(identity==='project/StatusSelect'?{inputSupport:{submit:'real Tab reveal followed by native Enter',unfocusedPointer:'unsupported: Update is 1px and clipped until focus-visible'}}:{}),scope:'Explicit finite focused sequence from the case fixture; separate from registered-check coverage, aliases, and all-catalog approval'+(identity==='tooling/EventLogger'?'; four grouped scenario checkpoints, not per-event pixel coverage or trusted physical input; exact trace calibration remains separate':identity==='project/StatusSelect'?'; keyboard-only submit; no unfocused pointer activation approval':'')};
+      fixtureGuards:{component:identity,kind:focused.kind},...(identity==='project/StatusSelect'?{inputSupport:{submit:'real Tab reveal followed by native Enter',unfocusedPointer:'unsupported: Update is 1px and clipped until focus-visible'}}:{}),scope:identity==='canvas/InfiniteCanvas'?'Only the canonical gallery:canvas/InfiniteCanvas focused sequence; the seven separate alias inventory rows are not action-tested or approved': 'Explicit finite focused sequence from the case fixture; separate from registered-check coverage, aliases, and all-catalog approval'+(identity==='tooling/EventLogger'?'; four grouped scenario checkpoints, not per-event pixel coverage or trusted physical input; exact trace calibration remains separate':identity==='project/StatusSelect'?'; keyboard-only submit; no unfocused pointer activation approval':'')};
   }
   const variant=identity.split('/')[1],target=identity.startsWith('settings/')?settingsTargets[variant]:null;
   if(identity!=='maps/MapPopup'&&!target)return null;
@@ -333,8 +339,16 @@ export function assertStatusSelectDueEvents(observed,{id,identity,entries,native
   return observed;
 }
 
+export function assertMinimapViewport(before,actual,{bounds,ratio,point}){
+  const zoom=before.view.zoom,expected={zoom,
+    x:bounds.x+(point.x-10)/ratio-before.stage.width/zoom/2,
+    y:bounds.y+(point.y-10)/ratio-before.stage.height/zoom/2};
+  for(const key of ['zoom','x','y'])assert(Math.abs(actual[key]-expected[key])<=1e-6,`Minimap ${key} must preserve pre-click viewport semantics: expected ${expected[key]}, got ${actual[key]}`);
+  return expected;
+}
+
 export async function runRequestedStateActions(contract,root,runStep){
-  if(['task-due-submit','remove-four-tags','radio-groups-reselection','eventlogger-public-timestamps','button-public-boundary','textarea-public-multiline'].includes(contract.focusedSequence)){
+  if(['task-due-submit','remove-four-tags','radio-groups-reselection','eventlogger-public-timestamps','button-public-boundary','textarea-public-multiline','canvas-minimap-zoom-fit-hit-test'].includes(contract.focusedSequence)){
     const identity=await root.getAttribute('data-ely-component');
     assert.equal(identity,contract.identity,'Exact alias identity is required');
     assert.equal(await root.getAttribute('data-ely-kind'),contract.kind);
@@ -358,6 +372,82 @@ export async function runRequestedStateActions(contract,root,runStep){
     let cursor=0;
     const begin=async()=>{cursor=(await events()).length;};
     const fresh=async()=>{assert.deepEqual(await twinState(),initialTwin,'Public actions must preserve the independent twin');return (await events()).slice(cursor);};
+    if(contract.focusedSequence==='canvas-minimap-zoom-fit-hit-test'){
+      const scene=()=>root.evaluate(node=>{
+        const host=node.querySelector('[data-ws-canvas-scene]'),stage=host?.querySelector('[data-cs-stage]'),world=host?.querySelector('[data-cs-world]'),map=host?.querySelector('[data-cs-minimap]');
+        if(!host||!stage||!world||!map)throw new Error('InfiniteCanvas must render its scene, stage, world and minimap');
+        const match=(world.getAttribute('transform')||'').match(/^scale\(([-+\d.e]+)\) translate\(([-+\d.e]+) ([-+\d.e]+)\)$/);
+        if(!match)throw new Error('Rendered canvas world transform is not the public scale/translate form');
+        const artboards=[...world.querySelectorAll('[data-cs-artboard]')].map(element=>({id:element.getAttribute('data-cs-artboard'),x:Number(element.getAttribute('x')),y:Number(element.getAttribute('y')),w:Number(element.getAttribute('width')),h:Number(element.getAttribute('height'))}));
+        const rect=element=>{const value=element.getBoundingClientRect();return {left:value.left,top:value.top,right:value.right,bottom:value.bottom,width:value.width,height:value.height};};
+        return {kind:host.dataset.sceneKind,stage:{width:stage.viewBox.baseVal.width,height:stage.viewBox.baseVal.height},view:{zoom:Number(match[1]),x:-Number(match[2]),y:-Number(match[3])},artboards,shapes:world.querySelectorAll('[data-cs-shape]').length,guides:world.querySelectorAll('[data-cs-guide]').length,grid:host.querySelectorAll('[data-cs-grid] circle').length,rulers:host.querySelectorAll('[data-cs-rulers] text').length,mapBounds:JSON.parse(map.dataset.bounds),mapRect:rect(map),viewRect:rect(host.querySelector('[data-cs-view]')),zoomRect:rect(host.querySelector('[data-cs-zoom]')),zoomTargets:[...host.querySelectorAll('[data-cs-zoom] button')].map(rect)};
+      });
+      const initial=await scene();
+      assert.equal(initial.kind,'InfiniteCanvas','Exact canonical fixture kind is required');
+      assert.deepEqual(initial.stage,{width:820,height:460},'Canonical InfiniteCanvas stage geometry changed');
+      assert.deepEqual(initial.view,{x:-60,y:-60,zoom:.7},'Initial viewport must match the canonical scene contract');
+      assert.deepEqual(initial.artboards.map(({id})=>id),['home','detail'],'The rendered fixture must contain its two canonical artboards');
+      assert.equal(initial.shapes,8,'The combined fixture must retain its eight rendered shapes');
+      assert.equal(initial.guides,2,'Both canonical guides must be painted');
+      assert(initial.grid>0&&initial.rulers>0,'The grid and ruler aliases must both render content');
+      const union=rects=>{const x=Math.min(...rects.map(rect=>rect.x)),y=Math.min(...rects.map(rect=>rect.y));return {x,y,w:Math.max(...rects.map(rect=>rect.x+rect.w))-x,h:Math.max(...rects.map(rect=>rect.y+rect.h))-y};};
+      const close=(actual,expected,message)=>assert(Math.abs(actual-expected)<=1e-6,message+`: expected ${expected}, got ${actual}`);
+      const initialBounds=union(initial.artboards);
+      for(const key of ['x','y','w','h'])close(initial.mapBounds.bounds[key],initialBounds[key],`Rendered minimap ${key} bound must cover the rendered artboard union`);
+      assert(initial.mapBounds.ratio>0,'Rendered minimap must have a positive scene-to-map scale');
+      const assertWorld=async expected=>{
+        const current=await scene();
+        close(current.view.zoom,expected.zoom,'Rendered canvas zoom must match the action state');
+        close(current.view.x,expected.x,'Rendered canvas x must match the action state');
+        close(current.view.y,expected.y,'Rendered canvas y must match the action state');
+        return current;
+      };
+      const controls=['[data-cs-zoom-out]','[data-cs-zoom-reset]','[data-cs-zoom-in]','[data-cs-fit]'];
+      assert.equal(await root.locator('[data-cs-zoom] button').count(),controls.length,'All four zoom targets must be present');
+      const overlap=(a,b)=>a.left<b.right&&b.left<a.right&&a.top<b.bottom&&b.top<a.bottom;
+      assert(!overlap(initial.zoomRect,initial.mapRect),'Zoom controls and minimap must not overlap');
+      for(let left=0;left<initial.zoomTargets.length;left++)for(let right=left+1;right<initial.zoomTargets.length;right++)assert(!overlap(initial.zoomTargets[left],initial.zoomTargets[right]),'Zoom control targets must not overlap each other');
+      assert(initial.mapRect.left>=initial.viewRect.left&&initial.mapRect.right<=initial.viewRect.right&&initial.mapRect.top>=initial.viewRect.top&&initial.mapRect.bottom<=initial.viewRect.bottom,'Minimap must remain inside its rendered canvas view');
+      for(const selector of controls){
+        const target=root.locator(selector);assert.equal(await target.count(),1,`${selector} must be unique`);
+        const hit=await target.evaluate(node=>{const rect=node.getBoundingClientRect(),x=rect.left+rect.width/2,y=rect.top+rect.height/2,element=document.elementFromPoint(x,y);return {reachable:!!element&&(element===node||node.contains(element)),disabled:node.disabled};});
+        assert.equal(hit.reachable,true,`${selector} center must be an owned hit target`);assert.equal(hit.disabled,false,`${selector} must be enabled`);
+      }
+      const mapHit=await root.locator('[data-cs-minimap]').evaluate(node=>{const rect=node.getBoundingClientRect(),x=rect.left+rect.width/2,y=rect.top+rect.height/2,element=document.elementFromPoint(x,y);return !!element&&(element===node||node.contains(element));});
+      assert.equal(mapHit,true,'Minimap center must be an owned hit target');
+      await root.evaluate(node=>{node.__visualCanvasClicks=[];node.__visualCanvasClickObserver=event=>{if(event.target.closest?.('[data-cs-minimap]'))node.__visualCanvasClicks.push({trusted:event.isTrusted,x:event.clientX,y:event.clientY});};node.addEventListener('click',node.__visualCanvasClickObserver,true);});
+      try{
+        let beforeZoom;
+        await runStep('zoom-in',async()=>{await begin();beforeZoom=await scene();return clickVisibleControl(root.locator('[data-cs-zoom-in]'));},async()=>{
+          const observed=await fresh();assert.deepEqual(observed.map(event=>event.type),['ely:action']);
+          const detail=observed[0].detail;assert.equal(detail.id,id);assert.equal(detail.component,identity);assert.equal(detail.action,'change-viewport');assert(detail.scene?.view,'Viewport action must carry the public scene view');
+          const stops=[.1,.25,.5,.75,1,1.5,2,3,4,6,8],zoom=stops.find(value=>value>beforeZoom.view.zoom+.001)??beforeZoom.view.zoom,center={x:beforeZoom.stage.width/2,y:beforeZoom.stage.height/2};
+          const expected={zoom,x:beforeZoom.view.x+center.x/beforeZoom.view.zoom-center.x/zoom,y:beforeZoom.view.y+center.y/beforeZoom.view.zoom-center.y/zoom};
+          close(detail.scene.view.zoom,expected.zoom,'Zoom-in must advance exactly one canonical zoom stop from the pre-click state');close(detail.scene.view.x,expected.x,'Zoom-in must preserve the pre-click center anchor');close(detail.scene.view.y,expected.y,'Zoom-in must preserve the pre-click center anchor');
+          await assertWorld(detail.scene.view);return {action:detail.action,view:detail.scene.view,expected,preClick:beforeZoom.view,events:observed};
+        });
+        const afterZoom=await scene();
+        await runStep('fit-canvas',async()=>{await begin();return clickVisibleControl(root.locator('[data-cs-fit]'));},async()=>{
+          const observed=await fresh();assert.deepEqual(observed.map(event=>event.type),['ely:action']);
+          const detail=observed[0].detail;assert.equal(detail.id,id);assert.equal(detail.component,identity);assert.equal(detail.action,'change-viewport');assert(detail.scene?.view,'Fit action must carry the public scene view');
+          const bounds=union(afterZoom.artboards),margin=48,zoom=Math.max(.1,Math.min(1,Math.min(Math.max(1,afterZoom.stage.width-2*margin)/Math.max(1,bounds.w),Math.max(1,afterZoom.stage.height-2*margin)/Math.max(1,bounds.h))));
+          const expected={zoom,x:bounds.x+bounds.w/2-afterZoom.stage.width/2/zoom,y:bounds.y+bounds.h/2-afterZoom.stage.height/2/zoom};
+          close(detail.scene.view.zoom,expected.zoom,'Fit zoom must be derived from rendered artboards and stage dimensions');close(detail.scene.view.x,expected.x,'Fit x must center rendered artboards');close(detail.scene.view.y,expected.y,'Fit y must center rendered artboards');
+          await assertWorld(detail.scene.view);return {action:detail.action,view:detail.scene.view,expected,geometry:{stage:afterZoom.stage,artboards:afterZoom.artboards}};
+        });
+        let beforeMinimap;
+        await runStep('navigate-minimap',async()=>{await begin();beforeMinimap=await scene();return clickVisibleControl(root.locator('[data-cs-minimap]'));},async()=>{
+          const observed=await fresh();assert.deepEqual(observed.map(event=>event.type),['ely:action']);
+          const detail=observed[0].detail;assert.equal(detail.id,id);assert.equal(detail.component,identity);assert.equal(detail.action,'change-viewport');assert(detail.scene?.view,'Minimap action must carry the public scene view');
+          const clicks=await root.evaluate(node=>node.__visualCanvasClicks);assert.equal(clicks.length,1,'Exactly one native minimap pointer click must be observed');
+          const click=clicks[0];assert.equal(click.trusted,true,'Minimap activation must use a trusted native pointer click');
+          const point=await root.locator('[data-cs-minimap]').evaluate((map,click)=>{const local=new DOMPoint(click.x,click.y).matrixTransform(map.getScreenCTM().inverse());return {x:local.x,y:local.y};},click);
+          const expected=assertMinimapViewport(beforeMinimap,detail.scene.view,{bounds:beforeMinimap.mapBounds.bounds,ratio:beforeMinimap.mapBounds.ratio,point});
+          await assertWorld(detail.scene.view);return {action:detail.action,view:detail.scene.view,expected,pointer:click};
+        });
+      }finally{await root.evaluate(node=>{node.removeEventListener('click',node.__visualCanvasClickObserver,true);delete node.__visualCanvasClickObserver;delete node.__visualCanvasClicks;});}
+      return;
+    }
     if(['button-public-boundary','textarea-public-multiline'].includes(contract.focusedSequence)){
       await root.evaluate(node=>{
         node.__visualNativeControls=[];
