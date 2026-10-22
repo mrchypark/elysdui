@@ -71,7 +71,9 @@ async function measure(root, group) {
     const base = {bounds, panelBounds, viewportContained, contained:inside(panelBounds, bounds) && panel.scrollWidth <= panel.clientWidth + 1};
     if (group === 'dashboard') return {...base, columns:getComputedStyle(panel).gridTemplateColumns.split(' ').length, tiles:[...panel.querySelectorAll('[data-ely-dashboard-tile]')].map(tile => {
       const box = rect(tile), texts = [...tile.querySelectorAll('h2,small,output')].map(node => {const range = document.createRange(); range.selectNodeContents(node); return rect(range);});
+      const computed=getComputedStyle(tile),grid={cssText:tile.style.cssText,declarations:Object.fromEntries(['grid-column-start','grid-column-end','grid-row-start','grid-row-end'].map(property => [property,{inline:tile.style.getPropertyValue(property),priority:tile.style.getPropertyPriority(property),computed:computed.getPropertyValue(property)}]))};
       return {...box, key:tile.dataset.elyKey, x:tile.dataset.elyX, y:tile.dataset.elyY, w:tile.dataset.elyW, h:tile.dataset.elyH,
+        grid,
         textFits:inside(box,panelBounds) && texts.every(text => inside(text,box) && text.top >= box.top - 1 && text.bottom <= box.bottom + 1),
         texts};
     })};
@@ -225,6 +227,7 @@ try {
         const tileStyles=mode==='columns'?await target.locator('[data-ely-dashboard-tile]').evaluateAll(nodes => nodes.map(node => node.getAttribute('style'))):null;
         const negative = {profile,identity,group,mode,beforeStyles:{target:original,tiles:tileStyles}};
         report.negatives.push(negative);
+        if(tileStyles)negative.beforeGrid=(await measure(root,group)).tiles.map(tile => tile.grid);
         await target.evaluate((node,mode) => {
           if(mode==='fill')node.style.setProperty('fill','rgb(255, 0, 255)','important');
           else if(mode==='hidden')node.style.setProperty('opacity','0','important');
@@ -249,12 +252,14 @@ try {
         if(mode==='clipped-gauge')assert.equal(broken.gauges[0].textFits,false);
         await capture(root,`${profile}-negative-${group}-${mode}`);
         assert(!valid(broken,group,mobile),`${profile} ${group}/${mode} negative must be rejected`);
-        await target.evaluate((node,style) => {if(style===null)node.removeAttribute('style');else node.setAttribute('style',style);},original);
-        if(tileStyles)await target.locator('[data-ely-dashboard-tile]').evaluateAll((nodes,styles) => nodes.forEach((node,index) => {if(styles[index]===null)node.removeAttribute('style');else node.setAttribute('style',styles[index]);}),tileStyles);
+        // Clear mutated CSSOM priorities before reparsing the exact original attribute.
+        await target.evaluate((node,style) => {node.removeAttribute('style');if(style!==null)node.setAttribute('style',style);},original);
+        if(tileStyles)await target.locator('[data-ely-dashboard-tile]').evaluateAll((nodes,styles) => nodes.forEach((node,index) => {node.removeAttribute('style');if(styles[index]!==null)node.setAttribute('style',styles[index]);}),tileStyles);
         await page.evaluate(() => window.scrollTo(0,window.scrollY));
         negative.afterStyles = {target:await target.getAttribute('style'),tiles:tileStyles ? await target.locator('[data-ely-dashboard-tile]').evaluateAll(nodes => nodes.map(node => node.getAttribute('style'))) : null};
         negative.restoredMetrics = await measure(root,group);
         assert.deepEqual(negative.afterStyles,negative.beforeStyles,`${group}/${mode} exact style restoration`);
+        if(tileStyles)assert.deepEqual(negative.restoredMetrics.tiles.map(tile => tile.grid),negative.beforeGrid,'dashboard CSSOM values, priorities and computed placement restored');
         assert(valid(negative.restoredMetrics,group,mobile),`${group} restored after negative: ${JSON.stringify(negative.restoredMetrics)}`);
         }
       }
