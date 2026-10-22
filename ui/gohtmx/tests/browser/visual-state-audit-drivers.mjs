@@ -182,6 +182,12 @@ export function caseActionContract(identity,source,filename){
 const settingsTargets={KeyboardShortcutsList:[1,'Keyboard'],ProxySettings:[2,'Network'],PrivacySettings:[3,'Privacy','telemetry'],NotificationSettings:[4,'Notifications','quiet'],StartupSettings:[5,'Startup','login'],StorageSettings:[6,'Storage'],ResetToDefault:[6,'Storage'],AdvancedSettings:[7,'Advanced','developer'],'DeveloperMode Toggle':[7,'Advanced','developer']};
 export function requestedStateContract(identity){
   const focused={
+    'tooling/EventLogger':{kind:'EventLogger',sequence:'eventlogger-public-timestamps',steps:[
+      ['coalesce-pointer','[data-tool-event-target]','Two public pointer moves coalesce; exact observed-event elapsed display'],
+      ['capture-consumed-key','[data-tool-event-target] input','Capture-phase Ctrl+K survives child stopPropagation'],
+      ['wheel-units','[data-tool-event-target]','Wheel delta and line units remain exact'],
+      ['retain-fifty-keys','[data-tool-event-target] input','55 keys retain exactly newest 50 rows and their observed timestamps'],
+    ]},
     'project/StatusSelect':{kind:'StatusSelect',sequence:'task-due-submit',steps:[
       ['change-due','input[type="date"][name="due"][data-project-property]','Native due edit emits current task property and complete form values; peers unchanged'],
       ['submit-current-due','button[type="submit"]','Visible Update submits the changed due and unchanged peers without claiming persistence'],
@@ -227,6 +233,7 @@ export function requestedStateContract(identity){
   }[identity];
   if(focused){
     const provenance={
+      'tooling/EventLogger':'internal/gallery/advanced_native_tooling_fixtures.go EventLogger; ui/gohtmx/templates/ely-api-native-tooling.html EventLogger; ui/gohtmx/assets/ely-api-native-tooling.js receive/recordInput; exact global trace calibration remains separate',
       'project/StatusSelect':'ui/gohtmx/templates/ely-api-communication.html:108,115; ui/gohtmx/assets/ely-api-communication.js:258; ui/gohtmx/assets/ely-api.js submit handler',
       'data/Tag':'internal/gallery/advanced_data_fixtures.go Tag; ui/gohtmx/templates/ely-api-data.html ely-api-tag; ui/gohtmx/assets/ely-api-data.js tag-remove handler',
       'menus/RadioMenuItem':'docs/gohtmx/menu-alias-contracts.md; internal/gallery/assets/advanced-interaction-checks.js radioMenuItemCheck; ui/gohtmx/assets/ely-api-interaction.js radio handler',
@@ -236,9 +243,9 @@ export function requestedStateContract(identity){
       'navigation/Tabs':'Explicit selected-tab/panel contract from ui/gohtmx/templates/ely-api-interaction.html and ui/gohtmx/assets/ely-api-interaction.js',
       'motion/Lottie Player':'Explicit deterministic player contract from internal/gallery/advanced_interaction_fixtures.go, ui/gohtmx/templates/ely-api-interaction.html and ui/gohtmx/assets/ely-api-interaction.js',
     }[identity];
-    const steps=focused.steps.map(([id,control,expectedState])=>({id,control,expectedState,event:'native Playwright action',source:{siteId:`focused-state:${identity}:${id}`,sourceAnchor:null,provenance}}));
+    const steps=focused.steps.map(([id,control,expectedState])=>({id,control,expectedState,event:identity==='tooling/EventLogger'?'synthetic public DOM event via Playwright':'native Playwright action',source:{siteId:`focused-state:${identity}:${id}`,sourceAnchor:null,provenance}}));
     return {identity,kind:focused.kind,target:null,variant:identity.split('/')[1],focusedSequence:focused.sequence,steps,mappingGaps:[],requestedStateOnly:true,
-      fixtureGuards:{component:identity,kind:focused.kind},scope:'Explicit finite focused sequence from the case fixture; separate from registered-check coverage, aliases, and all-catalog approval'};
+      fixtureGuards:{component:identity,kind:focused.kind},scope:'Explicit finite focused sequence from the case fixture; separate from registered-check coverage, aliases, and all-catalog approval'+(identity==='tooling/EventLogger'?'; four grouped scenario checkpoints, not per-event pixel coverage or trusted physical input; exact trace calibration remains separate':'')};
   }
   const variant=identity.split('/')[1],target=identity.startsWith('settings/')?settingsTargets[variant]:null;
   if(identity!=='maps/MapPopup'&&!target)return null;
@@ -257,8 +264,40 @@ export function requestedStateContract(identity){
     fixtureGuards:{component:identity,kind:target?'SettingsLayout':'MapView'},scope:'Finite requested target state; independent from registered-check ending state and all-property coverage'};
 }
 
+// Independent finite expected rows, not production recordInput or a clock override.
+export function assertEventLoggerPublicState(stage,observation){
+  const {rawEvents,rows,initialEmpty,consumedKeys,bubbledKeys}=observation;
+  const counts={'coalesce-pointer':2,'capture-consumed-key':3,'wheel-units':4,'retain-fifty-keys':59};
+  assert(Object.hasOwn(counts,stage),'Unknown EventLogger stage');
+  assert.equal(initialEmpty,true,'An existing row makes the internal timestamp origin unobservable');
+  assert.equal(rawEvents.length,counts[stage],'Unexpected public events cannot be silently ignored');
+  assert(rawEvents.every(event=>event.isTrusted===false),'This finite contract covers synthetic public events only');
+  assert(rawEvents.every((event,index)=>Number.isFinite(event.timeStamp)&&event.timeStamp>=0&&(!index||event.timeStamp>=rawEvents[index-1].timeStamp)),'Public event timestamps must be finite, nonnegative and ordered');
+  assert.deepEqual(rawEvents.slice(0,2).map(event=>[event.type,event.x,event.y]),[['pointermove',10,12],['pointermove',11,13]]);
+  const expected=[{event:rawEvents[1],message:'move to 11, 13 ×2'}];
+  if(rawEvents.length>=3){
+    assert.deepEqual([rawEvents[2].type,rawEvents[2].key,rawEvents[2].ctrlKey],['keydown','K',true]);
+    assert.equal(consumedKeys,1);assert.equal(bubbledKeys,stage==='retain-fifty-keys'?55:0,'Ctrl+K must not reach the root bubble listener');
+    expected.unshift({event:rawEvents[2],message:'key down ctrl+K'});
+  }
+  if(rawEvents.length>=4){
+    assert.deepEqual([rawEvents[3].type,rawEvents[3].deltaX,rawEvents[3].deltaY,rawEvents[3].deltaMode],['wheel',0,4,1]);
+    expected.unshift({event:rawEvents[3],message:'wheel 0, 4 lines'});
+  }
+  if(stage==='retain-fifty-keys'){
+    assert.deepEqual(rawEvents.slice(4).map(event=>[event.type,event.key,event.ctrlKey]),Array.from({length:55},(_,index)=>['keydown',String(index),false]));
+    expected.splice(0,expected.length,...Array.from({length:50},(_,index)=>({event:rawEvents[58-index],message:`key down ${54-index}`})));
+  }
+  assert.equal(rows.length,expected.length,'Exact retention/coalescing row count');
+  expected.forEach(({event,message},index)=>{
+    const time=`+${(Math.max(0,event.timeStamp-rawEvents[0].timeStamp)/1000).toFixed(2)}s`;
+    assert.deepEqual(rows[index],{time,message,text:time+message},'Displayed timestamp and message must match the observed event; no normalization or tolerance');
+  });
+  return {...observation,timestampOrigin:rawEvents[0].timeStamp,timestampRule:'first accepted public event.timeStamp; exact two-decimal elapsed seconds',eventProvenance:'Synthetic public DOM events through actual component listeners; trusted physical input is not established'};
+}
+
 export async function runRequestedStateActions(contract,root,runStep){
-  if(['task-due-submit','remove-four-tags','radio-groups-reselection'].includes(contract.focusedSequence)){
+  if(['task-due-submit','remove-four-tags','radio-groups-reselection','eventlogger-public-timestamps'].includes(contract.focusedSequence)){
     const identity=await root.getAttribute('data-ely-component');
     assert.equal(identity,contract.identity,'Exact alias identity is required');
     assert.equal(await root.getAttribute('data-ely-kind'),contract.kind);
@@ -282,6 +321,42 @@ export async function runRequestedStateActions(contract,root,runStep){
     let cursor=0;
     const begin=async()=>{cursor=(await events()).length;};
     const fresh=async()=>{assert.deepEqual(await twinState(),initialTwin,'Public actions must preserve the independent twin');return (await events()).slice(cursor);};
+    if(contract.focusedSequence==='eventlogger-public-timestamps'){
+      await root.evaluate(node=>{
+        const target=node.querySelector('[data-tool-event-target]'),log=node.querySelector('[data-tool-event-log]');
+        if(!target||!log||log.querySelector('time')||!log.querySelector('[data-tool-event-empty]'))throw new Error('EventLogger requires an empty observable timestamp origin');
+        const proof=node.__visualEventLogger={rawEvents:[],initialEmpty:true,consumedKeys:0,bubbledKeys:0};
+        proof.observe=event=>{if(!target.contains(event.target))return;const rect=target.getBoundingClientRect();proof.rawEvents.push({type:event.type,timeStamp:event.timeStamp,isTrusted:event.isTrusted,x:Number.isFinite(event.clientX)?Math.round(event.clientX-rect.left):undefined,y:Number.isFinite(event.clientY)?Math.round(event.clientY-rect.top):undefined,key:event.key,ctrlKey:event.ctrlKey,deltaX:event.deltaX,deltaY:event.deltaY,deltaMode:event.deltaMode});};
+        proof.bubble=()=>proof.bubbledKeys++;
+        for(const type of ['pointermove','pointerdown','pointerup','wheel','keydown','keyup'])node.addEventListener(type,proof.observe,true);
+        node.addEventListener('keydown',proof.bubble);
+      });
+      try{
+        for(const stage of contract.steps.map(step=>step.id))await runStep(stage,()=>root.evaluate((node,stage)=>{
+          const target=node.querySelector('[data-tool-event-target]'),field=target.querySelector('input'),proof=node.__visualEventLogger;
+          if(stage==='coalesce-pointer'){
+            const rect=target.getBoundingClientRect();
+            for(const [x,y]of [[10,12],[11,13]])target.dispatchEvent(new PointerEvent('pointermove',{bubbles:true,clientX:rect.left+x,clientY:rect.top+y}));
+          }else if(stage==='capture-consumed-key'){
+            const stop=event=>{proof.consumedKeys++;event.stopPropagation();};field.addEventListener('keydown',stop);
+            try{field.dispatchEvent(new KeyboardEvent('keydown',{key:'K',ctrlKey:true,bubbles:true,cancelable:true}));}
+            finally{field.removeEventListener('keydown',stop);}
+          }else if(stage==='wheel-units')target.dispatchEvent(new WheelEvent('wheel',{bubbles:true,deltaX:0,deltaY:4,deltaMode:1}));
+          else for(let index=0;index<55;index++)field.dispatchEvent(new KeyboardEvent('keydown',{key:String(index),bubbles:true,cancelable:true}));
+        },stage),async()=>{
+          assert.deepEqual(await fresh(),[],'EventLogger must not fabricate host actions or change events');
+          const observation=await root.evaluate(node=>{
+            const proof=node.__visualEventLogger,log=node.querySelector('[data-tool-event-log]');
+            if(log.querySelector('[data-tool-event-empty]'))throw new Error('Empty hint survived public input');
+            return {initialEmpty:proof.initialEmpty,rawEvents:proof.rawEvents,consumedKeys:proof.consumedKeys,bubbledKeys:proof.bubbledKeys,rows:[...log.children].map(row=>{const time=row.querySelector('time');if(!time)throw new Error('Event row has no timestamp');return {time:time.textContent,message:[...row.childNodes].filter(child=>child!==time).map(child=>child.textContent).join(''),text:row.textContent};})};
+          });
+          return assertEventLoggerPublicState(stage,observation);
+        });
+      }finally{
+        await root.evaluate(node=>{const proof=node.__visualEventLogger;for(const type of ['pointermove','pointerdown','pointerup','wheel','keydown','keyup'])node.removeEventListener(type,proof.observe,true);node.removeEventListener('keydown',proof.bubble);delete node.__visualEventLogger;});
+      }
+      return;
+    }
     if(contract.focusedSequence==='task-due-submit'){
       const form=root.locator('form[data-project-properties][data-ely-submit="update-task"]'),due=form.locator('input[type="date"][name="due"][data-project-property]');
       assert.equal(await form.getAttribute('data-task-id'),'brief');
