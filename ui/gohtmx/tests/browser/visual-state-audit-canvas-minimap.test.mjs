@@ -17,15 +17,15 @@ test('minimap viewport oracle rejects zoom changes against the pre-click state',
   );
 });
 
-test('canonical InfiniteCanvas has a geometry-derived contract; seven alias cases remain untested',async()=>{
+test('source-only: eight separate canvas minimap contracts; 32 case/profile runtime runs remain mandatory',async()=>{
   const contract=requestedStateContract('canvas/InfiniteCanvas');
   assert.equal(contract?.kind,'InfiniteCanvas');
   assert.equal(contract.focusedSequence,'canvas-minimap-zoom-fit-hit-test');
   assert.equal(contract.requestedStateOnly,true);
   assert.deepEqual(contract.mappingGaps,[]);
-  assert.match(contract.scope,/Only the canonical gallery:canvas\/InfiniteCanvas focused sequence/);
+  assert.match(contract.scope,/Only the separate gallery:canvas\/InfiniteCanvas three-action focused sequence/);
   assert.deepEqual(contract.steps.map(({id})=>id),['zoom-in','fit-canvas','navigate-minimap']);
-  assert(contract.steps.every(step=>step.source.siteId.startsWith('focused-state:canvas/InfiniteCanvas:')&&step.source.provenance.includes('seven other alias inventory IDs remain separate and untested')));
+  assert(contract.steps.every(step=>step.source.siteId.startsWith('focused-state:canvas/InfiniteCanvas:')&&step.source.provenance.includes('each alias and profile requires its own runtime evidence')));
 
   const [components,fixture,runtime,instrument]=await Promise.all([
     read('ui/gohtmx/components.json'),read('internal/gallery/advanced_workspace_canvas.go'),read('ui/gohtmx/assets/ely-api-workspace-canvas.js'),read('ui/gohtmx/tests/browser/visual-state-audit-instrument.mjs'),
@@ -36,7 +36,22 @@ test('canonical InfiniteCanvas has a geometry-derived contract; seven alias case
   const inventoryCaseIDs=story.components.map(component=>`gallery:canvas/${component}`);
   assert.deepEqual(inventoryCaseIDs,['gallery:canvas/InfiniteCanvas','gallery:canvas/CanvasGrid','gallery:canvas/Guides','gallery:canvas/Ruler','gallery:canvas/ArtboardFrame','gallery:canvas/ZoomControls','gallery:canvas/ZoomIndicator','gallery:canvas/MiniMap']);
   assert.match(instrument,/caseId:`gallery:\$\{item\.name\}`/,'Inventory case IDs are anchored to each component identity, not collapsed by shared fixture');
-  for(const alias of story.components.slice(1))assert.equal(requestedStateContract(`canvas/${alias}`),null,`${alias} inventory row must remain outside this focused action contract`);
+  for(const alias of story.components){
+    const identity=`canvas/${alias}`,actual=requestedStateContract(identity);
+    assert(actual,`${identity} must have its own explicit contract lookup`);
+    assert.equal(actual.identity,identity);
+    assert.equal(actual.variant,alias);
+    assert.equal(actual.kind,'InfiniteCanvas');
+    assert.equal(actual.focusedSequence,contract.focusedSequence);
+    assert.equal(actual.requestedStateOnly,true);
+    assert.deepEqual(actual.fixtureGuards,{component:identity,kind:'InfiniteCanvas'});
+    assert.deepEqual(actual.mappingGaps,[]);
+    assert.deepEqual(actual.steps.map(({id,control,expectedState,event})=>({id,control,expectedState,event})),contract.steps.map(({id,control,expectedState,event})=>({id,control,expectedState,event})));
+    assert(actual.steps.every(step=>step.source.siteId===`focused-state:${identity}:${step.id}`));
+    assert(actual.scope.includes(`Only the separate gallery:${identity} three-action focused sequence`));
+    assert.match(actual.scope,/not runtime approval; all eight IDs across four profiles require 32 separate case\/profile runs/);
+  }
+  for(const identity of ['editor/MiniMap','canvas/Unknown','canvas/InfiniteCanvasExtra','editor/Guides'])assert.equal(requestedStateContract(identity),null,`${identity} must not inherit the canvas contract`);
   assert.match(fixture,/case "InfiniteCanvas"/);
   assert.match(fixture,/"width"\], s\["height"\], s\["view"\], s\["rulers"\], s\["minimap"\] = 820, 460/);
   assert.match(fixture,/M\{"x": -60, "y": -60, "zoom": \.7\}/);
@@ -57,5 +72,10 @@ test('canonical InfiniteCanvas has a geometry-derived contract; seven alias case
   assert.match(driver,/assertMinimapViewport\(beforeMinimap,detail\.scene\.view/,'Minimap post-state must be validated against its pre-click viewport');
   assert.match(driver,/assertWorld\(detail\.scene\.view\)/,'Each public viewport action must match the rendered SVG transform');
   assert.match(driver,/fresh\(\)/,'Actions must retain the existing public-event and independent-twin guards');
+  assert.match(driver,/assert\.equal\(identity,contract\.identity,'Exact alias identity is required'\)/);
+  assert.match(driver,/initialTwin=await twinState\(\),id=await root\.getAttribute\('id'\)/);
+  assert.match(driver,/assert\.deepEqual\(await twinState\(\),initialTwin,'Public actions must preserve the independent twin'\)/);
+  const canvasDriver=driver.slice(driver.indexOf("if(contract.focusedSequence==='canvas-minimap-zoom-fit-hit-test')"),driver.indexOf("if(['button-public-boundary','textarea-public-multiline'].includes(contract.focusedSequence))"));
+  assert.equal((canvasDriver.match(/assert\.equal\(detail\.id,id\);assert\.equal\(detail\.component,identity\)/g)||[]).length,3,'Every canvas action must assert the actual instance ID and alias payload');
   assert.match(driver,/overlap\(initial\.zoomRect,initial\.mapRect\)/,'Initial zoom and minimap targets must not overlap');
 });
