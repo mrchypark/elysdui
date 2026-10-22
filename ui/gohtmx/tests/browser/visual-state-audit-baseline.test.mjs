@@ -9,9 +9,23 @@ import {fileURLToPath} from 'node:url';
 import {createHash} from 'node:crypto';
 import {chromium} from 'playwright';
 import {captureBounds} from './visual-state-audit-bounds.mjs';
+import {runInNewContext} from 'node:vm';
 
 const repo = fileURLToPath(new URL('../../../../', import.meta.url));
 const runner = join(repo, 'ui/gohtmx/tests/browser/visual-state-audit-baseline.mjs');
+test('capture camera converts document bounds only when the whole union fits viewport', async () => {
+  const source = await readFile(runner, 'utf8');
+  const fn = source.match(/function captureCamera\(clip, scroll, viewport\) \{[\s\S]*?\n\}/)[0];
+  const camera = runInNewContext(`(${fn})`);
+  const clip = {x: 85, y: 20242, width: 1270, height: 280};
+  const viewport = {width: 1440, height: 1000}, scroll = {x: 0, y: 19866};
+  const normalized = value => JSON.parse(JSON.stringify(value));
+  assert.deepEqual(normalized(camera(clip, scroll, viewport)), {fullPage: false, clip: {...clip, y: 376}});
+  assert.deepEqual(normalized(camera({...clip, width: 1500}, scroll, viewport)), {fullPage: true, clip: {...clip, width: 1500}});
+  assert.equal(camera(clip, {x: 86, y: 19866}, viewport).fullPage, true, 'negative viewport edge keeps document fallback');
+  assert.equal(camera(clip, {x: 0, y: 19000}, viewport).fullPage, true, 'below viewport keeps document fallback');
+  assert.deepEqual(clip, {x: 85, y: 20242, width: 1270, height: 280}, 'receipt coordinates remain unchanged');
+});
 test('portable CLI requires explicit matrix and lists all eight render profiles', () => {
   const env = {...process.env};
   delete env.VISUAL_AUDIT_MATRIX;

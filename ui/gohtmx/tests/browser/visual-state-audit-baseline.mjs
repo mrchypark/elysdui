@@ -11,6 +11,11 @@ import {chromium} from 'playwright';
 import {captureBounds} from './visual-state-audit-bounds.mjs';
 
 const repo = fileURLToPath(new URL('../../../../', import.meta.url));
+function captureCamera(clip, scroll, viewport) {
+  const viewportClip = {...clip, x: clip.x - scroll.x, y: clip.y - scroll.y};
+  const fits = viewportClip.x >= 0 && viewportClip.y >= 0 && viewportClip.x + clip.width <= viewport.width && viewportClip.y + clip.height <= viewport.height;
+  return {fullPage: !fits, clip: fits ? viewportClip : clip};
+}
 const profiles = Object.freeze({
   'live-desktop-light': {mode: 'live', viewport: {width: 1440, height: 1000}, colorScheme: 'light', deviceScaleFactor: 1},
   'live-desktop-dark': {mode: 'live', viewport: {width: 1440, height: 1000}, colorScheme: 'dark', deviceScaleFactor: 1},
@@ -450,12 +455,13 @@ try {
       if (batch.length >= batchSize) await flush();
       const batchName = `batch-${String(nextBatch).padStart(4, '0')}`;
       // Keep in-memory screenshot bytes only until this bounded batch is sealed.
-      // fullPage selects document coordinates; clip still bounds the output to this target.
-      const png = await page.screenshot({fullPage: true, clip: bounds.clip, animations: 'disabled', caret: 'hide', scale: 'css', timeout: 30000});
+      // Playwright's non-fullPage clip is viewport-relative; avoid deferred offscreen paint.
+      const camera = captureCamera(bounds.clip, metadata.scroll, metadata.viewport);
+      const png = await page.screenshot({...camera, animations: 'disabled', caret: 'hide', scale: 'css', timeout: 30000});
       assert.equal(png.readUInt32BE(16), bounds.clip.width, 'PNG width must match target capture bounds');
       assert.equal(png.readUInt32BE(20), bounds.clip.height, 'PNG height must match target capture bounds');
       result.evidence = {path: `${batchName}/${initialFile}`, bytes: png.length, sha256: sha256(png), crop: 'target root union visible descendant/text bounds; intentional CSS clipping retained', componentIdentity: item.componentIdentity};
-      result.screenshotGeometry = {widthCSS: bounds.clip.width, heightCSS: bounds.clip.height, clip: bounds.clip, scale: 'css', deviceScaleFactor: metadata.viewport.devicePixelRatio};
+      result.screenshotGeometry = {widthCSS: bounds.clip.width, heightCSS: bounds.clip.height, clip: bounds.clip, camera, coordinateSpace: 'document receipt; camera.clip is viewport-relative when fullPage=false', scale: 'css', deviceScaleFactor: metadata.viewport.devicePixelRatio};
       const overlayVisible = metadata.visibleOverlays.length > 0;
       const contextRequested = options.contextCases.includes(item.caseId) || options.contextCases.includes(item.componentIdentity);
       if (contextRequested || overlayVisible || bounds.extendsRoot || bounds.viewportTruncated || bounds.clippedCount) {
