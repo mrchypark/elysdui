@@ -110,6 +110,26 @@ export function validateBasicActionMatrix(matrix,manifest,revision){
   assert.equal(new Set(matrix.auditCases.map(row=>row.caseId)).size,53);
 }
 
+// Diagnostic evidence never changes a failed assertion into an acceptance pass.
+export async function retainBasicFailureEvidence(result,error,peer,capture){
+  result.status='failed';result.error=String(error);
+  const proof=result.failureEvidence={originalError:result.error,gaps:[]};
+  if(!result.receipts.at(-1)?.beforeCaptureOwnership?.ownedStateEvidence)proof.gaps.push({stage:'before-camera',error:'No owned before pixels for failed action'});
+  if(result.receipts.at(-1)?.eventReadError)proof.gaps.push({stage:'raw-events',error:result.receipts.at(-1).eventReadError});
+  const twin=async stage=>{
+    try{
+      const hash=await peer();result.finalTwinSHA256=hash;proof[stage]=hash;
+      if(!result.initialTwinSHA256||hash!==result.initialTwinSHA256)proof.gaps.push({stage,error:'Independent twin differs or initial hash is missing'});
+    }catch(error){proof.gaps.push({stage,error:String(error)});}
+  };
+  await twin('twinBeforeCameraSHA256');
+  try{
+    proof.afterCaptureOwnership=await capture();
+    if(!proof.afterCaptureOwnership?.ownedStateEvidence)proof.gaps.push({stage:'after-camera',error:'No owned after pixels for failed action'});
+  }catch(error){proof.gaps.push({stage:'after-camera',error:String(error)});}
+  await twin('twinAfterCameraSHA256');
+}
+
 // No launcher: the existing runner supplies owned roots, paired capture and twin checks.
 export async function runBasicActions(contract,root,runStep){
   const page=root.page(),t=contract.template,variant=Boolean(contract.variant),one=s=>root.locator(s);

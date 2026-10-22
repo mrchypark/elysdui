@@ -5,7 +5,7 @@ import {readFile} from 'node:fs/promises';
 import {createHash} from 'node:crypto';
 import {EventEmitter} from 'node:events';
 import {baselineFixture, basicFixturePackage, basicFixtureRoute, basicRootSelector, basicSourcePrefixes, validateBasicMatrix} from './visual-state-audit-basic.mjs';
-import {basicActionContract,basicActionVariants,validateBasicActionMatrix,runBasicActions,basicActionSurface,selectBasicActionCases,requiredBasicActionAssets,fulfillBasicActionAsset,assertBasicActionAssets,assertBasicTableRows} from './visual-state-audit-basic-actions.mjs';
+import {basicActionContract,basicActionVariants,validateBasicActionMatrix,runBasicActions,basicActionSurface,selectBasicActionCases,requiredBasicActionAssets,fulfillBasicActionAsset,assertBasicActionAssets,assertBasicTableRows,retainBasicFailureEvidence} from './visual-state-audit-basic-actions.mjs';
 
 const source = path => readFile(new URL(`../../../../${path}`, import.meta.url), 'utf8');
 async function metadata() {
@@ -201,9 +201,37 @@ test('phase2 source-only textarea uses explicit native newline edits with exact 
 test('phase2 source-only basic failure receipt retains native events even when action or verification throws',async()=>{
   const runner=await source('ui/gohtmx/tests/browser/visual-state-audit-actions.mjs');
   assert(runner.includes('try{await action(receipt);await sleepFrames(page);receipt.events=await root.evaluate(n=>n.__basicEvents.slice(n.__basicCursor));receipt.assertedState=await verify();receipt.assertionsPassed=true;}'));
-  assert(runner.includes('finally{receipt.events=await root.evaluate(n=>n.__basicEvents.slice(n.__basicCursor));}'));
+  assert(runner.includes('catch(error){actionError=error;throw error;}'));
+  assert(runner.includes('receipt.eventReadError=String(error);if(!actionError)throw error;'));
   assert(runner.includes("e.target.tagName==='TEXTAREA'?{inputType:e.inputType??null,data:e.data??null}:{}"));
   const driver=runBasicActions.toString();assert(driver.includes("await nativeTypes(t==='date-picker'?['input','change']:['input'])"),'Input keeps its one-event edit oracle');
+});
+
+test('phase2 source-only failure twin/camera proofs never mask the original error or approve failed actions',async()=>{
+  const initial='a'.repeat(64),changed='b'.repeat(64),original=new Error('original functional assertion');
+  for(const defect of [null,'before-twin-read','after-twin-read','before-twin-changed','camera-mutates-twin','lost-root','context-only','missing-before','raw-events-lost','missing-initial']){
+    const result={status:'running',initialTwinSHA256:initial,receipts:[{beforeCaptureOwnership:{ownedStateEvidence:true}}]};
+    if(defect==='missing-before')delete result.receipts[0].beforeCaptureOwnership;
+    if(defect==='raw-events-lost')result.receipts[0].eventReadError='original page lost';
+    if(defect==='missing-initial')delete result.initialTwinSHA256;
+    const calls=[];let reads=0;
+    await retainBasicFailureEvidence(result,original,async()=>{
+      reads++;calls.push('twin');if((defect==='before-twin-read'&&reads===1)||(defect==='after-twin-read'&&reads===2))throw new Error('secondary twin read');
+      return defect==='before-twin-changed'||(defect==='camera-mutates-twin'&&reads===2)?changed:initial;
+    },async()=>{calls.push('camera');if(defect==='lost-root')throw new Error('secondary root lost');return {ownedStateEvidence:defect!=='context-only',component:{path:'retained-failure-after.png'}};});
+    assert.deepEqual(calls,['twin','camera','twin'],'Both independent twin observations and camera are attempted despite secondary failures');
+    assert.equal(result.status,'failed');assert.equal(result.error,String(original));assert.equal(result.failureEvidence.originalError,String(original));
+    assert.equal(result.failureEvidence.gaps.length>0,Boolean(defect));assert.equal(result.failureEvidence.safe,undefined);
+    if(!defect){assert.equal(result.finalTwinSHA256,initial);assert.equal(result.failureEvidence.afterCaptureOwnership.ownedStateEvidence,true);}
+    if(defect==='camera-mutates-twin')assert.equal(result.finalTwinSHA256,changed);
+    if(defect==='lost-root')assert.match(result.failureEvidence.gaps.find(g=>g.stage==='after-camera').error,/secondary root lost/);
+  }
+  const runner=await source('ui/gohtmx/tests/browser/visual-state-audit-actions.mjs');
+  assert(runner.includes('await retainBasicFailureEvidence(result,error,peer,async()=>'));
+  assert(runner.includes("phase:'failure-after'"));assert(runner.includes("'Failed action root must still exist'"));
+  assert(runner.includes("assert.equal(await root.getAttribute('data-basic-props-sha256'),item.fixturePropsSHA256)"));
+  assert(runner.includes('result.assetError=String(error);result.error??=String(error)'));
+  assert(runner.includes('result.contextCloseError=String(error);result.error??=String(error)'));
 });
 
 test('phase2 source-only radio variant records Gamma, disabled pointer, then native ArrowLeft skipping Beta',async()=>{

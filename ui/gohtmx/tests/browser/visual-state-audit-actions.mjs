@@ -11,7 +11,7 @@ import {chromium} from 'playwright';
 import {actionModuleNames,prepareActionModule,synchronousTraceInit,registeredOutcomesEqual,registeredOutcomeDifferences,firstDifference,compareActionTrace,traceContractStatus} from './visual-state-audit-instrument.mjs';
 import {caseActionContract, requestedStateContract, runRequestedStateActions, ownedOverlayInventory, captureTargetPNG, screenshotWithoutCaretMutation, inventoryReceipt, inventoryDrift, unhandledBrowserErrors} from './visual-state-audit-drivers.mjs';
 import {basicFixturePackage,basicRootSelector} from './visual-state-audit-basic.mjs';
-import {basicActionContract,validateBasicActionMatrix,runBasicActions,basicActionSurface,selectBasicActionCases,fulfillBasicActionAsset,assertBasicActionAssets} from './visual-state-audit-basic-actions.mjs';
+import {basicActionContract,validateBasicActionMatrix,runBasicActions,basicActionSurface,selectBasicActionCases,fulfillBasicActionAsset,assertBasicActionAssets,retainBasicFailureEvidence} from './visual-state-audit-basic-actions.mjs';
 
 const repo = fileURLToPath(new URL('../../../../', import.meta.url));
 const defaultEvidenceRoot = resolve(repo, 'ui/gohtmx/tests/browser/visual-state-audit-evidence');
@@ -84,6 +84,14 @@ async function basicAudit({cases,origin,captures,matrixInput,coverageInput,sourc
     const result={caseId:item.caseId,componentIdentity:item.componentIdentity,fixtureIdentity:item.fixtureIdentity,fixturePropsSHA256:item.fixturePropsSHA256,contract,receipts,status:'running',assetsVerified:false};
     const assetTasks=[];
     const verifyAssets=async()=>{result.productionAssets=await Promise.all(assetTasks);assertBasicActionAssets(result.productionAssets,expectedAssets);result.assetsVerified=true;};
+    const record=page.locator(`[data-audit-name=${JSON.stringify(item.componentIdentity)}]`),root=record.locator(basicRootSelector),twin=record.locator('[data-audit-twin]>[data-basic-component]');
+    const peer=async()=>{
+      assert.equal(await twin.count(),1,'Exact independent twin root required');
+      assert.equal(await twin.getAttribute('data-basic-component'),item.componentIdentity);
+      assert.equal(await twin.getAttribute('data-basic-props-sha256'),item.fixturePropsSHA256);
+      return digest(await twin.evaluate(n=>({html:n.innerHTML,fields:[...n.querySelectorAll('input,select,textarea')].map(e=>({id:e.id,name:e.name,value:e.value,checked:e.checked,disabled:e.disabled})),canvases:[...n.querySelectorAll('canvas')].map(c=>c.toDataURL())})));
+    };
+    const state=async()=>({ownedOverlays:(await discoverOverlays(root)).filter(p=>p.owned)});
     reports.push(result);assert(contract,'Exact basic source contract required');
     page.on('pageerror',error=>browserErrors.push({caseId:item.caseId,type:'pageerror',text:String(error)}));
     page.on('response',response=>{if(response.status()>=400)browserErrors.push({caseId:item.caseId,type:'http-error',url:response.url(),status:response.status()});});
@@ -101,12 +109,10 @@ async function basicAudit({cases,origin,captures,matrixInput,coverageInput,sourc
         return route.continue();
       });
       await page.goto(origin+'/basic-actions/',{waitUntil:'networkidle'});await sleepFrames(page);
-      const record=page.locator(`[data-audit-name=${JSON.stringify(item.componentIdentity)}]`),root=record.locator(basicRootSelector),twin=record.locator('[data-audit-twin]>[data-basic-component]');
       assert.equal(await root.count(),1);assert.equal(await twin.count(),1);
       assert.equal(await root.getAttribute('data-basic-component'),item.componentIdentity);assert.equal(await root.getAttribute('data-basic-props-sha256'),item.fixturePropsSHA256);
       await page.waitForFunction(()=>[...document.querySelectorAll('[data-ui-component="map-view"]')].every(n=>n.dataset.mapReady==='true'));
       await verifyAssets();
-      const peer=async()=>digest(await twin.evaluate(n=>({html:n.innerHTML,fields:[...n.querySelectorAll('input,select,textarea')].map(e=>({id:e.id,name:e.name,value:e.value,checked:e.checked,disabled:e.disabled})),canvases:[...n.querySelectorAll('canvas')].map(c=>c.toDataURL())})));
       const initialTwin=await peer();
       result.initialTwinSHA256=initialTwin;
       await root.evaluate(node=>{
@@ -115,14 +121,15 @@ async function basicAudit({cases,origin,captures,matrixInput,coverageInput,sourc
         node.addEventListener('click',e=>node.__basicClicks.push({trusted:e.isTrusted,target:e.target.id||null}));
         for(const type of ['toggle','close','cancel'])node.addEventListener(type,e=>node.__basicLifecycle.push({type,target:e.target.id||null,tag:e.target.tagName,trusted:e.isTrusted,oldState:e.oldState??null,newState:e.newState??null}),true);
       });
-      const state=async()=>({ownedOverlays:(await discoverOverlays(root)).filter(p=>p.owned)});
       const step=async(id,control,action,verify)=>{
         const expected=contract.steps[receipts.length];assert.equal(expected?.id,id,'Exact source sequence');
         const receipt={action:id,control,source:expected,beforeState:await snapshot(root)};receipts.push(receipt);
         receipt.beforeCaptureOwnership=await captureOwnedState({page,record,root,caseId:item.caseId,siteId:id,checkpointIndex:receipts.length,phase:'before',captures,state:await state()});
         await root.evaluate(n=>{n.__basicCursor=n.__basicEvents.length;n.__basicClickCursor=n.__basicClicks.length;n.__basicLifecycleCursor=n.__basicLifecycle.length;});
+        let actionError;
         try{await action(receipt);await sleepFrames(page);receipt.events=await root.evaluate(n=>n.__basicEvents.slice(n.__basicCursor));receipt.assertedState=await verify();receipt.assertionsPassed=true;}
-        finally{receipt.events=await root.evaluate(n=>n.__basicEvents.slice(n.__basicCursor));}
+        catch(error){actionError=error;throw error;}
+        finally{try{receipt.events=await root.evaluate(n=>n.__basicEvents.slice(n.__basicCursor));}catch(error){receipt.eventReadError=String(error);if(!actionError)throw error;}}
         receipt.lifecycleEvents=await root.evaluate(n=>n.__basicLifecycle.slice(n.__basicLifecycleCursor));
         receipt.nativeClicks=await root.evaluate(n=>n.__basicClicks.slice(n.__basicClickCursor));
         if(!['menu','map-view','coordinate-display'].includes(contract.template))assert(!receipt.events.some(e=>['ely:action','ely:change','ui:select'].includes(e.type)),'Basic native controls must not fabricate advanced public payloads');
@@ -148,10 +155,19 @@ async function basicAudit({cases,origin,captures,matrixInput,coverageInput,sourc
       result.finalTwinSHA256=await peer();
       await verifyAssets();
       result.status=contract.classification==='finite-actions'?'passed-finite-actions':contract.classification;
-    }catch(error){result.status='failed';result.error=String(error);}
+    }catch(error){
+      await retainBasicFailureEvidence(result,error,peer,async()=>{
+        assert.equal(await record.count(),1);assert.equal(await root.count(),1,'Failed action root must still exist');
+        assert.equal(await root.getAttribute('data-basic-component'),item.componentIdentity);
+        assert.equal(await root.getAttribute('data-basic-props-sha256'),item.fixturePropsSHA256);
+        const receipt=receipts.at(-1);
+        return captureOwnedState({page,record,root,caseId:item.caseId,siteId:receipt?.action||'case-failure',checkpointIndex:receipts.length,phase:'failure-after',captures,state:await state()});
+      });
+    }
     finally{
-      await context.close();result.productionAssets=await Promise.all(assetTasks);
-      try{assertBasicActionAssets(result.productionAssets,expectedAssets);}catch(error){result.assetsVerified=false;result.status='failed';result.error=String(error);}
+      try{await context.close();}catch(error){result.status='failed';result.contextCloseError=String(error);result.error??=String(error);}
+      result.productionAssets=await Promise.all(assetTasks);
+      try{assertBasicActionAssets(result.productionAssets,expectedAssets);}catch(error){result.assetsVerified=false;result.status='failed';result.assetError=String(error);result.error??=String(error);}
     }
     if(result.status==='failed')break; // Stop the bounded batch on the first new failure.
   }
