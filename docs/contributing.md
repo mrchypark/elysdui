@@ -70,7 +70,7 @@ verified CI results, not an assumed browser pass. `dist/` and `test-results/` ar
 build/test output; do not include them in a source PR.
 
 `test:visual-regressions` runs focused chart, heatmap contrast, tree, dialog, native-gallery and
-workspace/calendar layout regressions, including mobile and theme cases. It
+workspace/calendar layout regressions, including mobile, theme and classic-scrollbar cases. It
 retains screenshots and source-hash receipts under `test-results/`; CI uploads
 these separately from the gallery evidence. Passing this finite regression set
 does not establish visual coverage of every component or action state.
