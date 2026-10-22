@@ -8,7 +8,7 @@ import {fileURLToPath} from 'node:url';
 import {setTimeout as delay} from 'node:timers/promises';
 import {isDeepStrictEqual} from 'node:util';
 import {chromium} from 'playwright';
-import {transform} from './visual-state-audit-instrument.mjs';
+import {actionModuleNames,prepareActionModule,synchronousTraceInit,registeredOutcomesEqual,compareActionTrace,traceContractStatus} from './visual-state-audit-instrument.mjs';
 import {caseActionContract, requestedStateContract, runRequestedStateActions, ownedOverlayInventory, captureTargetPNG, inventoryReceipt, inventoryDrift, unhandledBrowserErrors} from './visual-state-audit-drivers.mjs';
 
 const repo = fileURLToPath(new URL('../../../../', import.meta.url));
@@ -338,6 +338,15 @@ try {
   assert(new Set(cases.map(item => item.componentIdentity)).size === cases.length, 'pilot cases must use unique component names');
   assert(cases.every(item => familyModule[item.family]), 'case uses an unsupported family');
 
+  assert.equal(coverageManifest.source?.revision,expectedRevision,'coverage manifest revision');
+  for(const [name,path]of [['instrumenter','ui/gohtmx/tests/browser/visual-state-audit-instrument.mjs'],['drivers','ui/gohtmx/tests/browser/visual-state-audit-drivers.mjs'],['actions','ui/gohtmx/tests/browser/visual-state-audit-actions.mjs']])assert.equal(coverageManifest.source?.[`${name}SHA256`],sha256(await readFile(resolve(repo,path))),`coverage ${name} input hash`);
+  const preparedByFamily=new Map();
+  for(const family of new Set(cases.map(item=>item.family))){
+    const modules=[];
+    for(const name of actionModuleNames(family))modules.push(prepareActionModule(name,await readFile(resolve(repo,`internal/gallery/assets/advanced-${name}-checks.js`),'utf8'),coverageManifest,options.surface));
+    preparedByFamily.set(family,modules);
+  }
+
   await mkdir(options.output, {recursive: false});
   const captures = resolve(options.output, 'captures');
   await mkdir(captures);
@@ -395,32 +404,42 @@ try {
   for (const item of cases) { if (!byFamily.has(item.family)) byFamily.set(item.family, []); byFamily.get(item.family).push(item); }
   const reports = [], transformReports = {}, browserErrors = [];
   for (const [family, familyCases] of byFamily) {
-    const module = familyModule[family];
-    const filename = `internal/gallery/assets/advanced-${module}-checks.js`;
-    const localSource = await readFile(resolve(repo, filename), 'utf8');
-    // Match staticAssetPaths in the exporter before transforming served bytes.
-    const source = options.surface === 'static-audit' ? localSource.replace(/(["'`(=\s])\/assets\//g, `$1${staticBasePath}assets/`) : localSource;
-    const transformed = transform(source, filename, {registeredCheckEntriesAwaited: true});
-    transformReports[filename] = {localSourceSHA: sha256(localSource), originalSHA: transformed.originalSHA, transformedSHA: transformed.transformedSHA,
-      manifestCounts: coverageManifest.modules?.[family]?.counts || null,
-      manifestSourceSHA256: coverageManifest.modules?.[family]?.sourceSHA256 || null,
-      safeSiteCount: transformed.interactionSites.length, unsupportedCount: transformed.unsupported.length,
-      safeSites: transformed.interactionSites.map(site => ({siteId: site.siteId, checkIdentity: site.checkIdentity, mappedChecks: site.mappedChecks, line: site.line, column: site.column, control: site.control, event: site.event, action: site.action})),
-      unsupportedSites: transformed.unsupported.map(site => ({siteId: site.siteId || null, checkIdentity: site.checkIdentity || null, mappedChecks: site.mappedChecks || [], line: site.line || null, reason: site.reason}))};
+    const preparedModules=preparedByFamily.get(family),primary=preparedModules[0];
+    const {filename}=primary;
+    const transformed={...primary.transformed,interactionSites:preparedModules.flatMap(module=>module.transformed.interactionSites),unsupported:preparedModules.flatMap(module=>module.transformed.unsupported)};
+    for(const module of preparedModules)transformReports[module.filename]={localSourceSHA:sha256(module.localSource),originalSHA:module.transformed.originalSHA,transformedSHA:module.transformed.transformedSHA,
+      manifestCounts:coverageManifest.modules[module.name].counts,manifestSourceSHA256:coverageManifest.modules[module.name].sourceSHA256,
+      safeSiteCount:module.transformed.interactionSites.length,unsupportedCount:module.transformed.unsupported.length,
+      safeSites:module.transformed.interactionSites.map(site=>({siteId:site.siteId,checkIdentity:site.checkIdentity,mappedChecks:site.mappedChecks,line:site.line,column:site.column,control:site.control,event:site.event,action:site.action})),
+      unsupportedSites:module.transformed.unsupported.map(site=>({siteId:site.siteId||null,checkIdentity:site.checkIdentity||null,mappedChecks:site.mappedChecks||[],line:site.line||null,reason:site.reason}))};
     const contexts = await Promise.all([browser.newContext({viewport: profile.viewport, colorScheme: profile.colorScheme}), browser.newContext({viewport: profile.viewport, colorScheme: profile.colorScheme})]);
     const pages = await Promise.all(contexts.map(context => context.newPage()));
     const [originalPage, instrumentedPage] = pages;
+    let traceMode=false,originalInterceptionError=null;
+    const originalRoutes=new Map();
+    for(const module of preparedModules)await originalPage.route(`**/assets/advanced-${module.name}-checks.js`,async route=>{
+      const routedTrace=traceMode;
+      try{
+        const response=await route.fetch();
+        assert.equal(sha256(await response.text()),module.transformed.originalSHA,`untouched reference served hash: ${module.filename}`);
+        const key=`${routedTrace?'trace':'untouched'}:${module.filename}`;originalRoutes.set(key,(originalRoutes.get(key)||0)+1);
+        await route.fulfill(routedTrace?{response,body:module.trace.source}:{response});
+      }catch(error){originalInterceptionError=String(error);await route.abort('failed').catch(()=>{});}
+    });
+    await originalPage.addInitScript(synchronousTraceInit);
     const familyURL = options.surface === 'static-audit'
       ? `${origin}${staticBasePath}components/audit/${encodeURIComponent(family)}/aliases/`
       : `${origin}/components/audit?aliases=1&family=${encodeURIComponent(family)}`;
     let interceptCount = 0, interceptionError = null;
-    await instrumentedPage.route(`**/assets/advanced-${module}-checks.js`, async route => {
+    const moduleInterceptCounts=new Map(preparedModules.map(module=>[module.filename,0]));
+    for(const module of preparedModules)await instrumentedPage.route(`**/assets/advanced-${module.name}-checks.js`, async route => {
       try {
         const response = await route.fetch();
         const fetched = await response.text();
-        assert.equal(sha256(fetched), transformed.originalSHA, `intercepted original SHA matches expected served bytes for ${filename}`);
+        assert.equal(sha256(fetched), module.transformed.originalSHA, `intercepted original SHA matches expected served bytes for ${module.filename}`);
         interceptCount++;
-        await route.fulfill({response, body: transformed.source});
+        moduleInterceptCounts.set(module.filename,moduleInterceptCounts.get(module.filename)+1);
+        await route.fulfill({response, body: module.transformed.source});
       } catch (error) {
         interceptionError = String(error);
         await route.abort('failed').catch(() => {});
@@ -447,6 +466,7 @@ try {
     let active = null, checkpointIndex = 0;
     await instrumentedPage.exposeFunction('__visualBeforeAction', async site => {
       if (!active) throw new Error('Checkpoint fired without an active registered check');
+      active.traceEvents.push({siteId:site.siteId,phase:'enter'});
       checkpointIndex++;
       const receipt = {siteId: site.siteId, actionSiteId: site.siteId, sourceLocation: {filename: site.filename, line: site.line, column: site.column},
         containingFunction: site.containingFunction, controlExpression: site.control, eventExpression: site.event, actionExpression: site.action,
@@ -470,6 +490,8 @@ try {
       }
     });
     await instrumentedPage.exposeFunction('__visualCheckpoint', async site => {
+      if(!active)throw new Error('Checkpoint completion without an active check');
+      active.traceEvents.push({siteId:site.siteId,phase:'exit'});
       const receiptIndex = active?.pending.findLastIndex(item => item.siteId === site.siteId) ?? -1;
       if (receiptIndex < 0) throw new Error(`After-action checkpoint has no matching before receipt: ${site.siteId}`);
       const [receipt] = active.pending.splice(receiptIndex, 1);
@@ -489,11 +511,13 @@ try {
       receipt.captureStatus = receipt.beforeCaptureStatus === 'captured' && receipt.afterCaptureStatus === 'captured' ? 'captured' : 'failed';
     });
     await instrumentedPage.exposeFunction('__visualUnsupportedAction', site => {
-      if (!active) return;
+      if (!active){browserErrors.push({family,type:'pageerror',text:'Unsupported action outside an active check'});return;}
+      active.traceEvents.push({siteId:site.siteId,phase:'unsafe'});
       active.unsupportedReached.push({siteId: site.siteId, checkIdentity: site.checkIdentity, mappedChecks: site.mappedChecks, reason: site.reason || 'sync-only unsupported action reached'});
     });
     await Promise.all(pages.map(page => page.goto(familyURL, {waitUntil: 'networkidle'})));
     assert.equal(interceptionError, null, 'check-module interception');
+    for(const module of preparedModules){assert(moduleInterceptCounts.get(module.filename)>0,`required check module intercepted: ${module.filename}`);transformReports[module.filename].routeInterceptCount=moduleInterceptCounts.get(module.filename);}
     for (const item of familyCases) {
       checkpointIndex = 0;
       if(options.statesOnly){
@@ -505,6 +529,11 @@ try {
         console.log(`${item.caseId}: ${proof.status}; requested-state-receipts=${proof.receipts.length}`);
         continue;
       }
+      // Fresh documents give untouched, sync-traced and captured runs the same
+      // fixture starting state without adding a third simultaneous context.
+      await Promise.all(pages.map(page=>page.goto(familyURL,{waitUntil:'networkidle'})));
+      assert.equal(originalInterceptionError,null,'untouched check-module interception');
+      const untouchedCounts=new Map(originalRoutes);
       const originalRecord = originalPage.locator(`[data-audit-name=${JSON.stringify(item.componentIdentity)}]`);
       const instrumentRecord = instrumentedPage.locator(`[data-audit-name=${JSON.stringify(item.componentIdentity)}]`);
       assert.equal(await originalRecord.count(), 1, `original fixture ${item.componentIdentity}`);
@@ -518,14 +547,28 @@ try {
 
       let originalOutcome, originalError;
       try { originalOutcome = await executeCheck(originalPage, item); } catch (error) { originalError = String(error); }
+      let traceOutcome,originalTraceError,originalTrace={events:[],lateEvents:[],errors:[]};
+      try{
+        traceMode=true;
+        await originalPage.goto(familyURL,{waitUntil:'networkidle'});
+        assert.equal(originalInterceptionError,null,'sync trace served-source interception');
+        for(const module of preparedModules)assert((originalRoutes.get(`trace:${module.filename}`)||0)>(untouchedCounts.get(`trace:${module.filename}`)||0),`sync trace module loaded: ${module.filename}`);
+        const known=Object.fromEntries(preparedModules.flatMap(module=>module.trace.sites.map(site=>[site.siteId,site.sourceSHA256])));
+        await originalPage.evaluate(({caseId,known})=>Object.assign(globalThis.__visualSyncTraceState,{caseId,known}),{caseId:item.caseId,known});
+        traceOutcome=await executeCheck(originalPage,item);
+        await originalPage.evaluate(()=>{const state=globalThis.__visualSyncTraceState;state.caseId=null;state.sealed=true;});
+        await originalPage.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+        originalTrace=await originalPage.evaluate(()=>{const {events,lateEvents,errors}=globalThis.__visualSyncTraceState;return {events,lateEvents,errors};});
+      }catch(error){originalTraceError=String(error);originalTrace=await originalPage.evaluate(()=>{const {events,lateEvents,errors}=globalThis.__visualSyncTraceState;return {events,lateEvents,errors};}).catch(()=>originalTrace);}
+      finally{traceMode=false;}
       const instrumentSites = [];
       const unsupportedReached = [];
-      active = {item, record: instrumentRecord, root: initialInstrumentRoot, sites: instrumentSites, unsupportedReached, pending: []};
+      const capturedTrace=[];
+      active = {item, record: instrumentRecord, root: initialInstrumentRoot, sites: instrumentSites, unsupportedReached, pending: [],traceEvents:capturedTrace};
       let instrumentOutcome, instrumentError;
       try { instrumentOutcome = await executeCheck(instrumentedPage, item); } catch (error) { instrumentError = String(error); }
       finally { active = null; }
       assert(interceptCount > 0, `Playwright route intercepted ${filename}`);
-      transformReports[filename].routeInterceptCount = interceptCount;
 
       const originalPass = !originalError, instrumentedPass = !instrumentError;
       const equivalent = originalPass && instrumentedPass && isDeepStrictEqual(originalOutcome.result.checkResult, instrumentOutcome.result.checkResult)
@@ -535,7 +578,8 @@ try {
         && isDeepStrictEqual(originalOutcome.finalTwin, instrumentOutcome.finalTwin)
         && isDeepStrictEqual(initialOriginal, initialInstrumented);
       const key = await instrumentRecord.getAttribute('data-audit-key');
-      const contract=caseActionContract(item.componentIdentity,source,filename);
+      const selectedModule=preparedModules.find(module=>module.registeredChecks.includes(key))||primary;
+      const contract=caseActionContract(item.componentIdentity,selectedModule.source,selectedModule.filename);
       const candidateUnsupported = transformed.unsupported.filter(site => site.checkIdentity === key || site.mappedChecks?.includes(key));
       const candidateSafeNotHit = transformed.interactionSites.filter(site => (site.checkIdentity === key || site.mappedChecks?.includes(key)) && !instrumentSites.some(captured => captured.siteId === site.siteId));
       const expectedIds=contract?new Set(contract.steps.map(step=>step.source?.siteId).filter(Boolean)):null;
@@ -544,33 +588,51 @@ try {
       const directFallback=contract&&originalPass?await directCaseDriver({item,familyURL,captures,reference:originalOutcome,semanticSnapshotInit,contract,browserErrors}):null;
       const targetContract=requestedStateContract(item.componentIdentity);
       const requestedStateEvidence=targetContract&&originalPass?await directCaseDriver({item,familyURL,captures,reference:originalOutcome,semanticSnapshotInit,contract:targetContract,browserErrors}):null;
+      // Keep observing sealed late events through capture/direct-driver work,
+      // then discard the document before moving to another fixture.
+      try{originalTrace=await originalPage.evaluate(()=>{const {events,lateEvents,errors}=globalThis.__visualSyncTraceState;return {events,lateEvents,errors};});}
+      catch(error){originalTraceError||=String(error);}
+      await originalPage.goto('about:blank');
+      const traceEquivalent=!originalError&&!originalTraceError&&!originalTrace.errors.length&&registeredOutcomesEqual(originalOutcome,traceOutcome);
+      const originalTraceProof=compareActionTrace({originalEvents:originalTrace.events,capturedEvents:capturedTrace,receipts:instrumentSites,originalEquivalent:traceEquivalent,
+        unprobed:preparedModules.flatMap(module=>module.trace.unprobed),knownSiteIds:preparedModules.flatMap(module=>module.trace.sites.map(site=>site.siteId)),lateEvents:originalTrace.lateEvents});
       const reached=[...instrumentSites,...unsupportedReached];
       const unknownReached=contract?reached.filter(site=>!expectedIds.has(site.siteId)):[];
       const unexpectedRuntimeOccurrences=contract?reached.filter((site,index)=>reached.slice(0,index+1).filter(other=>other.siteId===site.siteId).length>contract.steps.filter(step=>step.source?.siteId===site.siteId).length).map(site=>site.siteId):[];
       const missingRuntimeOccurrences=contract?contract.steps.filter((step,index)=>step.source&&reached.filter(site=>site.siteId===step.source.siteId).length<contract.steps.slice(0,index+1).filter(other=>other.source?.siteId===step.source.siteId).length).map(step=>step.id):[];
-      const manifestModule = coverageManifest.modules?.[family];
+      const manifestModule = coverageManifest.modules[selectedModule.name];
       const capturedSiteIds = new Set(instrumentSites.map(site => site.siteId));
       const mappedSites = transformed.interactionSites.filter(site => contract?expectedIds.has(site.siteId):site.checkIdentity === key || site.mappedChecks?.includes(key));
       const unmappedRuntimeSites = instrumentSites.filter(site => !site.checkIdentity && !(site.mappedChecks || []).length);
       const captureFailures = instrumentSites.filter(site => site.captureStatus !== 'captured');
-      const incompleteCoverage = contract
+      const {traceCalibrationValid,independentContractGap}=traceContractStatus(contract,originalTrace.events,traceEquivalent,originalTrace.lateEvents);
+      const incompleteCoverage = independentContractGap||(contract?!traceCalibrationValid:originalTraceProof.status!=='passed')||(contract
         ? contract.mappingGaps.length>0||unknownReached.length>0||unexpectedRuntimeOccurrences.length>0||missingRuntimeOccurrences.length>0||directFallback?.status!=='passed'||directFallback?.visualActionabilityGaps?.length>0||captureFailures.length>0
-        : namedUnsupported.length > 0 || namedSafeNotHit.length > 0 || captureFailures.length > 0 || unsupportedReached.length > 0;
+        : namedUnsupported.length > 0 || namedSafeNotHit.length > 0 || captureFailures.length > 0 || unsupportedReached.length > 0);
       let classification;
       if (originalPass && !instrumentedPass) classification = 'harness-error-instrumented-failed-original-passed';
       else if (!originalPass) classification = 'original-check-failed-not-a-pass';
       else if (!instrumentSites.length) classification = 'unsupported-no-safe-action-checkpoint-executed';
       else if (!equivalent) classification = 'harness-error-semantic-or-event-mismatch';
+      else if (!traceEquivalent) classification = 'harness-error-original-trace-calibration';
       else if (incompleteCoverage) classification = !contract&&!captureFailures.length&&!unsupportedReached.length?'mapping-gap-equivalent-semantics':'action-coverage-gap-equivalent-semantics';
       else if(contract)classification='passed-equivalent-with-direct-action-contract';
       else classification = 'passed-equivalent-with-action-checkpoints';
       const actionCoverage = {
+        originalTraceProof:{...originalTraceProof,untouchedCalibrationEquivalent:traceEquivalent,error:originalTraceError||null,events:originalTrace.events,eventsSHA256:digest(originalTrace.events),lateEvents:originalTrace.lateEvents,errors:originalTrace.errors,
+          capturedEvents:capturedTrace,capturedEventsSHA256:digest(capturedTrace),
+          untouchedOutcomeSHA256:originalOutcome?digest({initial:originalOutcome.initial,finalTwin:originalOutcome.finalTwin,result:originalOutcome.result}):null,
+          tracedOutcomeSHA256:traceOutcome?digest({initial:traceOutcome.initial,finalTwin:traceOutcome.finalTwin,result:traceOutcome.result}):null,
+          completionScope:'registered check and its existing two-frame settling, followed by two sealed frames; future asynchronous actions not proved',
+          coverageAlternative:contract?'existing guarded exact source contract and independently asserted direct driver; trace only adds calibration/unknown-site vetoes':null},
+        independentContractCoverage:independentContractGap?'unresolved-public-controls-and-expected-states':'existing-exact-guarded-source-contract',
+        independentContractGap,
         manifestSourceSHA256: manifestModule?.sourceSHA256 || null,
         manifestCheckpointableSiteCount: manifestModule?.counts?.checkpointed ?? null,
         manifestUnsupportedSiteCount: manifestModule?.counts?.unsupported ?? null,
         manifestMappedCheckpointSiteCount: manifestModule?.counts?.mappedCheckpointSites ?? null,
-        moduleSafeSiteCount: transformed.interactionSites.length,
-        moduleUnsupportedSiteCount: transformed.unsupported.length,
+        moduleSafeSiteCount: selectedModule.transformed.interactionSites.length,
+        moduleUnsupportedSiteCount: selectedModule.transformed.unsupported.length,
         staticallyMappedSafeSiteCountForCase: mappedSites.length,
         runtimeCheckpointCountForCase: instrumentSites.length,
         runtimeCheckpointSiteIds: instrumentSites.map(site => site.siteId),
@@ -585,9 +647,9 @@ try {
         staticMappingDiagnostic:contract?{status:'shared-dispatcher-candidates-retained-separately-from-exact-contract',unselectedSafeCandidateCount:candidateSafeNotHit.filter(site=>!expectedIds.has(site.siteId)).length,
           unselectedUnsupportedCandidateCount:candidateUnsupported.filter(site=>!expectedIds.has(site.siteId)).length,
           unresolvedSelectedMappingGaps:contract.mappingGaps,unselectedCandidateSamples:[...candidateSafeNotHit,...candidateUnsupported].filter(site=>!expectedIds.has(site.siteId)).slice(0,3).map(site=>site.siteId)}:null,
-        coverageStatus: !originalPass ? 'original-check-failed' : contract&&!incompleteCoverage?'exact-guarded-contract-captured-and-asserted':!instrumentSites.length ? 'no-runtime-checkpoint-reached' : captureFailures.length ? 'runtime-checkpoints-reached-with-capture-failures' : 'runtime-checkpoints-captured-partial-static-coverage',
+        coverageStatus: !originalPass ? 'original-check-failed' : independentContractGap?'independent-supported-controls-and-expected-states-unresolved':contract&&!incompleteCoverage?'exact-guarded-contract-captured-and-asserted':!instrumentSites.length ? 'no-runtime-checkpoint-reached' : captureFailures.length ? 'runtime-checkpoints-reached-with-capture-failures' : 'runtime-checkpoints-captured-partial-static-coverage',
       };
-      const sourceSHA = {path: filename, localSourceSHA: sha256(localSource), originalSHA: transformed.originalSHA, transformedSHA: transformed.transformedSHA};
+      const sourceSHA = {path:selectedModule.filename,localSourceSHA:sha256(selectedModule.localSource),originalSHA:selectedModule.transformed.originalSHA,transformedSHA:selectedModule.transformed.transformedSHA};
       const semanticDifferences = originalPass && instrumentedPass ? [
         ['checkResult', originalOutcome.result.checkResult, instrumentOutcome.result.checkResult],
         ['actions', originalOutcome.result.actions, instrumentOutcome.result.actions],
@@ -614,7 +676,7 @@ try {
         namedUnsupportedActionSites: namedUnsupported.map(site => ({siteId: site.siteId || null, line: site.line || null, reason: site.reason})),
         namedUncapturedActionSiteIds: namedUnsupported.map(site => site.siteId).filter(siteId=>siteId&&!directFallback?.receipts.some(receipt=>receipt.sourceSiteId===siteId&&receipt.captureStatus==='captured'&&receipt.assertionsPassed)),
         namedSafeButUncapturedActionSiteIds: namedSafeNotHit.map(site => site.siteId),
-        unsupportedSiteCountForModule: transformed.unsupported.length, uncapturedSiteMapping: namedUnsupported.length ? 'mapped' : 'transform prototype does not statically map this check key; runtime active case attribution used for reached safe sites',
+        unsupportedSiteCountForModule: selectedModule.transformed.unsupported.length, uncapturedSiteMapping: namedUnsupported.length ? 'mapped' : 'transform prototype does not statically map this check key; runtime active case attribution used for reached safe sites',
       });
       console.log(`${item.caseId}: ${classification}; checkpoints=${instrumentSites.length}`);
     }

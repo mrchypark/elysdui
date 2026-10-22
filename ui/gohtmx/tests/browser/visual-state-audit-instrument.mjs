@@ -1,5 +1,8 @@
 import {createHash} from 'node:crypto';
 import {parse} from 'acorn';
+import {resolve} from 'node:path';
+import {pathToFileURL,fileURLToPath} from 'node:url';
+import {isDeepStrictEqual} from 'node:util';
 
 const interactionMethods=new Set(['click','dispatchEvent','focus','blur','press','fill','check','uncheck','selectOption','setInputFiles','requestSubmit','submit','showModal','close','scrollIntoView']);
 const functionNode=node=>node&&(node.type==='FunctionDeclaration'||node.type==='FunctionExpression'||node.type==='ArrowFunctionExpression');
@@ -17,6 +20,171 @@ function walk(node,parent,parents,visit){
 const ancestors=(node,parents)=>{const out=[];for(let at=node;at;at=parents.get(at))out.push(at);return out;};
 const contains=(outer,inner)=>outer.start<=inner.start&&outer.end>=inner.end;
 const needsStatementBlock=(stmt,parent)=>parent?.type==='IfStatement'&&(parent.consequent===stmt||parent.alternate===stmt)||['ForStatement','ForOfStatement','ForInStatement','WhileStatement','DoWhileStatement'].includes(parent?.type)&&parent.body===stmt;
+
+// Serialized directly into the reference page; no Node binding or promises.
+export function synchronousTraceInit(){
+  globalThis.__visualSyncTraceState={caseId:null,sealed:false,events:[],lateEvents:[],errors:[],known:{}};
+  globalThis.__visualSyncTrace=(site,phase)=>{
+    const state=globalThis.__visualSyncTraceState;
+    if(state.caseId===null){if(state.sealed){if(state.lateEvents.length<16384)state.lateEvents.push({siteId:site.siteId,phase});else if(!state.errors.includes('late trace budget exceeded'))state.errors.push('late trace budget exceeded');}return;}
+    if(!Object.hasOwn(state.known,site.siteId)||state.known[site.siteId]!==site.sourceSHA256||!['enter','exit','unsafe'].includes(phase)){
+      state.errors.push('unknown trace site, source hash or phase');throw new Error('Invalid synchronous trace event');
+    }
+    if(state.events.length>=16384){if(!state.errors.includes('trace event budget exceeded'))state.errors.push('trace event budget exceeded');throw new Error('Synchronous trace event budget exceeded');}
+    state.events.push({caseId:state.caseId,ordinal:state.events.length+1,siteId:site.siteId,phase});
+  };
+}
+
+export function registeredOutcomesEqual(reference,traced){
+  return Boolean(reference&&traced)&&['initial','finalTwin'].every(field=>isDeepStrictEqual(reference[field],traced[field]))
+    &&['checkResult','actions','hostEvents','finalState'].every(field=>isDeepStrictEqual(reference.result[field],traced.result[field]));
+}
+
+export function traceContractStatus(contract,events,calibrated,lateEvents){
+  const stack=[];let balanced=true;
+  for(const event of events){if(event.phase==='enter')stack.push(event.siteId);else if(event.phase==='exit'&&stack.pop()!==event.siteId)balanced=false;}
+  const traceCalibrationValid=Boolean(contract)&&calibrated===true&&!contract.mappingGaps.length&&!lateEvents.length&&events.length>0
+    &&balanced&&!stack.length
+    &&events.every(event=>['enter','exit','unsafe'].includes(event.phase))
+    &&JSON.stringify(events.filter(event=>event.phase!=='exit').map(event=>event.siteId))===JSON.stringify(contract.steps.map(step=>step.source?.siteId));
+  return {independentContractGap:!contract,traceCalibrationValid};
+}
+
+// Independent synchronous reach probes: no async eligibility or capture edits.
+export function synchronousTrace(source,filename='<source>'){
+  const tokens=[],ast=parse(source,{ecmaVersion:'latest',sourceType:'module',locations:true,onToken:tokens}),parents=new Map(),nodes=[];
+  walk(ast,null,parents,node=>nodes.push(node));
+  const calls=nodes.filter(node=>node.type==='CallExpression'&&node.callee.type==='MemberExpression'&&interactionMethods.has(node.callee.computed?node.callee.property.value:node.callee.property.name));
+  const edits=[],sites=[],unprobed=[],arrows=new Map();
+  for(const call of calls){
+    const chain=ancestors(call,parents),fn=chain.find(functionNode),statement=chain.find(node=>node.type==='ExpressionStatement'&&node.expression===call);
+    const method=call.callee.computed?call.callee.property.value:call.callee.property.name;
+    const site={siteId:`${filename}:${call.loc.start.line}:${call.loc.start.column}:${method}`,filename,line:call.loc.start.line,column:call.loc.start.column,method,sourceSHA256:sha(source),sourceAnchor:{start:call.start,end:call.end,text:source.slice(call.start,call.end)}};
+    const callback=chain.some(node=>node.type==='CallExpression'&&node.callee.type==='MemberExpression'&&['addEventListener','on','forEach','map','flatMap','some','every','filter','find','findIndex'].includes(node.callee.property.name)&&node.arguments.some(arg=>fn&&contains(arg,fn)));
+    const nested=calls.some(other=>other!==call&&contains(call,other));
+    const suspended=nodes.some(node=>['AwaitExpression','YieldExpression'].includes(node.type)&&contains(call,node));
+    const labelled=chain.find(node=>node.type==='LabeledStatement'&&(!fn||contains(fn,node)));
+    // Receiver calls/getters can execute an inner action before this invocation.
+    const simpleReceiver=call.callee.object.type==='Identifier'&&!call.callee.computed;
+    const safe=statement&&fn&&simpleReceiver&&!callback&&!nested&&!suspended&&!labelled&&!chain.some(node=>node.type==='ChainExpression');
+    site.traceKind=safe?'statement':'unsafe-region';sites.push(site);
+    const hook=phase=>`globalThis.__visualSyncTrace(${JSON.stringify(site)},${JSON.stringify(phase)});`;
+    if(safe){
+      const wrap=needsStatementBlock(statement,parents.get(statement));
+      edits.push({at:statement.start,order:1,text:`${wrap?'{':''}${hook('enter')}`});
+      edits.push({at:statement.end,order:0,text:`;${hook('exit')}${wrap?'}':''}`});
+    }else if(fn?.type==='ArrowFunctionExpression'&&fn.body.type!=='BlockStatement'){
+      const arrow=tokens.filter(token=>token.type.label==='=>'&&token.start>=fn.start&&token.end<=fn.body.start).at(-1);
+      if(!arrow){unprobed.push(site.siteId);continue;}
+      // Preserve parentheses, comments, lexical this and expression return value.
+      if(!arrows.has(fn))arrows.set(fn,{at:arrow.end,hooks:[]});
+      arrows.get(fn).hooks.push(hook('unsafe'));
+    }else{
+      const region=labelled||chain.find(node=>node!==call&&(/Statement$/.test(node.type)||node.type==='VariableDeclaration')&&(!fn||contains(fn,node)));
+      if(!region||region.type==='BlockStatement'){unprobed.push(site.siteId);continue;}
+      const wrap=needsStatementBlock(region,parents.get(region));
+      edits.push({at:region.start,order:1,text:`${wrap?'{':''}${hook('unsafe')}`});
+      if(wrap)edits.push({at:region.end,order:0,text:'}'});
+    }
+  }
+  for(const [fn,arrow]of arrows){edits.push({at:arrow.at,order:1,text:`{${arrow.hooks.join('')}return (`});edits.push({at:fn.end,order:0,text:');}'});}
+  let traced=source;
+  for(const edit of edits.sort((a,b)=>b.at-a.at||b.order-a.order))traced=traced.slice(0,edit.at)+edit.text+traced.slice(edit.at);
+  parse(traced,{ecmaVersion:'latest',sourceType:'module'});
+  return {source:traced,originalSHA:sha(source),tracedSHA:sha(traced),sites,unprobed};
+}
+
+export function compareActionTrace({originalEvents,capturedEvents,receipts,originalEquivalent,unprobed,knownSiteIds,lateEvents}){
+  const blockers=[],stack=[];
+  if(originalEquivalent!==true)blockers.push('sync-traced-original-semantics-not-verified');
+  if(!Array.isArray(unprobed)||unprobed.length)blockers.push('unprobed-or-unverified-source-sites');
+  if(!Array.isArray(lateEvents)||lateEvents.length)blockers.push('late-events-or-unverified-trace-lifecycle');
+  const known=new Set(knownSiteIds||[]);
+  if([...originalEvents,...capturedEvents].some(event=>typeof event.siteId!=='string'||!known.has(event.siteId)))blockers.push('unknown-source-site');
+  if(!originalEvents.length)blockers.push('empty-trace-needs-explicit-noninteractive-contract');
+  for(const event of originalEvents){
+    if(event.phase==='enter')stack.push(event.siteId);
+    else if(event.phase==='exit'){if(stack.pop()!==event.siteId)blockers.push('unbalanced-original-trace');}
+    else blockers.push('unsafe-or-unknown-original-region-reached');
+  }
+  if(stack.length)blockers.push('unbalanced-original-trace');
+  const sequence=events=>events.map(event=>[event.siteId,event.phase]);
+  if(JSON.stringify(sequence(originalEvents))!==JSON.stringify(sequence(capturedEvents)))blockers.push('captured-invocation-sequence-mismatch');
+  const reached=originalEvents.filter(event=>event.phase==='enter').map(event=>event.siteId);
+  if(JSON.stringify(reached)!==JSON.stringify(receipts.map(receipt=>receipt.siteId)))blockers.push('capture-receipt-occurrence-mismatch');
+  if(receipts.some(receipt=>receipt.captureStatus!=='captured'||receipt.beforeCaptureStatus!=='captured'||receipt.afterCaptureStatus!=='captured'||receipt.beforeCaptureOwnership?.ownedStateEvidence!==true||receipt.afterCaptureOwnership?.ownedStateEvidence!==true))blockers.push('missing-or-unowned-before-after-pixels');
+  return {status:blockers.length?'blocked':'passed',reachedOccurrenceCount:reached.length,independentContractCoverage:'not-established-by-trace',blockers:[...new Set(blockers)]};
+}
+
+// Registration tables only: never execute a check body or evaluate fixture guards.
+export function registrationInventory(source){
+  const ast=parse(source,{ecmaVersion:'latest',sourceType:'module',locations:true}),nodes=[],parents=new Map();
+  walk(ast,null,parents,node=>nodes.push(node));
+  const declarations=new Map(nodes.filter(node=>node.type==='VariableDeclarator'&&node.id.type==='Identifier'&&!ancestors(parents.get(node),parents).some(functionNode)).map(node=>[node.id.name,node.init]));
+  const key=node=>node?.type==='Identifier'?node.name:node?.value;
+  const bind=(pattern,value,env)=>{if(pattern?.type==='Identifier')env[pattern.name]=value;else if(pattern?.type==='ArrayPattern'&&Array.isArray(value))pattern.elements.forEach((part,index)=>bind(part,value[index],env));};
+  const value=(node,env={},seen=new Set())=>{
+    if(!node)return undefined;
+    if(node.type==='Literal')return node.value;
+    if(node.type==='Identifier'){if(Object.hasOwn(env,node.name))return env[node.name];if(seen.has(node.name))return undefined;return value(declarations.get(node.name),env,new Set([...seen,node.name]));}
+    if(node.type==='ArrayExpression'){const items=node.elements.map(item=>value(item,env,seen));return items.includes(undefined)?undefined:items;}
+    if(node.type==='ObjectExpression'){const out={};for(const item of node.properties){if(item.type!=='Property'||item.computed)return undefined;const v=value(item.value,env,seen);if(v===undefined)return undefined;out[key(item.key)]=v;}return out;}
+    if(node.type==='MemberExpression'){const object=value(node.object,env,seen),property=node.computed?value(node.property,env,seen):key(node.property);return object&&Object.hasOwn(object,property)?object[property]:undefined;}
+    if(node.type==='BinaryExpression'&&node.operator==='+'){const a=value(node.left,env,seen),b=value(node.right,env,seen);return a===undefined||b===undefined?undefined:a+b;}
+    if(node.type==='TemplateLiteral'){let out=node.quasis[0].value.cooked;for(let i=0;i<node.expressions.length;i++){const v=value(node.expressions[i],env,seen);if(v===undefined)return undefined;out+=v+node.quasis[i+1].value.cooked;}return out;}
+    if(node.type==='CallExpression'&&node.callee.type==='MemberExpression'&&node.callee.object.name==='Object'&&key(node.callee.property)==='entries'){const object=value(node.arguments[0],env,seen);return object&&typeof object==='object'?Object.entries(object):undefined;}
+    return undefined;
+  };
+  const registrations=[],unresolved=[];
+  for(const registration of nodes.filter(node=>node.type==='CallExpression'&&node.callee.name==='registerChecks')){
+    const definitions=registration.arguments[1],target=definitions?.type==='Identifier'?definitions.name:null,entries=new Map();
+    const add=(name,node)=>{if(typeof name==='string')entries.set(name,{key:name,registrationLine:registration.loc.start.line,sourceAnchor:{start:node.start,end:node.end}});else unresolved.push({line:node.loc.start.line,reason:'unresolved-registration-key'});};
+    const resolving=new Set();
+    const pairs=(node,env={})=>{
+      if(!node)return;
+      if(node.type==='Identifier'){if(resolving.has(node.name)){unresolved.push({line:node.loc.start.line,reason:'cyclic-registration-binding'});return;}resolving.add(node.name);pairs(declarations.get(node.name),env);resolving.delete(node.name);return;}
+      if(node.type==='ObjectExpression'){for(const item of node.properties)if(item.type==='Property')add(item.computed?value(item.key,env):key(item.key),item);else pairs(item.argument,env);return;}
+      if(node.type==='ArrayExpression'){for(const item of node.elements){if(item?.type==='SpreadElement')pairs(item.argument,env);else if(item?.type==='ArrayExpression')add(value(item.elements[0],env),item);}return;}
+      if(node.type==='CallExpression'&&node.callee.type==='MemberExpression'){
+        const method=key(node.callee.property);
+        if(node.callee.object.name==='Object'&&method==='fromEntries')return pairs(node.arguments[0],env);
+        if(['map','flatMap'].includes(method)){
+          const items=value(node.callee.object,env),callback=node.arguments[0];
+          if(Array.isArray(items)&&callback?.type==='ArrowFunctionExpression'){
+            for(const item of items){const next={...env};bind(callback.params[0],item,next);if(method==='map'&&callback.body.type==='ArrayExpression')add(value(callback.body.elements[0],next),callback.body);else pairs(callback.body,next);}return;
+          }
+        }
+      }
+      unresolved.push({line:node.loc.start.line,reason:'unresolved-registration-factory'});
+    };
+    pairs(definitions);
+    // Handle this repository's assignment-built checks, finite for-of tables,
+    // and add/set factories. Function bodies remain opaque except table writers.
+    const writes=(node,env={})=>{
+      if(!node||functionNode(node))return;
+      if(['IfStatement','SwitchStatement','TryStatement','ForStatement','WhileStatement','DoWhileStatement'].includes(node.type)){unresolved.push({line:node.loc.start.line,reason:'unresolved-conditional-registration-writer'});return;}
+      if(node.type==='AssignmentExpression'&&node.left.type==='MemberExpression'&&node.left.object.name===target){const name=value(node.left.property,env);if(name!==undefined)add(name,node);return;}
+      if(node.type==='ForOfStatement'){
+        const items=value(node.right,env);if(!Array.isArray(items)){unresolved.push({line:node.loc.start.line,reason:'unresolved-registration-loop'});return;}
+        for(const item of items){const next={...env};bind(node.left.declarations?.[0]?.id||node.left,item,next);writes(node.body,next);}return;
+      }
+      if(node.type==='CallExpression'&&node.callee.type==='Identifier'){
+        const factory=declarations.get(node.callee.name),body=factory?.body;
+        if(functionNode(factory)&&body?.type==='CallExpression'&&body.callee.type==='MemberExpression'&&key(body.callee.property)==='forEach'){
+          const next={...env};factory.params.forEach((param,index)=>bind(param,value(node.arguments[index],env),next));
+          const items=value(body.callee.object,next),callback=body.arguments[0];
+          if(Array.isArray(items)&&functionNode(callback))for(const item of items){const scope={...next};bind(callback.params[0],item,scope);writes(callback.body,scope);}return;
+        }
+      }
+      for(const [property,child]of Object.entries(node)){if(['loc','start','end'].includes(property))continue;if(Array.isArray(child))child.forEach(item=>writes(item,env));else if(child&&typeof child==='object')writes(child,env);}
+    };
+    if(target)for(const node of ast.body)if(node.start<registration.start)writes(node);
+    registrations.push(...entries.values());
+  }
+  const keys=registrations.map(item=>item.key);
+  if(new Set(keys).size!==keys.length)throw new Error('duplicate registered check across registerChecks calls');
+  return {entries:registrations,unresolved,lookupHelpers:[...declarations].filter(([name,node])=>['need','one','must','require'].includes(name)&&functionNode(node)).map(([name,node])=>({name,line:node.loc.start.line,sourceSHA256:sha(source.slice(node.start,node.end)),sourceAnchor:{start:node.start,end:node.end,text:source.slice(node.start,node.end)},reviewScope:'lookup source only; no receiver purity exemption'}))};
+}
 
 // Inventory one guarded registered driver, following lexical helper calls.
 // Unknown guards stay explicit; this does not transform or execute source.
@@ -304,5 +472,97 @@ export function transform(source,filename='<source>',{registeredCheckEntriesAwai
   // Adjacent statements share an offset: finish the previous hook before
   // starting the next one (including an unbraced else branch).
   for(const edit of edits.map((edit,index)=>({...edit,index})).sort((a,b)=>b.at-a.at||b.index-a.index))transformed=transformed.slice(0,edit.at)+edit.text+transformed.slice(edit.at);
-  return {source:transformed,interactionSites,unsupported,syncUnsupportedSites,originalSHA,transformedSHA:sha(transformed)};
+  return {source:transformed,interactionSites,unsupported,syncUnsupportedSites,originalSHA,transformedSHA:sha(transformed),registeredChecks:[...new Set(checkProperties.map(item=>item.key))].sort()};
 }
+
+// Candidate call-graph mappings are not fixture-specific expected action lists.
+export function staticCoverageManifest(inventory,sources,contractFor=()=>null){
+  if(!Array.isArray(inventory.cases)||!inventory.cases.length)throw new Error('inventory has no cases');
+  const ids=inventory.cases.map(item=>`${item.name}`);
+  if(new Set(ids).size!==ids.length)throw new Error('duplicate component inventory IDs');
+  const modules={};
+  for(const {name,filename,source}of sources){
+    if(modules[name])throw new Error(`duplicate module: ${name}`);
+    const result=transform(source,filename,{registeredCheckEntriesAwaited:true});
+    if(result.unsupported.some(site=>site.reason.startsWith('parse-error:')))throw new Error(`cannot parse ${filename}`);
+    const registration=registrationInventory(source);
+    const staticSource=source.replace(/(["'`(=\s])\/assets\//g,'$1/visual-action-audit/assets/');
+    const staticResult=transform(staticSource,filename,{registeredCheckEntriesAwaited:true});
+    const trace=synchronousTrace(source,filename),staticTrace=synchronousTrace(staticSource,filename);
+    modules[name]={filename,sourceSHA256:result.originalSHA,transformedSHA256:result.transformedSHA,registeredChecks:[...new Set([...result.registeredChecks,...registration.entries.map(item=>item.key)])].sort(),registration,
+      counts:{checkpointed:result.interactionSites.length,mappedCheckpointSites:result.interactionSites.filter(site=>site.checkIdentity||site.mappedChecks.length).length,
+        unsupported:result.unsupported.length,unsupportedActionSites:result.unsupported.filter(site=>site.siteId).length},
+      sites:result.interactionSites,unsupported:result.unsupported,
+      syncTrace:{tracedSHA256:trace.tracedSHA,siteCount:trace.sites.length,unsafeRegionSiteCount:trace.sites.filter(site=>site.traceKind==='unsafe-region').length,unsafeSiteIds:trace.sites.filter(site=>site.traceKind==='unsafe-region').map(site=>site.siteId),unprobed:trace.unprobed},
+      staticSyncTrace:{tracedSHA256:staticTrace.tracedSHA,siteCount:staticTrace.sites.length,unsafeRegionSiteCount:staticTrace.sites.filter(site=>site.traceKind==='unsafe-region').length,unsafeSiteIds:staticTrace.sites.filter(site=>site.traceKind==='unsafe-region').map(site=>site.siteId),unprobed:staticTrace.unprobed},
+      staticAudit:{basePath:'/visual-action-audit/',sourceSHA256:staticResult.originalSHA,transformedSHA256:staticResult.transformedSHA,sites:staticResult.interactionSites,unsupported:staticResult.unsupported}};
+  }
+  const cases=inventory.cases.map(item=>{
+    if(!item.name||!item.key||!item.family||!modules[item.family])throw new Error(`invalid inventory case: ${item.name}`);
+    const candidates=Object.entries(modules).filter(([name])=>name===item.family||item.family==='native'&&name==='native-tooling');
+    const matches=site=>site.checkIdentity===item.key||site.mappedChecks?.includes(item.key);
+    const candidateSafeSiteIds=candidates.flatMap(([,module])=>module.sites.filter(matches).map(site=>site.siteId));
+    const candidateUnsupportedSiteIds=candidates.flatMap(([,module])=>module.unsupported.filter(site=>site.siteId&&matches(site)).map(site=>site.siteId));
+    const registeredModules=candidates.filter(([,module])=>module.registeredChecks.includes(item.key)).map(([name])=>name);
+    if(registeredModules.length>1)throw new Error(`ambiguous registered module: ${item.key}`);
+    const source=sources.find(module=>module.name===item.family),contract=contractFor(item.name,source.source,source.filename);
+    const mappingGaps=contract?contract.mappingGaps:[{reason:'fixture-specific-action-contract-unresolved'}];
+    const blockers=[...mappingGaps];
+    for(const name of registeredModules)if(!actionModuleNames(item.family).includes(name))blockers.push({reason:'registered-module-not-transformed-by-action-runner',module:name});
+    return {caseId:`gallery:${item.name}`,componentIdentity:item.name,family:item.family,checkKey:item.key,registeredModules,
+      registrationStatus:registeredModules.length?'statically-resolved':'unresolved-not-missing-proof',candidateSafeSiteIds,candidateUnsupportedSiteIds,
+      exactContract:contract?{stepCount:contract.steps.length,siteIds:contract.steps.map(step=>step.source?.siteId||null),mappingGaps}:null,blockers};
+  });
+  const count=field=>Object.values(modules).reduce((total,module)=>total+module.counts[field],0);
+  return {schemaVersion:1,kind:'static-action-coverage-preflight',scope:'finite gallery fixtures; no runtime or pixel proof',
+    inventorySHA256:sha(JSON.stringify(inventory)),modules,cases,
+    counts:{cases:cases.length,distinctCheckKeys:new Set(cases.map(item=>item.checkKey)).size,checkpointed:count('checkpointed'),mappedCheckpointSites:count('mappedCheckpointSites'),
+      unsupportedRecords:count('unsupported'),unsupportedActionSites:count('unsupportedActionSites'),
+      casesWithCandidateUnsupportedSites:cases.filter(item=>item.candidateUnsupportedSiteIds.length).length,
+      casesWithoutCandidateSites:cases.filter(item=>!item.candidateSafeSiteIds.length&&!item.candidateUnsupportedSiteIds.length).length,
+      unresolvedRegistrations:cases.filter(item=>!item.registeredModules.length).length,
+      exactContracts:cases.filter(item=>item.exactContract&&!item.exactContract.mappingGaps.length).length,
+      blockingCases:cases.filter(item=>item.blockers.length).length},
+    blockingCaseIds:cases.filter(item=>item.blockers.length).map(item=>item.caseId),safeForFullActionClaim:false};
+}
+
+export const actionModuleNames=family=>family==='native'?['native','native-tooling']:[family];
+
+export function prepareActionModule(name,localSource,manifest,surface){
+  const filename=`internal/gallery/assets/advanced-${name}-checks.js`,expected=manifest.modules?.[name];
+  if(!expected||expected.filename!==filename||expected.sourceSHA256!==sha(localSource))throw new Error(`coverage source hash mismatch: ${filename}`);
+  const source=surface==='static-audit'?localSource.replace(/(["'`(=\s])\/assets\//g,'$1/visual-action-audit/assets/'):localSource;
+  const transformed=transform(source,filename,{registeredCheckEntriesAwaited:true}),served=surface==='static-audit'?expected.staticAudit:expected;
+  const trace=synchronousTrace(source,filename),traceManifest=surface==='static-audit'?expected.staticSyncTrace:expected.syncTrace;
+  if(!traceManifest||traceManifest.tracedSHA256!==trace.tracedSHA)throw new Error(`coverage synchronous trace hash mismatch: ${filename}`);
+  const registeredChecks=[...new Set([...transform(localSource,filename,{registeredCheckEntriesAwaited:true}).registeredChecks,...registrationInventory(localSource).entries.map(item=>item.key)])].sort();
+  if(JSON.stringify(expected.registeredChecks)!==JSON.stringify(registeredChecks))throw new Error(`coverage registration mismatch: ${filename}`);
+  if(!served||served.sourceSHA256!==transformed.originalSHA||served.transformedSHA256!==transformed.transformedSHA||sha(JSON.stringify(served.sites))!==sha(JSON.stringify(transformed.interactionSites))||sha(JSON.stringify(served.unsupported))!==sha(JSON.stringify(transformed.unsupported)))throw new Error(`coverage AST/hash mismatch: ${filename} (${surface})`);
+  return {name,filename,localSource,source,transformed,registeredChecks,trace};
+}
+
+async function coverageCLI(){
+  const {readFile,writeFile}=await import('node:fs/promises');
+  const {execFileSync}=await import('node:child_process');
+  const {caseActionContract}=await import('./visual-state-audit-drivers.mjs');
+  const args=process.argv.slice(2),inventoryArg=args.find(arg=>arg.startsWith('--coverage-inventory=')),outputArg=args.find(arg=>arg.startsWith('--coverage-output='));
+  if(args.length!==2||!inventoryArg||!outputArg)throw new Error('Usage: node visual-state-audit-instrument.mjs --coverage-inventory=<gallery-check-inventory.json> --coverage-output=<new-manifest.json>');
+  const repo=fileURLToPath(new URL('../../../../',import.meta.url)),inventoryPath=resolve(inventoryArg.split('=').slice(1).join('=')),outputPath=resolve(outputArg.split('=').slice(1).join('='));
+  const revision=()=>execFileSync('git',['rev-parse','HEAD'],{cwd:repo,encoding:'utf8'}).trim();
+  const before=revision(),inventoryBytes=await readFile(inventoryPath),sources=[];
+  for(const name of ['foundation','interaction','data','workspace','communication','native','forms','native-tooling']){
+    const filename=`internal/gallery/assets/advanced-${name}-checks.js`;
+    sources.push({name,filename,source:await readFile(resolve(repo,filename),'utf8')});
+  }
+  const instrumenterBytes=await readFile(new URL(import.meta.url)),driverBytes=await readFile(new URL('./visual-state-audit-drivers.mjs',import.meta.url)),actionBytes=await readFile(new URL('./visual-state-audit-actions.mjs',import.meta.url));
+  const inventory=JSON.parse(inventoryBytes);
+  if(inventory.cases?.length!==1313||inventory.stories?.length!==624)throw new Error('expected current 1313-case / 624-story inventory');
+  const report=staticCoverageManifest(inventory,sources,caseActionContract);
+  for(const module of sources)for(const surface of ['live-audit','static-audit'])prepareActionModule(module.name,module.source,report,surface);
+  for(const source of sources)if(sha(await readFile(resolve(repo,source.filename)))!==sha(source.source))throw new Error(`source drift: ${source.filename}`);
+  if(sha(await readFile(inventoryPath))!==sha(inventoryBytes)||revision()!==before||sha(await readFile(new URL(import.meta.url)))!==sha(instrumenterBytes)||sha(await readFile(new URL('./visual-state-audit-drivers.mjs',import.meta.url)))!==sha(driverBytes)||sha(await readFile(new URL('./visual-state-audit-actions.mjs',import.meta.url)))!==sha(actionBytes))throw new Error('coverage input drift');
+  report.source={revision:before,nodeVersion:process.version,gitStatus:execFileSync('git',['status','--porcelain'],{cwd:repo,encoding:'utf8'}).trim(),inventoryPath,inventoryBytesSHA256:sha(inventoryBytes),instrumenterSHA256:sha(instrumenterBytes),driversSHA256:sha(driverBytes),actionsSHA256:sha(actionBytes),inputsStable:true};
+  await writeFile(outputPath,JSON.stringify(report,null,2)+'\n',{flag:'wx'});
+  console.log(JSON.stringify({outputPath,sha256:sha(await readFile(outputPath)),counts:report.counts,safeForFullActionClaim:false}));
+}
+if(process.argv[1]&&import.meta.url===pathToFileURL(resolve(process.argv[1])).href)coverageCLI().catch(error=>{console.error(error);process.exitCode=1;});

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import {transform} from './visual-state-audit-instrument.mjs';
+import {transform,staticCoverageManifest,registrationInventory,actionModuleNames,prepareActionModule,synchronousTrace,compareActionTrace,synchronousTraceInit,registeredOutcomesEqual,traceContractStatus} from './visual-state-audit-instrument.mjs';
 import {readFile,mkdtemp,writeFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
@@ -21,6 +21,180 @@ async function execute(source,unsupportedHook=()=>{}){
   finally{for(const key of ['events','target','items','assert','registerChecks','__visualBeforeAction','__visualCheckpoint','__visualUnsupportedAction'])delete globalThis[key];}
   return events;
 }
+
+test('static coverage preserves alias IDs and unknown mappings without claiming unexecuted actions failed',()=>{
+  const source=`const asset='/assets/example.js'; registerChecks('forms',{'forms/Field':()=>{button.click();}});`;
+  const inventory={cases:[{name:'forms/Field',key:'forms/Field',family:'forms'},{name:'forms/Alias',key:'forms/Field',family:'forms'}]};
+  const sources=[{name:'forms',filename:'forms.js',source}];
+  const result=staticCoverageManifest(inventory,sources);
+  assert.equal(result.counts.cases,2);
+  assert.equal(result.counts.distinctCheckKeys,1);
+  assert.equal(result.counts.checkpointed,1);
+  assert.notEqual(result.modules.forms.sourceSHA256,result.modules.forms.staticAudit.sourceSHA256);
+  assert.notEqual(result.modules.forms.sites[0].siteId,result.modules.forms.staticAudit.sites[0].siteId,'Static rewritten columns must be recomputed, not relabelled');
+  assert.equal(result.counts.unresolvedRegistrations,0);
+  assert.equal(result.counts.blockingCases,2);
+  assert.equal(result.safeForFullActionClaim,false);
+  assert.deepEqual(result.blockingCaseIds,['gallery:forms/Field','gallery:forms/Alias']);
+  assert.deepEqual(result.cases[0].candidateSafeSiteIds,result.cases[1].candidateSafeSiteIds);
+  assert.throws(()=>staticCoverageManifest({cases:[inventory.cases[0],inventory.cases[0]]},sources),/duplicate/);
+  assert.throws(()=>staticCoverageManifest(inventory,[{...sources[0],source:'not javascript {'}]),/cannot parse/);
+  assert.throws(()=>staticCoverageManifest(inventory,[]),/invalid inventory/);
+});
+
+test('static coverage separates unsupported diagnostics and routed tooling from exact contract proof',()=>{
+  const sources=[{name:'native',filename:'native.js',source:`registerChecks('native',{'shell/A':()=>{return button.click();}});`},
+    {name:'native-tooling',filename:'tooling.js',source:`registerChecks('native',{'tooling/B':()=>{button.click();}});`}];
+  const inventory={cases:[{name:'shell/A',key:'shell/A',family:'native'},{name:'tooling/B',key:'tooling/B',family:'native'}]};
+  const report=staticCoverageManifest(inventory,sources,identity=>identity==='shell/A'?{steps:[{source:{siteId:'native.js:1:47:click'}}],mappingGaps:[]}:null);
+  assert.equal(report.counts.unsupportedActionSites,1);
+  assert.equal(report.counts.casesWithCandidateUnsupportedSites,1);
+  assert.equal(report.counts.exactContracts,1);
+  assert.deepEqual(report.cases[1].registeredModules,['native-tooling']);
+  assert(!report.cases[1].blockers.some(gap=>gap.reason==='registered-module-not-transformed-by-action-runner'));
+  assert.equal(report.safeForFullActionClaim,false);
+});
+
+test('bounded registration mapping handles table factories, assignments and add/set writers without executing checks',()=>{
+  const fixtures=[
+    `const names={layout:{Stack:['selector','action'],Flex:['selector']}}; registerChecks('foundation',Object.fromEntries([...Object.entries(names.layout).map(([name,[selector,action]])=>[\`layout/\${name}\`,check(selector,action)])]));`,
+    `const stories={menus:['Menu','MenuAlias']}; const checks=Object.fromEntries(Object.entries(stories).flatMap(([chapter,names])=>names.map(name=>[\`\${chapter}/\${name}\`,ctx=>check(ctx)]))); registerChecks('interaction',checks);`,
+    `const names={lists:['List','Tree']}; const checks={}; for(const [chapter,names] of Object.entries(names))for(const name of names)checks[chapter+'/'+name]=()=>{throw new Error('never execute')}; registerChecks('data',checks);`,
+    `const checks={};const groups={fields:['Input','Password']};const set=(chapter,names,check)=>names.forEach(name=>checks[\`\${chapter}/\${name}\`]=check);set('forms',groups.fields,field);checks['forms/Input']=override;registerChecks('forms',checks);`,
+  ];
+  assert.deepEqual(fixtures.map(source=>registrationInventory(source).entries.map(item=>item.key)),[['layout/Stack','layout/Flex'],['menus/Menu','menus/MenuAlias'],['lists/List','lists/Tree'],['forms/Input','forms/Password']]);
+  assert(registrationInventory(`registerChecks('data',unknownFactory());`).unresolved.length);
+  assert.deepEqual(registrationInventory(`const checks={};if(flag)checks['lists/A']=check;registerChecks('data',checks);checks['lists/Late']=check;`).entries,[],'Unknown conditional and post-registration writes cannot establish registered IDs');
+  assert(registrationInventory(`const a=b,b=a;registerChecks('data',a);`).unresolved.some(item=>item.reason==='cyclic-registration-binding'));
+  assert.throws(()=>registrationInventory(`registerChecks('data',{'lists/A':check});registerChecks('data',{'lists/A':check});`),/duplicate registered/);
+});
+
+test('native tooling route and source/AST hash guards fail closed before browser startup',()=>{
+  assert.deepEqual(actionModuleNames('native'),['native','native-tooling']);
+  const source=`const asset='/assets/a.js';registerChecks('native',{'tooling/A':()=>{button.click();}});`;
+  const manifest=staticCoverageManifest({cases:[{name:'tooling/A',key:'tooling/A',family:'native'}]},[{name:'native',filename:'internal/gallery/assets/advanced-native-checks.js',source}]);
+  for(const surface of ['live-audit','static-audit'])assert.equal(prepareActionModule('native',source,manifest,surface).name,'native');
+  assert.throws(()=>prepareActionModule('native',source+' ',manifest,'live-audit'),/source hash mismatch/);
+  assert.throws(()=>prepareActionModule('native-tooling',source,manifest,'live-audit'),/source hash mismatch/);
+  const tampered=structuredClone(manifest);tampered.modules.native.staticAudit.sites=[];
+  assert.throws(()=>prepareActionModule('native',source,tampered,'static-audit'),/AST\/hash mismatch/);
+  const wrongRegistration=structuredClone(manifest);wrongRegistration.modules.native.registeredChecks=[];
+  assert.throws(()=>prepareActionModule('native',source,wrongRegistration,'live-audit'),/registration mismatch/);
+});
+
+test('existing sync telemetry is not an independent complete original-action denominator',async()=>{
+  const safe=`function check(){target.click();target.click();}check();`;
+  const transformed=transform(safe,'safe-trace.js');
+  assert.equal(transformed.interactionSites.length,2);
+  assert.equal(transformed.syncUnsupportedSites.length,0,'Safe sites are not part of existing unsupported telemetry');
+  const unsafe=`function check(){true&&target.click();}check();`;
+  const blocked=transform(unsafe,'unsafe-trace.js');
+  assert.equal(blocked.source,unsafe);
+  assert.equal(blocked.syncUnsupportedSites.length,0,'Reached non-statement actions currently have no probe');
+  assert.deepEqual(await execute(unsafe),['click']);
+  const outcome=count=>{let checked=false;for(let i=0;i<count;i++)checked=!checked;return {checked,hostEvents:[]};};
+  assert.deepEqual(outcome(2),outcome(0),'Equal final semantics and host events cannot prove all intermediate actions ran');
+});
+
+test('sync trace preserves repeats, loop scoping, return values and synchronous callback scheduling',async()=>{
+  const traces=[];globalThis.__visualSyncTrace=(site,phase)=>traces.push({siteId:site.siteId,phase});
+  try{
+    const source=`function check(){for(const item of items)target.click();target.click();}check();`;
+    const traced=synchronousTrace(source,'trace.js');
+    assert(!traced.source.includes('await '));assert(!traced.source.includes('async '));
+    assert.deepEqual(await execute(traced.source),await execute(source));
+    assert.deepEqual(traces.map(event=>event.phase),['enter','exit','enter','exit']);
+    traces.length=0;
+    const expression=`const tap=()=>\n(target.click());assert(tap()===19);items.forEach(()=>{target.click();});`;
+    assert.deepEqual(await execute(synchronousTrace(expression,'expression.js').source),await execute(expression));
+    assert(traces.every(event=>event.phase==='unsafe'),'Expression-return and collection callbacks remain explicit unsafe regions');
+    traces.length=0;
+    const nested=`const tap=()=>target.click(target.click());tap();`;
+    assert.deepEqual(await execute(synchronousTrace(nested,'nested.js').source),await execute(nested));
+    assert.equal(traces.length,2);assert(traces.every(event=>event.phase==='unsafe'));
+    const skipped=`function check(){false&&target.click();}check();`;
+    assert.deepEqual(await execute(synchronousTrace(skipped,'skip.js').source),[]);
+    assert(traces.some(event=>event.phase==='unsafe'),'Conservative reach is not proof a short-circuit call ran');
+  }finally{delete globalThis.__visualSyncTrace;}
+});
+
+test('trace comparator requires exact ordered occurrences, verified semantics and owned before/after images',()=>{
+  const events=[{siteId:'a',phase:'enter'},{siteId:'a',phase:'exit'},{siteId:'a',phase:'enter'},{siteId:'a',phase:'exit'}];
+  const receipt={siteId:'a',captureStatus:'captured',beforeCaptureStatus:'captured',afterCaptureStatus:'captured',beforeCaptureOwnership:{ownedStateEvidence:true},afterCaptureOwnership:{ownedStateEvidence:true}};
+  const proof={originalEvents:events,capturedEvents:events,receipts:[receipt,receipt],originalEquivalent:true,unprobed:[],knownSiteIds:['a'],lateEvents:[]};
+  assert.equal(compareActionTrace(proof).status,'passed');
+  assert.equal(compareActionTrace(proof).independentContractCoverage,'not-established-by-trace');
+  assert.equal(compareActionTrace({...proof,receipts:[receipt]}).status,'blocked');
+  assert.equal(compareActionTrace({...proof,capturedEvents:events.slice(0,2)}).status,'blocked');
+  assert.equal(compareActionTrace({...proof,originalEquivalent:false}).status,'blocked');
+  assert.equal(compareActionTrace({...proof,unprobed:['unknown']}).status,'blocked');
+  assert.equal(compareActionTrace({...proof,knownSiteIds:[]}).status,'blocked');
+  assert.equal(compareActionTrace({...proof,lateEvents:[{siteId:'a',phase:'enter'}]}).status,'blocked');
+  assert.equal(compareActionTrace({...proof,receipts:[{...receipt,afterCaptureOwnership:{ownedStateEvidence:false}},receipt]}).status,'blocked');
+  assert.equal(compareActionTrace({...proof,originalEvents:[{siteId:'x',phase:'unsafe'}]}).status,'blocked');
+  assert.equal(compareActionTrace({...proof,originalEvents:[],capturedEvents:[],receipts:[]}).status,'blocked');
+  assert.equal(compareActionTrace({...proof,originalEvents:events.slice(0,3)}).status,'blocked');
+});
+
+test('sync trace keeps microtask/handler ordering and fails visibly on action or probe exceptions',async()=>{
+  const traces=[];globalThis.__visualSyncTrace=(site,phase)=>traces.push({siteId:site.siteId,phase});
+  try{
+    for(const source of [
+      `function check(){Promise.resolve().then(()=>events.push('micro'));target.click();events.push('assert');}check();`,
+      `const handlers=[];const button={addEventListener(_,handler){handlers.push(handler)}};button.addEventListener('click',()=>{target.click();});handlers[0]();`,
+      `function check(){label:for(const item of items){target.click();break label;}}check();`,
+    ])assert.deepEqual(await execute(synchronousTrace(source,'timing.js').source),await execute(source));
+    traces.length=0;
+    const receiver=`const box={get control(){target.click();return target}};function check(){box.control.click();}check();`;
+    assert.deepEqual(await execute(synchronousTrace(receiver,'receiver.js').source),await execute(receiver));
+    assert(traces.some(event=>event.phase==='unsafe'),'Receiver/getter evaluation cannot be mistaken for method invocation order');
+    const throwing=`const node={click(){throw new Error('action failed')}};function check(){node.click();}check();`;
+    await assert.rejects(execute(throwing),/action failed/);
+    await assert.rejects(execute(synchronousTrace(throwing,'throws.js').source),/action failed/);
+    globalThis.__visualSyncTrace=()=>{throw new Error('probe failed')};
+    await assert.rejects(execute(synchronousTrace(`function check(){target.click();}check();`,'probe.js').source),/probe failed/);
+  }finally{delete globalThis.__visualSyncTrace;}
+});
+
+test('page-local sync collector pins source hashes, case ordinals, errors and sealed late events',()=>{
+  synchronousTraceInit();
+  try{
+    const site={siteId:'a',sourceSHA256:'source'};
+    globalThis.__visualSyncTrace(site,'enter');
+    assert.equal(globalThis.__visualSyncTraceState.events.length,0,'Module-load events are not attributed to a case');
+    Object.assign(globalThis.__visualSyncTraceState,{caseId:'fixture',known:{a:'source'}});
+    globalThis.__visualSyncTrace(site,'enter');globalThis.__visualSyncTrace(site,'exit');
+    assert.deepEqual(globalThis.__visualSyncTraceState.events.map(event=>[event.caseId,event.ordinal,event.phase]),[['fixture',1,'enter'],['fixture',2,'exit']]);
+    assert.throws(()=>globalThis.__visualSyncTrace({...site,sourceSHA256:'changed'},'enter'),/Invalid synchronous trace/);
+    assert.equal(globalThis.__visualSyncTraceState.errors.length,1);
+    globalThis.__visualSyncTraceState.events.length=16384;
+    assert.throws(()=>globalThis.__visualSyncTrace(site,'enter'),/trace event budget exceeded/);
+    assert(globalThis.__visualSyncTraceState.errors.includes('trace event budget exceeded'));
+    Object.assign(globalThis.__visualSyncTraceState,{caseId:null,sealed:true});
+    globalThis.__visualSyncTrace(site,'enter');
+    assert.equal(globalThis.__visualSyncTraceState.lateEvents.length,1);
+  }finally{delete globalThis.__visualSyncTrace;delete globalThis.__visualSyncTraceState;}
+});
+
+test('untouched calibration compares every existing semantic, result, payload and twin field',()=>{
+  const reference={initial:{text:'initial'},finalTwin:{text:'twin'},result:{checkResult:{passed:true},actions:[{entries:[['content','first\nsecond']]}],hostEvents:[{value:'caller'}],finalState:{caret:4}}};
+  assert(registeredOutcomesEqual(reference,structuredClone(reference)));
+  for(const field of ['initial','finalTwin']){const changed=structuredClone(reference);changed[field]={text:'changed'};assert(!registeredOutcomesEqual(reference,changed));}
+  for(const field of ['checkResult','actions','hostEvents','finalState']){const changed=structuredClone(reference);changed.result[field]=null;assert(!registeredOutcomesEqual(reference,changed));}
+  assert(!registeredOutcomesEqual(reference,null));
+});
+
+test('passing reached traces never close independent contracts or relax the three existing exact drivers',()=>{
+  const events=[{siteId:'a',phase:'enter'},{siteId:'a',phase:'exit'},{siteId:'b',phase:'unsafe'}];
+  const contract={mappingGaps:[],steps:[{source:{siteId:'a'}},{source:{siteId:'b'}}]};
+  assert.deepEqual(traceContractStatus(null,events,true,[]),{independentContractGap:true,traceCalibrationValid:false});
+  assert.deepEqual(traceContractStatus(contract,events,true,[]),{independentContractGap:false,traceCalibrationValid:true});
+  for(const changed of [events.slice(0,2),[...events,events[2]],events.toReversed(),[]])assert.equal(traceContractStatus(contract,changed,true,[]).traceCalibrationValid,false);
+  assert.equal(traceContractStatus(contract,events,false,[]).traceCalibrationValid,false);
+  assert.equal(traceContractStatus(contract,[events[0],events[2]],true,[]).traceCalibrationValid,false,'An exact contract never excuses a missing synchronous exit');
+  assert.equal(traceContractStatus(contract,events,true,[{siteId:'late'}]).traceCalibrationValid,false);
+  assert.equal(traceContractStatus({...contract,mappingGaps:[{reason:'unknown-guard'}]},events,true,[]).traceCalibrationValid,false);
+});
 
 test('propagates async through declaration and arrow helper calls without moving assertions',async()=>{
   const source=`
