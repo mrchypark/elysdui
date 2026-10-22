@@ -96,6 +96,87 @@ test('existing sync telemetry is not an independent complete original-action den
   assert.deepEqual(outcome(2),outcome(0),'Equal final semantics and host events cannot prove all intermediate actions ran');
 });
 
+test('optional click caches receivers once, preserves this and emits no nullish hooks',async()=>{
+  const traces=[];globalThis.__visualSyncTrace=(site,phase)=>traces.push({siteId:site.siteId,phase});
+  try{
+    for(const value of ['null','undefined',`{name:'receiver',get click(){events.push('method-get');return function(){assert(this.name==='receiver');events.push('clicked');};}}`]){
+      const source=`let reads=0;Object.defineProperty(globalThis,'optionalReceiver',{configurable:true,get(){reads++;return ${value};}});async function check(){optionalReceiver?.click();assert(reads===1);}try{await check();}finally{delete globalThis.optionalReceiver;}`;
+      const original=await execute(source),transformed=transform(source,'optional.js'),trace=synchronousTrace(source,'optional.js');
+      assert.equal(transformed.interactionSites.length,1);assert.equal(transformed.unsupported.length,0);
+      assert.equal(trace.sites[0].traceKind,'statement');
+      assert.equal(transformed.interactionSites[0].siteId,trace.sites[0].siteId);
+      assert.equal(transformed.interactionSites[0].sourceAnchor.text,'optionalReceiver?.click()');
+      const captured=await execute(transformed.source);
+      assert.deepEqual(captured.filter(value=>!value.startsWith('before:')&&!value.startsWith('checkpoint:')),original);
+      traces.length=0;assert.deepEqual(await execute(trace.source),original);
+      if(value==='null'||value==='undefined'){assert.deepEqual(captured,[]);assert.deepEqual(traces,[]);}
+      else {assert.deepEqual(captured,['before:click','method-get','clicked','checkpoint:click']);assert.deepEqual(traces.map(event=>event.phase),['enter','exit']);}
+    }
+    for(const receiver of [`Object.defineProperty(globalThis,'optionalReceiver',{configurable:true,get(){throw new Error('receiver failed');}});`,`globalThis.optionalReceiver={get click(){throw new Error('method failed');}};`,`globalThis.optionalReceiver={};`]){
+      const source=`${receiver}async function check(){optionalReceiver?.click();}try{await check();}catch(error){events.push(error.name+':'+error.message);}finally{delete globalThis.optionalReceiver;}`;
+      const original=await execute(source),captured=await execute(transform(source,'throw.js').source);
+      assert.deepEqual(captured.filter(value=>!value.startsWith('before:')&&!value.startsWith('checkpoint:')),original);
+      assert(!captured.includes('checkpoint:click'),'Throwing actions have no completed after hook');
+      traces.length=0;assert.deepEqual(await execute(synchronousTrace(source,'throw.js').source),original);
+      assert(!traces.some(event=>event.phase==='exit'));
+      if(receiver.includes('receiver failed'))assert.deepEqual(traces,[],'Receiver exceptions occur before all hooks');
+    }
+  }finally{delete globalThis.__visualSyncTrace;delete globalThis.optionalReceiver;}
+});
+
+test('optional click keeps complex, optional-method, argument and callback sites unsupported',()=>{
+  for(const source of [
+    `async function check(){box.node?.click();}await check();`,
+    `async function check(){lookup()?.click();}await check();`,
+    `async function check(){node.click?.();}await check();`,
+    `async function check(){node?.click('argument');}await check();`,
+    `async function check(){node?.['click']();}await check();`,
+    `async function check(){globalThis?.click();}await check();`,
+    `button.addEventListener('click',()=>{node?.click();});`,
+    `items.forEach(()=>{node?.click();});`,
+    `const tap=()=>node?.click();tap();`,
+    `function* check(){node?.click();}check().next();`,
+  ]){
+    const transformed=transform(source,'unsupported-optional.js');
+    assert.equal(transformed.interactionSites.length,0);
+    assert(transformed.unsupported.some(site=>site.siteId));
+    assert(synchronousTrace(source,'unsupported-optional.js').sites.every(site=>site.traceKind==='unsafe-region'));
+  }
+});
+
+test('optional click preserves collision-free block scope, loops, dangling else and ordered occurrences',async()=>{
+  const source=`let count=0;const node={click(){events.push('click'+(++count));}};async function check(){const __visualOptionalTarget_0='caller';if(true)for(const value of [1,2])if(value)node?.click();else events.push('wrong');else events.push('outer-wrong');node?.click();assert(__visualOptionalTarget_0==='caller');}await check();`;
+  const at=source.indexOf('node?.click()'),withCollision=source+`const __visualOptionalTarget_${at}=7;`;
+  const traces=[];globalThis.__visualSyncTrace=(site,phase)=>traces.push({siteId:site.siteId,phase});
+  try{
+    const original=await execute(source),captured=await execute(transform(source,'scope.js').source);
+    assert.deepEqual(original,['click1','click2','click3']);
+    assert.deepEqual(captured,['before:click','click1','checkpoint:click','before:click','click2','checkpoint:click','before:click','click3','checkpoint:click']);
+    assert.deepEqual(await execute(synchronousTrace(source,'scope.js').source),original);
+    assert.equal(traces.length,6);
+    const shadowed=`async function check(undefined){undefined?.click();}await check({click(){events.push('shadowed');}});`;
+    assert.deepEqual((await execute(transform(shadowed,'shadow.js').source)).filter(value=>!value.startsWith('before:')&&!value.startsWith('checkpoint:')),await execute(shadowed));
+    assert.deepEqual(await execute(synchronousTrace(shadowed,'shadow.js').source),await execute(shadowed));
+    assert(transform(withCollision,'collision.js').source.includes(`const __visualOptionalTarget_${at}_=node`));
+    assert(synchronousTrace(withCollision,'collision.js').source.includes(`const __visualOptionalTarget_${at}_=node`));
+    assert.deepEqual((await execute(transform(withCollision,'collision.js').source)).filter(value=>!value.startsWith('before:')&&!value.startsWith('checkpoint:')),original);
+  }finally{delete globalThis.__visualSyncTrace;}
+});
+
+test('optional click promotes only seven real gallery sites and preserves original anchors',async()=>{
+  const filename='internal/gallery/assets/advanced-interaction-checks.js';
+  const source=await readFile(new URL('../../../../'+filename,import.meta.url),'utf8');
+  const transformed=transform(source,filename,{registeredCheckEntriesAwaited:true}),trace=synchronousTrace(source,filename);
+  const promoted=transformed.interactionSites.filter(site=>/^[A-Za-z_$][\w$]*\?\.click\(\)$/.test(site.sourceAnchor.text));
+  assert.deepEqual(promoted.map(site=>site.line),[123,133,135,137,140,230,277]);
+  assert.equal(transformed.interactionSites.length,168);
+  assert.equal(transformed.unsupported.filter(site=>site.siteId).length,7,'Four complex chains and three blocked Lottie sites remain unsupported');
+  for(const site of promoted){
+    assert.equal(source.slice(site.sourceAnchor.start,site.sourceAnchor.end),site.sourceAnchor.text);
+    assert.equal(trace.sites.find(other=>other.siteId===site.siteId)?.traceKind,'statement');
+  }
+});
+
 test('sync trace preserves repeats, loop scoping, return values and synchronous callback scheduling',async()=>{
   const traces=[];globalThis.__visualSyncTrace=(site,phase)=>traces.push({siteId:site.siteId,phase});
   try{

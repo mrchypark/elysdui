@@ -21,6 +21,20 @@ const ancestors=(node,parents)=>{const out=[];for(let at=node;at;at=parents.get(
 const contains=(outer,inner)=>outer.start<=inner.start&&outer.end>=inner.end;
 const needsStatementBlock=(stmt,parent)=>parent?.type==='IfStatement'&&(parent.consequent===stmt||parent.alternate===stmt)||['ForStatement','ForOfStatement','ForInStatement','WhileStatement','DoWhileStatement'].includes(parent?.type)&&parent.body===stmt;
 
+function optionalClickStatement(call,parents){
+  const member=call.callee,chain=parents.get(call),statement=parents.get(chain);
+  return !ancestors(call,parents).find(functionNode)?.generator&&member?.type==='MemberExpression'&&member.object.type==='Identifier'&&!['eval','arguments','globalThis'].includes(member.object.name)&&!member.computed&&member.optional&&member.property.name==='click'
+    &&!call.optional&&!call.arguments.length&&chain?.type==='ChainExpression'&&chain.expression===call&&statement?.type==='ExpressionStatement'&&statement.expression===chain?statement:null;
+}
+function optionalClickEdit(call,statement,nodes,before,after){
+  let temporary=`__visualOptionalTarget_${call.start}`;
+  while(nodes.some(node=>node.type==='Identifier'&&node.name===temporary))temporary+='_';
+  const receiver=call.callee.object.name;
+  // Retain the original call spelling as well as this/throws; native TypeError
+  // messages include it. The inner binding caches even a global getter once.
+  return {at:statement.start,end:statement.end,text:`{const ${temporary}=${receiver};if(${temporary}!==null&&${temporary}!==void 0){const ${receiver}=${temporary};${before}${receiver}?.click();${after}}}`};
+}
+
 // Serialized directly into the reference page; no Node binding or promises.
 export function synchronousTraceInit(){
   globalThis.__visualSyncTraceState={caseId:null,sealed:false,events:[],lateEvents:[],errors:[],known:{}};
@@ -79,7 +93,8 @@ export function synchronousTrace(source,filename='<source>'){
   const calls=nodes.filter(node=>node.type==='CallExpression'&&node.callee.type==='MemberExpression'&&interactionMethods.has(node.callee.computed?node.callee.property.value:node.callee.property.name));
   const edits=[],sites=[],unprobed=[],arrows=new Map();
   for(const call of calls){
-    const chain=ancestors(call,parents),fn=chain.find(functionNode),statement=chain.find(node=>node.type==='ExpressionStatement'&&node.expression===call);
+    const optional=optionalClickStatement(call,parents);
+    const chain=ancestors(call,parents),fn=chain.find(functionNode),statement=optional||chain.find(node=>node.type==='ExpressionStatement'&&node.expression===call);
     const method=call.callee.computed?call.callee.property.value:call.callee.property.name;
     const site={siteId:`${filename}:${call.loc.start.line}:${call.loc.start.column}:${method}`,filename,line:call.loc.start.line,column:call.loc.start.column,method,sourceSHA256:sha(source),sourceAnchor:{start:call.start,end:call.end,text:source.slice(call.start,call.end)}};
     const callback=chain.some(node=>node.type==='CallExpression'&&node.callee.type==='MemberExpression'&&['addEventListener','on','forEach','map','flatMap','some','every','filter','find','findIndex'].includes(node.callee.property.name)&&node.arguments.some(arg=>fn&&contains(arg,fn)));
@@ -88,10 +103,11 @@ export function synchronousTrace(source,filename='<source>'){
     const labelled=chain.find(node=>node.type==='LabeledStatement'&&(!fn||contains(fn,node)));
     // Receiver calls/getters can execute an inner action before this invocation.
     const simpleReceiver=call.callee.object.type==='Identifier'&&!call.callee.computed;
-    const safe=statement&&fn&&simpleReceiver&&!callback&&!nested&&!suspended&&!labelled&&!chain.some(node=>node.type==='ChainExpression');
+    const safe=statement&&fn&&simpleReceiver&&!callback&&!nested&&!suspended&&!labelled&&(optional||!chain.some(node=>node.type==='ChainExpression'));
     site.traceKind=safe?'statement':'unsafe-region';sites.push(site);
     const hook=phase=>`globalThis.__visualSyncTrace(${JSON.stringify(site)},${JSON.stringify(phase)});`;
     if(safe){
+      if(optional){edits.push({...optionalClickEdit(call,statement,nodes,hook('enter'),hook('exit')),order:1});continue;}
       const wrap=needsStatementBlock(statement,parents.get(statement));
       edits.push({at:statement.start,order:1,text:`${wrap?'{':''}${hook('enter')}`});
       edits.push({at:statement.end,order:0,text:`;${hook('exit')}${wrap?'}':''}`});
@@ -111,7 +127,7 @@ export function synchronousTrace(source,filename='<source>'){
   }
   for(const [fn,arrow]of arrows){edits.push({at:arrow.at,order:1,text:`{${arrow.hooks.join('')}return (`});edits.push({at:fn.end,order:0,text:');}'});}
   let traced=source;
-  for(const edit of edits.sort((a,b)=>b.at-a.at||b.order-a.order))traced=traced.slice(0,edit.at)+edit.text+traced.slice(edit.at);
+  for(const edit of edits.sort((a,b)=>b.at-a.at||b.order-a.order))traced=traced.slice(0,edit.at)+edit.text+traced.slice(edit.end??edit.at);
   parse(traced,{ecmaVersion:'latest',sourceType:'module'});
   return {source:traced,originalSHA:sha(source),tracedSHA:sha(traced),sites,unprobed};
 }
@@ -366,7 +382,7 @@ export function transform(source,filename='<source>',{registeredCheckEntriesAwai
   const seedFunctions=new Set(),siteByCall=new Map(),statementByCall=new Map(),siteOwner=new Map();
   for(const call of candidates){
     const chain=ancestors(call,parents),fn=chain.find(functionNode),handler=chain.find(node=>node.type==='CallExpression'&&node.callee.type==='MemberExpression'&&(node.callee.property.name==='addEventListener'||node.callee.property.name==='on'));
-    const expr=chain.find(node=>node.type==='ExpressionStatement'&&node.expression===call);
+    const expr=optionalClickStatement(call,parents)||chain.find(node=>node.type==='ExpressionStatement'&&node.expression===call);
     const method=call.callee.computed?String(call.callee.property.value):call.callee.property.name;
     const checkOwner=chain.find(node=>node.type==='AssignmentExpression'&&node.left.type==='MemberExpression'&&node.left.computed&&node.left.property.type==='Literal'&&typeof node.left.property.value==='string');
     const checkProperty=chain.find(node=>node.type==='Property'&&node.key.type==='Literal'&&typeof node.key.value==='string');
@@ -463,6 +479,10 @@ export function transform(source,filename='<source>',{registeredCheckEntriesAwai
     const insertion=stmt.end;
     const separator=statementText.trimEnd().endsWith(';')?' ':'; ';
     const serializedSite=JSON.stringify(site);
+    if(optionalClickStatement(call,parents)){
+      edits.push(optionalClickEdit(call,stmt,nodes,`await globalThis.__visualBeforeAction?.(${serializedSite});`,`await globalThis.__visualCheckpoint?.(${serializedSite});`));
+      interactionSites.push(site);continue;
+    }
     const wrap=needsStatementBlock(stmt,parents.get(stmt));
     edits.push({at:stmt.start,text:wrap?`{ await globalThis.__visualBeforeAction?.(${serializedSite}); `:`await globalThis.__visualBeforeAction?.(${serializedSite}); `});
     edits.push({at:insertion,text:`${separator}await globalThis.__visualCheckpoint?.(${serializedSite});${wrap?' }':''}`});
@@ -493,7 +513,7 @@ export function transform(source,filename='<source>',{registeredCheckEntriesAwai
   let transformed=source;
   // Adjacent statements share an offset: finish the previous hook before
   // starting the next one (including an unbraced else branch).
-  for(const edit of edits.map((edit,index)=>({...edit,index})).sort((a,b)=>b.at-a.at||b.index-a.index))transformed=transformed.slice(0,edit.at)+edit.text+transformed.slice(edit.at);
+  for(const edit of edits.map((edit,index)=>({...edit,index})).sort((a,b)=>b.at-a.at||b.index-a.index))transformed=transformed.slice(0,edit.at)+edit.text+transformed.slice(edit.end??edit.at);
   return {source:transformed,interactionSites,unsupported,syncUnsupportedSites,originalSHA,transformedSHA:sha(transformed),registeredChecks:[...new Set(checkProperties.map(item=>item.key))].sort()};
 }
 
