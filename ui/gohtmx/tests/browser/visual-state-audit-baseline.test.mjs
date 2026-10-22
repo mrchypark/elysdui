@@ -1,18 +1,60 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import {spawn, spawnSync} from 'node:child_process';
+import {spawn, spawnSync, execFileSync} from 'node:child_process';
 import {createServer} from 'node:http';
 import {mkdir, mkdtemp, readFile, writeFile, rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
-import {join} from 'node:path';
+import {join, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {createHash} from 'node:crypto';
 import {chromium} from 'playwright';
 import {captureBounds} from './visual-state-audit-bounds.mjs';
 import {runInNewContext} from 'node:vm';
+import {EventEmitter} from 'node:events';
 
 const repo = fileURLToPath(new URL('../../../../', import.meta.url));
 const runner = join(repo, 'ui/gohtmx/tests/browser/visual-state-audit-baseline.mjs');
+test('explicit production root requires exact revision without attributing secondary harness to it', async () => {
+  const source = await readFile(runner, 'utf8');
+  const fn = source.match(/function pinnedSourceRoot\(sourceRoot, revision\) \{[\s\S]*?\n\}/)[0];
+  const pinned = runInNewContext(`(${fn})`, {assert, resolve, execFileSync});
+  const revision = execFileSync('git', ['rev-parse','HEAD'], {cwd: repo, encoding:'utf8'}).trim();
+  assert.equal(pinned(repo, revision), resolve(repo));
+  assert.throws(() => pinned(repo, '0'.repeat(40)), /source revision pin mismatch/);
+  assert.throws(() => pinned(repo, null), /requires full/);
+  assert.throws(() => pinned(join(repo,'ui'), revision), /repository root/);
+  assert(source.includes('productionRoot: sourceRepo'));
+  assert(source.includes('harnessSource = {root: repo, revision:'));
+  assert(source.includes("readFile(new URL(name, import.meta.url))"), 'hash executing harness, not production copy');
+  assert(source.includes("matrix production revision pin mismatch"));
+  for (const line of source.split('\n').filter(line => /const build =|const exported =|child = spawn\(binary/.test(line))) assert(line.includes('cwd: sourceRepo'));
+});
+test('owned asset route proves delivered bytes before worker-close and rejects missing proof', async () => {
+  const source = await readFile(runner, 'utf8');
+  const fn = source.match(/async function fulfillAsset\(route, page, timeout = 30000\) \{[\s\S]*?\n\}/)[0];
+  const hash = bytes => createHash('sha256').update(bytes).digest('hex');
+  const fulfillAsset = runInNewContext(`(${fn})`, {URL, assert, sha256: hash, setTimeout, clearTimeout});
+  const bytes = Buffer.from('postMessage("ready")');
+  const page = new EventEmitter(), context = new EventEmitter();
+  page.context = () => context;
+  let delivered;
+  const response = {ok: () => true, url: () => 'http://owned/assets/worker.js', body: async () => bytes};
+  const request = {url: response.url, failure: () => null};
+  const route = {request: () => request, fetch: async () => response, fulfill: async options => { assert.equal(options.response, response); delivered = options.body; page.emit('requestfinished', request); context.emit('close'); }};
+  const proof = await fulfillAsset(route, page);
+  assert.equal(delivered, bytes, 'same actual response bytes are delivered, not recheck bytes');
+  assert.equal(proof.sha256, hash(delivered));
+  assert.equal(proof.bytes, bytes.length);
+  await assert.rejects(fulfillAsset({...route, fetch: async () => ({...response, body: async () => { throw new Error('worker closed before byte proof'); }})}, page), /worker closed before byte proof/);
+  await assert.rejects(fulfillAsset({...route, fulfill: async () => { throw new Error('delivery failed'); }}, page), /delivery failed/);
+  // Model safeRace resolving undefined on closure without protocol delivery completion.
+  await assert.rejects(fulfillAsset({...route, fulfill: async () => { context.emit('close'); return undefined; }}, page), /target closed before request completion/);
+  await assert.rejects(fulfillAsset({...route, fulfill: async () => {}}, page, 5), /completion missing/);
+  await assert.rejects(fulfillAsset({...route, fulfill: async () => { page.emit('requestfailed', request); }}, page), /request failed/);
+  await assert.rejects(fulfillAsset({...route, fulfill: async () => { page.emit('requestfinished', {}); }}, page, 5), /completion missing/, 'unrelated request cannot establish proof');
+  assert.equal(page.listenerCount('requestfinished'), 0);
+  assert.equal(context.listenerCount('close'), 0);
+});
 test('capture camera converts document bounds only when the whole union fits viewport', async () => {
   const source = await readFile(runner, 'utf8');
   const fn = source.match(/function captureCamera\(clip, scroll, viewport\) \{[\s\S]*?\n\}/)[0];

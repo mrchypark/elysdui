@@ -11,10 +11,45 @@ import {chromium} from 'playwright';
 import {captureBounds} from './visual-state-audit-bounds.mjs';
 
 const repo = fileURLToPath(new URL('../../../../', import.meta.url));
+function pinnedSourceRoot(sourceRoot, revision) {
+  assert.match(revision || '', /^[a-f0-9]{40}$/, 'explicit source root requires full --source-revision pin');
+  const root = resolve(sourceRoot);
+  const git = args => execFileSync('git', args, {cwd: root, encoding: 'utf8'}).trim();
+  assert.equal(resolve(git(['rev-parse', '--show-toplevel'])), root, 'source root must be the repository root');
+  assert.equal(git(['rev-parse', 'HEAD']), revision, 'source revision pin mismatch');
+  return root;
+}
 function captureCamera(clip, scroll, viewport) {
   const viewportClip = {...clip, x: clip.x - scroll.x, y: clip.y - scroll.y};
   const fits = viewportClip.x >= 0 && viewportClip.y >= 0 && viewportClip.x + clip.width <= viewport.width && viewportClip.y + clip.height <= viewport.height;
   return {fullPage: !fits, clip: fits ? viewportClip : clip};
+}
+async function fulfillAsset(route, page, timeout = 30000) {
+  const request = route.request(), path = new URL(request.url()).pathname;
+  const context = page.context();
+  let finish;
+  const completed = new Promise(resolve => { finish = resolve; });
+  const done = candidate => { if (candidate === request) finish(request.failure() ? {error: 'asset request completion failed'} : {}); };
+  const failed = candidate => { if (candidate === request) finish({error: 'asset request failed'}); };
+  const closed = () => finish({error: 'asset target closed before request completion'});
+  page.on('requestfinished', done); page.on('requestfailed', failed);
+  page.on('close', closed); context.on('close', closed);
+  const timer = setTimeout(() => finish({error: 'asset request completion missing'}), timeout);
+  try {
+    const response = await route.fetch();
+    assert(response.ok(), `asset response failed: ${path}`);
+    assert.equal(new URL(response.url()).pathname, path, 'asset redirect changed identity');
+    const bytes = await response.body();
+    // Fulfill may resolve on target closure; require this exact browser request to finish.
+    await route.fulfill({response, body: bytes});
+    const completion = await completed;
+    assert(!completion.error, completion.error);
+    return {path, bytes: bytes.length, sha256: sha256(bytes), loadedProof: 'owned-route identical bytes; exact browser requestfinished'};
+  } finally {
+    clearTimeout(timer);
+    page.off('requestfinished', done); page.off('requestfailed', failed);
+    page.off('close', closed); context.off('close', closed);
+  }
 }
 const profiles = Object.freeze({
   'live-desktop-light': {mode: 'live', viewport: {width: 1440, height: 1000}, colorScheme: 'light', deviceScaleFactor: 1},
@@ -29,9 +64,11 @@ const profiles = Object.freeze({
 
 function argsFrom(argv) {
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const options = {matrix: process.env.VISUAL_AUDIT_MATRIX ? resolve(process.env.VISUAL_AUDIT_MATRIX) : null, output: process.env.VISUAL_AUDIT_OUTPUT_DIR ? resolve(process.env.VISUAL_AUDIT_OUTPUT_DIR) : resolve(repo, 'test-results', 'visual-audit', `${stamp}-${process.pid}`), profile: 'live-desktop-light', mode: null, families: [], caseIds: [], contextCases: [], baseURL: null, help: false};
+  const options = {sourceRoot: null, sourceRevision: null, matrix: process.env.VISUAL_AUDIT_MATRIX ? resolve(process.env.VISUAL_AUDIT_MATRIX) : null, output: process.env.VISUAL_AUDIT_OUTPUT_DIR ? resolve(process.env.VISUAL_AUDIT_OUTPUT_DIR) : resolve(repo, 'test-results', 'visual-audit', `${stamp}-${process.pid}`), profile: 'live-desktop-light', mode: null, families: [], caseIds: [], contextCases: [], baseURL: null, help: false};
   for (const arg of argv) {
     if (arg === '--help' || arg === '-h') options.help = true;
+    else if (arg.startsWith('--source-root=')) options.sourceRoot = resolve(arg.slice('--source-root='.length));
+    else if (arg.startsWith('--source-revision=')) options.sourceRevision = arg.slice('--source-revision='.length);
     else if (arg.startsWith('--matrix=')) options.matrix = resolve(arg.slice('--matrix='.length));
     else if (arg.startsWith('--output-dir=')) options.output = resolve(arg.slice('--output-dir='.length));
     else if (arg.startsWith('--base-url=')) options.baseURL = arg.slice('--base-url='.length).replace(/\/$/, '');
@@ -43,7 +80,7 @@ function argsFrom(argv) {
     else throw new Error(`Unknown option: ${arg}`);
   }
   if (options.help) {
-    console.log('Usage: node visual-state-audit-baseline.mjs --matrix=/path/to/acceptance-matrix.json [--profile=<profile>] [--mode=live|static] [--family=a,b] [--case=id,...] [--context-case=id,...] [--output-dir=path] [--base-url=http://127.0.0.1:port]');
+    console.log('Usage: node visual-state-audit-baseline.mjs --matrix=/path/to/acceptance-matrix.json [--source-root=/production/repo --source-revision=<fullSHA>] [--profile=<profile>] [--mode=live|static] [--family=a,b] [--case=id,...] [--context-case=id,...] [--output-dir=path] [--base-url=http://127.0.0.1:port]');
     console.log(`Profiles: ${Object.keys(profiles).join(', ')}`);
     return null;
   }
@@ -60,31 +97,36 @@ function argsFrom(argv) {
 
 const options = argsFrom(process.argv.slice(2));
 if (!options) process.exit(0);
+const sourceRepo = options.sourceRoot ? pinnedSourceRoot(options.sourceRoot, options.sourceRevision) : repo;
 const batchSize = 25;
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
 async function sourceBaseSnapshot(matrixBytes, matrix) {
-  const git = args => execFileSync('git', args, {cwd: repo, encoding: 'utf8'});
+  const git = args => execFileSync('git', args, {cwd: sourceRepo, encoding: 'utf8'});
   const paths = [...new Set((git(['diff', 'HEAD', '--name-only', '-z']) + git(['ls-files', '--others', '--exclude-standard', '-z'])).split('\0').filter(Boolean))];
   const sourceFiles = [];
   for (const path of paths) {
     if (path.startsWith('ui/gohtmx/tests/browser/')) continue;
     if (!/^(?:go\.(?:mod|sum|work|work\.sum)$|ui\/gohtmx\/|internal\/gallery\/|examples\/gohtmx\/gallery\/|cmd\/ely-gallery-static\/)/.test(path)) continue;
     let contentHash;
-    try { contentHash = sha256(await readFile(resolve(repo, path))); }
+    try { contentHash = sha256(await readFile(resolve(sourceRepo, path))); }
     catch (error) { if (error.code !== 'ENOENT') throw error; contentHash = 'deleted'; }
     sourceFiles.push({path, sha256: contentHash});
   }
   sourceFiles.sort((left, right) => left.path.localeCompare(right.path));
-  const currentRevision = execFileSync('git', ['rev-parse', 'HEAD'], {cwd: repo, encoding: 'utf8'}).trim();
-  const branch = execFileSync('git', ['branch', '--show-current'], {cwd: repo, encoding: 'utf8'}).trim();
+  const currentRevision = execFileSync('git', ['rev-parse', 'HEAD'], {cwd: sourceRepo, encoding: 'utf8'}).trim();
+  if (options.sourceRoot) assert.equal(currentRevision, options.sourceRevision, 'production source pin changed');
+  const branch = execFileSync('git', ['branch', '--show-current'], {cwd: sourceRepo, encoding: 'utf8'}).trim();
   const matrixSHA256 = sha256(await readFile(options.matrix));
   const harnessFiles = await Promise.all(['visual-state-audit-baseline.mjs', 'visual-state-audit-bounds.mjs'].map(async name => ({path: name, sha256: sha256(await readFile(new URL(name, import.meta.url)))})));
+  const harnessSource = {root: repo, revision: execFileSync('git', ['rev-parse', 'HEAD'], {cwd: repo, encoding: 'utf8'}).trim(), files: harnessFiles};
   return {
+    productionRoot: sourceRepo,
+    harnessSource,
     matrix: options.matrix,
     matrixSHA256,
     matrixSource: matrix.source || null,
     currentRevision,
-    sourceTreeSHA256: sha256(Buffer.from(JSON.stringify({currentRevision, branch, matrixSHA256, sourceFiles, harnessFiles}))),
+    sourceTreeSHA256: sha256(Buffer.from(JSON.stringify({currentRevision, branch, matrixSHA256, sourceFiles, harnessFiles, productionRoot: sourceRepo, harnessSource}))),
     sourceFiles,
     harnessFiles,
     branch,
@@ -154,6 +196,7 @@ let currentThemeVerification = null;
 try {
   const matrixBytes = await readFile(options.matrix);
   const matrix = JSON.parse(matrixBytes.toString('utf8'));
+  if (options.sourceRoot) assert.equal(matrix.source?.revision, options.sourceRevision, 'matrix production revision pin mismatch');
   sourceBase = await sourceBaseSnapshot(matrixBytes, matrix);
   const currentRevision = sourceBase.currentRevision;
   const profile = profiles[options.profile];
@@ -181,13 +224,13 @@ try {
   let origin = options.baseURL;
   if (!origin && options.mode === 'live') {
     const binary = join(runDir, 'gallery');
-    const build = spawnSync('go', ['build', '-o', binary, './examples/gohtmx/gallery'], {cwd: repo, env: {...process.env, GOTOOLCHAIN: 'go1.26.9'}, encoding: 'utf8'});
+    const build = spawnSync('go', ['build', '-o', binary, './examples/gohtmx/gallery'], {cwd: sourceRepo, env: {...process.env, GOTOOLCHAIN: 'go1.26.9'}, encoding: 'utf8'});
     if (build.status !== 0) throw new Error(`Gallery build failed: ${build.stderr || build.stdout}`);
     buildArtifactSHA256 = sha256(await readFile(binary));
     const reservation = createServer();
     const port = await listen(reservation);
     await new Promise((accept, reject) => reservation.close(error => error ? reject(error) : accept()));
-    child = spawn(binary, ['-addr', `127.0.0.1:${port}`], {cwd: repo, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe']});
+    child = spawn(binary, ['-addr', `127.0.0.1:${port}`], {cwd: sourceRepo, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe']});
     child.stdout.on('data', data => serverOutput += data);
     child.stderr.on('data', data => serverOutput += data);
     origin = `http://127.0.0.1:${port}`;
@@ -200,7 +243,7 @@ try {
     assert(ready, `Gallery startup timeout: ${serverOutput}`);
   } else if (!origin && options.mode === 'static') {
     staticDir = join(runDir, 'static');
-    const exported = spawnSync('go', ['run', './cmd/ely-gallery-static', '-dir', staticDir, '-base', '/'], {cwd: repo, env: {...process.env, GOTOOLCHAIN: 'go1.26.9'}, encoding: 'utf8'});
+    const exported = spawnSync('go', ['run', './cmd/ely-gallery-static', '-dir', staticDir, '-base', '/'], {cwd: sourceRepo, env: {...process.env, GOTOOLCHAIN: 'go1.26.9'}, encoding: 'utf8'});
     if (exported.status !== 0) throw new Error(`Static export failed: ${exported.stderr || exported.stdout}`);
     staticHTTPServer = createServer(async (request, response) => {
       try {
@@ -231,13 +274,17 @@ try {
   page.on('console', message => { if (['error', 'warning'].includes(message.type())) addPageError(`console-${message.type()}`, message.text()); });
   page.on('pageerror', error => addPageError('pageerror', String(error)));
   page.on('requestfailed', request => addPageError('requestfailed', `${request.failure()?.errorText || 'failed'} ${request.url()}`));
+  await page.route(/\/assets\/.*\.(?:css|js)(?:\?.*)?$/, route => {
+    const path = new URL(route.request().url()).pathname;
+    const loaded = fulfillAsset(route, page).catch(async error => {
+      await route.abort().catch(() => {});
+      return {path, error: String(error)};
+    });
+    if (!productionAssets.has(path)) productionAssets.set(path, loaded);
+    return loaded;
+  });
   page.on('response', response => {
     if (response.status() >= 400) addPageError('http', `${response.status()} ${response.url()}`);
-    const url = new URL(response.url());
-    if (response.ok() && /\/assets\/.*\.(?:css|js)$/.test(url.pathname)) {
-      const pathname = url.pathname;
-      if (!productionAssets.has(pathname)) productionAssets.set(pathname, response.body().then(bytes => ({path: pathname, bytes: bytes.length, sha256: sha256(bytes)})).catch(error => ({path: pathname, error: String(error)})));
-    }
   });
 
   let nextBatch = 1;
@@ -304,7 +351,7 @@ try {
         }
         catch (error) { sourceDrift ||= {checkpoint: 'asset-recheck', path, error: String(error)}; return {path, error: String(error)}; }
       })),
-      goVersion: execFileSync('go', ['version'], {cwd: repo, env: {...process.env, GOTOOLCHAIN: 'go1.26.9'}, encoding: 'utf8'}).trim(),
+      goVersion: execFileSync('go', ['version'], {cwd: sourceRepo, env: {...process.env, GOTOOLCHAIN: 'go1.26.9'}, encoding: 'utf8'}).trim(),
       captureMethod: 'Playwright page clip of target root plus visible descendant and text overflow at CSS-pixel scale, respecting CSS clipping; target identity in every receipt; viewport context supplement for overflow/portals; no actions executed.',
       startedAt: batch[0].capturedAt,
       completedAt: new Date().toISOString(),
