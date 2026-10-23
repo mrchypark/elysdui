@@ -104,6 +104,21 @@ test('vertical range direct pure: finite geometry, eight native source states, c
   assert.throws(()=>assertVerticalRangeSnapshot('layout/ScrollbarAlias','range-center-pointer',base,'same twin'));
 });
 
+test('foreign paint clip source: only plain flow ancestors may trim measured paint',async()=>{
+  const source=await readFile(new URL('./visual-state-audit-drivers.mjs',import.meta.url),'utf8');
+  const start=source.indexOf('  const clippedPaintRect='),end=source.indexOf('\n  const rootSelector=',start),guard=source.slice(start,end);
+  const compact=guard.replace(/\s+/g,'');
+  assert(start>=0&&end>start,'Foreign paint clipping must stay local to the camera classifier');
+  assert(guard.includes('for(let p=element;p;p=p.parentElement)')&&guard.includes('if(p===element&&!text)continue'),'Positioned painted elements must remain conservative without clipping their own border box');
+  assert(guard.includes("!['static','relative'].includes(position)"),'Absolute, fixed and sticky descendants keep raw paint bounds');
+  assert(guard.includes("p.matches(':modal,:popover-open')"),'Top-layer ancestors keep raw paint bounds');
+  for(const unsupported of ['s.transform!==\'none\'','s.filter!==\'none\'','s.maskImage!==\'none\'','s.clipPath!==\'none\'','s.overflowClipMargin!==\'0px\''])assert(compact.includes(unsupported),`${unsupported} must remain conservative`);
+  for(const longhand of ['s.translate!==\'none\'','s.rotate!==\'none\'','s.scale!==\'none\''])assert(compact.includes(longhand),`${longhand} must keep raw paint bounds`);
+  assert(guard.includes('r.right+scrollX')&&guard.includes('r.bottom+scrollY')&&!guard.includes('clientLeft')&&!guard.includes('clientTop')&&!guard.includes('clientWidth')&&!guard.includes('clientHeight'),'Fractional clips use conservative border-box bounds, not rounded client metrics');
+  assert(!guard.includes('borderTopLeftRadius'),'Rounded overflow clips use their rectangular padding-box over-approximation');
+  assert(source.includes('clippedPaintRect(e,rect,text)'),'Both measured text and element paint must pass through the bounded clip check');
+});
+
 test('vertical range direct pure: listener cleanup preserves action failures',async()=>{
   const primary=new Error('range action failed'),cleanup=new Error('range listener cleanup failed'),diagnostics={threewayCleanupFailures:[]};
   const run=async()=>{let failed=false;try{throw primary;}catch(error){failed=true;throw error;}finally{await threewayCleanup(async()=>{throw cleanup;},failed,diagnostics);}};
@@ -1714,5 +1729,49 @@ test('action cameras distinguish covered foreign paint, exposed corners and empt
     await captureTargetPNG(page,page.locator('#radio'));
     assert(await page.locator('#radio').evaluate(node=>Math.abs(node.getBoundingClientRect().bottom-innerHeight)<1),'Finite Radio camera must leave room for the production menu upward collision placement');
     assert.equal(await page.content(),radioHTML,'Radio camera uses scrolling only, never instance isolation or DOM mutation');
+  }finally{await browser.close();}
+});
+
+test('action camera clips scroll-well text through rounded overflow and keeps visible corner and escaping paint foreign',async()=>{
+  const browser=await chromium.launch({executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH||undefined});
+  try{
+    const page=await browser.newPage({viewport:{width:600,height:400}});
+    await page.setContent(`<style>body{margin:0;height:400px}#target{position:absolute;left:30px;top:120px;width:220px;height:40px;background:white}.scroll-well{position:relative;box-sizing:border-box;width:220px;height:40px;margin-top:70px;overflow:hidden;border:1px solid #888;border-radius:.5rem;background:white}.scroll-well>.scroll{width:100%;height:100%;overflow-y:auto}.scroll-copy{margin:55px 0 0;line-height:18px}#visible-peer{width:220px;height:30px;margin-top:15px}#visible-peer span{background:red}</style>
+      <div data-audit-main><div id="target" data-ely-family="workspace">Target</div></div>
+      <div data-audit-twin><div id="clipped-peer" class="scroll-well" data-ely-family="workspace"><div class="scroll"><p id="clipped-copy" class="scroll-copy">Clipped foreign text</p></div></div></div>
+      <div data-audit-twin><div id="visible-peer" data-ely-family="workspace"><span>Visible foreign text</span></div></div>`);
+    const geometry=await page.evaluate(()=>{const r=document.createRange(),text=document.querySelector('#clipped-copy').firstChild;r.selectNodeContents(text);const raw=r.getBoundingClientRect(),peer=document.querySelector('#clipped-peer').getBoundingClientRect(),target=document.querySelector('#target').getBoundingClientRect();return {raw:{top:raw.top,bottom:raw.bottom},peer:{top:peer.top,bottom:peer.bottom},target:{top:target.top,bottom:target.bottom}};});
+    assert(geometry.peer.bottom<=geometry.target.top,'The clipped scroll root must stay outside the target camera');
+    assert(geometry.raw.top<geometry.target.bottom&&geometry.raw.bottom>geometry.target.top,'Its raw text range must cross into the target camera');
+    const clipped=await captureTargetPNG(page,page.locator('#target'));
+    assert.deepEqual(clipped.foreignDOMIntersections.map(peer=>peer.id),['visible-peer'],'Invisible overflow text is excluded while visible paint inside the camera stays foreign');
+    await page.locator('#clipped-peer>.scroll').evaluate(node=>{node.style.overflow='visible';node.parentElement.style.overflow='visible';});
+    const visibleGeometry=await page.evaluate(()=>{const peer=document.querySelector('#clipped-peer'),inner=peer.firstElementChild,text=document.querySelector('#clipped-copy').firstChild,range=document.createRange();range.selectNodeContents(text);const paint=range.getBoundingClientRect(),target=document.querySelector('#target').getBoundingClientRect();return {outerOverflow:getComputedStyle(peer).overflow,innerOverflow:getComputedStyle(inner).overflow,paint:{top:paint.top,bottom:paint.bottom},target:{top:target.top,bottom:target.bottom}};});
+    assert(visibleGeometry.outerOverflow==='visible'&&visibleGeometry.innerOverflow==='visible'&&visibleGeometry.paint.top<visibleGeometry.target.bottom&&visibleGeometry.paint.bottom>visibleGeometry.target.top,'Both overflow ancestors are visible and the text paint overlaps the camera');
+    assert((await captureTargetPNG(page,page.locator('#target'))).foreignDOMIntersections.some(peer=>peer.id==='clipped-peer'),'Visible overflow text crossing the camera remains foreign');
+    await page.locator('#clipped-peer>.scroll').evaluate(node=>{node.style.overflow='auto';node.style.transform='translateZ(0)';});
+    assert((await captureTargetPNG(page,page.locator('#target'))).foreignDOMIntersections.some(peer=>peer.id==='clipped-peer'),'A transformed clipping chain remains conservative');
+    for(const [property,value] of [['translate','1px 0'],['rotate','1deg'],['scale','1.01']]){
+      const computed=await page.locator('#clipped-peer>.scroll').evaluate((node,[name,next])=>{node.style.transform='none';node.style.translate='none';node.style.rotate='none';node.style.scale='none';node.style[name]=next;const style=getComputedStyle(node);return {transform:style.transform,longhand:style[name]};},[property,value]);
+      assert.equal(computed.transform,'none',`The ${property} case must not be masked by transform`);
+      assert.notEqual(computed.longhand,'none',`Only the ${property} longhand is active`);
+      assert((await captureTargetPNG(page,page.locator('#target'))).foreignDOMIntersections.some(peer=>peer.id==='clipped-peer'),`Individual ${property} keeps the raw overflowing paint foreign`);
+    }
+    await page.locator('#clipped-peer>.scroll').evaluate(node=>{node.style.transform='none';node.style.translate='none';node.style.rotate='none';node.style.scale='none';node.style.overflow='clip';node.style.overflowClipMargin='8px';});
+    assert.equal(await page.locator('#clipped-peer>.scroll').evaluate(node=>getComputedStyle(node).overflowClipMargin),'8px');
+    assert((await captureTargetPNG(page,page.locator('#target'))).foreignDOMIntersections.some(peer=>peer.id==='clipped-peer'),'Nonzero overflow clip margin remains conservative');
+    await page.locator('#clipped-peer>.scroll').evaluate(node=>{node.style.overflow='auto';node.style.overflowClipMargin='0px';node.style.translate='none';node.style.rotate='none';node.style.scale='none';const text=node.querySelector('#clipped-copy');Object.assign(text.style,{position:'absolute',left:'30px',top:'55px',margin:'0'});});
+    const escapedGeometry=await page.evaluate(()=>{const peer=document.querySelector('#clipped-peer'),inner=peer.firstElementChild,text=document.querySelector('#clipped-copy'),range=document.createRange();range.selectNodeContents(text.firstChild);const paint=range.getBoundingClientRect(),scroll=inner.getBoundingClientRect(),target=document.querySelector('#target').getBoundingClientRect();return {position:getComputedStyle(text).position,outerOverflow:getComputedStyle(peer).overflow,innerOverflow:getComputedStyle(inner).overflow,paint:{top:paint.top,bottom:paint.bottom},scroll:{top:scroll.top,bottom:scroll.bottom},target:{top:target.top,bottom:target.bottom}};});
+    assert(escapedGeometry.position==='absolute'&&escapedGeometry.outerOverflow==='visible'&&escapedGeometry.innerOverflow==='auto'&&escapedGeometry.paint.top>=escapedGeometry.scroll.bottom&&escapedGeometry.paint.top<escapedGeometry.target.bottom&&escapedGeometry.paint.bottom>escapedGeometry.target.top,'Absolute paint escapes the inner scrollport and overlaps the camera');
+    assert((await captureTargetPNG(page,page.locator('#target'))).foreignDOMIntersections.some(peer=>peer.id==='clipped-peer'),'An absolute descendant that escapes its overflow containing block remains foreign');
+    await page.setContent(`<style>body{margin:0}#target{position:absolute;left:0;top:0;width:.1px;height:.1px;background:white}#fractional-peer{position:relative;width:40.4px;height:40.4px;margin:120.25px 0 0 30.25px}.fractional-clip{width:100%;height:100%;overflow:hidden;border:1.75px solid transparent;box-sizing:border-box}.fractional-paint{display:block;width:100%;height:100%;background:red}</style><div data-audit-main><div id="target" data-ely-family="workspace">Target</div></div><div data-audit-twin><div id="fractional-peer" data-ely-family="workspace"><div class="fractional-clip"><span id="fractional-paint" class="fractional-paint"></span></div></div></div>`);
+    const fractional=await page.evaluate(()=>{const node=document.querySelector('.fractional-clip'),clip=node.getBoundingClientRect(),paint=document.querySelector('#fractional-paint').getBoundingClientRect(),targetNode=document.querySelector('#target'),legacy={left:clip.left+node.clientLeft,top:clip.top+node.clientTop,right:clip.left+node.clientLeft+node.clientWidth,bottom:clip.top+node.clientTop+node.clientHeight},gapRight=paint.right-legacy.right,gapBottom=paint.bottom-legacy.bottom,axis=gapRight>0?'x':gapBottom>0?'y':null;if(axis==='x')Object.assign(targetNode.style,{left:`${legacy.right+gapRight/2}px`,top:`${paint.top+paint.height/2}px`,width:`${gapRight/2}px`,height:'0.1px'});else if(axis==='y')Object.assign(targetNode.style,{left:`${paint.left+paint.width/2}px`,top:`${legacy.bottom+gapBottom/2}px`,width:'0.1px',height:`${gapBottom/2}px`});const target=targetNode.getBoundingClientRect(),intersects=(a,b)=>a.left<b.right&&a.right>b.left&&a.top<b.bottom&&a.bottom>b.top;return {clip:{left:clip.left,right:clip.right,top:clip.top,bottom:clip.bottom},paint:{left:paint.left,right:paint.right,top:paint.top,bottom:paint.bottom},legacy,target:{left:target.left,right:target.right,top:target.top,bottom:target.bottom},axis,clientTop:node.clientTop,clientLeft:node.clientLeft,clientWidth:node.clientWidth,clientHeight:node.clientHeight,legacyIntersection:intersects(legacy,target),actualIntersection:intersects(paint,target)};});
+    assert(fractional.clip.top%1!==0&&fractional.clientTop>0,'Fractional ancestor geometry and border are present');
+    assert(fractional.axis&&fractional.actualIntersection&&!fractional.legacyIntersection,`Actual paint-camera intersection is nonempty while legacy integer-client intersection is empty: ${JSON.stringify(fractional)}`);
+    assert((await captureTargetPNG(page,page.locator('#target'))).foreignDOMIntersections.find(peer=>peer.id==='fractional-peer')?.witnesses.some(witness=>witness.id==='fractional-paint'),'Conservative fractional clip bounds retain the visible edge witness');
+    await page.setContent(`<style>body{margin:0}#target{position:absolute;left:30px;top:120px;width:220px;height:40px;background:white}.scroll-well{position:relative;width:220px;height:40px;margin:120px 0 0 30px;overflow:hidden;border-radius:.5rem}.corner-paint{position:absolute;left:0;top:0;width:1px;height:1px;background:red}</style><div data-audit-main><div id="target" data-ely-family="workspace">Target</div></div><div data-audit-twin><div id="rounded-corner-peer" class="scroll-well" data-ely-family="workspace"><span class="corner-paint"></span></div></div>`);
+    const corner=await page.evaluate(()=>{const paint=document.querySelector('.corner-paint').getBoundingClientRect(),target=document.querySelector('#target').getBoundingClientRect(),root=getComputedStyle(document.querySelector('#rounded-corner-peer'));return {paint:{left:paint.left,right:paint.right,top:paint.top,bottom:paint.bottom},target:{left:target.left,right:target.right,top:target.top,bottom:target.bottom},radius:root.borderTopLeftRadius};});
+    assert(corner.paint.left<corner.target.right&&corner.paint.right>corner.target.left&&corner.paint.top<corner.target.bottom&&corner.paint.bottom>corner.target.top&&corner.radius!=='0px',`The corner-only clipped paint lies within the target and rounded clip: ${JSON.stringify(corner)}`);
+    assert((await captureTargetPNG(page,page.locator('#target'))).foreignDOMIntersections.some(peer=>peer.id==='rounded-corner-peer'),'Paint in the rounded-corner bounding-box over-approximation remains conservatively foreign');
   }finally{await browser.close();}
 });

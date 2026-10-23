@@ -97,6 +97,25 @@ export function captureForeignPaint(node,{clip,checkedRootID}){
     let common=node.parentElement;while(common&&!common.contains(paint))common=common.parentElement;
     return common&&covers.length&&unclippedAncestors()&&Number(style.opacity)===1&&style.transform==='none'&&style.filter==='none'&&style.mixBlendMode==='normal'&&plainChain(node.parentElement,common)&&plainChain(paint,common);
   };
+  // Trim raw text/control boxes only when every ancestor is ordinary flow and
+  // its rectangular overflow clip is directly measurable. Any complex paint
+  // or containing-block behavior keeps the conservative untrimmed witness.
+  const clippedPaintRect=(element,rect,text)=>{
+    const clipped={...rect};
+    for(let p=element;p;p=p.parentElement){
+      const s=getComputedStyle(p),position=s.position;
+      if(p.matches(':modal,:popover-open')||!['static','relative'].includes(position)||s.zIndex !== 'auto'||Number(s.opacity) !== 1||s.transform !== 'none'||s.translate !== 'none'||s.rotate !== 'none'||s.scale !== 'none'||s.filter !== 'none'||s.perspective !== 'none'||s.maskImage !== 'none'||s.backdropFilter !== 'none'||s.containerType !== 'normal'||s.isolation !== 'auto'||s.mixBlendMode !== 'normal'||s.contain !== 'none'||s.willChange !== 'auto'||s.clipPath !== 'none'||s.clip !== 'auto'||(s.zoom !== 'normal'&&Number(s.zoom) !== 1)||s.contentVisibility !== 'visible')return rect;
+      if(p===element&&!text)continue;
+      const clipX=s.overflowX!=='visible',clipY=s.overflowY!=='visible';
+      if(clipX||clipY){
+        if(s.overflowClipMargin!=='0px')return rect;
+        const r=p.getBoundingClientRect(),left=r.left+scrollX,top=r.top+scrollY;
+        if(clipX){const right=clipped.x+clipped.width;clipped.x=Math.max(clipped.x,left);clipped.width=Math.min(right,r.right+scrollX)-clipped.x;}
+        if(clipY){const bottom=clipped.y+clipped.height;clipped.y=Math.max(clipped.y,top);clipped.height=Math.min(bottom,r.bottom+scrollY)-clipped.y;}
+      }
+    }
+    return clipped.width>0&&clipped.height>0?clipped:null;
+  };
   const rootSelector='[data-audit-main]>[data-ely-family],[data-audit-twin]>[data-ely-family],[data-audit-main]>[data-basic-component],[data-audit-twin]>[data-basic-component]';
   const checkedRoot=checkedRootID?document.getElementById(checkedRootID):node.closest(rootSelector);
   const owners=new Set(checkedRoot?[checkedRoot.id,...[...checkedRoot.querySelectorAll('[id]')].map(e=>e.id)]:[]);
@@ -116,11 +135,11 @@ export function captureForeignPaint(node,{clip,checkedRootID}){
       if(!e.checkVisibility({checkOpacity:true,checkVisibilityCSS:true})||emptyClip(e))continue;
       const s=getComputedStyle(e),rect=box(e.getBoundingClientRect());
       // Native controls/media and nontrivial effects are conservative boxes.
-      if(e.matches('button,input,select,textarea,img,canvas,svg,video,iframe')||s.backgroundImage!=='none'||s.backgroundColor!=='rgba(0, 0, 0, 0)'||s.boxShadow!=='none'||['Top','Right','Bottom','Left'].some(side=>parseFloat(s[`border${side}Width`])>0))painted.push({e,rect});
-      for(const text of e.childNodes){if(text.nodeType!==Node.TEXT_NODE||!text.textContent.trim())continue;const range=document.createRange();range.selectNodeContents(text);for(const part of range.getClientRects())painted.push({e,rect:box(part)});}
+      if(e.matches('button,input,select,textarea,img,canvas,svg,video,iframe')||s.backgroundImage!=='none'||s.backgroundColor!=='rgba(0, 0, 0, 0)'||s.boxShadow!=='none'||['Top','Right','Bottom','Left'].some(side=>parseFloat(s[`border${side}Width`])>0))painted.push({e,rect:box(e.getBoundingClientRect()),text:false});
+      for(const text of e.childNodes){if(text.nodeType!==Node.TEXT_NODE||!text.textContent.trim())continue;const range=document.createRange();range.selectNodeContents(text);for(const part of range.getClientRects())painted.push({e,rect:box(part),text:true});}
     }
     let exposedArea=0,coveredArea=0;const witnesses=[];
-    for(const {e,rect} of painted){const overlap=intersect(rect,clip);if(!overlap)continue;
+    for(const {e,rect,text} of painted){const visible=clippedPaintRect(e,rect,text);if(!visible)continue;const overlap=intersect(visible,clip);if(!overlap)continue;
       const residual=canCover(e)?covers.reduce((parts,cover)=>parts.flatMap(part=>subtract(part,cover)),[overlap]):[overlap];
       const remaining=residual.reduce((sum,b)=>sum+b.width*b.height,0);
       exposedArea+=remaining;coveredArea+=overlap.width*overlap.height-remaining;
