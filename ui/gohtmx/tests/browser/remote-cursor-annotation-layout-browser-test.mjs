@@ -151,6 +151,31 @@ try {
     assert.equal(await ownedRoot.count(), 1, 'audit main has one exact component root');
     assert.equal(await ownedRoot.getAttribute('data-ely-component'), 'collab/RemoteSelection');
     assert.equal(await ownedRoot.evaluate(node => node.parentElement === node.closest('[data-audit-main]')), true, 'capture root belongs to its audit main');
+    if (viewport.width === 390) {
+      const mobileBounds = await ownedRoot.evaluate(node => {
+        const box = element => {
+          const rect = element.getBoundingClientRect();
+          return {left: rect.left, right: rect.right, width: rect.width};
+        };
+        const auditMain = node.closest('[data-audit-main]');
+        const presence = node.querySelector('[data-ws-presence]');
+        const header = presence.querySelector('header');
+        return {
+          viewportWidth: document.documentElement.clientWidth,
+          root: box(node),
+          auditMain: box(auditMain),
+          presence: box(presence),
+          headerContent: [...header.querySelectorAll(':scope > *')].map(element => ({text: element.textContent.trim(), ...box(element)})),
+        };
+      });
+      const tolerance = 1;
+      assert(mobileBounds.presence.left >= mobileBounds.root.left - tolerance && mobileBounds.presence.right <= mobileBounds.root.right + tolerance,
+        `mobile presence clip fits its component root: ${JSON.stringify(mobileBounds)}`);
+      assert(mobileBounds.presence.left >= mobileBounds.auditMain.left - tolerance && mobileBounds.presence.right <= mobileBounds.auditMain.right + tolerance,
+        `mobile presence clip fits its audit main: ${JSON.stringify(mobileBounds)}`);
+      assert(mobileBounds.headerContent.every(item => item.left >= -tolerance && item.right <= mobileBounds.viewportWidth + tolerance),
+        `mobile presence header content fits the viewport: ${JSON.stringify(mobileBounds)}`);
+    }
     const stem = viewport.width === 1440 ? 'desktop' : 'mobile';
     const targetPath = join(output, `${stem}-target.png`);
     const target = await captureTargetPNG(page, ownedRoot, targetPath);
