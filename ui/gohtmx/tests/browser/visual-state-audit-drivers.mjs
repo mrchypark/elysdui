@@ -212,7 +212,7 @@ export function caseActionContract(identity,source,filename){
   const canvas=registeredCanvasIDs.includes(identity);
   const definition=contracts[canvas?'canvas/InfiniteCanvas':editor?'editor/CodeEditor':identity];if(!definition)return null;
   const facts={root:{dataset:{elyKind:definition.kind,elyComponent:identity}},kind:definition.kind,variant:identity.split('/')[1],twin:true,
-    selectors:{'[data-ws-devtools-source]':false,'[data-ws-canvas-scene]':canvas},form:{dataset:{wsRequired:'true'}},node:{tagName:'INPUT',type:'password'}};
+    selectors:{'[data-ws-devtools-source]':false,'[data-ws-canvas-scene]':canvas},form:{dataset:{wsRequired:'true'}},node:{tagName:'INPUT',type:'password',...(identity==='forms/PasswordInput'?{name:'caller_value'}:{})}};
   const resolved=resolveCaseActionSites(source,filename,{entry:definition.entry,facts});
   const mappingGaps=[...resolved.mappingGaps];
   if(resolved.sites.length!==definition.steps.length)mappingGaps.push({reason:'exact-action-count-changed',expected:definition.steps.length,actual:resolved.sites.length});
@@ -223,7 +223,8 @@ export function caseActionContract(identity,source,filename){
   });
   return {identity,entry:definition.entry,kind:definition.kind,steps,mappingGaps,
     ...(canvas?{registeredCanvas:true}:{}),
-    fixtureGuards:{component:identity,kind:definition.kind,devtoolsSourceAbsent:identity!=='forms/PasswordInput',canvasSceneAbsent:identity==='files/ArchiveViewer',requiredEditor:editor}};
+    // advancedFormsCases supplies Name=caller_value; this is not an alias/default assumption.
+    fixtureGuards:{component:identity,kind:definition.kind,devtoolsSourceAbsent:identity!=='forms/PasswordInput',canvasSceneAbsent:identity==='files/ArchiveViewer',requiredEditor:editor,...(identity==='forms/PasswordInput'?{passwordInputName:'caller_value'}:{})}};
 }
 
 export function assertRegisteredCanvasTransition(label,before,after,detail){

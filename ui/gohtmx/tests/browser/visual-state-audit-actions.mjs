@@ -362,6 +362,7 @@ async function directCaseDriver({item, familyURL, captures, reference, semanticS
     if(contract.fixtureGuards.devtoolsSourceAbsent)assert.equal(await root.locator('[data-ws-devtools-source]').count(),0);
     if(contract.fixtureGuards.canvasSceneAbsent)assert.equal(await root.locator('[data-ws-canvas-scene]').count(),0);
     if(contract.fixtureGuards.requiredEditor)assert.equal(await root.locator('form[data-ws-edit-form]').getAttribute('data-ws-required'),'true');
+    if(contract.fixtureGuards.passwordInputName)assert.equal(await root.locator('input:not([type=hidden])').getAttribute('name'),contract.fixtureGuards.passwordInputName,'Exact PasswordInput fixture name is required before dispatch');
     if(reference)assert.deepEqual(await snapshot(root),reference.initial,'Direct driver begins from the same semantic state');
     await root.evaluate(node => {
       globalThis.__visualDirectActions = [];

@@ -964,6 +964,36 @@ test('CodeEditor alias contracts preserve exact branches, invocation order and p
   assert.match(actions,/assert.equal\(event.component,contract.identity,/);
   assert.match(actions,/assert.equal\(event.id,await root.getAttribute\('id'\),/);
 });
+test('password fixture fact pure: name resolves only the documented field branch',async()=>{
+  const source=await fixtureSource('forms'),contract=caseActionContract('forms/PasswordInput',source,'forms.js');
+  assert.deepEqual(contract.mappingGaps,[]);assert.equal(contract.fixtureGuards.passwordInputName,'caller_value');
+  assert.deepEqual(contract.steps.map(step=>step.source.event),['input','change','click']);
+  const facts={node:{tagName:'INPUT',type:'password'},root:{dataset:{elyComponent:'forms/PasswordInput'}}};
+  const missing=resolveCaseActionSites(source,'forms.js',{entry:'forms/PasswordInput',facts});
+  assert(missing.mappingGaps.some(gap=>gap.reason==='unresolved-control-flow-guard'&&gap.guard==='node.name'));
+  const empty=resolveCaseActionSites(source,'forms.js',{entry:'forms/PasswordInput',facts:{...facts,node:{...facts.node,name:''}}});
+  assert.deepEqual(empty.mappingGaps,[],'Explicit empty name selects the no-FormData branch, unlike unknown name');
+  assert.equal(caseActionContract('editor/CodeEditor',await fixtureSource('workspace'),'workspace.js').fixtureGuards.passwordInputName,undefined);
+  const changed=caseActionContract('forms/PasswordInput',source.replace("node.dispatchEvent(new Event('change',{bubbles:true}));};","};"),'forms.js');
+  assert(changed.mappingGaps.length>0);
+  const extra=caseActionContract('forms/PasswordInput',source.replace("node.dispatchEvent(new Event('change',{bubbles:true}));};","node.dispatchEvent(new Event('change',{bubbles:true}));node.click();};"),'forms.js');
+  assert(extra.mappingGaps.length>0);
+  const reordered=caseActionContract('forms/PasswordInput',source.replace("node.dispatchEvent(new Event('input',{bubbles:true}));node.dispatchEvent(new Event('change',{bubbles:true}));","node.dispatchEvent(new Event('change',{bubbles:true}));node.dispatchEvent(new Event('input',{bubbles:true}));"),'forms.js');
+  assert(reordered.mappingGaps.length>0);
+});
+test('password fixture fact pure: actual DOM name guard rejects mismatch before dispatch',async()=>{
+  const source=await readFile(new URL('./visual-state-audit-actions.mjs',import.meta.url),'utf8');
+  const guard=source.split('\n').find(line=>line.includes("if(contract.fixtureGuards.passwordInputName)"));assert(guard);
+  assert(source.indexOf(guard)<source.indexOf("globalThis.__visualDirectActions = []"));
+  const contract={fixtureGuards:{passwordInputName:'caller_value'}};
+  for(const name of ['caller_value','wrong','',null]){
+    let dispatched=false;
+    const root={locator:selector=>{assert.equal(selector,'input:not([type=hidden])');return {getAttribute:async key=>{assert.equal(key,'name');return name;}};}};
+    const run=compileFunction(`return (async()=>{${guard}\ndispatch();})();`,['assert','contract','root','dispatch']);
+    const pending=()=>run(assert,contract,root,()=>{dispatched=true;});
+    if(name==='caller_value'){await pending();assert.equal(dispatched,true);}else{await assert.rejects(pending);assert.equal(dispatched,false);}
+  }
+});
 test('maps both synchronous editor submissions and both password helper events exactly',async()=>{
   const editor=caseActionContract('editor/CodeEditor',await fixtureSource('workspace'),'workspace.js');
   const password=caseActionContract('forms/PasswordInput',await fixtureSource('forms'),'forms.js');
