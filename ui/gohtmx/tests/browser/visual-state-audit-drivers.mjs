@@ -305,6 +305,10 @@ export async function runRegisteredCanvasActions(contract,root,runStep){
 
 const settingsTargets={KeyboardShortcutsList:[1,'Keyboard'],ProxySettings:[2,'Network'],PrivacySettings:[3,'Privacy','telemetry'],NotificationSettings:[4,'Notifications','quiet'],StartupSettings:[5,'Startup','login'],StorageSettings:[6,'Storage'],ResetToDefault:[6,'Storage'],AdvancedSettings:[7,'Advanced','developer'],'DeveloperMode Toggle':[7,'Advanced','developer']};
 export function requestedStateContract(identity,trashFixture){
+  if(identity==='misc/IframeEmbed'||identity==='misc/EmbedCard'){
+    const stepId=identity==='misc/IframeEmbed'?'iframe-open-host':'embedcard-open-host',url='https://example.com';
+    return {identity,kind:'IframeEmbed',family:'native',requestedStateOnly:true,focusedSequence:'native-embed-open-host',mappingGaps:[],fixtureGuards:{component:identity,kind:'IframeEmbed',url,sourceNote:'Web views need macOS for now.'},steps:[{id:stepId,control:'header button[data-ely-action="open"][data-value="https://example.com"]',expectedState:'One trusted native click emits exactly open with this root ID, alias-preserving component identity, and exact URL; the source note and iframe-free local state remain unchanged.',event:'trusted native Playwright button click; one host request only; no navigation',source:{siteId:`native-state:${identity}:${stepId}`,sourceAnchor:'ui/gohtmx/components.json IframeEmbed/EmbedCard; internal/gallery/assets/native-misc-fixtures.json IframeEmbed; ui/gohtmx/templates/ely-api-native.html IframeEmbed; ui/gohtmx/assets/ely-api.js generic click emitter',provenance:`Exact default native identity ${identity}; EmbedCard keeps its own alias identity; the fixture source note and local state are preserved, with no provider or navigation claim`}}],scope:'One default header-button action for each of the two catalogue identities; no external provider, browser navigation, alias-family, or registered-check approval claim'};
+  }
   if(identity==='layout/Dock')return {identity,kind:'Dock',family:'foundation',requestedStateOnly:true,focusedSequence:'dock-native-actions',mappingGaps:[],fixtureGuards:{component:identity,kind:'Dock'},steps:[
     ['dock-click-files','.ely-foundation__dock-left [data-foundation-dock-tab]:nth-of-type(1)','Native click selects Files in the left zone and updates its local output','trusted native Playwright pointer click'],
     ['dock-click-outline','.ely-foundation__dock-left [data-foundation-dock-tab]:nth-of-type(2)','Native click selects Outline in the left zone and updates its local output','trusted native Playwright pointer click'],
@@ -697,6 +701,15 @@ export function assertDockCallerAction(actions,offset,identity,value,dock){
   return actions.length;
 }
 
+export function assertNativeEmbedOpen({actions,clicks,identity,rootId,url,before,after}){
+  assert(Array.isArray(actions)&&actions.length===1,'One native Embed activation must emit exactly one host action');
+  const action=actions[0];assert.equal(action.action,'open');assert.equal(action.value,url,'Host request must preserve the exact fixture URL');assert.equal(action.component,identity,'Host request must preserve the canonical or alias identity');assert.equal(action.id,rootId,'Host request must preserve the exact rendered root ID');
+  assert(Array.isArray(clicks)&&clicks.length===1,'One native Embed activation must produce exactly one observed button click');
+  const click=clicks[0];assert.equal(click.trusted,true,'Embed activation must be trusted browser input, not synthetic dispatch');assert.equal(click.action,'open');assert.equal(click.value,url);assert.equal(click.component,identity);assert.equal(click.id,rootId);
+  assert.deepEqual(after,before,'Opening through the host must not mutate the local Embed fixture');
+  return {identity,rootId,url,action:'open',trustedClick:true,localStateUnchanged:true};
+}
+
 export function assertDockNativeEvents(stepId,events,label){
   assert(Array.isArray(events)&&events.length>0,'Dock input must produce observed native browser events');
   assert(events.every(event=>event.trusted===true),'Dock input must be trusted browser input, not dispatched synthetic events');
@@ -726,6 +739,16 @@ export function assertEvalLastColumnGeometry({scrollLeft,previousScrollLeft,scro
 }
 
 export async function runRequestedStateActions(contract,root,runStep,failureDiagnostics){
+  if(contract.focusedSequence==='native-embed-open-host'){
+    const {identity,kind}=contract,url='https://example.com';assert(['misc/IframeEmbed','misc/EmbedCard'].includes(identity));assert.equal(kind,'IframeEmbed');
+    const button=root.locator('header button[data-ely-action="open"][data-value="https://example.com"]');assert.equal(await button.count(),1,'The exact default host-open button must remain present');assert.equal(await button.isEnabled(),true,'The default host-open button must remain enabled');
+    const rootId=await root.getAttribute('id'),snapshot=()=>root.evaluate(node=>{const open=node.querySelector('header button[data-ely-action="open"][data-value="https://example.com"]'),note=node.querySelector('[data-misc-source-note]');return {id:node.id,component:node.dataset.elyComponent,kind:node.dataset.elyKind,button:open?{action:open.dataset.elyAction,value:open.dataset.value,disabled:open.disabled,ariaLabel:open.getAttribute('aria-label')}:null,sourceNote:note?.textContent.trim()||null,iframeCount:node.querySelectorAll('iframe').length};});
+    const before=await snapshot();assert.deepEqual(before,{id:rootId,component:identity,kind:'IframeEmbed',button:{action:'open',value:url,disabled:false,ariaLabel:'Open with host'},sourceNote:'Web views need macOS for now.',iframeCount:0},'Default note, enabled header action, exact URL, and no-provider frame state are required');
+    await root.evaluate(node=>{const proof={clicks:[]};proof.listener=event=>{const target=event.target.closest?.('header button[data-ely-action="open"]');if(!target||target.closest('[data-ely-family]')!==node)return;proof.clicks.push({trusted:event.isTrusted,action:target.dataset.elyAction,value:target.dataset.value,id:node.id,component:node.dataset.elyComponent});};node.__nativeEmbedProof=proof;node.addEventListener('click',proof.listener,true);});
+    try{await runStep(contract.steps[0].id,()=>button.click(),async state=>{const after=await snapshot(),clicks=await root.evaluate(node=>node.__nativeEmbedProof.clicks);return assertNativeEmbedOpen({actions:state.actions,clicks,identity,rootId,url,before,after});});}
+    finally{await root.evaluate(node=>{const proof=node.__nativeEmbedProof;if(proof)node.removeEventListener('click',proof.listener,true);delete node.__nativeEmbedProof;});}
+    return;
+  }
   if(contract.focusedSequence==='dock-native-actions'){
     const identity='layout/Dock';assert.equal(contract.identity,identity);assert.equal(contract.kind,'Dock');assert.equal(await root.getAttribute('data-ely-component'),identity);assert.equal(await root.getAttribute('data-ely-kind'),'Dock');
     let actionOffset=0,nativeOffset=0;

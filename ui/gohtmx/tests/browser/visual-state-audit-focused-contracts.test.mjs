@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import test from 'node:test';
-import {assertCommunicationCallerRequest,assertDockCallerAction,assertDockNativeEvents,assertEvalLastColumnGeometry,requestedStateContract,runRequestedStateActions} from './visual-state-audit-drivers.mjs';
+import {assertCommunicationCallerRequest,assertDockCallerAction,assertDockNativeEvents,assertEvalLastColumnGeometry,assertNativeEmbedOpen,requestedStateContract,runRequestedStateActions} from './visual-state-audit-drivers.mjs';
 
 const read=path=>readFile(new URL(`../../../../${path}`,import.meta.url),'utf8');
 
@@ -134,6 +134,36 @@ test('Missing35 shipped communication fixtures have finite native local-action c
   assert.match(template,/<td>\{\{\.\}\}<\/td>/,'Evaluation cells remain html/template-escaped text');
   assert.match(template,/\{\{\.Content\}\}/);assert.match(template,/\{\{\.Name\}\}/);assert.doesNotMatch(template,/template\.HTML/,'Communication caller data is not promoted to trusted HTML');
   assert.match(fixture,/case "CalendarWeekView"/);assert.match(fixture,/case "CalendarDayView"/);assert.match(fixture,/case "EventPopover"/);
+});
+
+test('IframeEmbed and EmbedCard retain exact native host-open contracts without provider navigation',async()=>{
+  const identities=[['misc/IframeEmbed','iframe-open-host'],['misc/EmbedCard','embedcard-open-host']],url='https://example.com',sourceNote='Web views need macOS for now.';
+  for(const [identity,stepId]of identities){
+    const contract=requestedStateContract(identity);assert.equal(contract?.identity,identity);assert.equal(contract.kind,'IframeEmbed');assert.equal(contract.family,'native');assert.equal(contract.requestedStateOnly,true);assert.equal(contract.focusedSequence,'native-embed-open-host');assert.deepEqual(contract.mappingGaps,[]);assert.deepEqual(contract.steps.map(step=>step.id),[stepId]);
+    const step=contract.steps[0];assert.equal(step.control,'header button[data-ely-action="open"][data-value="https://example.com"]');assert.match(step.event,/trusted native Playwright button click/);assert(step.expectedState.includes('exact URL')&&step.expectedState.includes('remain unchanged'));assert.equal(step.source.siteId,`native-state:${identity}:${stepId}`);assert(step.source.provenance.includes(identity));
+  }
+  assert.equal(identities.length*4,8,'Two exact identities over four live profiles require eight checkpoints');assert.equal(identities.length*4*2,16,'Each checkpoint requires before/after primary captures');
+
+  const [catalogue,fixtures,template,api,driver,actions]=await Promise.all([read('ui/gohtmx/components.json'),read('internal/gallery/assets/native-misc-fixtures.json'),read('ui/gohtmx/templates/ely-api-native.html'),read('ui/gohtmx/assets/ely-api.js'),read('ui/gohtmx/tests/browser/visual-state-audit-drivers.mjs'),read('ui/gohtmx/tests/browser/visual-state-audit-actions.mjs')]);
+  const pages=JSON.parse(catalogue).pages,story=pages.flatMap(page=>page.stories).find(item=>item.name==='IframeEmbed'),fixture=JSON.parse(fixtures).IframeEmbed;
+  assert.deepEqual(story.components,['IframeEmbed','EmbedCard'],'EmbedCard is the native catalogue alias, with a separate gallery identity');assert.equal(fixture.URL,url);assert.equal(fixture.SourceNote,sourceNote);assert.equal(fixture.HideHeader,true,'The source fixture header policy must remain as-authored');
+  assert.match(template,/<header><span>◎ \{\{\.URL\}\}<\/span><button type="button" data-ely-action="\{\{or \.Action "open"\}\}" data-value="\{\{\.URL\}\}" aria-label="Open with host">/,'The embedded native header action stays rendered independently of the source note');
+  assert.match(api,/emit\(root, button\.dataset\.elyAction, \{ value: button\.value \|\| button\.dataset\.value \|\| ''/);assert.match(api,/detail: \{ \.\.\.detail, id: root\.id, component: root\.dataset\.elyComponent, action \}/);assert.doesNotMatch(api,/window\.open\s*\(/,'The control emits to the host; it does not navigate or launch an external provider');
+  const embedPath=runRequestedStateActions.toString().slice(runRequestedStateActions.toString().indexOf("if(contract.focusedSequence==='native-embed-open-host')"),runRequestedStateActions.toString().indexOf("if(contract.focusedSequence==='dock-native-actions')"));
+  assert.match(embedPath,/header button\[data-ely-action="open"\]\[data-value="https:\/\/example\.com"\]/);assert.match(embedPath,/button\.click\(\)/);assert.match(embedPath,/event\.isTrusted/);assert.match(embedPath,/finally/);assert.doesNotMatch(embedPath,/dispatchEvent|window\.open/,'Native input and host request must not be replaced by synthetic dispatch or navigation');
+  assert.match(actions,/if\(contract\.requestedStateOnly\)\{\s*await runRequestedStateActions\(contract,root,step,failureDiagnostics\);/,'The existing generic requested-state route must execute both Embed identities');
+
+  for(const [identity]of identities){
+    const rootId=`audit-${identity.replace('/','-')}`,before={id:rootId,component:identity,kind:'IframeEmbed',button:{action:'open',value:url,disabled:false,ariaLabel:'Open with host'},sourceNote,iframeCount:0};
+    const action={id:rootId,component:identity,action:'open',value:url},click={trusted:true,id:rootId,component:identity,action:'open',value:url};
+    assert.deepEqual(assertNativeEmbedOpen({actions:[action],clicks:[click],identity,rootId,url,before,after:{...before,button:{...before.button}}}),{identity,rootId,url,action:'open',trustedClick:true,localStateUnchanged:true});
+    assert.throws(()=>assertNativeEmbedOpen({actions:[{...action,value:'https://wrong.example'}],clicks:[click],identity,rootId,url,before,after:before}),/exact fixture URL/,'A wrong host URL cannot pass');
+    const wrongIdentity=identity==='misc/IframeEmbed'?'misc/EmbedCard':'misc/IframeEmbed';
+    assert.throws(()=>assertNativeEmbedOpen({actions:[{...action,component:wrongIdentity}],clicks:[click],identity,rootId,url,before,after:before}),/alias identity/,'An alias action cannot be relabeled as its canonical component');
+    assert.throws(()=>assertNativeEmbedOpen({actions:[{...action,id:'other-root'}],clicks:[click],identity,rootId,url,before,after:before}),/exact rendered root ID/,'An action from another component root cannot pass');
+    assert.throws(()=>assertNativeEmbedOpen({actions:[action],clicks:[{...click,trusted:false}],identity,rootId,url,before,after:before}),/trusted browser input/,'Synthetic click cannot pass');
+    assert.throws(()=>assertNativeEmbedOpen({actions:[action],clicks:[click],identity,rootId,url,before,after:{...before,iframeCount:1}}),/must not mutate/,'A provider/frame poststate cannot pass as this host-only fixture action');
+  }
 });
 
 test('Dock default fixture covers four native tab clicks, Enter/Space activation, and one native HTML drop',async()=>{
