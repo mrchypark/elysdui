@@ -110,6 +110,23 @@ func TestMobileGenerativeAndFeedbackWrappersUseShrinkableGridTracks(t *testing.T
 	}
 }
 
+func TestLicenseViewerWrapsWithinItsContainerAndKeepsLicenseScrolling(t *testing.T) {
+	css, err := Files.ReadFile("assets/ely-api-native.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		".ely-misc-licenses{width:min(560px,100%);min-width:0;display:flex;flex-wrap:wrap;gap:16px}",
+		".ely-misc-licenses nav{width:min(240px,100%);min-width:0;flex:0 1 240px;display:flex;flex-direction:column;gap:4px}",
+		".ely-misc-licenses article{min-width:0;flex:1 1 240px;display:flex;flex-direction:column;gap:8px}",
+		"[data-ely-family='native'] .ely-misc-licenses pre{max-height:320px;overflow:auto;",
+	} {
+		if !strings.Contains(string(css), want) {
+			t.Errorf("native LicenseViewer CSS is missing %q", want)
+		}
+	}
+}
+
 func TestAdvancedFamilyEntrypointsAreEmbeddedAndServed(t *testing.T) {
 	mux := http.NewServeMux()
 	if err := BindAssets(mux); err != nil {
