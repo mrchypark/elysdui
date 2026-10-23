@@ -387,6 +387,7 @@
 [data-ely-family='foundation'] .ely-foundation__floating aside output{display:block;margin:0 .75rem .75rem;padding:.5rem .75rem;border:1px solid var(--foundation-line);border-radius:.375rem;font-size:.75rem;color:var(--color-muted)}
 
 /* Source specimens 3–76: reset legacy dimensions at the component boundary. */
+[data-ely-family='foundation'] .ely-foundation__canvas-demo{flex-wrap:wrap}
 [data-ely-family='foundation'] .ely-foundation__icons{display:flex;flex-wrap:wrap;gap:4px;max-inline-size:none}
 [data-ely-family='foundation'] .ely-foundation__icons .ely-foundation__icon{inline-size:36px;block-size:36px;mask-size:16px;-webkit-mask-size:16px;flex:none}
 [data-ely-family='foundation'] .ely-foundation__icon-demo[data-specimen-rows]{display:grid;grid-template-columns:repeat(6,max-content);gap:24px 16px;justify-content:start;align-items:end}

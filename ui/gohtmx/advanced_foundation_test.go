@@ -104,3 +104,14 @@ func TestFoundationSlotCSSWrapsOnNarrowViewports(t *testing.T) {
 		t.Fatalf("foundation Slot stylesheet lacks narrow-width wrapping rule %q", rule)
 	}
 }
+
+func TestFoundationCanvasDemoWrapsCodeOnNarrowViewports(t *testing.T) {
+	data, err := Files.ReadFile("assets/ely-api-foundation.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const rule = "[data-ely-family='foundation'] .ely-foundation__canvas-demo{flex-wrap:wrap}"
+	if !strings.Contains(string(data), rule) {
+		t.Fatalf("foundation Canvas stylesheet lacks narrow-width wrapping rule %q", rule)
+	}
+}
