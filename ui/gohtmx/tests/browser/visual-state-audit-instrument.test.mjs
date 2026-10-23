@@ -1412,11 +1412,13 @@ test('license direct pure: actual production key receiver index wrap focus and d
   const count=events.length;handlers.get('0:keydown')({key:'ArrowRight',preventDefault(){throw Error('Unsupported key prevented');}});assert.equal(events.length,count);
   disabledValue=true;handlers.get('2:click')();handlers.get('2:keydown')({key:'Home',preventDefault(){throw Error('Disabled key prevented');}});assert.equal(events.length,count);assert.equal(focused,3);
 });
-test('websocket direct pure: only canonical source-backed identity has twelve separate direct steps',()=>{
+test('websocket direct pure: canonical source-backed identity preserves twelve socket steps plus one history-reveal checkpoint',()=>{
   const contract=requestedStateContract('devtools/WebSocketConsole');
   assert.equal(contract.identity,'devtools/WebSocketConsole');assert.equal(contract.kind,'WebSocketConsole');assert.equal(contract.requestedStateOnly,true);
   assert.equal(contract.focusedSequence,'websocket-public-host-boundary');
-  assert.deepEqual(contract.steps.map(step=>step.id),['empty-enter','type-ping','send-enter','type-pong','send-button','request-disconnect','host-ack-closed','type-closed-draft','closed-enter','clear-closed-draft','request-connect','host-ack-open']);
+  assert.deepEqual(contract.steps.map(step=>step.id),['empty-enter','type-ping','send-enter','type-pong','send-button','request-disconnect','host-ack-closed','type-closed-draft','closed-enter','clear-closed-draft','request-connect','host-ack-open','history-wheel-reveal']);
+  assert(contract.steps[12].expectedState.includes('complete first history row'));
+  assert(contract.steps[12].event.includes('native'));
   assert(contract.steps.filter(step=>step.id.startsWith('host-ack-')).every(step=>step.event.startsWith('synthetic controlled host acknowledgement')));
   assert(contract.steps.every(step=>step.source.sourceAnchor===null&&step.source.provenance.includes('no registered-site or networking approval')));
   for(const identity of ['devtools/WebSocket','devtools/WebSocketConsoleExtra','devtools/SocketConsole','devtools/ConnectionManager','devtools/ResponseViewer'])assert.equal(requestedStateContract(identity),null);
@@ -1427,11 +1429,11 @@ test('websocket direct pure: actual sequence preserves drafts messages native or
   const core=await readFile(new URL('../../assets/ely-api.js',import.meta.url),'utf8'),devtools=await readFile(new URL('../../assets/ely-api-workspace-devtools.js',import.meta.url),'utf8');
   assert(core.includes("root.addEventListener('change', change)")&&core.includes("name: event.target.name,")&&core.includes("value: event.target.value, checked: event.target.checked, type: event.target.type"),'Named native changes must produce the public detail from the changed control');
   assert(devtools.includes("field('A message to send',state.draft||'',v=>{state.draft=v;send.disabled=disabled||!connected||!v.trim();},'text',{'data-dt-socket-draft':''})"),'WebSocketConsole keeps its named draft input as the event source');
-  const labels=['empty-enter','type-ping','send-enter','type-pong','send-button','request-disconnect','host-ack-closed','type-closed-draft','closed-enter','clear-closed-draft','request-connect','host-ack-open'];
+  const labels=['empty-enter','type-ping','send-enter','type-pong','send-button','request-disconnect','host-ack-closed','type-closed-draft','closed-enter','clear-closed-draft','request-connect','host-ack-open','history-wheel-reveal'];
   const run=async defect=>{
     const url='wss://stream.example.com/orders',identity='devtools/WebSocketConsole',id='socket-main';
     const rows=[['ⓘ',`Connected to ${url}`,'10m'],['↗',JSON.stringify({type:'subscribe',channel:'orders'},null,2),'10m'],['↙',JSON.stringify({type:'order',id:1011,total:42.5},null,2),'2m']];
-    const state={state:'open',draft:'',rows,revision:0},timeline=[],actions=[],publicEvents=[],receipts=[];let cursor=0,dirty=false,committedDraft='',cleaned=false,initialized=false;
+    const state={state:'open',draft:'',rows,revision:0},timeline=[],actions=[],publicEvents=[],receipts=[];let cursor=0,dirty=false,committedDraft='',cleaned=false,initialized=false,historyScrollTop=180;
     const snapshot=()=>({state:state.state,url,draft:state.draft,sendDisabled:defect==='enabled-closed'&&state.state==='closed'?false:state.state!=='open'||!state.draft.trim(),toggleDisabled:false,toggle:state.state==='open'?'Disconnect':'Connect',rows:structuredClone(state.rows),model:defect==='model-drift'&&actions.length?'changed model':'original fixture model'});
     const native=(type,key=null,control='draft')=>timeline.push({type,key,control,value:state.draft,trusted:defect!=='untrusted',name:'A message to send',checked:false,inputType:'text'});
     const change=()=>{
@@ -1460,6 +1462,7 @@ test('websocket direct pure: actual sequence preserves drafts messages native or
     const root={evaluate:async(fn,arg)=>{
       const text=fn.toString();
       if(text.includes('const host=node.querySelector'))return snapshot();
+      if(text.includes("const log=node.querySelector('[data-dt-socket-log]')"))return {scrollTop:historyScrollTop,scrollHeight:460,clientHeight:280,scrollMax:180,firstRowText:rows[0].join(''),firstRowFullyVisible:historyScrollTop===0,rowRect:{top:0,bottom:40,left:0,right:320},clip:{top:0,bottom:280,left:0,right:320}};
       if(text.includes('node.__visualSocketNative=[]')){initialized=true;return;}
       if(text.includes('node.removeEventListener')){cleaned=true;return;}
       if(text.includes("node.dispatchEvent(new CustomEvent('ely:result'")){
@@ -1472,11 +1475,11 @@ test('websocket direct pure: actual sequence preserves drafts messages native or
     },locator:selector=>{
       const revision=state.revision;
       const current=()=>assert.equal(revision,state.revision,'A stale control survived host rerender');
-      return {pressSequentially:async value=>{current();for(const character of value){native('keydown',character);state.draft+=character;dirty=true;native('input');native('keyup',character);}},
+      return {hover:async()=>{},boundingBox:async()=>({height:280}),pressSequentially:async value=>{current();for(const character of value){native('keydown',character);state.draft+=character;dirty=true;native('input');native('keyup',character);}},
         press:async key=>{current();native('keydown',key);if(key==='Enter'){if(defect==='unexpected-change'&&!state.draft)publicEvents.push({type:'ely:change',detail:{id,component:identity,name:'unexpected',value:'',checked:false,type:'text'}});send();if(defect==='cleared-closed'&&state.state==='closed')state.draft='';}else if(key==='Backspace'){state.draft='';dirty=true;native('input');}native('keyup',key);},
         click:async()=>{current();const control=selector.includes('socket-send')?'send':'toggle';commitDraft();native('click',null,control);if(control==='send')send();else{emit({action:'toggle-socket',state:state.state,url});if(defect==='optimistic')state.state=state.state==='open'?'closed':'open';}},
       };
-    }};
+    },page:()=>({mouse:{wheel:async(_x,deltaY)=>{historyScrollTop=deltaY<0?0:Math.min(180,historyScrollTop+deltaY);timeline.push({type:'wheel',trusted:true,deltaY,control:'history-log'});}},evaluate:async()=>{}})};
     const begin=async()=>{cursor=publicEvents.length;};
     const fresh=async()=>{assert.notEqual(defect==='twin-html'&&state.revision>0,true,'Independent twin drift');return publicEvents.slice(cursor);};
     const runStep=async(label,action,verify)=>{assert.equal(label,labels[receipts.length]);const before=snapshot();await action();const result=await verify();receipts.push({label,before,after:snapshot(),result});};

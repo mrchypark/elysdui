@@ -75,8 +75,8 @@ test('Missing35 shipped communication fixtures have finite native local-action c
     'calendar/TimeGrid':['week-scroll-late-events','week-open-samples','week-open-client','week-create-event','week-open-allday'],
     'calendar/AllDayRow':['week-scroll-late-events','week-open-samples','week-open-client','week-create-event','week-open-allday'],
     'calendar/CurrentTimeIndicator':['week-scroll-late-events','week-open-samples','week-open-client','week-create-event','week-open-allday'],
-    'calendar/CalendarDayView':['day-scroll-late-events','day-open-samples','day-open-client','day-create-event'],
-    'calendar/TimezoneOverlay':['day-scroll-late-events','day-open-samples','day-open-client','day-create-event'],
+    'calendar/CalendarDayView':['day-scroll-late-events','day-open-samples','day-open-client','day-create-event','day-reveal-created-draft'],
+    'calendar/TimezoneOverlay':['day-scroll-late-events','day-open-samples','day-open-client','day-create-event','day-reveal-created-draft'],
     'calendar/EventPopover':['popover-open','popover-edit','popover-delete','popover-close','popover-reopen','popover-escape'],
     'calendar/AttendeeList':['popover-open','popover-edit','popover-delete','popover-close','popover-reopen','popover-escape'],
   };
@@ -88,16 +88,22 @@ test('Missing35 shipped communication fixtures have finite native local-action c
   const byKey=new Map();for(const contract of contracts){const prior=byKey.get(contract.behaviorKey);if(prior)assert.deepEqual(contract.steps.map(step=>step.id),prior.steps.map(step=>step.id));else byKey.set(contract.behaviorKey,contract);}
   assert.equal(contracts.length,10,'All ten exact Missing35 gallery identities remain represented');
   assert.equal(byKey.size,5,'The five shared aliases do not inflate the unique handler roster');
-  assert.equal(contracts.reduce((sum,contract)=>sum+contract.steps.length,0),45,'Each identity retains its own default-fixture action checkpoints');
-  assert.equal([...byKey.values()].reduce((sum,contract)=>sum+contract.steps.length,0),20,'Unique local handler checkpoint total is deduplicated by behavior key');
-  assert.equal(45*4,180,'Four mobile profiles require 180 identity/profile checkpoints');
-  assert.equal(180*2,360,'Each checkpoint requires owned before/after PNGs');
-  assert.equal(20*4*2,160,'Deduplicated handler comparison is 80 checkpoints/160 PNGs, not the capture denominator');
+  assert.equal(contracts.reduce((sum,contract)=>sum+contract.steps.length,0),47,'Each identity retains its default-fixture checkpoints, including the appended day draft reveal for each exact identity');
+  assert.equal([...byKey.values()].reduce((sum,contract)=>sum+contract.steps.length,0),21,'Unique local handler checkpoint total is deduplicated by behavior key');
+  assert.equal(47*4,188,'Four mobile profiles require 188 identity/profile checkpoints');
+  assert.equal(188*2,376,'Each checkpoint requires owned before/after PNGs');
+  assert.equal(21*4*2,168,'Deduplicated handler comparison is 84 checkpoints/168 PNGs, not the alias-expanded capture denominator');
+  assert.equal(5*2*4,40,'The requested day rerun is two exact identities × four mobile profiles × five checkpoints');
+  assert.equal(40*2,80,'The requested day rerun requires 80 owned before/after PNGs');
   assert.equal(requestedStateContract('calendar/MiniCalendar'),null,'Unrelated calendar siblings stay outside this contract');
   assert.equal(requestedStateContract('agent/TraceViewer'),null,'The canonical TraceViewer check does not create a second gallery specimen contract');
   assert.equal(requestedStateContract('calendar/CurrentTimeIndicator').directControlRole,'display-only indicator within the shared week fixture');
   assert.equal(requestedStateContract('calendar/TimezoneOverlay').directControlRole,'display-only overlay within the shared day fixture');
   assert.equal(requestedStateContract('calendar/AttendeeList').directControlRole,'display-only attendee content within the shared popover fixture');
+  const day=requestedStateContract('calendar/CalendarDayView');
+  assert.deepEqual(day.steps.slice(0,4).map(step=>step.id),['day-scroll-late-events','day-open-samples','day-open-client','day-create-event'],'The four existing day checkpoints remain in their original order');
+  assert.equal(day.steps[4].id,'day-reveal-created-draft');
+  assert.match(day.steps[4].expectedState,/complete painted.*16:00.*16:30/);
 
   const notificationReview=requestedStateContract('feedback/Notification').steps.find(step=>step.id==='notification-open-review');
   assert.match(notificationReview.expectedState,/review\(""\)/,'Nested Review actions do not inherit the notification row value');
@@ -139,6 +145,23 @@ test('Missing35 shipped communication fixtures have finite native local-action c
   assert.match(template,/<td>\{\{\.\}\}<\/td>/,'Evaluation cells remain html/template-escaped text');
   assert.match(template,/\{\{\.Content\}\}/);assert.match(template,/\{\{\.Name\}\}/);assert.doesNotMatch(template,/template\.HTML/,'Communication caller data is not promoted to trusted HTML');
   assert.match(fixture,/case "CalendarWeekView"/);assert.match(fixture,/case "CalendarDayView"/);assert.match(fixture,/case "EventPopover"/);
+});
+
+test('WebSocket history and day-event draft reveals append native-wheel checkpoints without changing prior actions',async()=>{
+  const socket=requestedStateContract('devtools/WebSocketConsole'),day=requestedStateContract('calendar/CalendarDayView'),dayAlias=requestedStateContract('calendar/TimezoneOverlay');
+  assert.deepEqual(socket.steps.slice(0,12).map(step=>step.id),['empty-enter','type-ping','send-enter','type-pong','send-button','request-disconnect','host-ack-closed','type-closed-draft','closed-enter','clear-closed-draft','request-connect','host-ack-open'],'All twelve existing WebSocket send, event, and host-ack checkpoints remain unchanged');
+  assert.equal(socket.steps[12].id,'history-wheel-reveal');assert(socket.steps[12].event.includes('native'));assert(socket.steps[12].expectedState.includes('complete first history row'));
+  assert.deepEqual(day.steps.slice(0,4).map(step=>step.id),['day-scroll-late-events','day-open-samples','day-open-client','day-create-event'],'All four existing day checkpoints remain unchanged');
+  assert.equal(day.steps[4].id,'day-reveal-created-draft');assert.equal(dayAlias.steps[4].id,'day-reveal-created-draft');assert.deepEqual(dayAlias.steps.map(step=>step.id),day.steps.map(step=>step.id));
+  assert.equal(13*2,26,'Two WebSocket mobile themes require 26 checkpoints');assert.equal(26*2,52,'WebSocket replay needs 52 before/after primary images');
+  assert.equal(5*2*4,40,'Two day identities across four mobile profiles require 40 checkpoints');assert.equal(40*2,80,'Day replay needs 80 before/after primary images');
+  const driver=await read('ui/gohtmx/tests/browser/visual-state-audit-drivers.mjs'),socketStart=driver.indexOf("if(contract.focusedSequence==='websocket-public-host-boundary')"),socketEnd=driver.indexOf("if(['sheet-native-actions'",socketStart),calendarStart=driver.indexOf("if(contract.focusedSequence==='communication-calendar-week'||contract.focusedSequence==='communication-calendar-day')"),calendarEnd=driver.indexOf("if(contract.focusedSequence==='communication-event-popover')",calendarStart);
+  assert(socketStart>=0&&socketEnd>socketStart&&calendarStart>=0&&calendarEnd>calendarStart);
+  const socketPath=driver.slice(socketStart,socketEnd),calendarPath=driver.slice(calendarStart,calendarEnd);
+  assert.match(socketPath,/root\.page\(\)\.mouse\.wheel\(0,-Math\.max\(120/);assert.match(socketPath,/scrollTop:[^,]+,scrollHeight:[^,]+,clientHeight:[^,]+,scrollMax:/);assert.match(socketPath,/firstRowFullyVisible/);assert.match(socketPath,/history-log/);
+  assert.match(calendarPath,/root\.page\(\)\.mouse\.wheel\(0,deltaY\)/);assert.match(calendarPath,/draftVisible/);assert.match(calendarPath,/New event · 16:00 – 16:30/);assert.match(calendarPath,/nativeWheel/);
+  assert.doesNotMatch(socketPath,/scrollTop\s*=(?!=)|\.scrollIntoView\(|\.style\s*\./,'WebSocket reveal uses native input without forced DOM scrolling or style writes');
+  assert.doesNotMatch(calendarPath,/scrollTop\s*=(?!=)|\.scrollIntoView\(|\.style\s*\./,'Calendar reveal uses native input without forced DOM scrolling or style writes');
 });
 
 test('IframeEmbed and EmbedCard retain exact native host-open contracts without provider navigation',async()=>{
