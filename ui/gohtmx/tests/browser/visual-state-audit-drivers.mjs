@@ -39,6 +39,7 @@ export function activeOutlineBounds(node,bounds){
   const alpha=style.outlineColor.match(/\/\s*([\d.]+%?)\s*\)$/)?.[1]??style.outlineColor.match(/^rgba\([^,]+,[^,]+,[^,]+,\s*([\d.]+%?)\s*\)$/)?.[1];
   if(style.outlineStyle==='none'||style.outlineStyle==='hidden'||width===0||style.outlineColor==='transparent'||(alpha!==undefined&&parseFloat(alpha)===0))return bounds;
   const gap=reason=>({...bounds,focusOutline:{status:'unsupported',reason}});
+  const positioned=[];
   if(active.closest('[data-ely-family]')!==node.closest('[data-ely-family]'))return gap('nested component focus ownership');
   if(style.outlineStyle==='auto'||!Number.isFinite(width)||!Number.isFinite(offset))return gap('unbounded outline style');
   if(active.getClientRects().length!==1)return gap('fragmented focus outline');
@@ -46,17 +47,19 @@ export function activeOutlineBounds(node,bounds){
   const paint={left:r.left-margin,top:r.top-margin,right:r.right+margin,bottom:r.bottom+margin};
   for(let ancestor=active;ancestor;ancestor=ancestor.parentElement){
     const s=getComputedStyle(ancestor);
+    if(['absolute','fixed'].includes(s.position))positioned.push({node:ancestor,containingBlock:s.position==='absolute'?ancestor.offsetParent:null});
     if(s.display==='none'||Number(s.opacity)===0||s.contentVisibility==='hidden'||(ancestor===active&&s.visibility!=='visible'))return bounds;
     if(ancestor!==active&&s.visibility!=='visible')return gap('ancestor visibility overridden by visible focused child');
-    if(s.transform!=='none'||s.perspective!=='none'||s.filter !== 'none'||s.clipPath!=='none'||s.clip!=='auto'||s.maskImage!=='none'||s.contain.split(/\s+/).some(value=>['paint','strict','content'].includes(value))||(s.zoom!=='normal'&&Number(s.zoom)!==1))return gap('complex outline geometry or clipping');
+    if(s.transform!=='none'||s.translate !== 'none'||s.rotate !== 'none'||s.scale !== 'none'||s.perspective!=='none'||s.filter !== 'none'||s.clipPath!=='none'||s.clip!=='auto'||s.maskImage!=='none'||s.contain.split(/\s+/).some(value=>['paint','strict','content'].includes(value))||(s.zoom!=='normal'&&Number(s.zoom)!==1))return gap('complex outline geometry or clipping');
     if(ancestor===active)continue;
     const clipX=s.overflowX!=='visible',clipY=s.overflowY!=='visible';
     if(!clipX&&!clipY)continue;
+    if(positioned.some(item=>item.node!==ancestor&&(!item.containingBlock||!ancestor.contains(item.containingBlock))))return gap('unproven positioned outline overflow clip relationship');
     if((s.overflowX==='clip'||s.overflowY==='clip')&&s.overflowClipMargin!=='0px')return gap('nonzero overflow clip margin');
-    if(['borderTopLeftRadius','borderTopRightRadius','borderBottomLeftRadius','borderBottomRightRadius'].some(key=>parseFloat(s[key])!==0))return gap('rounded ancestor clip');
-    const box=ancestor.getBoundingClientRect(),left=box.left+ancestor.clientLeft,top=box.top+ancestor.clientTop;
-    if(clipX){paint.left=Math.max(paint.left,left);paint.right=Math.min(paint.right,left+ancestor.clientWidth);}
-    if(clipY){paint.top=Math.max(paint.top,top);paint.bottom=Math.min(paint.bottom,top+ancestor.clientHeight);}
+    // The border box over-approximates the padding and rounded overflow clip.
+    const box=ancestor.getBoundingClientRect();
+    if(clipX){paint.left=Math.max(paint.left,box.left);paint.right=Math.min(paint.right,box.right);}
+    if(clipY){paint.top=Math.max(paint.top,box.top);paint.bottom=Math.min(paint.bottom,box.bottom);}
   }
   if(paint.right<=paint.left||paint.bottom<=paint.top)return bounds;
   if(paint.left+scrollX<0||paint.top+scrollY<0)return gap('outline extends outside document camera');

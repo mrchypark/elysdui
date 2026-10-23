@@ -1775,3 +1775,79 @@ test('action camera clips scroll-well text through rounded overflow and keeps vi
     assert((await captureTargetPNG(page,page.locator('#target'))).foreignDOMIntersections.some(peer=>peer.id==='rounded-corner-peer'),'Paint in the rounded-corner bounding-box over-approximation remains conservatively foreign');
   }finally{await browser.close();}
 });
+
+test('focus outline keeps a conservative fractional box through rounded overflow clipping',async()=>{
+  const browser=await chromium.launch({executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH||undefined});
+  try{
+    const page=await browser.newPage({viewport:{width:320,height:240}});
+    await page.setContent(`<style>body{margin:0;width:800px;height:800px}#target{position:relative;left:100px;top:100px;width:120px;height:100px}.clip{position:absolute;left:20.25px;top:12.25px;width:50.5px;height:40.5px;border:1.5px solid transparent;border-radius:20px;overflow:hidden}#focus{position:absolute;left:-4px;top:-4px;width:8px;height:8px;margin:0;padding:0;border:0;outline:4px solid red;outline-offset:3px}</style><div data-audit-main><div id="target" data-ely-family="forms"><div class="clip"><button id="focus" type="button" tabindex="0"></button></div></div></div>`);
+    await page.evaluate(()=>window.scrollTo(37,41));
+    const expected=await page.locator('#focus').evaluate(node=>{node.focus();const clip=node.parentElement.getBoundingClientRect(),r=node.getBoundingClientRect(),style=getComputedStyle(node),margin=parseFloat(style.outlineWidth)+parseFloat(style.outlineOffset);return {scroll:{x:scrollX,y:scrollY},paint:{left:Math.max(r.left-margin,clip.left),top:Math.max(r.top-margin,clip.top),right:Math.min(r.right+margin,clip.right),bottom:Math.min(r.bottom+margin,clip.bottom)},documentPaint:{left:Math.max(r.left-margin,clip.left)+scrollX,top:Math.max(r.top-margin,clip.top)+scrollY,right:Math.min(r.right+margin,clip.right)+scrollX,bottom:Math.min(r.bottom+margin,clip.bottom)+scrollY},clip:{left:clip.left,top:clip.top,right:clip.right,bottom:clip.bottom},radius:parseFloat(getComputedStyle(node.parentElement).borderTopLeftRadius)};});
+    assert(expected.scroll.x>0&&expected.scroll.y>0,`The regression requires nonzero scroll on both axes: ${JSON.stringify(expected.scroll)}`);
+    const captured=await captureTargetPNG(page,page.locator('#target'));
+    assert.equal(captured.bounds.focusOutline.status,'bounded');
+    assert.deepEqual(captured.bounds.focusOutline.paint,expected.paint);
+    assert.equal(captured.bounds.focusOutline.paint.left,expected.clip.left,'The rectangular over-approximation retains corner pixels; it does not claim rounded-edge visibility');
+    assert.equal(captured.bounds.focusOutline.paint.top,expected.clip.top);
+    const camera=captured.bounds.clip;
+    assert(camera.x<=expected.documentPaint.left&&camera.y<=expected.documentPaint.top&&camera.x+camera.width>=expected.documentPaint.right&&camera.y+camera.height>=expected.documentPaint.bottom,'The document-space screenshot camera contains the full conservative focus-paint envelope');
+    assert(expected.radius>0&&expected.clip.left%1!==0&&expected.clip.top%1!==0,'The clipping ancestor is measurably rounded and fractional');
+  }finally{await browser.close();}
+});
+
+test('focus outline keeps unsupported overflow margins and transformed clips as gaps',async()=>{
+  const browser=await chromium.launch({executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH||undefined});
+  try{
+    const page=await browser.newPage({viewport:{width:320,height:240}});
+    const fixture=clip=>`<style>body{margin:0;width:800px;height:800px}#target{position:relative;left:40px;top:40px;width:120px;height:100px}.clip{position:absolute;left:20px;top:12px;width:50px;height:40px;border-radius:20px;overflow:hidden;${clip}}#focus{position:absolute;left:4px;top:4px;width:8px;height:8px;margin:0;padding:0;border:0;outline:4px solid red;outline-offset:3px}</style><div data-audit-main><div id="target" data-ely-family="forms"><div class="clip"><button id="focus" type="button" tabindex="0"></button></div></div></div>`;
+    await page.setContent(fixture('overflow:clip;overflow-clip-margin:4px'));
+    await page.locator('#focus').focus();
+    let captured=await captureTargetPNG(page,page.locator('#target'));
+    assert.equal(captured.bounds.focusOutline.status,'unsupported');
+    assert.equal(captured.bounds.focusOutline.reason,'nonzero overflow clip margin');
+    await page.setContent(fixture('overflow:hidden;transform:translateZ(0)'));
+    await page.locator('#focus').focus();
+    captured=await captureTargetPNG(page,page.locator('#target'));
+    assert.equal(captured.bounds.focusOutline.status,'unsupported');
+    assert.equal(captured.bounds.focusOutline.reason,'complex outline geometry or clipping');
+    await page.setContent(fixture('overflow:hidden;clip-path:inset(1px)'));
+    await page.locator('#focus').focus();
+    captured=await captureTargetPNG(page,page.locator('#target'));
+    assert.equal(captured.bounds.focusOutline.status,'unsupported');
+    assert.equal(captured.bounds.focusOutline.reason,'complex outline geometry or clipping');
+    for(const [property,value] of [['translate','1px 0'],['rotate','1deg'],['scale','2']]){
+      await page.setContent(fixture(`overflow:hidden;${property}:${value}`));
+      await page.locator('#focus').focus();
+      const styles=await page.locator('.clip').evaluate(node=>({transform:getComputedStyle(node).transform,translate:getComputedStyle(node).translate,rotate:getComputedStyle(node).rotate,scale:getComputedStyle(node).scale}));
+      assert.equal(styles.transform,'none',`${property} regression must not be masked by the transform shorthand`);
+      assert.notEqual(styles[property],'none',`${property} must be the isolated active transform`);
+      captured=await captureTargetPNG(page,page.locator('#target'));
+      assert.equal(captured.bounds.focusOutline.status,'unsupported');
+      assert.equal(captured.bounds.focusOutline.reason,'complex outline geometry or clipping');
+    }
+    for(const position of ['absolute','fixed']){
+      const left=position==='absolute'?95:135;
+      await page.setContent(`<style>body{margin:0;width:800px;height:800px}#target{position:relative;left:40px;top:40px;width:260px;height:200px}.cb{position:relative;width:220px;height:120px}.clip{width:100px;height:70px;overflow:hidden}#focus{position:${position};left:${left}px;top:55px;width:10px;height:10px;margin:0;padding:0;border:0;outline:4px solid red;outline-offset:3px}</style><div data-audit-main><div id="target" data-ely-family="forms"><div class="cb"><div class="clip"><button id="focus" type="button" tabindex="0"></button></div></div></div></div>`);
+      await page.locator('#focus').focus();
+      const geometry=await page.locator('#focus').evaluate(node=>{const clip=node.parentElement.getBoundingClientRect(),root=node.closest('[data-ely-family]').getBoundingClientRect(),r=node.getBoundingClientRect(),style=getComputedStyle(node),margin=parseFloat(style.outlineWidth)+parseFloat(style.outlineOffset);return {position:style.position,containingBlock:node.offsetParent?.className??null,clip:{left:clip.left,right:clip.right,top:clip.top,bottom:clip.bottom},root:{left:root.left,right:root.right,top:root.top,bottom:root.bottom},paint:{left:r.left-margin,right:r.right+margin,top:r.top-margin,bottom:r.bottom+margin}};});
+      assert.equal(geometry.position,position);
+      if(position==='absolute')assert.equal(geometry.containingBlock,'cb','Absolute control must be positioned by a containing block outside the overflow clip');
+      assert(geometry.paint.right>geometry.clip.right&&geometry.paint.left<geometry.clip.right&&geometry.paint.bottom>geometry.clip.top&&geometry.paint.top<geometry.clip.bottom&&geometry.paint.left<geometry.root.right&&geometry.paint.bottom<geometry.root.bottom,`The ${position} outline crosses the overflow clip edge but stays within the capture root: ${JSON.stringify(geometry)}`);
+      captured=await captureTargetPNG(page,page.locator('#target'));
+      assert.equal(captured.bounds.focusOutline.status,'unsupported');
+      assert.equal(captured.bounds.focusOutline.reason,'unproven positioned outline overflow clip relationship');
+
+      const wrapperLeft=position==='absolute'?95:135;
+      await page.setContent(`<style>body{margin:0;width:800px;height:800px}#target{position:relative;left:40px;top:40px;width:260px;height:200px}.cb{position:relative;width:220px;height:120px}.clip{width:100px;height:70px;overflow:hidden}.wrapper{position:${position};left:${wrapperLeft}px;top:55px;width:10px;height:10px}#focus{display:block;width:10px;height:10px;margin:0;padding:0;border:0;outline:4px solid red;outline-offset:3px}</style><div data-audit-main><div id="target" data-ely-family="forms"><div class="cb"><div class="clip"><div class="wrapper"><button id="focus" type="button" tabindex="0"></button></div></div></div></div></div>`);
+      await page.locator('#focus').focus();
+      const wrapperGeometry=await page.locator('#focus').evaluate(node=>{const wrapper=node.parentElement,clip=wrapper.parentElement.getBoundingClientRect(),root=node.closest('[data-ely-family]').getBoundingClientRect(),r=node.getBoundingClientRect(),style=getComputedStyle(node),margin=parseFloat(style.outlineWidth)+parseFloat(style.outlineOffset);return {activePosition:style.position,wrapperPosition:getComputedStyle(wrapper).position,containingBlock:wrapper.offsetParent?.className??null,clip:{left:clip.left,right:clip.right,top:clip.top,bottom:clip.bottom},root:{left:root.left,right:root.right,top:root.top,bottom:root.bottom},paint:{left:r.left-margin,right:r.right+margin,top:r.top-margin,bottom:r.bottom+margin}};});
+      assert.equal(wrapperGeometry.activePosition,'static');
+      assert.equal(wrapperGeometry.wrapperPosition,position);
+      if(position==='absolute')assert.equal(wrapperGeometry.containingBlock,'cb','Escaping absolute wrapper must be positioned outside the overflow clip');
+      assert(wrapperGeometry.paint.right>wrapperGeometry.clip.right&&wrapperGeometry.paint.left<wrapperGeometry.clip.right&&wrapperGeometry.paint.bottom>wrapperGeometry.clip.top&&wrapperGeometry.paint.top<wrapperGeometry.clip.bottom&&wrapperGeometry.paint.left<wrapperGeometry.root.right&&wrapperGeometry.paint.bottom<wrapperGeometry.root.bottom,`Static focus outline crosses its ${position} wrapper clip but stays within the capture root: ${JSON.stringify(wrapperGeometry)}`);
+      captured=await captureTargetPNG(page,page.locator('#target'));
+      assert.equal(captured.bounds.focusOutline.status,'unsupported');
+      assert.equal(captured.bounds.focusOutline.reason,'unproven positioned outline overflow clip relationship');
+    }
+  }finally{await browser.close();}
+});
