@@ -1133,8 +1133,27 @@ export async function runRequestedStateActions(contract,root,runStep,failureDiag
           if(target){await page.mouse.move(target.x,target.y);while(ending.offset+ending.client<ending.extent-1&&attempts<6){await page.mouse.wheel(axis==='horizontal'?Math.max(ending.extent,800):0,axis==='text'?Math.max(ending.extent,800):0);attempts++;await page.waitForFunction(({node,axis,offset})=>{const target=node.__licenseScrollTarget;return (axis==='text'?target.scrollTop:target.scrollLeft)>offset;},{node:await root.elementHandle(),axis,offset:ending.offset},{timeout:2000});ending=await metrics();}assert(ending.offset+ending.client>=ending.extent-1,'Bounded native wheel did not reach local endpoint');}
           after={axis,start,ending,attempts,noLocalScroller:!target};return after;
         },async()=>{const state=await snapshot();verifyLicenseSelection(state,selected);assert.deepEqual(state.events,before.events);assert.equal(state.documentX,before.documentX);assert.equal((await layout()).overlays,0);
-          const visible=await root.evaluate((node,axis)=>{const element=node.querySelector(axis==='text'?'pre':'[data-license-title]'),range=document.createRange();range.selectNodeContents(element);const rects=[...range.getClientRects()];const r=axis==='text'?rects.at(-1):element.getBoundingClientRect();if(!r)return false;let left=Math.max(0,r.left),right=Math.min(document.documentElement.clientWidth,r.right),top=Math.max(0,r.top),bottom=Math.min(innerHeight,r.bottom);for(let a=element.parentElement;a;a=a.parentElement){const s=getComputedStyle(a),b=a.getBoundingClientRect();if(s.overflowX!=='visible'){left=Math.max(left,b.left+a.clientLeft);right=Math.min(right,b.left+a.clientLeft+a.clientWidth);}if(s.overflowY!=='visible'){top=Math.max(top,b.top+a.clientTop);bottom=Math.min(bottom,b.top+a.clientTop+a.clientHeight);}}return right>left&&bottom>top&&r.left>=left-1&&r.right<=right+1&&r.top>=top-1&&r.bottom<=bottom+1;},axis);
-          assert(visible,'Required detail/last license line not visible through actual clip chain');return {...after,layout:await layout()};});
+          const visibility=await root.evaluate((node,axis)=>{
+            const element=node.querySelector(axis==='text'?'pre':'[data-license-title]'),range=document.createRange();range.selectNodeContents(element);
+            const rects=[...range.getClientRects()],r=axis==='text'?rects.at(-1):element.getBoundingClientRect();
+            let left=Math.max(0,r?.left??0),right=Math.min(document.documentElement.clientWidth,r?.right??0),top=Math.max(0,r?.top??0),bottom=Math.min(innerHeight,r?.bottom??0);
+            const clips=[{selector:'viewport',left,top,right,bottom}];
+            for(let a=element.parentElement,index=0;a;a=a.parentElement,index++){
+              const s=getComputedStyle(a),b=a.getBoundingClientRect(),clip={left:b.left+a.clientLeft,top:b.top+a.clientTop,right:b.left+a.clientLeft+a.clientWidth,bottom:b.top+a.clientTop+a.clientHeight};
+              if(s.overflowX!=='visible'){left=Math.max(left,clip.left);right=Math.min(right,clip.right);}
+              if(s.overflowY!=='visible'){top=Math.max(top,clip.top);bottom=Math.min(bottom,clip.bottom);}
+              clips.push({index,selector:a.id?`#${a.id}`:a.localName,position:s.position,overflowX:s.overflowX,overflowY:s.overflowY,rect:{left:b.left,top:b.top,right:b.right,bottom:b.bottom,width:b.width,height:b.height},clip,left,top,right,bottom});
+            }
+            const visible=!!r&&right>left&&bottom>top&&r.left>=left-1&&r.right<=right+1&&r.top>=top-1&&r.bottom<=bottom+1;
+            if(visible)return {visible};
+            const pre=node.querySelector('pre'),text=pre?.textContent??'',tail=text.slice(-48),lastIndex=text.search(/\s*$/)-1;
+            let lastTextRect=null;
+            if(pre&&lastIndex>=0){const walker=document.createTreeWalker(pre,NodeFilter.SHOW_TEXT);let current,remaining=lastIndex;while((current=walker.nextNode())){if(remaining<current.data.length){const lastRange=document.createRange();lastRange.setStart(current,remaining);lastRange.setEnd(current,remaining+1);const rect=lastRange.getBoundingClientRect();lastTextRect={left:rect.left,top:rect.top,right:rect.right,bottom:rect.bottom,width:rect.width,height:rect.height};break;}remaining-=current.data.length;}}
+            const rectJSON=rect=>rect?{left:rect.left,top:rect.top,right:rect.right,bottom:rect.bottom,width:rect.width,height:rect.height}:null;
+            const preStyle=pre?getComputedStyle(pre):null,preRect=pre?.getBoundingClientRect();
+            return {visible:false,diagnostic:{selectedLicense:node.querySelector('[data-misc-license][aria-pressed="true"]')?.dataset.title??null,textLength:text.length,textTail:JSON.stringify(tail),lastNonWhitespaceIndex:lastIndex,lastNonWhitespaceCharacter:lastIndex>=0?text[lastIndex]:null,lastNonWhitespaceRect:lastTextRect,lastRangeRects:rects.slice(-8).map(rectJSON),targetRect:rectJSON(r),pre:pre?{scrollTop:pre.scrollTop,clientHeight:pre.clientHeight,scrollHeight:pre.scrollHeight,rect:rectJSON(preRect),overflowX:preStyle.overflowX,overflowY:preStyle.overflowY}:null,viewport:{width:document.documentElement.clientWidth,height:innerHeight,scrollX,scrollY},clips}};
+          },axis);
+          assert(visibility.visible,`Required detail/last license line not visible through actual clip chain${visibility.diagnostic?`: ${JSON.stringify(visibility.diagnostic)}`:''}`);return {...after,layout:await layout()};});
       }
     }finally{
       const ending=await inventoryReceipt(fixtureURL);contract.fixtureReceipt.endingSHA256=ending.sha256;
