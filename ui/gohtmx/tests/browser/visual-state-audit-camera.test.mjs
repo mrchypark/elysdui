@@ -60,7 +60,7 @@ test('action camera matches the frozen baseline rule without importing its execu
 
 test('source-only active owned outline union respects axis clips and fails closed for complex paint',async()=>{
   const box={left:85,top:100,right:285,bottom:140},bounds={clip:{x:85,y:1100,width:200,height:40},root:box,extendsRoot:false,viewportTruncated:false};
-  const plain={outlineStyle:'solid',outlineWidth:'2px',outlineOffset:'4px',outlineColor:'rgb(0,0,255)',display:'block',visibility:'visible',opacity:'1',contentVisibility:'visible',transform:'none',perspective:'none',filter:'none',clipPath:'none',clip:'auto',maskImage:'none',contain:'none',zoom:'1',overflowX:'visible',overflowY:'visible',borderTopLeftRadius:'0px',borderTopRightRadius:'0px',borderBottomLeftRadius:'0px',borderBottomRightRadius:'0px'};
+  const plain={outlineStyle:'solid',outlineWidth:'2px',outlineOffset:'4px',outlineColor:'rgb(0,0,255)',display:'block',visibility:'visible',opacity:'1',contentVisibility:'visible',transform:'none',translate:'none',rotate:'none',scale:'none',perspective:'none',filter:'none',clipPath:'none',clip:'auto',maskImage:'none',contain:'none',zoom:'1',overflowX:'visible',overflowY:'visible',borderTopLeftRadius:'0px',borderTopRightRadius:'0px',borderBottomLeftRadius:'0px',borderBottomRightRadius:'0px'};
   const owner={},foreign={},parent={style:{...plain},parentElement:null,clientLeft:0,clientTop:0,clientWidth:200,clientHeight:40,getBoundingClientRect:()=>box};
   const active={style:{...plain},parentElement:parent,closest:()=>owner,getBoundingClientRect:()=>box,getClientRects:()=>[box]};
   const node={contains:value=>value===active,closest:()=>owner};
@@ -70,9 +70,14 @@ test('source-only active owned outline union respects axis clips and fails close
   assert.equal(run().focusOutline.status,'bounded');assert.equal(run().extendsRoot,true);
   parent.style.overflowX='hidden';assert.deepEqual(run().clip,{x:85,y:1094,width:200,height:52},'Horizontal clip must not incorrectly clip the vertical outline');
   parent.style.overflowY='hidden';assert.deepEqual(run().clip,bounds.clip);
-  for(const [key,value]of [['transform','matrix(1,0,0,1,0,0)'],['clipPath','inset(1px)'],['maskImage','url(mask)'],['contain','paint'],['borderTopLeftRadius','5px']]){
+  for(const [key,value]of [['transform','matrix(1,0,0,1,0,0)'],['clipPath','inset(1px)'],['maskImage','url(mask)'],['contain','paint']]){
     parent.style={...plain,overflowX:'hidden',[key]:value};assert.equal(run().focusOutline.status,'unsupported',key);assert.deepEqual(run().clip,bounds.clip);
   }
+  parent.style={...plain,overflowX:'hidden',borderTopLeftRadius:'5px'};
+  const rounded=run();
+  assert.equal(rounded.focusOutline.status,'bounded','Rounded overflow uses its enclosing border-box AABB conservatively');
+  assert.deepEqual(rounded.focusOutline.paint,{left:85,top:94,right:285,bottom:146},'The rounded corner may be over-included, but the enclosing paint envelope is not under-captured');
+  assert.deepEqual(rounded.clip,{x:85,y:1094,width:200,height:52},'The document camera contains the full conservative rounded-clip AABB');
   parent.style={...plain};active.closest=()=>foreign;assert.equal(run().focusOutline.status,'unsupported');active.closest=()=>owner;
   active.getClientRects=()=>[box,box];assert.equal(run().focusOutline.status,'unsupported');active.getClientRects=()=>[box];
   parent.style={...plain,overflowX:'clip',overflowClipMargin:'3px'};assert.equal(run().focusOutline.status,'unsupported');parent.style={...plain};
