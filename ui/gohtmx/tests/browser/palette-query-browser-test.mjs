@@ -120,17 +120,17 @@ try {
   browser = await chromium.launch({headless: true}); report.browserVersion = browser.version();
   page = await browser.newPage({viewport: {width: 1280, height: 900}}); page.setDefaultTimeout(10000);
   page.on('response', response => {
-    const check = current?.name, url = new URL(response.url());
+    const check = current?.name, responseURL = response.url(), requestMethod = response.request().method(), responseStatus = response.status(), responsePath = new URL(responseURL).pathname;
     responses.push((async () => {
       try {
-        assert.equal(url.origin, origin, 'no remote browser assets');
-        const path = url.pathname, responseFixture = path === '/sdui-action' ? '/sdui-response-primary' : path;
+        assert.equal(new URL(responseURL).origin, origin, 'no remote browser assets');
+        const path = responsePath, responseFixture = path === '/sdui-action' ? '/sdui-response-primary' : path;
         const wanted = report.assets[path] || report.fixtures[responseFixture]; assert(wanted, 'unexpected browser response');
         const bytes = await response.body();
         const proof = {check, path, ...(path === '/sdui-action' ? {responseFixture} : {}), status: response.status(), expectedSHA256: wanted.servedSHA256, receivedSHA256: sha(bytes), bytes: bytes.length};
         report.browserResponses.push(proof);
         if (proof.status !== 200 || proof.expectedSHA256 !== proof.receivedSHA256 || proof.bytes !== wanted.bytes) report.transportErrors.push(proof);
-      } catch (error) { report.transportErrors.push({check, message: String(error)}); }
+      } catch (error) { report.transportErrors.push({check, responseURL, path: responsePath, method: requestMethod, status: responseStatus, message: String(error)}); }
     })());
   });
   page.on('pageerror', error => report.pageErrors.push({check: current?.name, message: error.message}));
