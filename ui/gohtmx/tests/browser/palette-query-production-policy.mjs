@@ -33,6 +33,8 @@ export const paletteAuditCandidateProduction = [
 // keeps the same source-owned boundary as the source loop.
 export const paletteAuditCandidateAssets = [
   'ui/gohtmx/assets/ely-api-interaction.css',
+  'ui/gohtmx/assets/ely-api.css',
+  'ui/gohtmx/assets/ely-api-native.css',
   'ui/gohtmx/assets/ely-controls.css',
   'ui/gohtmx/assets/ely-patterns.css',
   'ui/gohtmx/assets/ely-patterns.js',

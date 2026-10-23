@@ -26,7 +26,7 @@ assert.deepEqual(paletteProductionPaths('audit-candidate'),[...paletteReviewedPr
 // The audited candidate allowance is exactly the three audited production
 // files, and it never widens strict or activation-repair.
 assert.deepEqual(paletteAuditCandidateProduction,['ui/gohtmx/assets/ely-controls.js','ui/gohtmx/ui.go','ui/gohtmx/component.go']);
-assert.deepEqual(paletteAuditCandidateAssets,['ui/gohtmx/assets/ely-api-interaction.css','ui/gohtmx/assets/ely-controls.css','ui/gohtmx/assets/ely-patterns.css','ui/gohtmx/assets/ely-patterns.js']);
+assert.deepEqual(paletteAuditCandidateAssets,['ui/gohtmx/assets/ely-api-interaction.css','ui/gohtmx/assets/ely-api.css','ui/gohtmx/assets/ely-api-native.css','ui/gohtmx/assets/ely-controls.css','ui/gohtmx/assets/ely-patterns.css','ui/gohtmx/assets/ely-patterns.js']);
 for(const path of paletteAuditCandidateProduction){
   assert(!paletteReviewedProduction.includes(path),'audited file is not a reviewed file');
   assert(!paletteProductionPaths('strict').includes(path),'audited file is not strict-allowed');
@@ -162,6 +162,30 @@ const positiveReplay=selectedRejection===null;
 if(!positiveReplay)console.log(`NEGATIVE CONTROL: selected production policy ${productionPolicy} rejects the current tree with the exact message "${selectedRejection.message}".`);
 const temp=await mkdtemp(join(tmpdir(),'palette-production-policy-'));let positives=0,negatives=0;
 try{
+  if(productionPolicy==='audit-candidate'){
+    // Independently read committed reference bytes. Native CSS is an allowed
+    // candidate asset, but is not loaded by this go-qualified fixture: these
+    // byte controls do not claim native rendering or native loader coverage.
+    for(const path of ['ui/gohtmx/assets/ely-api.css','ui/gohtmx/assets/ely-api-native.css']){
+      const reference=execFileSync('git',['show','HEAD:'+path],{cwd:base,maxBuffer:16*1024*1024});
+      const current=await readFile(join(base,path));
+      const reason='candidate Info CSS differs from committed reference: '+path;
+      const verify=bytes=>assert.equal(paletteSHA(bytes),paletteSHA(reference),reason);
+      verify(current);
+      const changed=Buffer.from(current);changed[0]=changed[0]===32?9:32;
+      assert.equal(changed.length,current.length);assert.notDeepEqual(changed,current);
+      assert.throws(()=>verify(changed),error=>String(error.message).split('\n')[0]===reason);
+      negatives++;
+    }
+    assert(loadedAssetPaths.some(asset=>asset.sourcePath==='ui/gohtmx/assets/ely-api.css'),'Info CSS is actually loaded by the go-qualified fixture');
+    const tampered=join(temp,'info-css-source');
+    execFileSync('git',['clone','--shared','--quiet',base,tampered],{stdio:'pipe'});
+    const path='ui/gohtmx/assets/ely-api.css',current=await readFile(join(tampered,path)),changed=Buffer.from(current);
+    changed[0]=changed[0]===32?9:32;
+    await writeFile(join(tampered,path),changed);
+    await assert.rejects(loadPaletteInputs(tampered,surface,{productionPolicy}),error=>String(error.message).split('\n')[0]==='loaded production assets pinned to reviewed source: /assets/ely-api.css');
+    negatives++;
+  }
   if(productionPolicy==='activation-repair'){
     // Exercise the real loader against disposable source bytes, not a cached
     // hash comparison. These failures occur before fixture compilation.
