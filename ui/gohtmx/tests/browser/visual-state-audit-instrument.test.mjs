@@ -110,7 +110,8 @@ test('foreign paint clip source: only proven overflow clips may trim measured pa
   const compact=guard.replace(/\s+/g,'');
   assert(start>=0&&end>start,'Foreign paint clipping must stay local to the camera classifier');
   assert(guard.includes('for(let p=element;p;p=p.parentElement)')&&guard.includes('if(p===element&&!text)continue'),'Positioned painted elements must remain conservative without clipping their own border box');
-  assert(guard.includes("position==='fixed'||position==='sticky'"),'Fixed and sticky descendants keep raw paint bounds');
+  assert(guard.includes("!['static','relative','absolute'].includes(position)"),'Fixed, sticky and other unmodeled positions keep raw paint bounds');
+  assert(guard.includes("s.zIndex !== 'auto'&&position!=='absolute'"),'Local absolute stacking is allowed only for clipping; other z-index cases remain conservative');
   assert(guard.includes("if(position==='absolute')positioned.push({node:p,containingBlock:p.offsetParent})"),'Absolute descendants must retain their measured containing block for clip proof');
   assert(guard.includes('!p.contains(containingBlock)'),'An absolute descendant is clipped only when its containing block is inside the clipping ancestor');
   assert(guard.includes("item.node.localName==='svg'&&item.node.parentElement===p&&position!=='static'"),'An absolute SVG without offsetParent is clip-eligible only under its direct positioned HTML parent');
@@ -120,6 +121,31 @@ test('foreign paint clip source: only proven overflow clips may trim measured pa
   assert(guard.includes('r.right+scrollX')&&guard.includes('r.bottom+scrollY')&&!guard.includes('clientLeft')&&!guard.includes('clientTop')&&!guard.includes('clientWidth')&&!guard.includes('clientHeight'),'Fractional clips use conservative border-box bounds, not rounded client metrics');
   assert(!guard.includes('borderTopLeftRadius'),'Rounded overflow clips use their rectangular padding-box over-approximation');
   assert(source.includes('clippedPaintRect(e,rect,text)'),'Both measured text and element paint must pass through the bounded clip check');
+});
+
+test('foreign paint clip pure: proven z-indexed absolute ancestors clip nested text; escapes stay raw',async()=>{
+  const source=await readFile(new URL('./visual-state-audit-drivers.mjs',import.meta.url),'utf8');
+  const start=source.indexOf('const clippedPaintRect='),end=source.indexOf('\n  const rootSelector=',start);
+  assert(start>=0&&end>start,'Clipping predicate must remain extractable within the classifier');
+  const declaration=source.slice(start,end).trim().replace(/;$/,'');
+  const clip=new Function('getComputedStyle','scrollX','scrollY',`return (${declaration.slice('const clippedPaintRect='.length)})`)(node=>node.style,0,0);
+  const style=(values={})=>({position:'static',zIndex:'auto',opacity:'1',transform:'none',translate:'none',rotate:'none',scale:'none',filter:'none',perspective:'none',maskImage:'none',backdropFilter:'none',containerType:'normal',isolation:'auto',mixBlendMode:'normal',contain:'none',willChange:'auto',clipPath:'none',clip:'auto',zoom:'normal',contentVisibility:'visible',overflowX:'visible',overflowY:'visible',overflowClipMargin:'0px',...values});
+  const box=(top,bottom)=>({x:0,y:top,width:100,height:bottom-top});
+  const node=(name,css,rect,parent=null,offsetParent=null,namespaceURI='http://www.w3.org/1999/xhtml')=>({localName:name,namespaceURI,style:style(css),rect,parentElement:parent,offsetParent,matches:()=>false,contains(other){for(let current=other;current;current=current.parentElement)if(current===this)return true;return false;},getBoundingClientRect(){return {left:rect.x,top:rect.y,right:rect.x+rect.width,bottom:rect.y+rect.height};}});
+
+  const scroller=node('div',{overflowY:'auto',position:'relative'},box(0,60));
+  const slot=node('div',{position:'relative'},box(0,140),scroller);const button=node('button',{position:'absolute',zIndex:'2'},box(50,80),slot,slot);
+  const small=node('small',{display:'block'},box(52,72),button);
+  assert.deepEqual(clip(button,button.rect,false),box(50,60),'Calendar button z-index must not escape its proven scrollport clip');
+  assert.deepEqual(clip(small,small.rect,true),box(52,60),'Nested small text must retain the absolute button containing-block proof');
+
+  const outer=node('div',{position:'relative'},box(0,60));const overflow=node('div',{overflowY:'hidden'},box(0,60),outer);const escaped=node('button',{position:'absolute',zIndex:'2'},box(70,100),overflow,outer);
+  assert.deepEqual(clip(escaped,escaped.rect,false),escaped.rect,'Absolute paint whose containing block is outside the clip remains raw');
+  const fixed=node('button',{position:'fixed',zIndex:'2'},box(70,100));
+  assert.deepEqual(clip(fixed,fixed.rect,false),fixed.rect,'Fixed paint remains raw even when z-indexed');
+
+  const svgClip=node('div',{position:'relative',overflowY:'hidden'},box(0,60));const svg=node('svg',{position:'absolute',zIndex:'2'},box(50,80),svgClip,null,'http://www.w3.org/2000/svg');
+  assert.deepEqual(clip(svg,svg.rect,false),box(50,60),'Direct positioned-parent proof trims an absolute SVG viewport to its clip');
 });
 
 test('vertical range direct pure: listener cleanup preserves action failures',async()=>{

@@ -106,7 +106,7 @@ export function captureForeignPaint(node,{clip,checkedRootID}){
     const clipped={...rect},positioned=[];
     for(let p=element;p;p=p.parentElement){
       const s=getComputedStyle(p),position=s.position;
-      if(p.matches(':modal,:popover-open')||position==='fixed'||position==='sticky'||(position==='absolute'&&p!==element)||s.zIndex !== 'auto'||Number(s.opacity) !== 1||s.transform !== 'none'||s.translate !== 'none'||s.rotate !== 'none'||s.scale !== 'none'||s.filter !== 'none'||s.perspective !== 'none'||s.maskImage !== 'none'||s.backdropFilter !== 'none'||s.containerType !== 'normal'||s.isolation !== 'auto'||s.mixBlendMode !== 'normal'||s.contain !== 'none'||s.willChange !== 'auto'||s.clipPath !== 'none'||s.clip !== 'auto'||(s.zoom !== 'normal'&&Number(s.zoom) !== 1)||s.contentVisibility !== 'visible')return rect;
+      if(p.matches(':modal,:popover-open')||!['static','relative','absolute'].includes(position)||s.zIndex !== 'auto'&&position!=='absolute'||Number(s.opacity) !== 1||s.transform !== 'none'||s.translate !== 'none'||s.rotate !== 'none'||s.scale !== 'none'||s.filter !== 'none'||s.perspective !== 'none'||s.maskImage !== 'none'||s.backdropFilter !== 'none'||s.containerType !== 'normal'||s.isolation !== 'auto'||s.mixBlendMode !== 'normal'||s.contain !== 'none'||s.willChange !== 'auto'||s.clipPath !== 'none'||s.clip !== 'auto'||(s.zoom !== 'normal'&&Number(s.zoom) !== 1)||s.contentVisibility !== 'visible')return rect;
       if(position==='absolute')positioned.push({node:p,containingBlock:p.offsetParent});
       if(p===element&&!text)continue;
       const clipX=s.overflowX!=='visible',clipY=s.overflowY!=='visible';

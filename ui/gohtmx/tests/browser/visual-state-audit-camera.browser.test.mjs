@@ -53,16 +53,17 @@ test('foreign paint honors proven absolute overflow clips but keeps escaping pos
       .twin{position:relative;width:100px;height:60px;margin-top:-60px}.twin.first{margin-top:0}
       .scroll{position:relative;width:100px;height:60px;overflow:auto}
       .content{position:relative;width:100px;height:180px}.slot{position:relative;height:140px}
-      .inside{position:absolute;top:80px;left:0;width:80px;height:30px;background:#c22}
+      .inside{position:absolute;top:80px;left:0;width:80px;height:30px;background:#c22;z-index:2}
+      .inside small{display:block;overflow:hidden}
       .svg-clip{position:relative;width:100px;height:60px;overflow:hidden}
-      .svg-clip>svg{position:absolute;top:70px;left:0;width:80px;height:30px;overflow:visible}
+      .svg-clip>svg{position:absolute;top:50px;left:0;width:80px;height:30px;overflow:visible;z-index:2}
       .outer{position:relative;width:100px;height:60px}.clip{width:100px;height:60px;overflow:hidden}
-      .outside{position:absolute;top:70px;left:0;width:40px;height:30px;background:#2c2}
-      .fixed{position:fixed;top:70px;left:50px;width:40px;height:30px;background:#22c}
+      .outside{position:absolute;top:70px;left:0;width:40px;height:30px;background:#2c2;z-index:2}
+      .fixed{position:fixed;top:70px;left:50px;width:40px;height:30px;background:#22c;z-index:2}
       #owned{position:absolute;left:0;top:65px;width:100px;height:100px}
     </style><body>
       <div class="twin first" data-audit-twin><section class="root" id="calendar-twin" data-ely-family="communication">
-        <div class="scroll" id="calendar-scroll"><div class="content"><div class="slot"><button class="inside" id="clipped-calendar-button">calendar event</button></div></div></div>
+        <div class="scroll" id="calendar-scroll"><div class="content"><div class="slot"><button class="inside" id="clipped-calendar-button"><small>calendar event</small></button></div></div></div>
       </section></div>
       <div class="twin" data-audit-twin><section class="root" id="svg-twin" data-ely-family="fixture"><div class="svg-clip" id="svg-clip"><svg id="clipped-absolute-svg" viewBox="0 0 80 30"><rect width="80" height="30" fill="#c22"/></svg></div></section></div>
       <div class="twin" data-audit-twin><section class="root" id="outside-twin" data-ely-family="fixture"><div class="outer"><div class="clip"><button class="outside" id="escaped-absolute">absolute escape</button></div></div></section></div>
