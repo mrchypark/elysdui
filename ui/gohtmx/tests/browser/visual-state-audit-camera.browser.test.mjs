@@ -42,6 +42,53 @@ test('camera bounds clip an absolutely positioned map SVG at its canvas but reta
   }finally{await browser.close();}
 });
 
+test('foreign paint honors proven absolute overflow clips but keeps escaping positioned paint conservative',{
+  skip:process.env.RUN_ACTION_CAMERA_BROWSER!=='1',timeout:30000,
+},async()=>{
+  const browser=await chromium.launch({executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH||undefined});
+  try{
+    const page=await browser.newPage({viewport:{width:400,height:240}});
+    await page.setContent(`<style>
+      body{margin:0}.root{position:relative;width:100px;height:60px}
+      .scroll{position:relative;width:100px;height:60px;overflow:auto}
+      .content{position:relative;width:100px;height:180px}.slot{position:relative;height:140px}
+      .inside{position:absolute;top:80px;left:0;width:80px;height:30px;background:#c22}
+      .svg-clip{position:relative;width:100px;height:60px;overflow:hidden}
+      .svg-clip>svg{position:absolute;top:70px;left:0;width:80px;height:30px;overflow:visible}
+      .outer{position:relative;width:100px;height:60px}.clip{width:100px;height:60px;overflow:hidden}
+      .outside{position:absolute;top:70px;left:0;width:80px;height:30px;background:#2c2}
+      .fixed{position:fixed;top:70px;left:0;width:80px;height:30px;background:#22c}
+      #owned{position:absolute;left:0;top:65px;width:100px;height:100px}
+    </style><body>
+      <div data-audit-twin><section class="root" id="calendar-twin" data-ely-family="communication">
+        <div class="scroll" id="calendar-scroll"><div class="content"><div class="slot"><button class="inside" id="clipped-calendar-button">calendar event</button></div></div></div>
+      </section></div>
+      <div data-audit-twin><section class="root" id="svg-twin" data-ely-family="fixture"><div class="svg-clip"><svg id="clipped-absolute-svg" viewBox="0 0 80 30"><rect width="80" height="30" fill="#c22"/></svg></div></section></div>
+      <div data-audit-twin><section class="root" id="outside-twin" data-ely-family="fixture"><div class="outer"><div class="clip"><button class="outside" id="escaped-absolute">absolute escape</button></div></div></section></div>
+      <div data-audit-twin><section class="root" id="fixed-twin" data-ely-family="fixture"><button class="fixed" id="escaped-fixed">fixed escape</button></section></div>
+      <div data-audit-main><section id="owned" data-ely-family="fixture"></section></div></body>`);
+    await page.locator('#calendar-scroll').evaluate(node=>{node.scrollTop=20;});
+    const geometry=await page.evaluate(()=>{
+      const r=id=>{const b=document.getElementById(id).getBoundingClientRect();return {left:b.left,top:b.top,right:b.right,bottom:b.bottom};};
+      return {target:r('owned'),calendarRoot:r('calendar-twin'),scroll:r('calendar-scroll'),button:r('clipped-calendar-button'),svgRoot:r('svg-twin'),svgClip:r('svg-twin .svg-clip'),svg:r('clipped-absolute-svg'),absolute:r('escaped-absolute'),fixed:r('escaped-fixed'),absoluteCB:document.getElementById('escaped-absolute').offsetParent?.className,fixedPosition:getComputedStyle(document.getElementById('escaped-fixed')).position};
+    });
+    assert(geometry.button.top<geometry.target.bottom&&geometry.button.bottom>geometry.target.top,'Raw calendar button box must overlap the later target');
+    assert(geometry.button.bottom>geometry.scroll.bottom,'Calendar button must geometrically extend past its scrollport');
+    assert(geometry.target.top>=geometry.scroll.bottom&&geometry.calendarRoot.bottom<geometry.target.top,'Calendar button overlap must lie wholly outside the twin scrollport and root');
+    assert(geometry.svg.top<geometry.target.bottom&&geometry.svg.bottom>geometry.target.top&&geometry.svg.bottom>geometry.svgClip.bottom,'Absolute SVG box must overlap the later target beyond its clipping parent');
+    assert(geometry.target.top>=geometry.svgClip.bottom&&geometry.svgRoot.bottom<geometry.target.top,'SVG overlap must lie wholly outside its clipping parent and root');
+    assert(geometry.absolute.top<geometry.target.bottom&&geometry.absolute.bottom>geometry.target.top,'Unproven absolute escape must geometrically intersect the target');
+    assert(geometry.fixed.top<geometry.target.bottom&&geometry.fixed.bottom>geometry.target.top,'Fixed escape must geometrically intersect the target');
+    assert.equal(geometry.absoluteCB,'outer','Negative absolute control must have a containing block outside the overflow clip');
+    assert.equal(geometry.fixedPosition,'fixed');
+    const result=await page.locator('#owned').evaluate(captureForeignPaint,{clip:{x:0,y:65,width:100,height:100},checkedRootID:'owned'});
+    assert(!result.foreignDOMIntersections.some(item=>item.id==='calendar-twin'),'Calendar absolute paint wholly beyond its scrollport must not be counted in the target');
+    assert(!result.foreignDOMIntersections.some(item=>item.id==='svg-twin'),'Absolute SVG paint wholly beyond its positioned clipping parent must not be counted in the target');
+    assert(result.foreignDOMIntersections.some(item=>item.id==='outside-twin'),'Absolute paint with containing block outside overflow clip remains a conservative foreign witness');
+    assert(result.foreignDOMIntersections.some(item=>item.id==='fixed-twin'),'Fixed paint escaping an overflow ancestor remains a conservative foreign witness');
+  }finally{await browser.close();}
+});
+
 // Separate explicit grant only: RUN_ACTION_CAMERA_BROWSER=1 node --test <this file>.
 test('action camera tall-page, outline and centered native-modal causal pixels',{
   skip:process.env.RUN_ACTION_CAMERA_BROWSER!=='1',

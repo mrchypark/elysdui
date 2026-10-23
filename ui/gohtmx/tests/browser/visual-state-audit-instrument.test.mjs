@@ -104,13 +104,16 @@ test('vertical range direct pure: finite geometry, eight native source states, c
   assert.throws(()=>assertVerticalRangeSnapshot('layout/ScrollbarAlias','range-center-pointer',base,'same twin'));
 });
 
-test('foreign paint clip source: only plain flow ancestors may trim measured paint',async()=>{
+test('foreign paint clip source: only proven overflow clips may trim measured paint',async()=>{
   const source=await readFile(new URL('./visual-state-audit-drivers.mjs',import.meta.url),'utf8');
   const start=source.indexOf('  const clippedPaintRect='),end=source.indexOf('\n  const rootSelector=',start),guard=source.slice(start,end);
   const compact=guard.replace(/\s+/g,'');
   assert(start>=0&&end>start,'Foreign paint clipping must stay local to the camera classifier');
   assert(guard.includes('for(let p=element;p;p=p.parentElement)')&&guard.includes('if(p===element&&!text)continue'),'Positioned painted elements must remain conservative without clipping their own border box');
-  assert(guard.includes("!['static','relative'].includes(position)"),'Absolute, fixed and sticky descendants keep raw paint bounds');
+  assert(guard.includes("position==='fixed'||position==='sticky'"),'Fixed and sticky descendants keep raw paint bounds');
+  assert(guard.includes("if(position==='absolute')positioned.push({node:p,containingBlock:p.offsetParent})"),'Absolute descendants must retain their measured containing block for clip proof');
+  assert(guard.includes('!p.contains(containingBlock)'),'An absolute descendant is clipped only when its containing block is inside the clipping ancestor');
+  assert(guard.includes("item.node.localName==='svg'&&item.node.parentElement===p&&position!=='static'"),'An absolute SVG without offsetParent is clip-eligible only under its direct positioned HTML parent');
   assert(guard.includes("p.matches(':modal,:popover-open')"),'Top-layer ancestors keep raw paint bounds');
   for(const unsupported of ['s.transform!==\'none\'','s.filter' + '!==\'none\'','s.maskImage!==\'none\'','s.clipPath!==\'none\'','s.overflowClipMargin!==\'0px\''])assert(compact.includes(unsupported),`${unsupported} must remain conservative`);
   for(const longhand of ['s.translate!==\'none\'','s.rotate!==\'none\'','s.scale!==\'none\''])assert(compact.includes(longhand),`${longhand} must keep raw paint bounds`);

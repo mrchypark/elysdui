@@ -100,18 +100,24 @@ export function captureForeignPaint(node,{clip,checkedRootID}){
     let common=node.parentElement;while(common&&!common.contains(paint))common=common.parentElement;
     return common&&covers.length&&unclippedAncestors()&&Number(style.opacity)===1&&style.transform==='none'&&style.filter==='none'&&style.mixBlendMode==='normal'&&plainChain(node.parentElement,common)&&plainChain(paint,common);
   };
-  // Trim raw text/control boxes only when every ancestor is ordinary flow and
-  // its rectangular overflow clip is directly measurable. Any complex paint
-  // or containing-block behavior keeps the conservative untrimmed witness.
+  // Trim text/control boxes only for measurable clips with ordinary flow or a
+  // positioned descendant whose containing block proves the clip applies.
   const clippedPaintRect=(element,rect,text)=>{
-    const clipped={...rect};
+    const clipped={...rect},positioned=[];
     for(let p=element;p;p=p.parentElement){
       const s=getComputedStyle(p),position=s.position;
-      if(p.matches(':modal,:popover-open')||!['static','relative'].includes(position)||s.zIndex !== 'auto'||Number(s.opacity) !== 1||s.transform !== 'none'||s.translate !== 'none'||s.rotate !== 'none'||s.scale !== 'none'||s.filter !== 'none'||s.perspective !== 'none'||s.maskImage !== 'none'||s.backdropFilter !== 'none'||s.containerType !== 'normal'||s.isolation !== 'auto'||s.mixBlendMode !== 'normal'||s.contain !== 'none'||s.willChange !== 'auto'||s.clipPath !== 'none'||s.clip !== 'auto'||(s.zoom !== 'normal'&&Number(s.zoom) !== 1)||s.contentVisibility !== 'visible')return rect;
+      if(p.matches(':modal,:popover-open')||position==='fixed'||position==='sticky'||(position==='absolute'&&p!==element)||s.zIndex !== 'auto'||Number(s.opacity) !== 1||s.transform !== 'none'||s.translate !== 'none'||s.rotate !== 'none'||s.scale !== 'none'||s.filter !== 'none'||s.perspective !== 'none'||s.maskImage !== 'none'||s.backdropFilter !== 'none'||s.containerType !== 'normal'||s.isolation !== 'auto'||s.mixBlendMode !== 'normal'||s.contain !== 'none'||s.willChange !== 'auto'||s.clipPath !== 'none'||s.clip !== 'auto'||(s.zoom !== 'normal'&&Number(s.zoom) !== 1)||s.contentVisibility !== 'visible')return rect;
+      if(position==='absolute')positioned.push({node:p,containingBlock:p.offsetParent});
       if(p===element&&!text)continue;
       const clipX=s.overflowX!=='visible',clipY=s.overflowY!=='visible';
       if(clipX||clipY){
         if(s.overflowClipMargin!=='0px')return rect;
+        for(const item of positioned){
+          let containingBlock=item.containingBlock;
+          // Some engines expose no offsetParent for an absolutely positioned SVG viewport.
+          if(!containingBlock&&item.node.namespaceURI==='http://www.w3.org/2000/svg'&&item.node.localName==='svg'&&item.node.parentElement===p&&position!=='static')containingBlock=p;
+          if(item.node!==p&&(!containingBlock||!p.contains(containingBlock)))return rect;
+        }
         const r=p.getBoundingClientRect(),left=r.left+scrollX,top=r.top+scrollY;
         if(clipX){const right=clipped.x+clipped.width;clipped.x=Math.max(clipped.x,left);clipped.width=Math.min(right,r.right+scrollX)-clipped.x;}
         if(clipY){const bottom=clipped.y+clipped.height;clipped.y=Math.max(clipped.y,top);clipped.height=Math.min(bottom,r.bottom+scrollY)-clipped.y;}
