@@ -193,7 +193,35 @@ test('Dock default fixture covers four native tab clicks, Enter/Space activation
   assert.match(fixture,/case "Dock":[\s\S]*"Items": \[\]string\{"Files", "Outline", "Search"\}/,'The default Dock labels are source-backed');
   assert.match(foundation,/const dockTab = event\.target\.closest\('\[data-foundation-dock-tab\]'\)/);assert.match(foundation,/emit\(root, 'change', \{value: dockTab\.textContent\}\)/);
   assert.match(foundation,/const onDragStart = event => \{ const tab = event\.target\.closest\?\.\('\[data-foundation-dock-tab\]'\)/);assert.match(foundation,/emit\(root, 'change', \{dock: dockZone\.dataset\.foundationDockZone, value: label\}\)/);
-  const dockPath=runRequestedStateActions.toString().slice(runRequestedStateActions.toString().indexOf("if(contract.focusedSequence==='dock-native-actions')"),runRequestedStateActions.toString().indexOf("if(contract.focusedSequence?.startsWith('communication-'))"));
+  const dockPath=runRequestedStateActions.toString().slice(runRequestedStateActions.toString().indexOf("if(contract.focusedSequence==='dock-native-actions')"),runRequestedStateActions.toString().indexOf("if(contract.focusedSequence==='foundation-native-resize')"));
   assert.match(dockPath,/\.click\(\)/);assert.match(dockPath,/\.press\(key\)/);assert.match(dockPath,/\.dragTo\(target\)/);assert.match(dockPath,/event\.isTrusted/);assert.doesNotMatch(dockPath,/dispatchEvent|new DataTransfer/,'Dock input must come from Playwright native interaction, not synthetic dispatch');
   assert.match(actions,/if\(contract\.requestedStateOnly\)\{\s*await runRequestedStateActions\(contract,root,step,failureDiagnostics\);/,'The existing generic requested-state path must execute Dock without a new whitelist');
+});
+
+test('ResizeHandle, Notification identities, local scroll sync, and RTL host locale have exact requested-state mappings',async()=>{
+  const expected=[
+    ['layout/ResizeHandle','ResizeHandle','foundation-native-resize',['resize-horizontal-pointer','resize-vertical-range-home','resize-horizontal-range-end']],
+    ['feedback/Notification','Notification','interaction-notification-actions',['notification-scroll-last-row','notification-open-review','notification-mark-all-read','notification-clear','notification-reset']],
+    ['feedback/NotificationCenter','Notification','interaction-notification-actions',['notification-scroll-last-row','notification-open-review','notification-mark-all-read','notification-clear','notification-reset']],
+    ['interaction/ScrollSync','VirtualScroller','interaction-scroll-sync',['scrollsync-before-to-after','scrollsync-after-to-before']],
+    ['interaction/VirtualScroller','VirtualScroller','interaction-scroll-sync',['virtual-scroller-advance','virtual-sync-before-to-after','virtual-sync-after-to-before']],
+    ['i18n/RTL layout','RTL layout','native-rtl-locale-host',['rtl-locale-he','rtl-locale-en-restore']],
+  ];
+  for(const [identity,kind,sequence,ids]of expected){
+    const contract=requestedStateContract(identity);assert.equal(contract?.identity,identity);assert.equal(contract.kind,kind);assert.equal(contract.requestedStateOnly,true);assert.equal(contract.focusedSequence,sequence);assert.deepEqual(contract.mappingGaps,[]);assert.deepEqual(contract.steps.map(step=>step.id),ids);assert(contract.steps.every(step=>step.source.siteId.endsWith(`:${step.id}`)&&step.source.sourceAnchor&&step.source.provenance.length>0));
+  }
+  assert.equal(expected.reduce((sum,[identity])=>sum+requestedStateContract(identity).steps.length,0),20,'The six exact identities resolve to twenty checkpoints per live profile');
+  assert.equal(requestedStateContract('layout/SplitPane'),null,'ResizeHandle mapping does not expand to nested SplitPane');
+  assert.equal(requestedStateContract('i18n/LocaleNumber'),null,'RTL host event mapping does not invent a locale toggle or expand to LocaleNumber');
+  const [actions,foundationTemplate,foundationJS,interactionTemplate,interactionJS,nativeTemplate,nativeJS,foundationFixtures,interactionFixtures,nativeFixtures]=await Promise.all([
+    read('ui/gohtmx/tests/browser/visual-state-audit-actions.mjs'),read('ui/gohtmx/templates/ely-api-foundation.html'),read('ui/gohtmx/assets/ely-api-foundation.js'),read('ui/gohtmx/templates/ely-api-interaction.html'),read('ui/gohtmx/assets/ely-api-interaction.js'),read('ui/gohtmx/templates/ely-api-native.html'),read('ui/gohtmx/assets/ely-api-native-theme.js'),read('internal/gallery/advanced_foundation_fixtures.go'),read('internal/gallery/advanced_interaction_fixtures.go'),read('internal/gallery/advanced_native_fixtures.go'),
+  ]);
+  const requested=runRequestedStateActions.toString(),branch=requested.slice(requested.indexOf("if(contract.focusedSequence==='foundation-native-resize')"),requested.indexOf("if(contract.focusedSequence?.startsWith('communication-'))"));
+  assert.match(actions,/if\(contract\.requestedStateOnly\)\{\s*await runRequestedStateActions\(contract,root,step,failureDiagnostics\);/,'All six exact cases use the existing requested-state route');
+  assert.match(foundationTemplate,/eq \.Kind "ResizeHandle"[\s\S]*?data-foundation-split-handle[\s\S]*?input class="ely-foundation__split-range" type="range"/);assert.match(foundationJS,/const setSplit = \(split, value\) =>[\s\S]*?emit\(root, 'change', \{value: bounded\}\)/);assert.match(foundationFixtures,/"layout\/ResizeHandle": \{"Before": "", "After": "", "Label": "Resize panes"\}/);
+  assert.match(interactionTemplate,/eq \.Kind "Notification"[\s\S]*?data-interaction-notification-read[\s\S]*?data-interaction-notification-clear[\s\S]*?data-interaction-notification-reset/);assert.match(interactionTemplate,/eq \.Kind "VirtualScroller"[\s\S]*?data-direct-count[\s\S]*?data-direct-sync/);assert.match(interactionJS,/value = 'read-all'[\s\S]*?value = 'reset'[\s\S]*?value = 'cleared'/);assert.match(interactionJS,/const directWindow = \(count, height, top, viewport\)/);assert.match(interactionJS,/root\.querySelectorAll\('\[data-direct-sync\]'\)[\s\S]*?other\.scrollTop = pane\.scrollTop/);assert.match(interactionFixtures,/if name == "VirtualScroller"[\s\S]*?props\["Count"\], props\["RowHeight"\], props\["Label"\] = 10000, 28, "Ten thousand rows"/);
+  assert.match(nativeTemplate,/eq \.Kind "RTL layout"[\s\S]*?data-native-locale-scope/);assert.match(nativeJS,/listen\(root,'ely:locale',event=>[\s\S]*?scope\.dataset\.locale=event\.detail\.locale[\s\S]*?sync\(event\)/);assert.match(nativeFixtures,/props\["Locale"\], props\["RTL"\] = "en-US", false/);
+  assert.match(branch,/mouse\.move\(x,box\.y\+box\.height\*\.7/);assert.match(branch,/\.press\(key\)/);assert.match(branch,/assertChange\(cursor,'notification',value\)/);assert.match(branch,/notification-scroll-last-row/);assert.match(branch,/mouse\.wheel/);assert.match(branch,/virtual-scroller-advance/);assert.match(branch,/Math\.abs\(positions\[0\]-positions\[1\]\)<=1/);assert.match(branch,/new CustomEvent\('ely:locale'/);assert.match(branch,/twinUnchanged:true/);
+  assert.doesNotMatch(branch,/scrollTop\s*=|\.dispatchEvent\(new (?:PointerEvent|MouseEvent|KeyboardEvent)/,'Scroll/resize inputs cannot be replaced by forced scroll assignment or synthetic native input');
+  assert.match(branch,/finally\{await root\.evaluate/,'Temporary event observers must be removed even when a checkpoint fails');
 });
