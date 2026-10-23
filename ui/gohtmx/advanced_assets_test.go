@@ -110,6 +110,17 @@ func TestMobileGenerativeAndFeedbackWrappersUseShrinkableGridTracks(t *testing.T
 	}
 }
 
+func TestMobileWebEmbedsUseShrinkableControlsTrack(t *testing.T) {
+	css, err := Files.ReadFile("assets/ely-api-native.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const want = "[data-ely-family='native'] .ely-native-card:is([data-native-kind='WebView'],[data-native-kind='IframeEmbed']) .ely-native-controls{grid-template-columns:minmax(0,1fr)}"
+	if !strings.Contains(string(css), want) {
+		t.Fatalf("native web embeds are missing the constrained controls grid rule %q", want)
+	}
+}
+
 func TestLicenseViewerWrapsWithinItsContainerAndKeepsLicenseScrolling(t *testing.T) {
 	css, err := Files.ReadFile("assets/ely-api-native.css")
 	if err != nil {

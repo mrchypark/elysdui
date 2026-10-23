@@ -803,3 +803,6 @@
 
 /* Give fixed-width generative controls a definite, shrinkable content track. */
 [data-ely-family='native'] .ely-native-card:is([data-native-kind='FineTuneJobCard'],[data-native-kind='DatasetViewer']) .ely-native-controls{grid-template-columns:minmax(0,1fr)}
+
+/* Let native web embeds shrink inside narrow family roots instead of widening their grid track. */
+[data-ely-family='native'] .ely-native-card:is([data-native-kind='WebView'],[data-native-kind='IframeEmbed']) .ely-native-controls{grid-template-columns:minmax(0,1fr)}
