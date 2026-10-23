@@ -98,5 +98,34 @@ if [ "$NETWORK_READY" != true ]; then
   exit 1
 fi
 echo 'Android guest reached the Go server through the app host-loopback bridge.'
+# Boot/network readiness does not prove that Gradle can discover device properties.
+# This is an observation deadline, not a hard command timeout: no existing
+# per-ADB timeout helper is available, and a hung adb can outlive the deadline.
+DEVICE_DEADLINE=$(( $(date +%s) + 120 ))
+DEVICE_READY=false
+DEVICE_ATTEMPT=1
+DEVICE_LOG="$RESULTS/pre-gradle-device-readiness.log"
+printf '%s\n' 'Serial emulator-5554; expected API 29 / x86_64; at most 30 observations, 2s apart; 120s soft deadline (ADB commands are not individually time-bounded).' > "$DEVICE_LOG"
+adb version >> "$DEVICE_LOG" 2>&1
+while [ "$DEVICE_ATTEMPT" -le 30 ] && [ "$(date +%s)" -lt "$DEVICE_DEADLINE" ]; do
+  printf '\n%s attempt=%s serial=%s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$DEVICE_ATTEMPT" "$SERIAL" >> "$DEVICE_LOG"
+  if device_state=$(adb -s "$SERIAL" get-state 2>> "$DEVICE_LOG" | tr -d '\r'); then state_ok=true; else state_ok=false; fi
+  if device_properties=$(adb -s "$SERIAL" shell getprop 2>> "$DEVICE_LOG" | tr -d '\r'); then properties_ok=true; else properties_ok=false; fi
+  if package_path=$(adb -s "$SERIAL" shell pm path android 2>> "$DEVICE_LOG" | tr -d '\r'); then package_ok=true; else package_ok=false; fi
+  device_sdk=$(printf '%s\n' "$device_properties" | awk -F '[][]' '$2=="ro.build.version.sdk" {print $4}')
+  device_abi=$(printf '%s\n' "$device_properties" | awk -F '[][]' '$2=="ro.product.cpu.abi" {print $4}')
+  printf 'state=%s\nsdk=%s\nabi=%s\npackage=%s\n%s\n' "$device_state" "$device_sdk" "$device_abi" "$package_path" "$device_properties" >> "$DEVICE_LOG"
+  if [ "$state_ok" = true ] && [ "$properties_ok" = true ] && [ "$package_ok" = true ] && [ "$device_state" = device ] && [ "$device_sdk" = 29 ] && [ "$device_abi" = x86_64 ] && [ "$(date +%s)" -lt "$DEVICE_DEADLINE" ]; then
+    case "$package_path" in package:/*) DEVICE_READY=true; break;; esac
+  fi
+  DEVICE_ATTEMPT=$((DEVICE_ATTEMPT + 1))
+  if [ "$DEVICE_ATTEMPT" -le 30 ] && [ "$(date +%s)" -lt "$DEVICE_DEADLINE" ]; then sleep 2; fi
+done
+if [ "$DEVICE_READY" != true ]; then
+  echo 'Exact Android device API/ABI/package readiness was not observed; refusing Gradle instrumentation.' >&2
+  cat "$DEVICE_LOG" >&2
+  exit 1
+fi
+echo 'Exact Android device API 29 / x86_64 and package service observed before Gradle.'
 cd adapters/android
 ANDROID_SERIAL="$SERIAL" ./gradlew --no-daemon :app:connectedDebugAndroidTest
