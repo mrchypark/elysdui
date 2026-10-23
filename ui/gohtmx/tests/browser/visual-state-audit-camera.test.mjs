@@ -133,6 +133,25 @@ test('source-only active owned outline union respects axis clips and fails close
   assert.match(driver,/captureForeignPaint,\{clip:bounds\.clip,checkedRootID\}/,'Foreign ownership must use the expanded clip');
 });
 
+test('absolute SVG focus outline uses only its direct non-static clipping parent when offsetParent is null',async()=>{
+  const rect={left:20,top:30,right:220,bottom:170,width:200,height:140},family={},base={display:'block',visibility:'visible',opacity:'1',contentVisibility:'visible',outlineStyle:'solid',outlineWidth:'2px',outlineOffset:'-2px',outlineColor:'rgb(0, 95, 204)',transform:'none',translate:'none',rotate:'none',scale:'none',perspective:'none',filter:'none',clipPath:'none',clip:'auto',maskImage:'none',contain:'none',zoom:'1',overflowX:'visible',overflowY:'visible',overflowClipMargin:'0px',position:'static'};
+  const make=(tag,parent,style)=>({localName:tag,namespaceURI:tag==='svg'?'http://www.w3.org/2000/svg':'http://www.w3.org/1999/xhtml',parentElement:parent,style:{...base,...style},offsetParent:null,closest:()=>family,getBoundingClientRect:()=>rect,getClientRects:()=>[rect],hasAttribute:()=>false,matches:()=>false,contains(candidate){for(let current=candidate;current;current=current.parentElement)if(current===this)return true;return false;}});
+  const evaluate=svg=>{
+    const node={contains:candidate=>candidate===svg,closest:()=>family},bounds={clip:{x:20,y:30,width:200,height:140},root:rect,extendsRoot:false,viewportTruncated:false};
+    return JSON.parse(JSON.stringify(runInNewContext(`(${activeOutlineBounds.toString()})(node,bounds)`,{document:{activeElement:svg},getComputedStyle:element=>element.style,node,bounds,scrollX:0,scrollY:0,innerWidth:500,innerHeight:400})));
+  };
+  const positioned=make('div',null,{position:'relative'}),directView=make('div',positioned,{position:'relative',overflowX:'hidden',overflowY:'hidden'}),directSVG=make('svg',directView,{position:'absolute'});
+  assert.equal(evaluate(directSVG).focusOutline.status,'bounded','A direct absolute SVG child of its non-static clip has a proven relationship despite null offsetParent');
+  const staticView=make('div',positioned,{position:'static',overflowX:'hidden',overflowY:'hidden'}),staticSVG=make('svg',staticView,{position:'absolute'}),staticResult=evaluate(staticSVG);
+  assert.equal(staticResult.focusOutline.status,'unsupported','A static parent cannot establish the SVG containing block');
+  assert.equal(staticResult.focusOutline.reason,'unproven positioned outline overflow clip relationship');
+  const interveningView=make('div',positioned,{position:'relative',overflowX:'hidden',overflowY:'hidden'}),wrapper=make('div',interveningView,{}),nestedSVG=make('svg',wrapper,{position:'absolute'}),nestedResult=evaluate(nestedSVG);
+  assert.equal(nestedResult.focusOutline.status,'unsupported','An intervening wrapper cannot use the direct-parent fallback');
+  assert.equal(nestedResult.focusOutline.reason,'unproven positioned outline overflow clip relationship');
+  const css=await readFile(new URL('../../assets/ely-api-workspace.css',import.meta.url),'utf8');
+  assert.match(css,/\[data-ely-family='workspace'\] \[data-cs-minimap\]:focus\{outline:2px solid var\(--focus\);outline-offset:-2px\}/,'The minimap keeps a visible theme-color focus ring inset within its clip');
+});
+
 test('caret preparation preserves exact style presence and bytes on all controls and twins, even on throw',async()=>{
   // Model the pinned Playwright preparation/cleanup contract, not a DOM engine.
   const controls=[{id:'primary',style:null},{id:'empty',style:''},{id:'styled',style:' color: red;  caret-color: blue !important; '},{id:'non-target-twin',style:null}];

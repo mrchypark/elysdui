@@ -42,14 +42,14 @@ export function activeOutlineBounds(node,bounds){
   if(style.outlineStyle==='none'||style.outlineStyle==='hidden'||width===0||style.outlineColor==='transparent'||(alpha!==undefined&&parseFloat(alpha)===0))return bounds;
   const diagnostic=()=>{
     const rectJSON=rect=>rect?{left:rect.left,top:rect.top,right:rect.right,bottom:rect.bottom,width:rect.width,height:rect.height}:null;
-    const identity=element=>element?{tag:element.localName,namespace:element.namespaceURI,id:element.id||null,dataCsMinimap:element.hasAttribute('data-cs-minimap'),rect:rectJSON(element.getBoundingClientRect())}:null;
+    const identity=element=>element?{tag:element.localName,namespace:element.namespaceURI,id:element.id||null,dataCsMinimap:element.hasAttribute?.('data-cs-minimap')??false,rect:rectJSON(element.getBoundingClientRect?.())}:null;
     const ancestors=[];
     for(let element=active;element;element=element.parentElement){
       const s=getComputedStyle(element);
       ancestors.push({...identity(element),position:s.position,overflowX:s.overflowX,overflowY:s.overflowY,overflowClipMargin:s.overflowClipMargin,clip:s.clip,clipPath:s.clipPath,transform:s.transform,translate:s.translate,rotate:s.rotate,scale:s.scale,perspective:s.perspective,filter:s.filter,contain:s.contain});
     }
     const offsetParent=identity(active.offsetParent);
-    return {active:{...identity(active),matchesFocusVisible:active.matches(':focus-visible'),outlineStyle:style.outlineStyle,outlineWidth:style.outlineWidth,outlineOffset:style.outlineOffset,outlineColor:style.outlineColor,clientRects:[...active.getClientRects()].map(rectJSON)},offsetParent,ancestors};
+    return {active:{...identity(active),matchesFocusVisible:active.matches?.(':focus-visible')??false,outlineStyle:style.outlineStyle,outlineWidth:style.outlineWidth,outlineOffset:style.outlineOffset,outlineColor:style.outlineColor,clientRects:[...(active.getClientRects?.()??[])].map(rectJSON)},offsetParent,ancestors};
   };
   const gap=reason=>({...bounds,focusOutline:{status:'unsupported',reason,diagnostic:diagnostic()}});
   const positioned=[];
@@ -67,7 +67,7 @@ export function activeOutlineBounds(node,bounds){
     if(ancestor===active)continue;
     const clipX=s.overflowX!=='visible',clipY=s.overflowY!=='visible';
     if(!clipX&&!clipY)continue;
-    if(positioned.some(item=>item.node!==ancestor&&(!item.containingBlock||!ancestor.contains(item.containingBlock))))return gap('unproven positioned outline overflow clip relationship');
+    if(positioned.some(item=>item.node!==ancestor&&(!item.containingBlock||!ancestor.contains(item.containingBlock))&&!(item.containingBlock===null&&getComputedStyle(item.node).position==='absolute'&&item.node.namespaceURI==='http://www.w3.org/2000/svg'&&item.node.localName==='svg'&&item.node.parentElement===ancestor&&getComputedStyle(ancestor).position!=='static')))return gap('unproven positioned outline overflow clip relationship');
     if((s.overflowX==='clip'||s.overflowY==='clip')&&s.overflowClipMargin!=='0px')return gap('nonzero overflow clip margin');
     // The border box over-approximates the padding and rounded overflow clip.
     const box=ancestor.getBoundingClientRect();
