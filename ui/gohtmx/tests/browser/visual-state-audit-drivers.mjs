@@ -301,6 +301,20 @@ export function requestedStateContract(identity,trashFixture){
   }
   const canvasIdentity=['canvas/InfiniteCanvas','canvas/CanvasGrid','canvas/Guides','canvas/Ruler','canvas/ArtboardFrame','canvas/ZoomControls','canvas/ZoomIndicator','canvas/MiniMap'].includes(identity);
   const focused={
+    'devtools/WebSocketConsole':{kind:'WebSocketConsole',sequence:'websocket-public-host-boundary',steps:[
+      ['empty-enter','[data-dt-socket-draft]','Empty Enter emits no request'],
+      ['type-ping','[data-dt-socket-draft]','Trusted typing enables Send without sending'],
+      ['send-enter','[data-dt-socket-draft]','Enter sends ping once and clears draft without fabricating messages'],
+      ['type-pong','[data-dt-socket-draft]','Trusted typing enables Send again'],
+      ['send-button','[data-dt-socket-send]','Native Send sends pong once and clears draft'],
+      ['request-disconnect','[data-dt-socket-toggle]','Request carries current open state; no optimistic disconnect'],
+      ['host-ack-closed','root ely:result','Explicit synthetic host acknowledgement rerenders closed state'],
+      ['type-closed-draft','[data-dt-socket-draft]','Closed draft queued is retained; Send stays disabled'],
+      ['closed-enter','[data-dt-socket-draft]','Closed Enter cannot send or clear queued draft'],
+      ['clear-closed-draft','[data-dt-socket-draft]','Native select-all/Backspace clears draft without a request'],
+      ['request-connect','[data-dt-socket-toggle]','Request carries current closed state; no optimistic connection'],
+      ['host-ack-open','root ely:result','Explicit synthetic acknowledgement restores open state and original messages'],
+    ]},
     'buttons/ActionSheet':{kind:'ActionSheet',sequence:'sheet-native-actions',steps:[
       ...['wallpaper','duplicate','delete'].flatMap(value=>[[`open-${value}`,'[data-interaction-dialog]','Native pointer opens the owned modal and focuses its enabled header Close control in actual DOM order'],[`choose-${value}`,`[data-interaction-sheet-action][value="${value}"]`,'One exact public action; native dialog closes and focus returns to its opener']]),
       ['open-cancel','[data-interaction-dialog]','Open the owned modal again and focus its header Close control'],['cancel-sheet','.ely-interaction__sheet-cancel','Native Cancel closes without any public action'],
@@ -393,6 +407,7 @@ export function requestedStateContract(identity,trashFixture){
   }[canvasIdentity?'canvas/InfiniteCanvas':identity];
   if(focused){
     const provenance={
+      'devtools/WebSocketConsole':'Only canonical source-backed Devtools WebSocketConsole fixture; advanced_workspace_devtools.go and ely-api-workspace-devtools.js socket(); native edits/keys/clicks plus separately labelled synthetic root host acknowledgements; no registered-site or networking approval',
       'buttons/ActionSheet':'internal/gallery/advanced_interaction_fixtures.go ActionSheet; ely-api-interaction.html native dialog/actions; ely-api.js interactionSheetAction dispatch exclusion; ely-api-interaction.js sheetAction/closeDialog; no host application callback execution',
       'buttons/BulkActionBar':'internal/gallery/advanced_interaction_fixtures.go explicitly SelectedCount0; ely-api-interaction.html effective-count rendering; ely-api-interaction.js bulk add/clear; separate initial Value2 render proof is TestBulkActionBarEffectiveInitialCount, NOT this gallery runtime fixture',
       'layout/Collapsible':'internal/gallery/advanced_foundation_fixtures.go Collapsible; ely-api-foundation.html native details; ely-api-foundation.js captured nonbubbling toggle emits change action asynchronously',
@@ -411,7 +426,7 @@ export function requestedStateContract(identity,trashFixture){
       'motion/Lottie Player':'Explicit deterministic player contract from internal/gallery/advanced_interaction_fixtures.go, ui/gohtmx/templates/ely-api-interaction.html and ui/gohtmx/assets/ely-api-interaction.js',
       'canvas/InfiniteCanvas':'Eight explicit canvas inventory IDs resolve the canonical InfiniteCanvas fixture via internal/gallery/advanced.go with no canvas aliasFixtureProps overrides; ui/gohtmx/component.go preserves actual alias identity and canonical Kind; action behavior from ui/gohtmx/assets/ely-api-workspace-canvas.js; action geometry is read from rendered SVG, not a presumed fit percentage; each alias and profile requires its own runtime evidence',
     }[canvasIdentity?'canvas/InfiniteCanvas':identity];
-    const steps=focused.steps.map(([id,control,expectedState])=>({id,control,expectedState,event:identity==='tooling/EventLogger'?'synthetic public DOM event via Playwright':id.startsWith('disabled-')?'native HTMLButtonElement.click (disabled negative; not trusted pointer input)':'native Playwright action',source:{siteId:`focused-state:${identity}:${id}`,sourceAnchor:null,provenance}}));
+    const steps=focused.steps.map(([id,control,expectedState])=>({id,control,expectedState,event:identity==='devtools/WebSocketConsole'&&id.startsWith('host-ack-')?'synthetic controlled host acknowledgement, not trusted user input':identity==='tooling/EventLogger'?'synthetic public DOM event via Playwright':id.startsWith('disabled-')?'native HTMLButtonElement.click (disabled negative; not trusted pointer input)':'native Playwright action',source:{siteId:`focused-state:${identity}:${id}`,sourceAnchor:null,provenance}}));
     return {identity,kind:focused.kind,target:null,variant:identity.split('/')[1],focusedSequence:focused.sequence,steps,mappingGaps:[],requestedStateOnly:true,
       fixtureGuards:{component:identity,kind:focused.kind},...(identity==='project/StatusSelect'?{inputSupport:{submit:'real Tab reveal followed by native Enter',unfocusedPointer:'unsupported: Update is 1px and clipped until focus-visible'}}:{}),scope:canvasIdentity?`Only the separate gallery:${identity} three-action focused sequence; source-defined contract is not runtime approval; all eight IDs across four profiles require 32 separate case/profile runs`: 'Explicit finite focused sequence from the case fixture; separate from registered-check coverage, aliases, and all-catalog approval'+(identity==='tooling/EventLogger'?'; four grouped scenario checkpoints, not per-event pixel coverage or trusted physical input; exact trace calibration remains separate':identity==='project/StatusSelect'?'; keyboard-only submit; no unfocused pointer activation approval':'')};
   }
@@ -561,7 +576,7 @@ export async function runRequestedStateActions(contract,root,runStep){
     await press('empty-confirm',clear,'empty-trash','');
     return;
   }
-  if(['task-due-submit','remove-four-tags','radio-groups-reselection','eventlogger-public-timestamps','button-public-boundary','textarea-public-multiline','canvas-minimap-zoom-fit-hit-test','sheet-native-actions','bulk-canonical-zero','native-disclosure'].includes(contract.focusedSequence)){
+  if(['task-due-submit','remove-four-tags','radio-groups-reselection','eventlogger-public-timestamps','button-public-boundary','textarea-public-multiline','canvas-minimap-zoom-fit-hit-test','websocket-public-host-boundary','sheet-native-actions','bulk-canonical-zero','native-disclosure'].includes(contract.focusedSequence)){
     const identity=await root.getAttribute('data-ely-component');
     assert.equal(identity,contract.identity,'Exact alias identity is required');
     assert.equal(await root.getAttribute('data-ely-kind'),contract.kind);
@@ -585,6 +600,76 @@ export async function runRequestedStateActions(contract,root,runStep){
     let cursor=0;
     const begin=async()=>{cursor=(await events()).length;};
     const fresh=async()=>{assert.deepEqual(await twinState(),initialTwin,'Public actions must preserve the independent twin');return (await events()).slice(cursor);};
+    if(contract.focusedSequence==='websocket-public-host-boundary'){
+      assert.equal(identity,'devtools/WebSocketConsole');
+      const url='wss://stream.example.com/orders';
+      const socket=()=>root.evaluate(node=>{
+        const host=node.querySelector('[data-ws-devtools-source]');if(host?.dataset.kind!=='WebSocketConsole')throw new Error('Exact source-backed WebSocketConsole required');
+        const panel=host.querySelector('[data-dt-panel="socket"]'),row=panel.querySelector('[data-dt-row]'),draft=panel.querySelector('[data-dt-socket-draft]'),send=panel.querySelector('[data-dt-socket-send]'),toggle=panel.querySelector('[data-dt-socket-toggle]');
+        return {state:row.querySelector('[data-dt-badge]').dataset.dtBadge,url:row.children[1].textContent,draft:draft.value,sendDisabled:send.disabled,toggleDisabled:toggle.disabled,toggle:toggle.textContent,rows:[...panel.querySelector('[data-dt-socket-log]').children].map(row=>[...row.children].map(child=>child.textContent)),model:host.querySelector('[data-ws-devtools-data]').innerHTML};
+      });
+      const initial=await socket();
+      assert.equal(initial.state,'open');assert.equal(initial.url,url);assert.equal(initial.draft,'');assert.equal(initial.sendDisabled,true);assert.equal(initial.toggle,'Disconnect');assert.equal(initial.toggleDisabled,false);
+      assert.deepEqual(initial.rows.map(row=>row.slice(0,2)),[['ⓘ',`Connected to ${url}`],['↗',JSON.stringify({type:'subscribe',channel:'orders'},null,2)],['↙',JSON.stringify({type:'order',id:1011,total:42.5},null,2)]]);
+      await root.evaluate(node=>{
+        node.__visualSocketNative=[];
+        node.__visualSocketTwinEvents=[];node.__visualSocketTwin=node.closest('[data-audit-name]').querySelector('[data-audit-twin] > [data-ely-family]');
+        node.__visualSocketTwinObserver=event=>node.__visualSocketTwinEvents.push(event.type);
+        for(const type of ['input','change','ely:action','ely:change','ely:result'])node.__visualSocketTwin.addEventListener(type,node.__visualSocketTwinObserver,true);
+        node.__visualSocketObserver=event=>{
+          if(event.type==='ely:action'){node.__visualSocketNative.push({type:event.type,detail:{...event.detail}});return;}
+          if(event.type==='ely:result'){node.__visualSocketNative.push({type:event.type,trusted:event.isTrusted,root:event.target===node,action:event.detail?.action,state:event.detail?.result?.state});return;}
+          const control=event.target.closest?.('[data-dt-socket-draft],[data-dt-socket-send],[data-dt-socket-toggle]');if(!control)return;
+          node.__visualSocketNative.push({type:event.type,trusted:event.isTrusted,key:event.key||null,value:control.value||'',control:control.hasAttribute('data-dt-socket-draft')?'draft':control.hasAttribute('data-dt-socket-send')?'send':'toggle'});
+        };
+        for(const type of ['input','change','keydown','keyup','click','ely:result','ely:action'])node.addEventListener(type,node.__visualSocketObserver,true);
+      });
+      const native=()=>root.evaluate(node=>node.__visualSocketNative);
+      let nativeCursor=0;
+      const steps=[
+        ['empty-enter','open','',true,null,'Enter'],
+        ['type-ping','open','ping',false,null,'ping'],
+        ['send-enter','open','',true,{action:'send-socket',text:'ping',url},'Enter'],
+        ['type-pong','open','pong',false,null,'pong'],
+        ['send-button','open','',true,{action:'send-socket',text:'pong',url},'send'],
+        ['request-disconnect','open','',true,{action:'toggle-socket',state:'open',url},'toggle'],
+        ['host-ack-closed','closed','',true,null,'closed'],
+        ['type-closed-draft','closed','queued',true,null,'queued'],
+        ['closed-enter','closed','queued',true,null,'Enter'],
+        ['clear-closed-draft','closed','',true,null,'clear'],
+        ['request-connect','closed','',true,{action:'toggle-socket',state:'closed',url},'toggle'],
+        ['host-ack-open','open','',true,null,'open'],
+      ];
+      try{for(const [label,state,draft,sendDisabled,expected,activation]of steps){
+        await runStep(label,async()=>{
+          await begin();nativeCursor=(await native()).length;
+          // Reacquire scoped locators after each host-driven ui.replaceChildren render.
+          if(label.startsWith('host-ack-')){await root.evaluate((node,state)=>node.dispatchEvent(new CustomEvent('ely:result',{bubbles:true,detail:{action:'toggle-socket',result:{state}}})),activation);return {method:'synthetic root-targeted host acknowledgement',state:activation};}
+          if(activation==='send'||activation==='toggle')return clickVisibleControl(root.locator(`[data-dt-socket-${activation}]`));
+          const input=root.locator('[data-dt-socket-draft]');
+          if(activation==='Enter')await input.press('Enter');
+          else if(activation==='clear'){await input.press('ControlOrMeta+A');await input.press('Backspace');}
+          else await input.pressSequentially(activation);
+        },async()=>{
+          const observed=await fresh();assert.deepEqual(observed.map(event=>({type:event.type,detail:event.detail})),expected?[{type:'ely:action',detail:{...expected,id,component:identity}}]:[]);
+          const current=await socket();assert.equal(current.state,state);assert.equal(current.url,url);assert.equal(current.draft,draft);assert.equal(current.sendDisabled,sendDisabled);assert.equal(current.toggle,state==='open'?'Disconnect':'Connect');assert.equal(current.toggleDisabled,false);
+          assert.deepEqual(current.rows,initial.rows,'No fabricated, removed, reordered or changed message');assert.equal(current.model,initial.model,'Caller fixture data remains unchanged');
+          assert.deepEqual(await root.evaluate(node=>node.__visualSocketTwinEvents),[],'Actions and host replies must not reach the independent twin');
+          const timeline=(await native()).slice(nativeCursor),inputs=timeline.filter(event=>event.type!=='ely:action');
+          assert.deepEqual(timeline.filter(event=>event.type==='ely:action').map(event=>event.detail),expected?[{...expected,id,component:identity}]:[]);
+          if(label.startsWith('host-ack-'))assert.deepEqual(inputs,[{type:'ely:result',trusted:false,root:true,action:'toggle-socket',state:activation}]);
+          else{
+            assert(inputs.length>0&&inputs.every(event=>event.trusted===true&&event.type!=='ely:result'),'Native evidence must be trusted; host replies require their named stage');
+            if(['ping','pong','queued'].includes(activation))assert.deepEqual(inputs.filter(event=>event.type==='input').map(event=>event.value),[...activation].map((_letter,index)=>activation.slice(0,index+1)));
+            else if(activation==='Enter'){assert.equal(inputs.filter(event=>event.type==='keydown'&&event.key==='Enter').length,1);assert.equal(inputs.filter(event=>event.type==='keyup'&&event.key==='Enter').length,1);if(expected){const down=timeline.findIndex(event=>event.type==='keydown'&&event.key==='Enter'),sent=timeline.findIndex(event=>event.type==='ely:action'),up=timeline.findIndex(event=>event.type==='keyup'&&event.key==='Enter');assert(down<sent&&sent<up,'Send request must occur inside native Enter dispatch');}}
+            else if(activation==='clear'){assert.equal(inputs.filter(event=>event.type==='keydown'&&event.key==='Backspace').length,1);assert.deepEqual(inputs.filter(event=>event.type==='input').map(event=>event.value),['']);}
+            else{assert.equal(inputs.filter(event=>event.type==='click'&&event.control===activation).length,1);assert(timeline.findIndex(event=>event.type==='click')<timeline.findIndex(event=>event.type==='ely:action'),'Host request must follow native pointer activation');}
+          }
+          return {state:current.state,draft:current.draft,sendDisabled:current.sendDisabled,events:observed,nativeEvents:timeline,hostAcknowledgement:label.startsWith('host-ack-')};
+        });
+      }}finally{await root.evaluate(node=>{for(const type of ['input','change','keydown','keyup','click','ely:result','ely:action'])node.removeEventListener(type,node.__visualSocketObserver,true);for(const type of ['input','change','ely:action','ely:change','ely:result'])node.__visualSocketTwin.removeEventListener(type,node.__visualSocketTwinObserver,true);delete node.__visualSocketTwinObserver;delete node.__visualSocketTwinEvents;delete node.__visualSocketTwin;delete node.__visualSocketObserver;delete node.__visualSocketNative;});}
+      return;
+    }
     if(['sheet-native-actions','bulk-canonical-zero','native-disclosure'].includes(contract.focusedSequence)){
       await root.evaluate(node=>{
         node.__visualFiniteClicks=[];
