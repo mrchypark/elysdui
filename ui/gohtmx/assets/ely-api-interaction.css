@@ -442,8 +442,8 @@
 [data-ely-family="interaction"] .ely-interaction--feedback-source .ely-interaction__result-mark :is(circle,path){stroke-dasharray:1;stroke-dashoffset:0;animation:ely-feedback-draw .5s ease-out both}
 [data-ely-family="interaction"] .ely-interaction--feedback-source .ely-interaction__result-mark path{stroke-width:4;animation-delay:.378s}
 [data-ely-family="interaction"] .ely-interaction--feedback-source [data-feedback-result-replay]{justify-self:start}
-[data-ely-family="interaction"] .ely-interaction--feedback-source .ely-interaction__confirmation-grid{width:512px;max-width:100%;display:grid;grid-template-columns:1fr;gap:12px}
-[data-ely-family="interaction"] .ely-interaction--feedback-source .ely-interaction__confirmation{display:flex;flex-direction:column;gap:12px;padding:16px;border:1px solid var(--color-line,#cdd2df);border-radius:8px;background:var(--color-paper,#fff)}
+[data-ely-family="interaction"] .ely-interaction--feedback-source .ely-interaction__confirmation-grid{width:100%;max-width:512px;min-width:0;display:grid;grid-template-columns:minmax(0,1fr);gap:12px}
+[data-ely-family="interaction"] .ely-interaction--feedback-source .ely-interaction__confirmation{display:flex;flex-direction:column;gap:12px;min-width:0;padding:16px;border:1px solid var(--color-line,#cdd2df);border-radius:8px;background:var(--color-paper,#fff)}
 [data-ely-family="interaction"] .ely-interaction--feedback-source .ely-interaction__confirmation p{margin-top:4px;color:var(--color-muted,#687087)}
 [data-ely-family="interaction"] .ely-interaction--feedback-source .ely-interaction__confirmation code{margin:0;padding:8px 12px;font-size:12px;border-radius:6px;background:var(--color-sunken,var(--accent-tint,#eef0f8))}
 [data-ely-family="interaction"] .ely-interaction--feedback-source .ely-interaction__confirmation footer{justify-content:flex-end}
