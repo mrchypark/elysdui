@@ -1,10 +1,11 @@
 package dev.ely.nativeprofile
 
-import android.graphics.Bitmap
 import android.accessibilityservice.AccessibilityServiceInfo
+import android.graphics.Bitmap
+import android.graphics.Rect
 import android.os.SystemClock
-import android.view.KeyEvent
 import android.view.accessibility.AccessibilityWindowInfo
+import android.view.inputmethod.InputMethodManager
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.test.*
@@ -99,6 +100,7 @@ class LiveProfileAppTest {
     }
 
     private fun closeKeyboard(expectedEditableText: String) {
+        val activity = compose.activity
         val serviceInfo = requireNotNull(automation.serviceInfo) {
             "Cannot determine whether the IME is visible: UiAutomation service info is unavailable"
         }
@@ -110,21 +112,53 @@ class LiveProfileAppTest {
                 automation.setServiceInfo(serviceInfo)
             }
 
-            val imeWasVisible = hasInputMethodWindow()
-            if (imeWasVisible) {
-                // A single trusted native Back dismisses the IME without invoking IME Done/save.
-                instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
-                val deadline = SystemClock.elapsedRealtime() + 3_000L
-                var imeHidden = false
-                while (SystemClock.elapsedRealtime() < deadline) {
-                    if (!hasInputMethodWindow()) {
-                        imeHidden = true
-                        break
-                    }
-                    SystemClock.sleep(50L)
+            val activityBounds = Rect()
+            var activityWindowId = -1
+            instrumentation.runOnMainSync {
+                val decorView = activity.window.decorView
+                val focusedView = activity.currentFocus ?: decorView
+                val windowToken = requireNotNull(focusedView.windowToken) {
+                    "Cannot request IME dismissal without the Activity window token"
                 }
-                assertTrue("IME remained visible after one native Back", imeHidden)
+                assertTrue("Activity window has no visible bounds", decorView.getGlobalVisibleRect(activityBounds))
+                val decorNode = decorView.createAccessibilityNodeInfo()
+                try {
+                    activityWindowId = decorNode.windowId
+                } finally {
+                    decorNode.recycle()
+                }
+                check(activityWindowId >= 0) { "Cannot identify this Activity's accessibility window" }
+                val inputMethodManager = requireNotNull(
+                    activity.getSystemService(InputMethodManager::class.java)
+                ) { "InputMethodManager is unavailable" }
+                // Request hide directly; its return value does not report actual IME visibility.
+                inputMethodManager.hideSoftInputFromWindow(windowToken, 0)
             }
+
+            val deadline = SystemClock.elapsedRealtime() + 3_000L
+            var sawOwnActivityWindow = false
+            var imeHiddenWithOwnWindow = false
+            while (SystemClock.elapsedRealtime() < deadline) {
+                val windows = automation.windows
+                val imeVisible: Boolean
+                val ownActivityWindow: Boolean
+                try {
+                    imeVisible = windows.any { it.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD }
+                    ownActivityWindow = windows.any {
+                        isOwnActivityWindow(it, activity, activityBounds, activityWindowId)
+                    }
+                } finally {
+                    windows.forEach { it.recycle() }
+                }
+                sawOwnActivityWindow = sawOwnActivityWindow || ownActivityWindow
+                if (ownActivityWindow && !imeVisible) {
+                    imeHiddenWithOwnWindow = true
+                    break
+                }
+                SystemClock.sleep(50L)
+            }
+            assertTrue("Could not observe this Activity's application window", sawOwnActivityWindow)
+            assertTrue("IME was not observed hidden alongside this Activity window", imeHiddenWithOwnWindow)
         } finally {
             if (serviceInfo.flags != originalFlags) {
                 serviceInfo.flags = originalFlags
@@ -141,12 +175,20 @@ class LiveProfileAppTest {
                 SemanticsProperties.EditableText, AnnotatedString(expectedEditableText)))
     }
 
-    private fun hasInputMethodWindow(): Boolean {
-        val windows = automation.windows
+    private fun isOwnActivityWindow(
+        window: AccessibilityWindowInfo,
+        activity: MainActivity,
+        activityBounds: Rect,
+        activityWindowId: Int,
+    ): Boolean {
+        if (window.type != AccessibilityWindowInfo.TYPE_APPLICATION || window.id != activityWindowId) return false
+        val root = window.root ?: return false
         return try {
-            windows.any { it.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD }
+            if (root.packageName?.toString() != activity.packageName) return false
+            val rootBounds = Rect().also(root::getBoundsInScreen)
+            !rootBounds.isEmpty && Rect.intersects(activityBounds, rootBounds)
         } finally {
-            windows.forEach { it.recycle() }
+            root.recycle()
         }
     }
 
