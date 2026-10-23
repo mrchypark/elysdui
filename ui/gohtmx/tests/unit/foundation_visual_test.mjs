@@ -31,6 +31,8 @@ onToggle({target:disclosure(true,{})});onToggle({target:{matches:()=>false}});
 assert.deepEqual(events,[],'nested family and non-details toggle must be ignored');
 assert.doesNotMatch(foundationSource.slice(foundationSource.indexOf('  const onChange ='),foundationSource.indexOf('  const setSplit =')),/closest\('details'\)/,'native disclosure must not rely on synthetic change');
 const css=readFileSync('ui/gohtmx/assets/ely-api-foundation.css','utf8');
+assert.match(css,/\.ely-foundation__scrollbar \[data-foundation-scrollbar\][^}]*writing-mode:vertical-lr;direction:rtl;/,'native range scrollbar keeps vertical orientation and bottom-to-top direction');
+assert.doesNotMatch(css,/appearance:slider-vertical/,'non-standard vertical slider appearance must not emit browser console warnings');
 assert.match(css,/\[data-ely-family='foundation'\] \.ely-foundation__section-items span,\[data-ely-family='foundation'\] fieldset span\{padding:\.4rem \.5rem;border:1px solid var\(--border,#777\);border-radius:\.25rem\}/);
 assert.doesNotMatch(css,/,fieldset span\{/,'foundation chip styling must not leak into other families');
 // Guard the explicit resets required to beat the older element/nth-child selectors.
