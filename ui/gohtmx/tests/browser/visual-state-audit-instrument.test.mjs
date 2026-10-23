@@ -409,8 +409,59 @@ test('optional click promotes only seven real gallery sites and preserves origin
   const transformed=transform(source,filename,{registeredCheckEntriesAwaited:true}),trace=synchronousTrace(source,filename);
   const promoted=transformed.interactionSites.filter(site=>/^[A-Za-z_$][\w$]*\?\.click\(\)$/.test(site.sourceAnchor.text));
   assert.deepEqual(promoted.map(site=>site.line),[123,133,135,137,140,230,277]);
-  assert.equal(transformed.interactionSites.length,168);
-  assert.equal(transformed.unsupported.filter(site=>site.siteId).length,7,'Four complex chains and three blocked Lottie sites remain unsupported');
+  assert.equal(transformed.originalSHA,'fc2fc05b122ac680bc89b8f4da892dc89886f79b14c75041cdfc054812a22427');
+  const additions=[
+    ['265:166:click','265:18:click','check','suspenseReload.click()',"suspense.querySelector('[data-interaction-suspense-toggle]')?.click()"],
+    ['265:531:click','265:288:click','check','suspenseFail.click()',"suspense.querySelector('[data-interaction-suspense-fail]')?.click()"],
+    ['329:336:click','329:208:click','check','dialogClose.click()',"target?.querySelector('[data-interaction-close]')?.click()"],
+    ['440:430:click','440:306:click','check','bulkClear.click()',"host.querySelector('[data-interaction-bulk-clear]')?.click()"],
+    ['552:21:dispatchEvent','552:21:dispatchEvent','lottieCheck',"seek.dispatchEvent(new Event('input', {bubbles: true}))", "seek.dispatchEvent(new Event('input', {bubbles: true}))"],
+    ['554:2:click','554:2:click','lottieCheck','pause.click()','pause.click()'],
+    ['555:2:click','555:2:click','lottieCheck','play.click()','play.click()'],
+  ];
+  assert.equal(transformed.interactionSites.length,175);
+  assert.deepEqual(transformed.unsupported.filter(site=>site.siteId),[]);
+  const addedIds=new Set(additions.map(([id])=>`${filename}:${id}`));
+  assert.equal(addedIds.size,7);
+  for(const [id,,owner,anchor]of additions){
+    const matches=transformed.interactionSites.filter(site=>site.siteId===`${filename}:${id}`);
+    assert.equal(matches.length,1,'Each newly eligible source site occurs exactly once');
+    const site=matches[0];assert.equal(site.method,id.split(':')[2]);assert.equal(site.containingFunction,owner);
+    assert.equal(site.sourceAnchor.text,anchor);assert.equal(source.slice(site.sourceAnchor.start,site.sourceAnchor.end),anchor);
+  }
+  // Lottie input is programmatic dispatch, not trusted/native user input.
+  assert.equal(transformed.interactionSites.find(site=>site.siteId===`${filename}:552:21:dispatchEvent`).event,"new Event('input', {bubbles: true})");
+
+  let historical=source;
+  const reversals=[
+    ['return await lottieCheck({root});','return lottieCheck({root});'],
+    ["const suspenseReload = suspense.querySelector('[data-interaction-suspense-toggle]'); if (suspenseReload !== null && suspenseReload !== undefined) { suspenseReload.click(); }","suspense.querySelector('[data-interaction-suspense-toggle]')?.click();"],
+    ["const suspenseFail = suspense.querySelector('[data-interaction-suspense-fail]'); if (suspenseFail !== null && suspenseFail !== undefined) { suspenseFail.click(); }","suspense.querySelector('[data-interaction-suspense-fail]')?.click();"],
+    ["const dialogClose = target?.querySelector('[data-interaction-close]'); if (dialogClose !== null && dialogClose !== undefined) { dialogClose.click(); }","target?.querySelector('[data-interaction-close]')?.click();"],
+    ["const bulkClear = host.querySelector('[data-interaction-bulk-clear]'); if (bulkClear !== null && bulkClear !== undefined) { bulkClear.click(); }","host.querySelector('[data-interaction-bulk-clear]')?.click();"],
+  ];
+  for(const [current,old]of reversals){assert.equal(historical.split(current).length,2);historical=historical.replace(current,old);}
+  const old=transform(historical,filename,{registeredCheckEntriesAwaited:true});
+  assert.equal(old.originalSHA,'ad9ea3d5afec8ab9149b39270863b829cd2ca375d6b2efc6f396a3310860e0b8','Reconstructed input must equal the exact 168-site historical fixture');
+  assert.equal(old.interactionSites.length,168);
+  const blocked=old.unsupported.filter(site=>site.siteId);
+  assert.deepEqual(blocked.map(site=>site.siteId).sort(),additions.map(([,id])=>`${filename}:${id}`).sort());
+  for(const [,id,owner,,anchor]of additions){
+    const site=blocked.find(site=>site.siteId===`${filename}:${id}`);
+    assert.equal(site.method,id.split(':')[2]);assert.equal(site.containingFunction,owner);assert.equal(site.sourceAnchor.text,anchor);
+    assert.equal(historical.slice(site.sourceAnchor.start,site.sourceAnchor.end),anchor);
+  }
+  // Preserve exact ordered anchor occurrences across column shifts on rewritten lines.
+  const occurrences=(sites,input)=>{
+    const seen=new Map();
+    return sites.map(site=>{
+      assert.equal(input.slice(site.sourceAnchor.start,site.sourceAnchor.end),site.sourceAnchor.text);
+      const identity=JSON.stringify([site.containingFunction,site.method,site.sourceAnchor.text]);
+      const ordinal=(seen.get(identity)||0)+1;seen.set(identity,ordinal);
+      return [identity,ordinal];
+    });
+  };
+  assert.deepEqual(occurrences(transformed.interactionSites.filter(site=>!addedIds.has(site.siteId)),source),occurrences(old.interactionSites,historical),'All 168 retained safe action occurrences must be unchanged');
   for(const site of promoted){
     assert.equal(source.slice(site.sourceAnchor.start,site.sourceAnchor.end),site.sourceAnchor.text);
     assert.equal(trace.sites.find(other=>other.siteId===site.siteId)?.traceKind,'statement');
