@@ -1094,13 +1094,16 @@ export async function runRequestedStateActions(contract,root,runStep,failureDiag
       node.__licenseTwinObserver=event=>node.__licenseTwinEvents.push(event.type);
       for(const type of ['ely:change','ely:action','click','keydown']){node.addEventListener(type,node.__licenseObserver,true);twin.addEventListener(type,node.__licenseTwinObserver,true);}
     });
-    const layout=()=>root.evaluate(node=>{
-      const rect=element=>{const r=element.getBoundingClientRect();return {left:r.left,right:r.right,top:r.top,bottom:r.bottom,width:r.width,height:r.height};};
-      const section=node.querySelector('[data-misc-licenses]'),article=section.querySelector('article'),pre=section.querySelector('pre');
-      const chain=[];for(let current=section;current;current=current.parentElement){const style=getComputedStyle(current);chain.push({tag:current.localName,rect:rect(current),clientWidth:current.clientWidth,scrollWidth:current.scrollWidth,scrollLeft:current.scrollLeft,overflowX:style.overflowX});}
-      const overlays=[...document.querySelectorAll('dialog[open],[role=dialog],[role=menu],[role=listbox]')].filter(element=>{const r=element.getBoundingClientRect(),s=getComputedStyle(element);return r.width>0&&r.height>0&&s.display!=='none'&&s.visibility!=='hidden';});
-      return {section:rect(section),article:rect(article),pre:rect(pre),host:{clientWidth:section.parentElement.clientWidth,paddingLeft:getComputedStyle(section.parentElement).paddingLeft,paddingRight:getComputedStyle(section.parentElement).paddingRight},chain,documentX:scrollX,overlays:overlays.length};
-    });
+    const layout=async()=>{
+      const metrics=await root.evaluate(node=>{
+        const rect=element=>{const r=element.getBoundingClientRect();return {left:r.left,right:r.right,top:r.top,bottom:r.bottom,width:r.width,height:r.height};};
+        const section=node.querySelector('[data-misc-licenses]'),article=section.querySelector('article'),pre=section.querySelector('pre');
+        const chain=[];for(let current=section;current;current=current.parentElement){const style=getComputedStyle(current);chain.push({tag:current.localName,rect:rect(current),clientWidth:current.clientWidth,scrollWidth:current.scrollWidth,scrollLeft:current.scrollLeft,overflowX:style.overflowX});}
+        return {section:rect(section),article:rect(article),pre:rect(pre),host:{clientWidth:section.parentElement.clientWidth,paddingLeft:getComputedStyle(section.parentElement).paddingLeft,paddingRight:getComputedStyle(section.parentElement).paddingRight},chain,documentX:scrollX};
+      });
+      const overlays=assertNoOwnedLicenseViewerOverlays(await root.evaluate(ownedOverlayInventory));
+      return {...metrics,overlays:overlays.length};
+    };
     let selected=0;
     assert.equal((await layout()).overlays,0,'Unexpected overlays block before any capture expansion');
     try{
@@ -1659,6 +1662,12 @@ export async function runRequestedStateActions(contract,root,runStep,failureDiag
   }
   if(contract.variant==='ProxySettings')await runStep('manual-proxy',()=>root.locator('[data-suite-proxy-mode]').selectOption('manual'),async()=>{assert.equal(await root.locator('[data-suite-proxy-fields]').isVisible(),true);assert.equal(await root.locator('[data-suite-proxy-apply]').isDisabled(),true);return {mode:'manual',fieldsVisible:true,applyDisabled:true};});
   if(contract.variant==='ResetToDefault')await runStep('reset-defaults',()=>clickVisibleControl(root.locator('[data-suite-reset-defaults]'),{allowKeyboard:true}),async()=>{assert.equal(await root.locator('input[name=size]').inputValue(),'14');assert.equal(await root.locator('[data-suite-reset-defaults]').isDisabled(),true);return {fontSize:'14',resetDisabled:true,summary:await root.locator('[data-suite-defaults-summary]').textContent()};});
+}
+
+export function assertNoOwnedLicenseViewerOverlays(inventory){
+  const owned=inventory.filter(item=>item.owned);
+  assert.equal(owned.length,0,`Unexpected owned LicenseViewer overlay${owned.length===1?'':'s'}: ${owned.map(item=>item.id||item.tag).join(', ')}`);
+  return owned;
 }
 
 // Runs in the page. A twin's descendants/references never confer ownership.
