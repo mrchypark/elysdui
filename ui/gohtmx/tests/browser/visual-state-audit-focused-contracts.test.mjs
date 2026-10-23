@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import test from 'node:test';
-import {assertCommunicationCallerRequest,requestedStateContract,runRequestedStateActions} from './visual-state-audit-drivers.mjs';
+import {assertCommunicationCallerRequest,assertEvalLastColumnGeometry,requestedStateContract,runRequestedStateActions} from './visual-state-audit-drivers.mjs';
 
 const read=path=>readFile(new URL(`../../../../${path}`,import.meta.url),'utf8');
 
@@ -69,7 +69,7 @@ test('each declared focused sequence has a matching asserted driver path',()=>{
 
 test('Missing35 shipped communication fixtures have finite native local-action contracts with alias behavior deduplicated',async()=>{
   const expected={
-    'agent/EvalResultTable':['sort-tokens-ascending','sort-tokens-descending'],
+    'agent/EvalResultTable':['sort-tokens-ascending','sort-tokens-descending','eval-scroll-last-column'],
     'calendar/CalendarMonthView':['month-page-down','month-open-day'],
     'calendar/CalendarWeekView':['week-scroll-late-events','week-open-samples','week-open-client','week-create-event','week-open-allday'],
     'calendar/TimeGrid':['week-scroll-late-events','week-open-samples','week-open-client','week-create-event','week-open-allday'],
@@ -88,11 +88,11 @@ test('Missing35 shipped communication fixtures have finite native local-action c
   const byKey=new Map();for(const contract of contracts){const prior=byKey.get(contract.behaviorKey);if(prior)assert.deepEqual(contract.steps.map(step=>step.id),prior.steps.map(step=>step.id));else byKey.set(contract.behaviorKey,contract);}
   assert.equal(contracts.length,10,'All ten exact Missing35 gallery identities remain represented');
   assert.equal(byKey.size,5,'The five shared aliases do not inflate the unique handler roster');
-  assert.equal(contracts.reduce((sum,contract)=>sum+contract.steps.length,0),44,'Each identity retains its own default-fixture action checkpoints');
-  assert.equal([...byKey.values()].reduce((sum,contract)=>sum+contract.steps.length,0),19,'Unique local handler checkpoint total is deduplicated by behavior key');
-  assert.equal(44*4,176,'Four mobile profiles require 176 identity/profile checkpoints');
-  assert.equal(176*2,352,'Each checkpoint requires owned before/after PNGs');
-  assert.equal(19*4*2,152,'Deduplicated handler comparison is 76 checkpoints/152 PNGs, not the capture denominator');
+  assert.equal(contracts.reduce((sum,contract)=>sum+contract.steps.length,0),45,'Each identity retains its own default-fixture action checkpoints');
+  assert.equal([...byKey.values()].reduce((sum,contract)=>sum+contract.steps.length,0),20,'Unique local handler checkpoint total is deduplicated by behavior key');
+  assert.equal(45*4,180,'Four mobile profiles require 180 identity/profile checkpoints');
+  assert.equal(180*2,360,'Each checkpoint requires owned before/after PNGs');
+  assert.equal(20*4*2,160,'Deduplicated handler comparison is 80 checkpoints/160 PNGs, not the capture denominator');
   assert.equal(requestedStateContract('calendar/MiniCalendar'),null,'Unrelated calendar siblings stay outside this contract');
   assert.equal(requestedStateContract('agent/TraceViewer'),null,'The canonical TraceViewer check does not create a second gallery specimen contract');
   assert.equal(requestedStateContract('calendar/CurrentTimeIndicator').directControlRole,'display-only indicator within the shared week fixture');
@@ -101,9 +101,16 @@ test('Missing35 shipped communication fixtures have finite native local-action c
 
   assert.throws(()=>assertCommunicationCallerRequest([{action:'delete-event',component:'calendar/EventPopover',value:'review'}],0,'calendar/EventPopover','edit-event','review'),/wrong caller request/,'A plausible but wrong host request must fail the causal control');
   assert.throws(()=>assertCommunicationCallerRequest([{action:'edit-event',component:'calendar/EventPopover',value:'review'},{action:'edit-event',component:'calendar/EventPopover',value:'review'}],0,'calendar/EventPopover','edit-event','review'),/exactly one new caller request/,'Duplicate host requests must fail the causal control');
+  const visibleColumns=Array.from({length:6},()=>({insideRoot:true,insideClip:true}));
+  assert.equal(assertEvalLastColumnGeometry({scrollLeft:200,previousScrollLeft:0,scrollWidth:580,clientWidth:380,columns:visibleColumns,actionsBefore:2,actionsAfter:2,initiallyVisible:false,didScroll:true}).overflow,true,'Scrollable final column is accepted after local wheel movement with no action');
+  assert.equal(assertEvalLastColumnGeometry({scrollLeft:0,previousScrollLeft:0,scrollWidth:380,clientWidth:380,columns:visibleColumns,actionsBefore:2,actionsAfter:2,initiallyVisible:true,didScroll:false}).overflow,false,'A fitting final column is accepted by passive geometry with no wheel or host action');
+  assert.throws(()=>assertEvalLastColumnGeometry({scrollLeft:200,previousScrollLeft:0,scrollWidth:580,clientWidth:380,columns:[...visibleColumns.slice(0,5),{insideRoot:true,insideClip:false}],actionsBefore:2,actionsAfter:2,initiallyVisible:false,didScroll:true}),/within the component root and local scrollport/,'A clipped final value cannot pass on wheel movement alone');
+  assert.throws(()=>assertEvalLastColumnGeometry({scrollLeft:0,previousScrollLeft:0,scrollWidth:580,clientWidth:380,columns:visibleColumns,actionsBefore:2,actionsAfter:2,initiallyVisible:false,didScroll:false}),/requires native horizontal wheel input/,'An initially hidden final column cannot pass without native wheel input');
+  assert.throws(()=>assertEvalLastColumnGeometry({scrollLeft:200,previousScrollLeft:0,scrollWidth:580,clientWidth:380,columns:visibleColumns,actionsBefore:2,actionsAfter:3,initiallyVisible:false,didScroll:true}),/must not emit a host action/,'The passive reachability checkpoint rejects an extra host action');
 
-  const [driver,template,fixture,communicationJS,actions]=await Promise.all([read('ui/gohtmx/tests/browser/visual-state-audit-drivers.mjs'),read('ui/gohtmx/templates/ely-api-communication.html'),read('internal/gallery/advanced_communication_fixtures.go'),read('ui/gohtmx/assets/ely-api-communication.js'),read('ui/gohtmx/tests/browser/visual-state-audit-actions.mjs')]);
-  const communicationPath=driver.slice(driver.indexOf("if(contract.focusedSequence.startsWith('communication-'))"),driver.indexOf("if(contract.focusedSequence==='vertical-range-native-scroll')"));
+  const [driver,template,fixture,communicationJS,communicationCSS,actions]=await Promise.all([read('ui/gohtmx/tests/browser/visual-state-audit-drivers.mjs'),read('ui/gohtmx/templates/ely-api-communication.html'),read('internal/gallery/advanced_communication_fixtures.go'),read('ui/gohtmx/assets/ely-api-communication.js'),read('ui/gohtmx/assets/ely-api-communication.css'),read('ui/gohtmx/tests/browser/visual-state-audit-actions.mjs')]);
+  assert.match(driver,/if\(contract\.focusedSequence\?\.startsWith\('communication-'\)\)/,'Legacy requested-state contracts may omit focusedSequence and must retain the safe optional guard');
+  const communicationPath=driver.slice(driver.indexOf("if(contract.focusedSequence?.startsWith('communication-'))"),driver.indexOf("if(contract.focusedSequence==='vertical-range-native-scroll')"));
   assert.doesNotMatch(communicationPath,/\.dispatchEvent\(|innerHTML|scrollTop\s*=/,'Input stays native and no DOM injection or forced scroll substitutes for user actions');
   assert.match(communicationPath,/mouse\.wheel/);assert.match(communicationPath,/keyboard\.press\('Escape'\)/);assert.match(communicationPath,/aria-expanded/);assert.match(communicationPath,/assertCommunicationCallerRequest/);
   assert.match(actions,/if\(contract\.requestedStateOnly\)\{\s*await runRequestedStateActions\(contract,root,step,failureDiagnostics\);/,'The existing generic requested-state route must execute these communication contracts without a new whitelist');
@@ -111,6 +118,13 @@ test('Missing35 shipped communication fixtures have finite native local-action c
   assert.match(communicationPath,/data-ely-date="2026-10-13"\]\[data-ely-time="16:00"/);assert.match(communicationPath,/data-ely-date="2026-10-13"\]\[data-ely-time="16:30"/);
   assert.match(communicationPath,/Exactly one Tuesday 16:00 slot must exist/);assert.match(communicationPath,/event\.start,'2026-10-13T16:00'/);assert.match(communicationPath,/event\.end,'2026-10-13T16:30'/);
   assert.match(communicationJS,/emit\(root,'create-event',\{start:values\[0\],end:values\[1\]\}\)/,'Calendar creation emits an interval payload from native pointer-drag input');
+  assert.match(template,/<section class="ely-agent-evals">[\s\S]*?<table>/,'The evaluation table is nested inside its source-defined component section');
+  assert.match(communicationCSS,/\.ely-agent-evals\{[^}]*overflow:auto/,'The evaluation section is the native horizontal scroll owner');assert.match(communicationCSS,/\.ely-agent-evals table\{[^}]*min-width:580px/,'The source table can exceed narrow profile width');
+  assert.match(communicationPath,/owner=root\.locator\('\.ely-agent-evals'\)/,'The final-column check must use the component section that owns overflow');
+  assert.match(communicationPath,/data-eval-column.*?time/,'The final header and cells must be selected by their source-initialized Time-column identity');
+  assert.match(communicationPath,/mouse\.wheel\(Math\.max\(120,Math\.round\(box\.width\*\.75\)\),0\)/,'Overflow is inspected with bounded native horizontal wheel input');
+  assert.match(communicationPath,/if\(current\.scrollWidth>current\.clientWidth&&!initiallyVisible\)/,'The driver scrolls only when local overflow clips the final column');
+  assert.match(fixture,/\{"Value": "time", "Label": "Time"\}/,'The last asserted column is the default fixture Time field');
   assert.equal((template.match(/data-ely-calendar-time-slot data-ely-date="\{\{\.Date\}\}" data-ely-time="\{\{\$slotTime\}\}"/g)||[]).length,2,'Week and day time slots expose both date and time for an exact column match');
   assert.match(communicationPath,/mouse\.wheel\([\s\S]*?requestAnimationFrame\(\(\)=>requestAnimationFrame\(resolve\)\)/,'Every bounded wheel input must settle through two animation frames before reachability is rechecked');
   const calendarKeydown=communicationJS.slice(communicationJS.indexOf("root.addEventListener('keydown',event=>{const day="),communicationJS.indexOf("},options);",communicationJS.indexOf("root.addEventListener('keydown',event=>{const day="))+10);

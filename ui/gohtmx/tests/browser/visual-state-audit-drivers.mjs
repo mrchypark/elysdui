@@ -320,6 +320,7 @@ export function requestedStateContract(identity,trashFixture){
     'agent/EvalResultTable':{kind:'TraceViewer',sequence:'communication-eval-sort',fixture:'agent/EvalResultTable',steps:[
       ['sort-tokens-ascending','[data-ely-eval-sort][value="tokens"]','Trusted native sort click orders numeric token counts ascending, updates aria-sort, and emits sort-evaluations(tokens,ascending)'],
       ['sort-tokens-descending','[data-ely-eval-sort][value="tokens"]','Second trusted native sort click orders numeric token counts descending, updates aria-sort, and emits sort-evaluations(tokens,descending)'],
+      ['eval-scroll-last-column','.ely-agent-evals','Native horizontal wheel exposes the final Time column within this local scroll owner; if it already fits, assert it passively. No host action is expected.'],
     ]},
     'calendar/CalendarMonthView':{kind:'CalendarMonthView',sequence:'communication-calendar-month',fixture:'calendar/CalendarMonthView',steps:[
       ['month-page-down','[data-ely-calendar-day][aria-pressed="true"]','Native PageDown selects and visibly focuses the clamped target date; calendar-navigation carries that exact date'],
@@ -354,7 +355,7 @@ export function requestedStateContract(identity,trashFixture){
   }[identity];
   if(communicationBehavior){
     const behavior=communicationBehavior.sharedBehaviorKey?requestedStateContract(communicationBehavior.sharedBehaviorKey):communicationBehavior;
-    const steps=behavior.steps.map(step=>{const [id,control,expectedState]=Array.isArray(step)?step:[step.id,step.control,step.expectedState];return {id,control,expectedState,event:'trusted native Playwright pointer, keyboard, or wheel input',source:{siteId:`communication-state:${identity}:${id}`,sourceAnchor:`internal/gallery/advanced_communication_fixtures.go ${communicationBehavior.fixture}; ui/gohtmx/templates/ely-api-communication.html; ui/gohtmx/assets/ely-api-communication.js`,provenance:`Exact gallery identity ${identity}; shared behavior is retained under its canonical fixture identity${communicationBehavior.sharedBehaviorKey?` ${communicationBehavior.sharedBehaviorKey}`:''}; caller requests only, no external service or persistence result`}};});
+    const steps=behavior.steps.map(step=>{const [id,control,expectedState]=Array.isArray(step)?step:[step.id,step.control,step.expectedState];return {id,control,expectedState,event:id==='eval-scroll-last-column'?'conditional trusted native horizontal wheel or passive geometry read; no host action expected':'trusted native Playwright pointer, keyboard, or wheel input',source:{siteId:`communication-state:${identity}:${id}`,sourceAnchor:`internal/gallery/advanced_communication_fixtures.go ${communicationBehavior.fixture}; ui/gohtmx/templates/ely-api-communication.html; ui/gohtmx/assets/ely-api-communication.js`,provenance:`Exact gallery identity ${identity}; shared behavior is retained under its canonical fixture identity${communicationBehavior.sharedBehaviorKey?` ${communicationBehavior.sharedBehaviorKey}`:''}; caller requests only, no external service or persistence result`}};});
     return {identity,kind:communicationBehavior.kind,variant:identity.split('/')[1],fixtureIdentity:`execution-fixture:${communicationBehavior.fixture}`,requestedStateOnly:true,focusedSequence:communicationBehavior.sequence,mappingGaps:[],fixtureGuards:{component:identity,kind:communicationBehavior.kind},behaviorKey:communicationBehavior.sharedBehaviorKey||identity,directControlRole:communicationBehavior.directControlRole||'interactive local control in the default fixture',steps,
       scope:'Only this shipped communication gallery identity and its documented default fixture. Alias roots keep distinct case/profile evidence but reuse the canonical handler sequence; no external provider, persistence, locale matrix, or unrelated nested-content claim.'};
   }
@@ -679,18 +680,45 @@ export function assertCommunicationCallerRequest(actions,offset,identity,action,
   return {event,nextOffset:actions.length};
 }
 
+export function assertEvalLastColumnGeometry({scrollLeft,previousScrollLeft,scrollWidth,clientWidth,columns,actionsBefore,actionsAfter,initiallyVisible,didScroll}){
+  assert.equal(actionsAfter,actionsBefore,'Reading the final table column must not emit a host action');
+  assert.equal(columns.length,6,'The final Time header and all five fixture values must be present');
+  if(scrollWidth>clientWidth&&!initiallyVisible)assert.equal(didScroll,true,'An initially clipped final column requires native horizontal wheel input');
+  if(didScroll)assert(scrollLeft>previousScrollLeft,'Native horizontal wheel input must advance the local scroll owner');
+  assert(columns.every(column=>column.insideRoot&&column.insideClip),'The Time header and every Time value must be reachable within the component root and local scrollport');
+  return {overflow:scrollWidth>clientWidth,scrollLeft,columns};
+}
+
 export async function runRequestedStateActions(contract,root,runStep,failureDiagnostics){
-  if(contract.focusedSequence.startsWith('communication-')){
+  if(contract.focusedSequence?.startsWith('communication-')){
     const identity=contract.identity,grid=root.locator('.ely-calendar-time-grid');
     assert.equal(await root.getAttribute('data-ely-component'),identity,'Exact alias/canonical gallery identity is required');
     assert.equal(await root.getAttribute('data-ely-kind'),contract.kind,'Default fixture must resolve to its documented canonical kind');
     let actionOffset=0;
     const assertAction=(state,name,value)=>{const result=assertCommunicationCallerRequest(state.actions,actionOffset,identity,name,value);actionOffset=result.nextOffset;return result.event;};
     if(contract.focusedSequence==='communication-eval-sort'){
-      const tokens=root.locator('[data-ely-eval-sort][value="tokens"]'),table=root.locator('table');
+      const tokens=root.locator('[data-ely-eval-sort][value="tokens"]'),table=root.locator('table'),owner=root.locator('.ely-agent-evals');
       assert.equal(await table.locator('tbody tr').count(),5,'Default evaluation fixture must retain its five source rows');
       for(const [id,direction,firstText] of [['sort-tokens-ascending','ascending','Explain a stack trace'],['sort-tokens-descending','descending','Add a settings page']])
         await runStep(id,()=>tokens.click(),async state=>{assert.equal(await tokens.evaluate(node=>node.closest('th').getAttribute('aria-sort')),direction);assert((await table.locator('tbody tr').first().textContent()).includes(firstText),'Sorted first row must match numeric token ordering');const event=assertAction(state,'sort-evaluations');assert.equal(event.column,'tokens');assert.equal(event.direction,direction);return {column:event.column,direction:event.direction,firstRow:(await table.locator('tbody tr').first().textContent()).trim()};});
+      let columnGeometry;
+      await runStep('eval-scroll-last-column',async()=>{
+        assert.equal(await owner.count(),1,'The evaluation table must have one local horizontal scroll owner');
+        assert.equal(await owner.locator('table').count(),1);
+        const previousScrollLeft=await owner.evaluate(node=>node.scrollLeft),box=await owner.boundingBox();assert(box&&box.width>0,'The local evaluation scroll owner must be visible');
+        const inspect=()=>owner.evaluate(node=>{const root=node.closest('[data-ely-family]'),rootRect=root.getBoundingClientRect(),rect=node.getBoundingClientRect(),clip={left:rect.left+node.clientLeft,right:rect.left+node.clientLeft+node.clientWidth,top:rect.top+node.clientTop,bottom:rect.top+node.clientTop+node.clientHeight},table=node.querySelector('table'),cells=[table.querySelector('thead th[data-eval-column="time"]'),...table.querySelectorAll('tbody td[data-eval-column="time"]')];return {scrollLeft:node.scrollLeft,scrollWidth:node.scrollWidth,clientWidth:node.clientWidth,columns:cells.map(cell=>{const r=cell.getBoundingClientRect();return {text:cell.textContent.trim(),insideRoot:r.left>=rootRect.left&&r.right<=rootRect.right&&r.top>=rootRect.top&&r.bottom<=rootRect.bottom,insideClip:r.left>=clip.left&&r.right<=clip.right&&r.top>=clip.top&&r.bottom<=clip.bottom};})};});
+        let current=await inspect();const initiallyVisible=current.columns.every(column=>column.insideRoot&&column.insideClip);let didScroll=false;
+        if(current.scrollWidth>current.clientWidth&&!initiallyVisible){
+          await owner.hover();
+          for(let attempt=0;attempt<8&&!current.columns.every(column=>column.insideRoot&&column.insideClip);attempt++){
+            await root.page().mouse.wheel(Math.max(120,Math.round(box.width*.75)),0);
+            didScroll=true;
+            await root.page().evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+            current=await inspect();
+          }
+        }
+        columnGeometry={...current,previousScrollLeft,initiallyVisible,didScroll};
+      },async state=>{const result=assertEvalLastColumnGeometry({...columnGeometry,actionsBefore:actionOffset,actionsAfter:state.actions.length});return {owner:{scrollLeft:result.scrollLeft,previousScrollLeft:columnGeometry.previousScrollLeft,scrollWidth:columnGeometry.scrollWidth,clientWidth:columnGeometry.clientWidth},columns:result.columns};});
       return;
     }
     if(contract.focusedSequence==='communication-calendar-month'){
