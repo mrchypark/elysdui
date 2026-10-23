@@ -632,7 +632,7 @@ export async function runRequestedStateActions(contract,root,runStep,failureDiag
     });
     let primaryFailed=false;
     try{
-      for(const [stage,phase]of [['range-center-pointer','pointer-center'],['range-home-min','home'],['range-end-max','end']]){
+      for(const {id:stage}of contract.steps){
         let before;
         await runStep(stage,async()=>{
           before=await snapshot();
@@ -643,7 +643,7 @@ export async function runRequestedStateActions(contract,root,runStep,failureDiag
           return {method:stage==='range-center-pointer'?'native vertical pointer at track center':'native keyboard',key:stage==='range-center-pointer'?null:stage==='range-home-min'?'Home':'End'};
         },async()=>{
           const after=await snapshot();
-          assertVerticalRangeSnapshot(identity,phase,{...after,nativeEvents:after.nativeEvents.slice(before.nativeEvents.length),publicEvents:after.publicEvents.slice(before.publicEvents.length),twinEvents:after.twinEvents.slice(before.twinEvents.length)},initial.twinHTML);
+          assertVerticalRangeSnapshot(identity,stage,{...after,nativeEvents:after.nativeEvents.slice(before.nativeEvents.length),publicEvents:after.publicEvents.slice(before.publicEvents.length),twinEvents:after.twinEvents.slice(before.twinEvents.length)},initial.twinHTML);
           return {value:after.value,scrollTop:after.scrollTop,scrollMax:after.scrollMax,direction:after.direction,writingMode:after.writingMode,orientationRect:after.rect,trustedInput:true,publicEvents:after.publicEvents.slice(before.publicEvents.length)};
         });
       }

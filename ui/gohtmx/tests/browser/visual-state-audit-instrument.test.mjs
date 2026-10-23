@@ -52,17 +52,18 @@ test('vertical range direct pure: exact canonical identities and finite native s
   const runner=runRequestedStateActions.toString();
   assert(runner.includes("range.click({position:{x:box.width/2,y:box.height/2}})"));
   assert(runner.includes("range.press(stage==='range-home-min'?'Home':'End')"));
-  assert(runner.includes('assertVerticalRangeSnapshot')&&runner.includes('finally{await threewayCleanup'));
+  assert(runner.includes('for(const {id:stage}of contract.steps)'));
+  assert(runner.includes('assertVerticalRangeSnapshot(identity,stage,')&&runner.includes('finally{await threewayCleanup'));
   assert(!runner.includes("thumb.value = '0'")&&!runner.includes("dispatchEvent(new Event('input'"));
 });
 
 test('vertical range direct pure: finite geometry, native input, host silence, and twin invariants',()=>{
   const base={component:'layout/Scrollbar',direction:'rtl',writingMode:'vertical-lr',rect:{width:8,height:120},scrollTop:250,scrollLeft:0,scrollHeight:600,clientHeight:100,scrollMax:500,value:500,nativeEvents:[{type:'input',trusted:true}],publicEvents:[],twinHTML:'same twin',twinEvents:[]};
-  for(const identity of ['layout/Scrollbar','layout/StickyHeader'])for(const [stage,patch,nativeEvents]of [
-    ['range-center-pointer',{component:identity},[...base.nativeEvents,{type:'pointerdown',trusted:true},{type:'click',trusted:true}]],
-    ['range-home-min',{component:identity,value:0,scrollTop:0},[...base.nativeEvents,{type:'keydown',key:'Home',trusted:true}]],
-    ['range-end-max',{component:identity,value:1000,scrollTop:500},[...base.nativeEvents,{type:'keydown',key:'End',trusted:true}],
-  ]])assert.doesNotThrow(()=>assertVerticalRangeSnapshot(identity,stage,{...base,...patch,nativeEvents},'same twin'));
+  for(const identity of ['layout/Scrollbar','layout/StickyHeader'])for(const {id:stage}of requestedStateContract(identity).steps){
+    const patch=stage==='range-home-min'?{value:0,scrollTop:0}:stage==='range-end-max'?{value:1000,scrollTop:500}:{};
+    const nativeEvents=[...base.nativeEvents,...(stage==='range-center-pointer'?[{type:'pointerdown',trusted:true},{type:'click',trusted:true}]:[{type:'keydown',key:stage==='range-home-min'?'Home':'End',trusted:true}])];
+    assert.doesNotThrow(()=>assertVerticalRangeSnapshot(identity,stage,{...base,...patch,component:identity,nativeEvents},'same twin'),`${identity} ${stage} contract step must reach the assertion unchanged`);
+  }
   for(const patch of [{direction:'ltr'},{writingMode:'horizontal-tb'},{rect:{width:120,height:8}},{scrollLeft:1},{scrollMax:499},{value:500,scrollTop:0},{nativeEvents:[]},{nativeEvents:[{type:'input',trusted:false}]},{publicEvents:[{type:'ely:action'}]},{twinHTML:'changed twin'},{twinEvents:['input']}])assert.throws(()=>assertVerticalRangeSnapshot('layout/Scrollbar','range-center-pointer',{...base,...patch},'same twin'));
   assert.throws(()=>assertVerticalRangeSnapshot('layout/ScrollbarAlias','range-center-pointer',base,'same twin'));
 });
