@@ -91,6 +91,37 @@ test('foreign paint honors proven absolute overflow clips but keeps escaping pos
   }finally{await browser.close();}
 });
 
+test('masked empty leaves are trimmed only by proven ancestor overflow clips',{
+  skip:process.env.RUN_ACTION_CAMERA_BROWSER!=='1',timeout:30000,
+},async()=>{
+  const browser=await chromium.launch({executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH||undefined});
+  try{
+    const page=await browser.newPage({viewport:{width:240,height:120}});
+    const capture=async({overflow='auto',scrollWidth=80,scrollMargin=0,leafTop=30,leafWidth=16,leafStyle='',maskClip='border-box'}={})=>{
+      await page.setContent(`<style>
+        body{margin:0}[data-audit-main],[data-audit-twin]{position:absolute;inset:0}
+        .root{position:relative;width:220px;height:100px}
+        #owned-panel{position:absolute;left:0;top:0;width:100px;height:60px;z-index:5;background:#fff;border:0;border-radius:0}
+        .scrollport{width:${scrollWidth}px;height:20px;margin-left:${scrollMargin}px;overflow:${overflow}}
+        #masked-leaf{display:block;width:${leafWidth}px;height:16px;margin-top:${leafTop}px;background:#c22;mask-image:linear-gradient(#000,#000);mask-size:contain;mask-repeat:no-repeat;mask-clip:${maskClip};${leafStyle}}
+      </style><div data-audit-main><section class="root" id="owned-root" data-ely-family="fixture"><article id="owned-panel">owned panel</article></section></div><div data-audit-twin><section class="root" id="twin-root" data-ely-family="fixture"><div class="scrollport"><span id="masked-leaf"></span></div></section></div>`);
+      return page.locator('#owned-panel').evaluate(captureForeignPaint,{clip:{x:0,y:0,width:220,height:100},checkedRootID:'owned-root'});
+    };
+    const clipped=await capture();
+    assert.deepEqual(clipped.foreignDOMIntersections,[],'An empty masked leaf wholly outside an ordinary ancestor scrollport is clipped before intersection');
+    const visible=await capture({leafTop:0});
+    assert(visible.foreignDOMIntersections.some(peer=>peer.id==='twin-root'),'Visible masked pixels remain a foreign witness');
+    const protruding=await capture({scrollWidth:20,scrollMargin:70,leafTop:0,leafWidth:40});
+    assert(protruding.foreignDOMIntersections.some(peer=>peer.id==='twin-root'),'A partially visible masked box protruding beyond its scrollport remains blocking');
+    const noClip=await capture({overflow:'visible'});
+    assert(noClip.foreignDOMIntersections.some(peer=>peer.id==='twin-root'),'Without an ancestor clip the original masked bounds remain blocking');
+    const noClipMask=await capture({leafTop:0,maskClip:'no-clip'});
+    assert(noClipMask.foreignDOMIntersections.some(peer=>peer.id==='twin-root'),'A mask whose clip is not border-box remains unproven');
+    const fixed=await capture({leafStyle:'position:fixed;left:10px;top:10px',leafTop:0});
+    assert(fixed.foreignDOMIntersections.some(peer=>peer.id==='twin-root'),'Fixed masked paint escaping its scrollport remains blocking');
+  }finally{await browser.close();}
+});
+
 test('opaque panel subtracts only covered foreign paint with provably inactive static z-index',{
   skip:process.env.RUN_ACTION_CAMERA_BROWSER!=='1',timeout:30000,
 },async()=>{
