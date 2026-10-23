@@ -470,6 +470,51 @@ try {
           return {tag: node.tagName, role: node.getAttribute('role'), id: node.id || null, text: (node.innerText || '').trim().replace(/\s+/g, ' ').slice(0, 300), bounds: box(node), insideComponent: element.contains(node), ownerRecord: ownerRecord?.getAttribute('data-audit-name') || null, ownerReference, ownedByTarget, ownershipStatus: ownedByTarget ? 'target-owned' : ownerRecord ? 'other-case' : 'ambiguous-external'};
         }).filter(overlay => overlay.ownedByTarget);
         const style = getComputedStyle(element);
+        // Bounded attribution only: measured host width is not the viewport or a visual verdict.
+        const layoutDiagnostics = (() => {
+          const selectors = {
+            'gallery:layout/Layer': '[data-foundation-layers]',
+            'gallery:layout/ResizeHandle': '.ely-foundation__resize-demo',
+            'gallery:layout/Dock': '[data-foundation-dock]',
+            'gallery:primitives/Canvas': '.ely-foundation__canvas-demo',
+            'gallery:primitives/Slot': '.ely-foundation__slots',
+            'gallery:canvas/InspectorPanel': '[data-ws-scene-ui],[data-ws-layer-layout]',
+            'gallery:misc/LicenseViewer': '[data-misc-licenses],[data-misc-licenses] nav,[data-misc-licenses] article'
+          };
+          if (!Object.hasOwn(selectors, caseId)) return null;
+          const measure = node => {
+            const computed = getComputedStyle(node);
+            return {tag: node.localName, id: node.id || null, class: String(node.getAttribute('class') || '').slice(0, 240), bounds: box(node),
+              clientLeft: node.clientLeft, clientTop: node.clientTop, clientWidth: node.clientWidth, clientHeight: node.clientHeight,
+              scrollWidth: node.scrollWidth, scrollHeight: node.scrollHeight, scrollLeft: node.scrollLeft, scrollTop: node.scrollTop,
+              style: Object.fromEntries(['overflowX','overflowY','display','boxSizing','width','minWidth','maxWidth','paddingLeft','paddingRight','paddingTop','paddingBottom','gridTemplateColumns','flexDirection','flexWrap','flex','gap'].map(key => [key, computed[key]]))};
+          };
+          const ancestors = []; let ancestor = element;
+          while (ancestor && ancestors.length < 32) { ancestors.push(measure(ancestor)); ancestor = ancestor.parentElement; }
+          const nodes = new Set([element]);
+          let childrenTruncated = false;
+          const add = node => { if (nodes.has(node)) return; if (nodes.size < 96) nodes.add(node); else childrenTruncated = true; };
+          for (const node of element.children) add(node);
+          for (const node of element.querySelectorAll(selectors[caseId])) {
+            add(node);
+            for (const child of node.children) add(child);
+          }
+          const children = [...nodes].map(node => {
+            const ranges = []; let textTruncated = false;
+            for (const text of node.childNodes) {
+              if (text.nodeType !== Node.TEXT_NODE || !text.textContent.trim()) continue;
+              const range = document.createRange(); range.selectNodeContents(text);
+              for (const rect of range.getClientRects()) {
+                if (ranges.length < 32) ranges.push({left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom}); else textTruncated = true;
+              }
+            }
+            return {...measure(node), textRanges: ranges, textRangesTruncated: textTruncated};
+          });
+          return {caseId, diagnosticOnly: true, ancestorLimit: 32, ancestorsTruncated: Boolean(ancestor), ancestors,
+            childLimit: 96, childrenTruncated, children, textRangeLimitPerNode: 32,
+            layoutViewport: {clientWidth: document.documentElement.clientWidth, clientHeight: document.documentElement.clientHeight},
+            visualViewport: window.visualViewport ? {width: window.visualViewport.width, height: window.visualViewport.height, offsetLeft: window.visualViewport.offsetLeft, offsetTop: window.visualViewport.offsetTop, scale: window.visualViewport.scale} : null};
+        })();
         const faces = [...document.fonts].map(face => ({family: face.family, status: face.status, weight: face.weight, style: face.style}));
         const controlSelector = 'button,input,select,textarea,summary,a[href],[role="button"],[role="option"],[role="menuitem"],[role="switch"],[role="checkbox"],[role="radio"],[role="tab"],[role="combobox"],[tabindex],[contenteditable="true"],[data-ely-action],[data-ui-action],[data-ws-action],[data-native-action],[data-action]';
         const controlsInRoot = [...element.querySelectorAll(controlSelector)];
@@ -516,7 +561,7 @@ try {
             }
           }
         }
-        return {rootBounds: box(element), fixtureSnapshot: {recordSHA256: null, rootSHA256: null}, viewport: {width: innerWidth, height: innerHeight, devicePixelRatio}, scroll: {x: scrollX, y: scrollY, documentWidth: document.documentElement.scrollWidth, documentHeight: document.documentElement.scrollHeight}, readyMarker: element.getAttribute('data-ely-ready'), fonts: {documentStatus: document.fonts.status, rootFamily: style.fontFamily, rootSize: style.fontSize, faces}, visibleOverlays: overlays, componentText: (element.innerText || '').trim().replace(/\s+/g, ' ').slice(0, 1200), controlInventory: {count: controlsInRoot.length, maxRows: 300, truncated: controlsInRoot.length > 300, controls: controlsSnapshot}, svgGeometryDiagnostics: {svgCount: svgRoots.length, invalidViewBoxes, malformedNumericGeometry}};
+        return {rootBounds: box(element), layoutDiagnostics, fixtureSnapshot: {recordSHA256: null, rootSHA256: null}, viewport: {width: innerWidth, height: innerHeight, devicePixelRatio}, scroll: {x: scrollX, y: scrollY, documentWidth: document.documentElement.scrollWidth, documentHeight: document.documentElement.scrollHeight}, readyMarker: element.getAttribute('data-ely-ready'), fonts: {documentStatus: document.fonts.status, rootFamily: style.fontFamily, rootSize: style.fontSize, faces}, visibleOverlays: overlays, componentText: (element.innerText || '').trim().replace(/\s+/g, ' ').slice(0, 1200), controlInventory: {count: controlsInRoot.length, maxRows: 300, truncated: controlsInRoot.length > 300, controls: controlsSnapshot}, svgGeometryDiagnostics: {svgCount: svgRoots.length, invalidViewBoxes, malformedNumericGeometry}};
       }, {element: await root.elementHandle(), caseId: item.caseId});
       const fixtureHTML = await record.evaluate((node, selector) => ({record: node.outerHTML, root: node.querySelector(selector)?.outerHTML || ''}), rootSelector);
       metadata.fixtureSnapshot = {recordSHA256: sha256(fixtureHTML.record), rootSHA256: sha256(fixtureHTML.root)};

@@ -14,6 +14,30 @@ import {EventEmitter} from 'node:events';
 
 const repo = fileURLToPath(new URL('../../../../', import.meta.url));
 const runner = join(repo, 'ui/gohtmx/tests/browser/visual-state-audit-baseline.mjs');
+test('layout attribution pure: exact identities, measured widths and bounded truncation', async () => {
+  const source = await readFile(runner, 'utf8');
+  const block = source.match(/const layoutDiagnostics = \(\(\) => \{[\s\S]*?\n        \}\)\(\);/)[0];
+  const make = width => ({localName:'div',id:'',children:[],childNodes:[],parentElement:null,clientWidth:width,clientHeight:10,clientLeft:0,clientTop:0,scrollWidth:width+188,scrollHeight:10,scrollLeft:0,scrollTop:0,getAttribute:()=>null,getBoundingClientRect:()=>({x:0,y:0,left:0,top:0,right:width,bottom:10,width,height:10}),querySelectorAll:()=>[]});
+  const element=make(308); let tail=element;
+  for(let i=0;i<34;i++){tail.parentElement=make(308);tail=tail.parentElement;}
+  element.children=Array.from({length:100},()=>make(240));
+  const text={nodeType:3,textContent:'required label'};element.childNodes=[text];
+  const context={element,caseId:'gallery:misc/LicenseViewer',getComputedStyle:()=>({overflowX:'hidden',overflowY:'visible',width:'308px'}),box:node=>node.getBoundingClientRect(),Node:{TEXT_NODE:3},document:{documentElement:{clientWidth:375,clientHeight:844},createRange:()=>({selectNodeContents(){},getClientRects:()=>Array.from({length:33},()=>({left:0,top:0,right:10,bottom:10}))})},window:{visualViewport:{width:390,height:844,offsetLeft:0,offsetTop:0,scale:1}}};
+  const evaluate=caseId=>JSON.parse(JSON.stringify(runInNewContext(`${block}\nlayoutDiagnostics`,{...context,caseId})));
+  const result=evaluate(context.caseId);
+  assert.equal(result.ancestors.length,32);assert.equal(result.ancestorsTruncated,true);
+  assert.equal(result.children.length,96);assert.equal(result.childrenTruncated,true);
+  assert.equal(result.children[0].textRanges.length,32);assert.equal(result.children[0].textRangesTruncated,true);
+  assert.equal(result.ancestors[0].clientWidth,308);assert.equal(result.layoutViewport.clientWidth,375);assert.equal(result.visualViewport.width,390);
+  assert.equal(result.ancestors[0].scrollWidth,496);assert.equal(result.ancestors[0].style.overflowX,'hidden');
+  assert.equal(result.diagnosticOnly,true);assert.equal(Object.hasOwn(result,'pass'),false);
+  const exact=['layout/Layer','layout/ResizeHandle','layout/Dock','primitives/Canvas','primitives/Slot','canvas/InspectorPanel','misc/LicenseViewer'];
+  for(const identity of exact)assert(evaluate(`gallery:${identity}`));
+  assert.equal(evaluate('gallery:canvas/LayerPanel'),null,'behavior key cannot substitute for exact InspectorPanel');
+  assert.equal(evaluate('gallery:misc/Terms'),null);
+  element.parentElement=null;element.children=[];element.childNodes=[];
+  const short=evaluate(context.caseId);assert.equal(short.ancestorsTruncated,false);assert.equal(short.childrenTruncated,false);
+});
 test('explicit production root requires exact revision without attributing secondary harness to it', async () => {
   const source = await readFile(runner, 'utf8');
   const fn = source.match(/function pinnedSourceRoot\(sourceRoot, revision\) \{[\s\S]*?\n\}/)[0];
