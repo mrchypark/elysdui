@@ -326,6 +326,7 @@ async function executeCheck(page, item, onCheckpoint) {
 async function directCaseDriver({item, familyURL, captures, reference, semanticSnapshotInit, contract, browserErrors}) {
   const context = await browser.newContext({viewport: profile.viewport, colorScheme: profile.colorScheme});
   const page = await context.newPage(), receipts = [];
+  const failureDiagnostics={threewayCleanupFailures:[]};
   page.on('pageerror',error=>browserErrors.push({family:item.family,driver:'direct-playwright',caseId:item.caseId,type:'pageerror',text:String(error)}));
   try {
     await page.addInitScript(semanticSnapshotInit);
@@ -405,7 +406,7 @@ async function directCaseDriver({item, familyURL, captures, reference, semanticS
       receipt.captureStatus = receipt.visualEvidenceGap?'captured-context-only':'captured';
     };
     if(contract.requestedStateOnly){
-      await runRequestedStateActions(contract,root,step);
+      await runRequestedStateActions(contract,root,step,failureDiagnostics);
     }else if(contract.registeredCanvas){
       await runRegisteredCanvasActions(contract,root,step);
     }else if(contract.identity==='files/ArchiveViewer'){
@@ -465,7 +466,7 @@ async function directCaseDriver({item, familyURL, captures, reference, semanticS
       visualActionabilityGaps:receipts.filter(receipt=>receipt.actionActivation?.pointerActionabilityGap||receipt.visualEvidenceGap).map(receipt=>({action:receipt.action,control:receipt.control,reason:receipt.actionActivation?.pointerActionabilityGap||receipt.visualEvidenceGap})),
       comparisonScope:contract.requestedStateOnly?'Explicit target state assertions; registered ending state is different and not compared':'Exact registered-check actions, host events, final semantic state and unchanged twin',
       limitation: 'Independent action sequence; does not replace or inflate registered-check assertion counts or prove unreached variant branches.'};
-  } catch (error) { return {status: 'failed', error: String(error), receipts}; }
+  } catch (error) { return {status: 'failed', error: String(error), receipts,...(failureDiagnostics.threewayCleanupFailures.length?{threewayCleanupFailures:failureDiagnostics.threewayCleanupFailures}:{})}; }
   finally { await context.close(); }
 }
 

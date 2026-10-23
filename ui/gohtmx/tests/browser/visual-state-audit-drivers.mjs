@@ -566,7 +566,19 @@ export function assertThreewayState(state,{id,stage,twin}){
   assert.deepEqual(state.timeline,timeline,'Native and public events retain their combined causal order');
 }
 
-export async function runRequestedStateActions(contract,root,runStep){
+export async function threewayCleanup(cleanup,primaryFailed,failureDiagnostics){
+  try{await cleanup();}
+  catch(cleanupError){
+    // The runner owns this bounded channel before any capture/action receipt.
+    // Never let diagnostic formatting or attachment replace either real error.
+    let text='[unprintable cleanup error]';
+    try{text=String(cleanupError).slice(0,1000);}catch{}
+    try{failureDiagnostics.threewayCleanupFailures.push({phase:'threeway-listener-cleanup',error:text,primaryFailed});}catch{}
+    if(!primaryFailed)throw cleanupError;
+  }
+}
+
+export async function runRequestedStateActions(contract,root,runStep,failureDiagnostics){
   if(contract.focusedSequence==='threeway-native-submit'){
     assert.equal(contract.identity,'git/ThreeWayMerge');
     const pinReceipts=[];
@@ -595,6 +607,7 @@ export async function runRequestedStateActions(contract,root,runStep){
       proof.observeTwin=event=>proof.twinEvents.push(event.type);
       for(const type of ['click','input','change','submit','ely:change','ely:action']){node.addEventListener(type,proof.observe,true);proof.twin.addEventListener(type,proof.observeTwin,true);}
     });
+    let primaryFailed=false;
     try{
       for(const stage of contract.steps.map(step=>step.id))await runStep(stage,async()=>{
         if(stage==='choose-theirs')await form.locator('input[name="resolution"][value="theirs"]').click();
@@ -603,7 +616,8 @@ export async function runRequestedStateActions(contract,root,runStep){
         // Existing runStep persists actionActivation even when later assertions fail.
         return {stage,rawState:await snapshot(),sourcePins:pinReceipts};
       },async()=>{const state=await snapshot();contract.threewayEvidence??=[];contract.threewayEvidence.push({stage,state});assertThreewayState(state,{id,stage,twin});return {stage,state,sourcePins:pinReceipts};});
-    }finally{await root.evaluate(node=>{const proof=node.__threeway;if(!proof)return;for(const type of ['click','input','change','submit','ely:change','ely:action']){node.removeEventListener(type,proof.observe,true);proof.twin.removeEventListener(type,proof.observeTwin,true);}});}
+    }catch(error){primaryFailed=true;throw error;}
+    finally{await threewayCleanup(()=>root.evaluate(node=>{const proof=node.__threeway;if(!proof)return;for(const type of ['click','input','change','submit','ely:change','ely:action']){node.removeEventListener(type,proof.observe,true);proof.twin.removeEventListener(type,proof.observeTwin,true);}}),primaryFailed,failureDiagnostics);}
     return;
   }
   if(contract.focusedSequence==='license-native-selection-scroll'){

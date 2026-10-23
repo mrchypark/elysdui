@@ -8,7 +8,40 @@ import {join} from 'node:path';
 import {chromium} from 'playwright';
 import {compileFunction} from 'node:vm';
 import {parse} from 'acorn';
-import {caseActionContract,requestedStateContract,runRequestedStateActions,runRegisteredCanvasActions,assertRegisteredCanvasTransition,clickVisibleControl,ownedOverlayInventory,captureTargetPNG,inventoryReceipt,inventoryDrift,unhandledBrowserErrors,assertThreewayState,threewaySourcePins} from './visual-state-audit-drivers.mjs';
+import {caseActionContract,requestedStateContract,runRequestedStateActions,runRegisteredCanvasActions,assertRegisteredCanvasTransition,clickVisibleControl,ownedOverlayInventory,captureTargetPNG,inventoryReceipt,inventoryDrift,unhandledBrowserErrors,assertThreewayState,threewaySourcePins,threewayCleanup} from './visual-state-audit-drivers.mjs';
+
+test('threeway direct pure: primary identity survives cleanup and diagnostic attachment failures',async()=>{
+  const primary=Object.freeze(new Error('before-first-capture')),cleanup=new Error('listener cleanup failed');
+  const run=async diagnostics=>{let failed=false;try{throw primary;}catch(error){failed=true;throw error;}finally{await threewayCleanup(async()=>{throw cleanup;},failed,diagnostics);}};
+  const diagnostics={threewayCleanupFailures:[]};
+  await assert.rejects(run(diagnostics),error=>error===primary);
+  assert.deepEqual(diagnostics.threewayCleanupFailures,[{phase:'threeway-listener-cleanup',error:'Error: listener cleanup failed',primaryFailed:true}]);
+  await assert.rejects(run(Object.freeze({threewayCleanupFailures:Object.freeze([])})),error=>error===primary);
+  await assert.rejects(run(new Proxy({}, {get(){throw Error('metadata access failed');}})),error=>error===primary);
+  const unprintable={toString(){throw Error('format failed');}},fallback={threewayCleanupFailures:[]};
+  await threewayCleanup(async()=>{throw unprintable;},true,fallback);
+  assert.equal(fallback.threewayCleanupFailures[0].error,'[unprintable cleanup error]');
+});
+test('threeway direct pure: cleanup-only failure remains exact failure and clean cleanup adds nothing',async()=>{
+  const cleanup=Object.freeze(new Error('sole cleanup failure')),diagnostics={threewayCleanupFailures:[]};
+  await assert.rejects(threewayCleanup(async()=>{throw cleanup;},false,diagnostics),error=>error===cleanup);
+  assert.equal(diagnostics.threewayCleanupFailures[0].primaryFailed,false);
+  await assert.rejects(threewayCleanup(async()=>{throw cleanup;},false,new Proxy({}, {get(){throw Error('attachment failed');}})),error=>error===cleanup);
+  const clean={threewayCleanupFailures:[]};await threewayCleanup(async()=>{},false,clean);assert.deepEqual(clean.threewayCleanupFailures,[]);
+});
+test('threeway direct pure: runner persists cleanup facts before first receipt without broad error serialization',async()=>{
+  const source=await readFile(new URL('./visual-state-audit-actions.mjs',import.meta.url),'utf8');
+  const start=source.indexOf('async function directCaseDriver('),end=source.indexOf('\ntry {',start),branch=source.slice(start,end);
+  assert(branch.indexOf('const failureDiagnostics={threewayCleanupFailures:[]};')<branch.indexOf('await page.addInitScript'));
+  assert(branch.includes('runRequestedStateActions(contract,root,step,failureDiagnostics)'));
+  const catchStart=branch.indexOf("} catch (error) { return {status: 'failed'"),catchEnd=branch.indexOf('\n  finally',catchStart),catchBody=branch.slice(catchStart,catchEnd);
+  const serialize=new Function('error','receipts','failureDiagnostics',catchBody.slice(catchBody.indexOf('return '),catchBody.lastIndexOf('}')));
+  const primary=new Error('native action failed'),diagnostics={threewayCleanupFailures:[]};
+  await threewayCleanup(async()=>{throw Error('cleanup before receipt');},true,diagnostics);
+  assert.deepEqual(serialize(primary,[],diagnostics),{status:'failed',error:'Error: native action failed',receipts:[],threewayCleanupFailures:[{phase:'threeway-listener-cleanup',error:'Error: cleanup before receipt',primaryFailed:true}]});
+  assert.deepEqual(serialize(primary,[],{threewayCleanupFailures:[]}),{status:'failed',error:'Error: native action failed',receipts:[]});
+  assert.equal(serialize(primary,[],diagnostics).threewayCleanupFailures,diagnostics.threewayCleanupFailures);
+});
 
 test('threeway direct pure: canonical three steps preserve registered unsupported boundary',()=>{
   const contract=requestedStateContract('git/ThreeWayMerge');
