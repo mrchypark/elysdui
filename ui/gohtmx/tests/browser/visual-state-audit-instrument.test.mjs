@@ -1749,6 +1749,7 @@ test('action cameras distinguish covered foreign paint, exposed corners and empt
       <div data-audit-twin><div id="outside" data-ely-family="interaction"><div role="menu">Unrelated outside camera</div></div></div>
       <aside id="nested-portal" role="region" data-ely-owner="nested" style="position:absolute;top:300px">Nested owner portal</aside>`);
     const originalHTML=await page.content(),inventory=await page.locator('#main').evaluate(ownedOverlayInventory);
+    const peerButton=page.locator('#peer button'),originalPeerButtonStyle=await peerButton.getAttribute('style');
     assert.deepEqual(inventory.filter(item=>item.owned).map(item=>item.id),['panel','nested-portal']);
     assert.equal(inventory.find(item=>item.id==='panel').openerReferences[0].ariaControls,'panel');
     const context=await captureTargetPNG(page,page.locator('#main'));
@@ -1756,9 +1757,9 @@ test('action cameras distinguish covered foreign paint, exposed corners and empt
     const panel=await captureTargetPNG(page,page.locator('#panel'));
     assert.deepEqual(panel.foreignDOMIntersections,[],'Opaque higher-stacked panel covers the twin paint, not merely its layout box');
     assert(panel.occludedForeignPaint.some(item=>item.id==='peer'));
-    await page.locator('#peer button').evaluate(node=>{node.style.zIndex='3';});
+    await peerButton.evaluate(node=>{node.style.zIndex='3';});
     assert((await captureTargetPNG(page,page.locator('#panel'))).foreignDOMIntersections.some(item=>item.id==='peer'),'Higher local foreign z-index remains blocking');
-    await page.locator('#peer button').evaluate(node=>node.style.removeProperty('z-index'));
+    await peerButton.evaluate((node,style)=>{if(style===null)node.removeAttribute('style');else node.setAttribute('style',style);},originalPeerButtonStyle);
     assert.equal(await page.content(),originalHTML,'Camera must not hide, resize, detach or mutate either instance');
     for(const position of ['sticky','fixed']){
       await page.locator('#main').evaluate((node,position)=>{node.style.position=position;},position);
