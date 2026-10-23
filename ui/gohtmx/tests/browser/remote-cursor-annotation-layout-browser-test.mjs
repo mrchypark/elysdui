@@ -7,6 +7,7 @@ import {tmpdir} from 'node:os';
 import {join, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {chromium} from 'playwright';
+import {captureTargetPNG, screenshotWithoutCaretMutation} from './visual-state-audit-drivers.mjs';
 
 const repo = resolve(fileURLToPath(new URL('../../../../', import.meta.url)));
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -47,7 +48,6 @@ try {
   assert(ready, 'owned gallery startup');
   browser = await chromium.launch({headless: true, executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined});
   receipt.browserVersion = browser.version();
-  receipt.browserPID = browser.process()?.pid ?? null;
 
   for (const viewport of [{width: 1440, height: 1000}, {width: 390, height: 844}]) {
     const page = await browser.newPage({viewport, deviceScaleFactor: 1});
