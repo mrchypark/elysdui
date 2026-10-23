@@ -4,6 +4,7 @@
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/../../.." && pwd)
 cd "$ROOT"
+source "$ROOT/scripts/ci/native/android-readiness.sh"
 RESULTS="$ROOT/test-results/android-native"
 mkdir -p "$RESULTS"
 export ANDROID_HOME="${ANDROID_HOME:-${ANDROID_SDK_ROOT:?An existing Android SDK is required}}"
@@ -12,9 +13,22 @@ SERIAL=emulator-5554
 SERVER_PID=
 CONTROLS_PID=
 EMULATOR_PID=
+ANR_WATCH_PID=
 cleanup() {
   result=$?
   set +e
+	if [ -n "$ANR_WATCH_PID" ]; then
+		if kill -0 "$ANR_WATCH_PID" 2>/dev/null; then
+			if android_is_owned_child_matching "$ANR_WATCH_PID" '*adb*logcat*ActivityManager*'; then
+				kill "$ANR_WATCH_PID" 2>/dev/null
+				wait "$ANR_WATCH_PID" 2>/dev/null
+			else
+				echo "Refusing to signal unverified ANR watcher PID $ANR_WATCH_PID" >&2
+			fi
+		else
+			wait "$ANR_WATCH_PID" 2>/dev/null
+		fi
+	fi
   adb -s "$SERIAL" logcat -d > "$RESULTS/logcat.txt" 2>&1
   adb -s "$SERIAL" shell dumpsys activity lastanr > "$RESULTS/last-anr.txt" 2>&1
   adb -s "$SERIAL" shell cat /proc/meminfo > "$RESULTS/meminfo.txt" 2>&1
@@ -29,6 +43,9 @@ cleanup() {
   exit "$result"
 }
 trap cleanup EXIT
+
+# The workflow builds both APKs before this script; keep the guard test pre-emulator too.
+bash "$ROOT/scripts/ci/native/test-android-readiness.sh"
 
 # The app has no Google Play dependency. Use the lighter Android 10 / API 29
 # AOSP runtime: the API 35 guest saturated its single virtual CPU and produced
@@ -50,10 +67,18 @@ PY
 emulator -accel-check
 emulator -avd ely-profile -port 5554 -cores 2 -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect -accel on > "$RESULTS/emulator.log" 2>&1 &
 EMULATOR_PID=$!
+ANR_LOG="$RESULTS/system-anr-watch.log"
+: > "$ANR_LOG"
 BOOT_DEADLINE=$((SECONDS + 600))
 while [ "$SECONDS" -lt "$BOOT_DEADLINE" ]; do
   kill -0 "$EMULATOR_PID" || { cat "$RESULTS/emulator.log"; exit 1; }
-  if [ "$(adb -s "$SERIAL" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = 1 ]; then break; fi
+	if boot_state=$(adb -s "$SERIAL" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r'); then
+		if [ -z "$ANR_WATCH_PID" ]; then
+			adb -s "$SERIAL" logcat -v brief ActivityManager:E '*:S' > "$ANR_LOG" 2>&1 &
+			ANR_WATCH_PID=$!
+		fi
+		if [ "$boot_state" = 1 ]; then break; fi
+	fi
   sleep 2
 done
 if [ "$(adb -s "$SERIAL" shell getprop sys.boot_completed | tr -d '\r')" != 1 ]; then
@@ -64,6 +89,89 @@ fi
 echo 'Android 10 / API 29 emulator boot completed; starting real native UI tests.'
 adb -s "$SERIAL" shell input keyevent 82
 adb -s "$SERIAL" shell getprop ro.build.fingerprint > "$RESULTS/device.txt"
+
+# Boot completion alone did not prevent the hosted guest's System UI ANR from
+# obscuring the app. Require a responsive Window Manager view, visible system
+# bars, and three identical focused-window samples before instrumentation.
+READY_LOG="$RESULTS/system-readiness.log"
+READY_DUMP="$RESULTS/system-readiness-window.txt"
+READY_DEADLINE=$((SECONDS + 90))
+# This run's SystemUI ANR surfaced about 36 seconds after boot completion.
+READY_NOT_BEFORE=$((SECONDS + 60))
+READY_FOCUS=
+READY_STREAK=0
+READY=false
+: > "$READY_LOG"
+while [ "$SECONDS" -lt "$READY_DEADLINE" ]; do
+	if ! kill -0 "$ANR_WATCH_PID" 2>/dev/null; then
+		printf '%s system-anr-watch-stopped\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" >> "$READY_LOG"
+		break
+	fi
+	if android_anr_seen "$ANR_LOG"; then
+		printf '%s boot-anr-observed\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" >> "$READY_LOG"
+		break
+	fi
+	ADB_PID=
+	READY_COMMAND_DEADLINE=$((SECONDS + 5))
+	if [ "$READY_COMMAND_DEADLINE" -gt "$READY_DEADLINE" ]; then READY_COMMAND_DEADLINE=$READY_DEADLINE; fi
+	adb -s "$SERIAL" shell dumpsys window windows > "$READY_DUMP" 2>&1 &
+	ADB_PID=$!
+	while kill -0 "$ADB_PID" 2>/dev/null && [ "$SECONDS" -lt "$READY_COMMAND_DEADLINE" ]; do sleep 0.1; done
+	if [ "$SECONDS" -ge "$READY_DEADLINE" ]; then
+		if kill -0 "$ADB_PID" 2>/dev/null; then
+			if android_is_owned_child_matching "$ADB_PID" '*adb*shell*dumpsys*window*'; then
+				kill "$ADB_PID" 2>/dev/null || true
+				wait "$ADB_PID" 2>/dev/null || true
+			else
+				printf '%s refused-to-signal-unverified-adb-pid=%s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$ADB_PID" >> "$READY_LOG"
+				break
+			fi
+		fi
+		printf '%s readiness-deadline-reached-during-window-query\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" >> "$READY_LOG"
+		break
+	fi
+	if kill -0 "$ADB_PID" 2>/dev/null; then
+		if android_is_owned_child_matching "$ADB_PID" '*adb*shell*dumpsys*window*'; then
+			kill "$ADB_PID" 2>/dev/null || true
+			wait "$ADB_PID" 2>/dev/null || true
+		else
+			printf '%s refused-to-signal-unverified-adb-pid=%s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$ADB_PID" >> "$READY_LOG"
+		fi
+		READY_FOCUS=
+		READY_STREAK=0
+		printf '%s window-dump-timeout\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" >> "$READY_LOG"
+	elif ! wait "$ADB_PID"; then
+		READY_FOCUS=
+		READY_STREAK=0
+		printf '%s window-dump-failed\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" >> "$READY_LOG"
+	elif grep -Eiq 'Window\{[^}]*Application Not Responding:' "$READY_DUMP"; then
+		printf '%s visible-anr-window\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" >> "$READY_LOG"
+		break
+	elif focus=$(android_window_readiness_focus < "$READY_DUMP"); then
+		if [ "$focus" = "$READY_FOCUS" ]; then READY_STREAK=$((READY_STREAK + 1)); else READY_FOCUS=$focus; READY_STREAK=1; fi
+		printf '%s ready-sample=%s focus=%s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$READY_STREAK" "$focus" >> "$READY_LOG"
+		if [ "$READY_STREAK" -ge 3 ] && [ "$SECONDS" -ge "$READY_NOT_BEFORE" ] && [ "$SECONDS" -lt "$READY_DEADLINE" ]; then READY=true; break; fi
+	else
+		READY_FOCUS=
+		READY_STREAK=0
+		printf '%s focus-or-system-bars-unready\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" >> "$READY_LOG"
+	fi
+	if [ "$SECONDS" -ge "$READY_DEADLINE" ]; then
+		printf '%s readiness-deadline-reached\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" >> "$READY_LOG"
+		break
+	fi
+	remaining=$((READY_DEADLINE - SECONDS))
+	if [ "$remaining" -gt 2 ]; then remaining=2; fi
+	sleep "$remaining"
+done
+if [ "$READY" != true ]; then
+	echo 'Android system readiness failed: no stable focused window with visible system bars and no ANR within 90 seconds.' >&2
+	cat "$READY_LOG" >&2
+	tail -n 80 "$ANR_LOG" >&2
+	cat "$READY_DUMP" >&2
+	exit 1
+fi
+echo 'Android system window focus and visible system bars settled before instrumentation.'
 
 SERVER_BINARY="${RUNNER_TEMP:-/tmp}/ely-native-emulator-profile"
 go build -o "$SERVER_BINARY" ./examples/native-profile
