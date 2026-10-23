@@ -1382,10 +1382,14 @@ export async function runRequestedStateActions(contract,root,runStep,failureDiag
       assert(initial.mapRect.left>=initial.viewRect.left&&initial.mapRect.right<=initial.viewRect.right&&initial.mapRect.top>=initial.viewRect.top&&initial.mapRect.bottom<=initial.viewRect.bottom,'Minimap must remain inside its rendered canvas view');
       for(const selector of controls){
         const target=root.locator(selector);assert.equal(await target.count(),1,`${selector} must be unique`);
+        await target.scrollIntoViewIfNeeded();
+        await target.evaluate(node=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
         const hit=await target.evaluate(node=>{const rect=node.getBoundingClientRect(),x=rect.left+rect.width/2,y=rect.top+rect.height/2,element=document.elementFromPoint(x,y);return {reachable:!!element&&(element===node||node.contains(element)),disabled:node.disabled};});
         assert.equal(hit.reachable,true,`${selector} center must be an owned hit target`);assert.equal(hit.disabled,false,`${selector} must be enabled`);
       }
-      const mapHit=await root.locator('[data-cs-minimap]').evaluate(node=>{const rect=node.getBoundingClientRect(),x=rect.left+rect.width/2,y=rect.top+rect.height/2,element=document.elementFromPoint(x,y);return !!element&&(element===node||node.contains(element));});
+      const mapTarget=root.locator('[data-cs-minimap]');await mapTarget.scrollIntoViewIfNeeded();
+      await mapTarget.evaluate(node=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+      const mapHit=await mapTarget.evaluate(node=>{const rect=node.getBoundingClientRect(),x=rect.left+rect.width/2,y=rect.top+rect.height/2,element=document.elementFromPoint(x,y);return !!element&&(element===node||node.contains(element));});
       assert.equal(mapHit,true,'Minimap center must be an owned hit target');
       await root.evaluate(node=>{node.__visualCanvasClicks=[];node.__visualCanvasClickObserver=event=>{if(event.target.closest?.('[data-cs-minimap]'))node.__visualCanvasClicks.push({trusted:event.isTrusted,x:event.clientX,y:event.clientY});};node.addEventListener('click',node.__visualCanvasClickObserver,true);});
       try{

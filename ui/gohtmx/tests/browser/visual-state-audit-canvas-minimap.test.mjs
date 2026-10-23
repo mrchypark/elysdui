@@ -76,6 +76,11 @@ test('source-only: eight separate canvas minimap contracts; 32 case/profile runt
   assert.match(driver,/initialTwin=await twinState\(\),id=await root\.getAttribute\('id'\)/);
   assert.match(driver,/assert\.deepEqual\(await twinState\(\),initialTwin,'Public actions must preserve the independent twin'\)/);
   const canvasDriver=driver.slice(driver.indexOf("if(contract.focusedSequence==='canvas-minimap-zoom-fit-hit-test')"),driver.indexOf("if(['button-public-boundary','textarea-public-multiline'].includes(contract.focusedSequence))"));
+  const centerChecks=canvasDriver.slice(canvasDriver.indexOf('for(const selector of controls)'),canvasDriver.indexOf('await root.evaluate(node=>{node.__visualCanvasClicks=[]'));
+  assert.match(centerChecks,/await target\.scrollIntoViewIfNeeded\(\);\s*await target\.evaluate\(node=>new Promise\(resolve=>requestAnimationFrame\(\(\)=>requestAnimationFrame\(resolve\)\)\)\);\s*const hit=await target\.evaluate/,'Each zoom control must scroll natively and settle before its center ownership check');
+  assert.match(centerChecks,/assert\.equal\(hit\.reachable,true,`\$\{selector\} center must be an owned hit target`\)/,'A visible foreign hit target must still fail the exact center assertion');
+  assert.match(centerChecks,/await mapTarget\.scrollIntoViewIfNeeded\(\);\s*await mapTarget\.evaluate\(node=>new Promise\(resolve=>requestAnimationFrame\(\(\)=>requestAnimationFrame\(resolve\)\)\)\);\s*const mapHit=await mapTarget\.evaluate/,'Minimap ownership must also be checked after native scrolling and settling');
+  assert.match(centerChecks,/assert\.equal\(mapHit,true,'Minimap center must be an owned hit target'\)/,'A visible foreign minimap hit target must still fail');
   assert.equal((canvasDriver.match(/assert\.equal\(detail\.id,id\);assert\.equal\(detail\.component,identity\)/g)||[]).length,3,'Every canvas action must assert the actual instance ID and alias payload');
   assert.match(driver,/overlap\(initial\.zoomRect,initial\.mapRect\)/,'Initial zoom and minimap targets must not overlap');
 });
