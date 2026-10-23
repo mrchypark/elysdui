@@ -91,6 +91,45 @@ test('foreign paint honors proven absolute overflow clips but keeps escaping pos
   }finally{await browser.close();}
 });
 
+test('opaque panel subtracts only covered foreign paint with provably inactive static z-index',{
+  skip:process.env.RUN_ACTION_CAMERA_BROWSER!=='1',timeout:30000,
+},async()=>{
+  const browser=await chromium.launch({executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH||undefined});
+  try{
+    const page=await browser.newPage({viewport:{width:240,height:120}});
+    const capture=async({parentDisplay='block',chipStyle='position:static;z-index:1;overflow:hidden',left=10,width=60}={})=>{
+      await page.setContent(`<style>
+        body{margin:0}[data-audit-main],[data-audit-twin]{position:absolute;inset:0}
+        .root{position:relative;width:220px;height:100px}
+        #owned-panel{position:absolute;left:0;top:0;width:100px;height:60px;z-index:5;background:#fff;border:0;border-radius:0}
+        .chip-parent{display:${parentDisplay};width:220px;height:80px}
+        #foreign-chip{position:static;width:${width}px;height:20px;margin:0 0 0 ${left}px;padding:0;border:0;background:#c22;${chipStyle}}
+      </style><div data-audit-main><section class="root" id="owned-root" data-ely-family="fixture"><article id="owned-panel">owned panel</article></section></div><div data-audit-twin><section class="root" id="twin-root" data-ely-family="fixture"><div class="chip-parent"><button id="foreign-chip">foreign chip</button></div></section></div>`);
+      return page.locator('#owned-panel').evaluate(captureForeignPaint,{clip:{x:0,y:0,width:220,height:100},checkedRootID:'owned-root'});
+    };
+    const covered=await capture();
+    assert.deepEqual(covered.foreignDOMIntersections,[],'Static z-index under a computed block parent is inactive; node overflow can only shrink its covered paint');
+    assert(covered.occludedForeignPaint.some(peer=>peer.id==='twin-root'));
+    for(const [label,style,parentDisplay]of [
+      ['lower active flex-item z-index','z-index:1;overflow:hidden','flex'],
+      ['equal active grid-item z-index','z-index:5;overflow:hidden','grid'],
+      ['higher active flex-item z-index','z-index:6;overflow:hidden','flex'],
+      ['higher positioned z-index','position:relative;z-index:6;overflow:hidden','block'],
+      ['unknown contents parent','z-index:1;overflow:hidden','contents'],
+      ['foreign box shadow','z-index:1;overflow:hidden;box-shadow:0 0 8px #c22','block'],
+      ['foreign filter','z-index:1;overflow:hidden;filter:blur(1px)','block'],
+    ]){
+      const result=await capture({chipStyle:style,parentDisplay});
+      assert(result.foreignDOMIntersections.some(peer=>peer.id==='twin-root'),`${label} must remain blocking`);
+      assert.deepEqual(result.occludedForeignPaint,[],`${label} cannot be subtracted as opaque-panel coverage`);
+    }
+    const protruding=await capture({left:85,width:40});
+    const remaining=protruding.foreignDOMIntersections.find(peer=>peer.id==='twin-root');
+    assert(remaining&&remaining.exposedPaintArea>0,'Native chip paint protruding beyond the opaque panel remains foreign evidence');
+    assert.deepEqual(protruding.occludedForeignPaint,[],'Partially covered native paint is not reported as fully occluded');
+  }finally{await browser.close();}
+});
+
 // Separate explicit grant only: RUN_ACTION_CAMERA_BROWSER=1 node --test <this file>.
 test('action camera tall-page, outline and centered native-modal causal pixels',{
   skip:process.env.RUN_ACTION_CAMERA_BROWSER!=='1',
