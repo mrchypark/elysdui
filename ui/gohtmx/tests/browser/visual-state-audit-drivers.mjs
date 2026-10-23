@@ -316,6 +316,48 @@ export function requestedStateContract(identity,trashFixture){
       steps:labels.map(id=>({id,control:'[data-misc-licenses]',event:id==='inspect-license'?'passive exact fixture inspection':id.startsWith('scroll-')?'bounded native wheel, at most six attempts':'trusted native click or keyboard',expectedState:'Exact source-pinned package text/events, independent twin, measured local accessibility',source:{siteId:`license-state:${id}`,sourceAnchor:'ely-api-native-misc.js:32; ely-api-native.html:106',provenance:'Only misc/LicenseViewer requested states; no aliases or registered-site approval'}})),
       captureLimits:{stepsPerRow:10,primaryPerRow:20,viewportContextsPerRow:20,totalRows:5,totalPNGs:200,wheelAttemptsPerAxis:6},scope:'Five independently verified rows only; initial baseline35 separate; no OS, persistence or production CSS approval'};
   }
+  const communicationBehavior={
+    'agent/EvalResultTable':{kind:'TraceViewer',sequence:'communication-eval-sort',fixture:'agent/EvalResultTable',steps:[
+      ['sort-tokens-ascending','[data-ely-eval-sort][value="tokens"]','Trusted native sort click orders numeric token counts ascending, updates aria-sort, and emits sort-evaluations(tokens,ascending)'],
+      ['sort-tokens-descending','[data-ely-eval-sort][value="tokens"]','Second trusted native sort click orders numeric token counts descending, updates aria-sort, and emits sort-evaluations(tokens,descending)'],
+    ]},
+    'calendar/CalendarMonthView':{kind:'CalendarMonthView',sequence:'communication-calendar-month',fixture:'calendar/CalendarMonthView',steps:[
+      ['month-page-down','[data-ely-calendar-day][aria-pressed="true"]','Native PageDown selects and visibly focuses the clamped target date; calendar-navigation carries that exact date'],
+      ['month-open-day','[data-ely-calendar-day][aria-pressed="true"]','Native Enter requests open-day for the selected date; no application navigation is fabricated'],
+    ]},
+    'calendar/CalendarWeekView':{kind:'CalendarWeekView',sequence:'communication-calendar-week',fixture:'calendar/CalendarWeekView',steps:[
+      ['week-scroll-late-events','.ely-calendar-time-grid','Native wheel scroll changes the grid scroll position and makes the 15:00 and 17:00 fixture event controls reachable'],
+      ['week-open-samples','.ely-calendar-time-grid [data-ely-calendar-event][value="samples"]','Native click requests open-event(samples)'],
+      ['week-open-client','.ely-calendar-time-grid [data-ely-calendar-event][value="client"]','Native click requests open-event(client)'],
+      ['week-create-event','.ely-calendar-time-slot[data-ely-date="2026-10-13"][data-ely-time="16:00"]','Native drag from the exact Tuesday 16:00 slot to 16:30 requests create-event(start,end)'],
+      ['week-open-allday','.ely-calendar-allday [data-ely-action="open-event"][value="offsite"]','Native click requests open-event(offsite) from the all-day row'],
+    ]},
+    'calendar/TimeGrid':{kind:'CalendarWeekView',sequence:'communication-calendar-week',fixture:'calendar/CalendarWeekView',sharedBehaviorKey:'calendar/CalendarWeekView'},
+    'calendar/AllDayRow':{kind:'CalendarWeekView',sequence:'communication-calendar-week',fixture:'calendar/CalendarWeekView',sharedBehaviorKey:'calendar/CalendarWeekView'},
+    'calendar/CurrentTimeIndicator':{kind:'CalendarWeekView',sequence:'communication-calendar-week',fixture:'calendar/CalendarWeekView',sharedBehaviorKey:'calendar/CalendarWeekView',directControlRole:'display-only indicator within the shared week fixture'},
+    'calendar/CalendarDayView':{kind:'CalendarDayView',sequence:'communication-calendar-day',fixture:'calendar/CalendarDayView',steps:[
+      ['day-scroll-late-events','.ely-calendar-time-grid','Native wheel scroll changes the grid scroll position and makes the 15:00 and 17:00 fixture event controls reachable'],
+      ['day-open-samples','.ely-calendar-time-grid [data-ely-calendar-event][value="samples"]','Native click requests open-event(samples)'],
+      ['day-open-client','.ely-calendar-time-grid [data-ely-calendar-event][value="client"]','Native click requests open-event(client)'],
+      ['day-create-event','.ely-calendar-time-slot[data-ely-date="2026-10-13"][data-ely-time="16:00"]','Native drag from the exact Tuesday 16:00 slot to 16:30 requests create-event(start,end)'],
+    ]},
+    'calendar/TimezoneOverlay':{kind:'CalendarDayView',sequence:'communication-calendar-day',fixture:'calendar/CalendarDayView',sharedBehaviorKey:'calendar/CalendarDayView',directControlRole:'display-only overlay within the shared day fixture'},
+    'calendar/EventPopover':{kind:'EventPopover',sequence:'communication-event-popover',fixture:'calendar/EventPopover',steps:[
+      ['popover-open','[data-calendar-popover-open]','Native click opens the default Design review details and exposes aria-expanded=true'],
+      ['popover-edit','[data-calendar-popover] [data-ely-action="edit-event"]','Native click emits exactly the local edit-event request for review; no provider or persistence result is asserted'],
+      ['popover-delete','[data-calendar-popover] [data-ely-action="delete-event"]','Native click emits exactly the local delete-event request for review; no provider or persistence result is asserted'],
+      ['popover-close','[data-calendar-popover-close]','Native Close hides the panel, clears aria-expanded and restores focus to the trigger'],
+      ['popover-reopen','[data-calendar-popover-open]','Native click reopens the same details panel'],
+      ['popover-escape','[data-calendar-popover]','Native Escape closes the panel and restores focus to the trigger'],
+    ]},
+    'calendar/AttendeeList':{kind:'EventPopover',sequence:'communication-event-popover',fixture:'calendar/EventPopover',sharedBehaviorKey:'calendar/EventPopover',directControlRole:'display-only attendee content within the shared popover fixture'},
+  }[identity];
+  if(communicationBehavior){
+    const behavior=communicationBehavior.sharedBehaviorKey?requestedStateContract(communicationBehavior.sharedBehaviorKey):communicationBehavior;
+    const steps=behavior.steps.map(step=>{const [id,control,expectedState]=Array.isArray(step)?step:[step.id,step.control,step.expectedState];return {id,control,expectedState,event:'trusted native Playwright pointer, keyboard, or wheel input',source:{siteId:`communication-state:${identity}:${id}`,sourceAnchor:`internal/gallery/advanced_communication_fixtures.go ${communicationBehavior.fixture}; ui/gohtmx/templates/ely-api-communication.html; ui/gohtmx/assets/ely-api-communication.js`,provenance:`Exact gallery identity ${identity}; shared behavior is retained under its canonical fixture identity${communicationBehavior.sharedBehaviorKey?` ${communicationBehavior.sharedBehaviorKey}`:''}; caller requests only, no external service or persistence result`}};});
+    return {identity,kind:communicationBehavior.kind,variant:identity.split('/')[1],fixtureIdentity:`execution-fixture:${communicationBehavior.fixture}`,requestedStateOnly:true,focusedSequence:communicationBehavior.sequence,mappingGaps:[],fixtureGuards:{component:identity,kind:communicationBehavior.kind},behaviorKey:communicationBehavior.sharedBehaviorKey||identity,directControlRole:communicationBehavior.directControlRole||'interactive local control in the default fixture',steps,
+      scope:'Only this shipped communication gallery identity and its documented default fixture. Alias roots keep distinct case/profile evidence but reuse the canonical handler sequence; no external provider, persistence, locale matrix, or unrelated nested-content claim.'};
+  }
   if(identity==='documents/TrashBin'){
     if(!trashFixture)return null;
     assert(['default','empty','longpath'].includes(trashFixture),'Unknown explicit Trash fixture');
@@ -629,7 +671,59 @@ export function assertVerticalRangeSnapshot(identity,stage,state,twinHTML){
   assert.equal(state.twinHTML,twinHTML,'The independent twin must remain unchanged');assert.deepEqual(state.twinEvents,[]);
 }
 
+export function assertCommunicationCallerRequest(actions,offset,identity,action,value){
+  assert(Array.isArray(actions)&&Number.isInteger(offset)&&offset>=0&&offset<=actions.length,'Caller request observation offset must be valid');
+  const emitted=actions.slice(offset);assert.equal(emitted.length,1,'One native activation must emit exactly one new caller request');
+  const event=emitted[0];assert.equal(event.action,action,'Native activation emitted the wrong caller request');assert.equal(event.component,identity,'Caller request must retain the exact gallery identity');
+  if(value!==undefined)assert.equal(event.value,value,'Caller request must retain the exact default-fixture value');
+  return {event,nextOffset:actions.length};
+}
+
 export async function runRequestedStateActions(contract,root,runStep,failureDiagnostics){
+  if(contract.focusedSequence.startsWith('communication-')){
+    const identity=contract.identity,grid=root.locator('.ely-calendar-time-grid');
+    assert.equal(await root.getAttribute('data-ely-component'),identity,'Exact alias/canonical gallery identity is required');
+    assert.equal(await root.getAttribute('data-ely-kind'),contract.kind,'Default fixture must resolve to its documented canonical kind');
+    let actionOffset=0;
+    const assertAction=(state,name,value)=>{const result=assertCommunicationCallerRequest(state.actions,actionOffset,identity,name,value);actionOffset=result.nextOffset;return result.event;};
+    if(contract.focusedSequence==='communication-eval-sort'){
+      const tokens=root.locator('[data-ely-eval-sort][value="tokens"]'),table=root.locator('table');
+      assert.equal(await table.locator('tbody tr').count(),5,'Default evaluation fixture must retain its five source rows');
+      for(const [id,direction,firstText] of [['sort-tokens-ascending','ascending','Explain a stack trace'],['sort-tokens-descending','descending','Add a settings page']])
+        await runStep(id,()=>tokens.click(),async state=>{assert.equal(await tokens.evaluate(node=>node.closest('th').getAttribute('aria-sort')),direction);assert((await table.locator('tbody tr').first().textContent()).includes(firstText),'Sorted first row must match numeric token ordering');const event=assertAction(state,'sort-evaluations');assert.equal(event.column,'tokens');assert.equal(event.direction,direction);return {column:event.column,direction:event.direction,firstRow:(await table.locator('tbody tr').first().textContent()).trim()};});
+      return;
+    }
+    if(contract.focusedSequence==='communication-calendar-month'){
+      const selected=root.locator('[data-ely-calendar-day][aria-pressed="true"]');
+      let beforeDate='',expectedDate='';
+      await runStep('month-page-down',async()=>{beforeDate=await selected.getAttribute('value');assert.match(beforeDate,/^\d{4}-\d\d-\d\d$/,'Default month fixture must expose its selected ISO date');const [year,month,day]=beforeDate.split('-').map(Number),nextMonth=Date.UTC(year,month,1),lastDay=new Date(Date.UTC(year,month+1,0)).getUTCDate();expectedDate=new Date(nextMonth).toISOString().slice(0,8)+String(Math.min(day,lastDay)).padStart(2,'0');await selected.press('PageDown');},async state=>{const date=await root.locator('[data-ely-calendar-day][aria-pressed="true"]').getAttribute('value');assert.equal(date,expectedDate,'PageDown selection must equal the independently derived clamped next-month date');assert.equal(await root.locator('[data-ely-calendar-day][aria-pressed="true"]').evaluate(node=>node===document.activeElement),true,'PageDown must retain visible keyboard focus');const event=assertAction(state,'calendar-navigation');assert.equal(event.direction,'next');assert.equal(event.view,'month');assert.equal(event.date,expectedDate);return {beforeDate,date,focused:true};});
+      await runStep('month-open-day',()=>root.locator('[data-ely-calendar-day][aria-pressed="true"]').press('Enter'),async state=>{const event=assertAction(state,'open-day',expectedDate);assert.equal(event.date,expectedDate);return {date:expectedDate,action:event.action};});
+      return;
+    }
+    if(contract.focusedSequence==='communication-calendar-week'||contract.focusedSequence==='communication-calendar-day'){
+      let previousScrollTop=0;
+      const day=contract.focusedSequence==='communication-calendar-day';
+      await runStep(day?'day-scroll-late-events':'week-scroll-late-events',async()=>{assert.equal(await grid.count(),1,'One native calendar time grid is required');previousScrollTop=await grid.evaluate(node=>node.scrollTop);await grid.hover();const box=await grid.boundingBox();assert(box&&box.height>0,'Calendar time grid must be visible for native wheel input');for(let attempt=0;attempt<8;attempt++){const reached=await grid.evaluate(node=>['samples','client'].every(value=>{const target=node.querySelector(`[data-ely-calendar-event][value="${value}"]`);if(!target)return false;const r=target.getBoundingClientRect(),clip=node.getBoundingClientRect();return r.top>=clip.top&&r.bottom<=clip.bottom&&r.left>=clip.left&&r.right<=clip.right;}));if(reached)break;await root.page().mouse.wheel(0,Math.max(120,Math.round(box.height*.75)));await root.page().evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));}},async()=>{const geometry=await grid.evaluate(node=>({scrollTop:node.scrollTop,grid:(()=>{const r=node.getBoundingClientRect();return {top:r.top,bottom:r.bottom,left:r.left,right:r.right};})(),events:Object.fromEntries(['samples','client'].map(value=>{const target=node.querySelector(`[data-ely-calendar-event][value="${value}"]`),r=target.getBoundingClientRect();return [value,{top:r.top,bottom:r.bottom,left:r.left,right:r.right,inside:r.top>=node.getBoundingClientRect().top&&r.bottom<=node.getBoundingClientRect().bottom&&r.left>=node.getBoundingClientRect().left&&r.right<=node.getBoundingClientRect().right}];}))}));assert(geometry.scrollTop>previousScrollTop,'Native wheel must advance the calendar grid itself');assert(Object.values(geometry.events).every(event=>event.inside),'Both target events must be wholly reachable inside the native scrollport');return {previousScrollTop,...geometry,reachable:['samples','client']};});
+      for(const value of ['samples','client'])await runStep(`${day?'day':'week'}-open-${value}`,()=>grid.locator(`[data-ely-calendar-event][value="${value}"]`).click(),async state=>{const event=assertAction(state,'open-event',value);return {action:event.action,value:event.value};});
+      if(day){
+        await runStep('day-create-event',async()=>{const start=grid.locator('.ely-calendar-time-slot[data-ely-date="2026-10-13"][data-ely-time="16:00"]'),end=grid.locator('.ely-calendar-time-slot[data-ely-date="2026-10-13"][data-ely-time="16:30"]');assert.equal(await start.count(),1,'Exactly one Tuesday 16:00 slot must exist');assert.equal(await end.count(),1,'Exactly one Tuesday 16:30 slot must exist');const from=await start.boundingBox(),to=await end.boundingBox();assert(from&&to&&from.width>0&&to.width>0&&to.y>from.y,'Adjacent Tuesday slots must have visible, increasing geometry');await root.page().mouse.move(from.x+from.width/2,from.y+1);await root.page().mouse.down();await root.page().mouse.move(to.x+to.width/2,to.y+1,{steps:3});await root.page().mouse.up();},async state=>{const event=assertAction(state,'create-event');assert.equal(event.start,'2026-10-13T16:00');assert.equal(event.end,'2026-10-13T16:30');return {action:event.action,start:event.start,end:event.end};});
+      }else{
+        await runStep('week-create-event',async()=>{const start=grid.locator('.ely-calendar-time-slot[data-ely-date="2026-10-13"][data-ely-time="16:00"]'),end=grid.locator('.ely-calendar-time-slot[data-ely-date="2026-10-13"][data-ely-time="16:30"]');assert.equal(await start.count(),1,'Exactly one Tuesday 16:00 slot must exist');assert.equal(await end.count(),1,'Exactly one Tuesday 16:30 slot must exist');const from=await start.boundingBox(),to=await end.boundingBox();assert(from&&to&&from.width>0&&to.width>0&&to.y>from.y,'Adjacent Tuesday slots must have visible, increasing geometry');await root.page().mouse.move(from.x+from.width/2,from.y+1);await root.page().mouse.down();await root.page().mouse.move(to.x+to.width/2,to.y+1,{steps:3});await root.page().mouse.up();},async state=>{const event=assertAction(state,'create-event');assert.equal(event.start,'2026-10-13T16:00');assert.equal(event.end,'2026-10-13T16:30');return {action:event.action,start:event.start,end:event.end};});
+        await runStep('week-open-allday',()=>root.locator('.ely-calendar-allday [data-ely-action="open-event"][value="offsite"]').click(),async state=>{const event=assertAction(state,'open-event','offsite');return {action:event.action,value:event.value};});
+      }
+      return;
+    }
+    if(contract.focusedSequence==='communication-event-popover'){
+      const trigger=root.locator('[data-calendar-popover-open]'),panel=root.locator('[data-calendar-popover]');
+      await runStep('popover-open',()=>trigger.click(),async()=>{assert.equal(await panel.isVisible(),true);assert.equal(await trigger.getAttribute('aria-expanded'),'true');assert.equal(await panel.evaluate(node=>node.contains(document.activeElement)),true,'Opening must move keyboard focus into the owned details panel');return {visible:true,expanded:true,focusInside:true};});
+      for(const action of ['edit-event','delete-event'])await runStep(`popover-${action==='edit-event'?'edit':'delete'}`,()=>panel.locator(`[data-ely-action="${action}"]`).click(),async state=>{const event=assertAction(state,action,'review');return {action:event.action,value:event.value};});
+      await runStep('popover-close',()=>panel.locator('[data-calendar-popover-close]').click(),async()=>{assert.equal(await panel.isVisible(),false);assert.equal(await trigger.getAttribute('aria-expanded'),'false');assert.equal(await trigger.evaluate(node=>node===document.activeElement),true);return {visible:false,expanded:false,focusRestored:true};});
+      await runStep('popover-reopen',()=>trigger.click(),async()=>{assert.equal(await panel.isVisible(),true);assert.equal(await trigger.getAttribute('aria-expanded'),'true');assert.equal(await panel.evaluate(node=>node.contains(document.activeElement)),true);return {visible:true,expanded:true,focusInside:true};});
+      await runStep('popover-escape',()=>root.page().keyboard.press('Escape'),async()=>{assert.equal(await panel.isVisible(),false);assert.equal(await trigger.getAttribute('aria-expanded'),'false');assert.equal(await trigger.evaluate(node=>node===document.activeElement),true);return {visible:false,expanded:false,focusRestored:true};});
+      return;
+    }
+    assert.fail(`Unknown focused communication sequence ${contract.focusedSequence}`);
+  }
   if(contract.focusedSequence==='vertical-range-native-scroll'){
     assert(['layout/Scrollbar','layout/StickyHeader'].includes(contract.identity));
     const identity=contract.identity,kind=identity.split('/')[1];
