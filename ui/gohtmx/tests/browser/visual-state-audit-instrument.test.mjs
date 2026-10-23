@@ -55,6 +55,31 @@ test('basic menu placement pure: beforetoggle precedes focus and shared listener
   roots.splice(0);windowListeners.get('resize').fn();assert.deepEqual(events,[],'No removed-root registry remains');
 });
 
+test('basic menu placement pure: actual keyboard handler transitions skip disabled items',async()=>{
+  const source=await readFile(new URL('../../assets/ely-patterns.js',import.meta.url),'utf8'),nodes=[];
+  const visit=node=>{if(!node||typeof node!=='object')return;if(node.type)nodes.push(node);for(const child of Object.values(node))if(Array.isArray(child))child.forEach(visit);else if(child&&typeof child==='object')visit(child);};
+  visit(parse(source,{ecmaVersion:'latest',sourceType:'script'}));
+  const declarations=nodes.filter(node=>node.type==='VariableDeclarator'&&node.id.name==='items');
+  const handlers=nodes.filter(node=>node.type==='CallExpression'&&node.callee.type==='MemberExpression'&&node.callee.object.name==='popup'&&node.callee.property.name==='addEventListener'&&node.arguments[0]?.value==='keydown');
+  assert.equal(declarations.length,1);assert.equal(handlers.length,1);
+  const declaration=`const ${source.slice(declarations[0].start,declarations[0].end)};`,callback=source.slice(handlers[0].arguments[1].start,handlers[0].arguments[1].end);
+  const run=(itemsSource,handlerSource)=>{
+    const document={activeElement:null},focus=[];
+    const items=['first','disabled','last'].map((name,index)=>({name,disabled:index===1,focus(){if(!this.disabled){document.activeElement=this;focus.push(name);}}}));
+    document.activeElement=items[0];
+    const handler=compileFunction(`${itemsSource};return (${handlerSource});`,['popup','document'])({querySelectorAll:()=>items},document);
+    for(const [key,expected]of [['ArrowDown',items[2]],['ArrowUp',items[0]]]){
+      let prevented=false;handler({key,preventDefault(){prevented=true;}});
+      assert(prevented);assert.equal(document.activeElement,expected,'Navigation must make the actual first/last focus transition');
+    }
+    assert.deepEqual(focus,['last','first']);
+  };
+  run(declaration,callback);
+  const unfiltered=declaration.replace('.filter(item => !item.disabled)','');assert.notEqual(unfiltered,declaration);
+  assert.throws(()=>run(unfiltered,callback),'Dropping disabled filtering cannot pass by keeping old focus');
+  assert.throws(()=>run(declaration,'()=>{}'),'A no-op keyboard handler cannot pass a one-item wrap');
+});
+
 test('basic menu positioning browser: native opening precedes focus and follows nested scroll without isolation',async()=>{
   const names=['ely-patterns.js','ely-patterns.css','app.css'];
   const hash=bytes=>createHash('sha256').update(bytes).digest('hex');
@@ -69,7 +94,7 @@ test('basic menu positioning browser: native opening precedes focus and follows 
     for(const width of [1440,390])for(const theme of ['light','dark'])for(const old of [false,true]){
       const context=await browser.newContext({viewport:{width,height:1000},colorScheme:theme}),page=await context.newPage();page.setDefaultTimeout(10000);
       try{
-        const instance=id=>`<div class="ui-menu" data-ui-component="menu" id="${id}"><button type="button" popovertarget="${id}-popup" data-ui-menu-trigger aria-expanded="false" aria-controls="${id}-popup">Caller menu</button><div class="ui-menu-panel" id="${id}-popup" popover role="menu" aria-label="Caller menu"><a role="menuitem" href="#caller-first">Caller first link</a><button role="menuitem" disabled>Disabled</button></div></div>`;
+        const instance=id=>`<div class="ui-menu" data-ui-component="menu" id="${id}"><button type="button" popovertarget="${id}-popup" data-ui-menu-trigger aria-expanded="false" aria-controls="${id}-popup">Caller menu</button><div class="ui-menu-panel" id="${id}-popup" popover role="menu" aria-label="Caller menu"><a role="menuitem" href="#caller-first">Caller first link</a><button role="menuitem" disabled>Disabled</button><a role="menuitem" href="#caller-last">Caller last link</a></div></div>`;
         const scoped='[data-ui-component="menu"]>.ui-menu-panel';
         const css=old?sources['ely-patterns.css'].split('\n').filter(line=>!line.startsWith(scoped)).join('\n'):sources['ely-patterns.css'];
         const js=old?sources['ely-patterns.js'].replace("if (event.newState === 'open') positionMenu(popup, trigger);","if (event.newState === 'open') void 0;"):sources['ely-patterns.js'];
@@ -95,9 +120,19 @@ test('basic menu positioning browser: native opening precedes focus and follows 
         await root.evaluate(node=>{Object.assign(node.style,{position:'fixed',right:'8px',bottom:'8px'});window.dispatchEvent(new Event('resize'));});
         const edge=await geometry();check(edge);assert(edge.panel.bottom<=edge.trigger.top-5,'Bottom edge flips above');assert(await page.evaluate(()=>document.activeElement===menuActive));await capture('edge');
         await page.keyboard.press('Escape');await page.waitForFunction(()=>!document.getElementById('main-popup').matches(':popover-open'));
-        await trigger.click();await page.waitForFunction(()=>document.getElementById('main-popup').matches(':popover-open'));await page.mouse.click(4,4);await page.waitForFunction(()=>!document.getElementById('main-popup').matches(':popover-open'));
-        await trigger.click();await page.waitForFunction(()=>document.getElementById('main-popup').matches(':popover-open'));await page.keyboard.press('ArrowDown');assert.equal(await page.evaluate(()=>document.activeElement.textContent),'Caller first link','Disabled button is skipped');await popup.locator('a').click();
-        await page.waitForFunction(()=>!document.getElementById('main-popup').matches(':popover-open'));assert.deepEqual(await page.evaluate(()=>menuSelect),[{trusted:false,detail:{value:'#caller-first'}}]);
+        await trigger.click();await page.waitForFunction(()=>document.getElementById('main-popup').matches(':popover-open'));await page.mouse.click(4,4);
+        await page.waitForFunction(()=>!document.getElementById('main-popup').matches(':popover-open')&&document.activeElement===document.querySelector('#main [data-ui-menu-trigger]'));
+        const focusCursor=await page.evaluate(()=>menuFocus.length);
+        await page.keyboard.press('Enter');
+        await page.waitForFunction(()=>document.getElementById('main-popup').matches(':popover-open')&&document.activeElement===document.querySelector('#main-popup [href="#caller-first"]'));
+        const reopened=await geometry();check(reopened);
+        const reopenedFocus=await page.evaluate(cursor=>menuFocus.slice(cursor),focusCursor);assert(reopenedFocus.length,'Keyboard reopen requires a fresh first-item focus observation');
+        for(const f of reopenedFocus)assert(Math.abs(f.left-reopened.panel.left)<=1&&Math.abs(f.top-reopened.panel.top)<=1,'Keyboard first focus must already be anchored');
+        row.keyboardReopen={geometry:reopened,focus:reopenedFocus};
+        await page.keyboard.press('ArrowDown');assert(await popup.locator('[href="#caller-last"]').evaluate(node=>node===document.activeElement),'ArrowDown must skip disabled and move first to last');
+        await page.keyboard.press('ArrowUp');assert(await popup.locator('[href="#caller-first"]').evaluate(node=>node===document.activeElement),'ArrowUp must skip disabled and move last to first');
+        await page.keyboard.press('Enter');
+        await page.waitForFunction(()=>!document.getElementById('main-popup').matches(':popover-open')&&document.activeElement===document.querySelector('#main [data-ui-menu-trigger]'));assert.deepEqual(await page.evaluate(()=>menuSelect),[{trusted:false,detail:{value:'#caller-first'}}]);
         assert.equal(await page.locator('#twin').evaluate(node=>node.outerHTML),twin);
       }finally{await context.close();}
     }
