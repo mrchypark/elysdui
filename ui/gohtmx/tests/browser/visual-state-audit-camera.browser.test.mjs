@@ -209,7 +209,7 @@ test('action camera tall-page, outline and centered native-modal causal pixels',
       assert.deepEqual(capture.png,reference,'Compare actual target pixels, not just PNG dimensions or pre-capture ownership');
     }
     // Author-only until an exclusive browser grant: independent six-pixel paint reference.
-    await page.setContent('<style>body{margin:0;background:magenta}#spacer{height:64419px}#target{margin-left:85px;width:200px;height:40px}input{box-sizing:border-box;width:200px;height:40px;border:0;background:green;outline:none}input:focus-visible{outline:2px solid blue;outline-offset:4px}#target[data-outline-negative] input{outline:none!important}#tail{height:2000px}</style><div id="spacer"></div><div id="target" data-ely-family="forms"><input aria-label="Outline calibration"></div><div id="tail"></div>');
+    await page.setContent('<style>body{margin:0;background:magenta}#spacer{height:64419px}#target{margin-left:85px;width:200px;height:40px}input{box-sizing:border-box;width:200px;height:40px;border:0;background:green;outline:none;caret-color:transparent}input:focus-visible{outline:2px solid blue;outline-offset:4px}#target[data-outline-negative] input{outline:none!important}#tail{height:2000px}</style><div id="spacer"></div><div id="target" data-ely-family="forms"><input aria-label="Outline calibration"></div><div id="tail"></div>');
     await page.keyboard.press('Tab');
     assert.equal(await page.locator('input').evaluate(node=>node===document.activeElement&&node.matches(':focus-visible')),true);
     await root.scrollIntoViewIfNeeded();
