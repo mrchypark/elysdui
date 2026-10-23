@@ -138,6 +138,7 @@ class LiveProfileAppTest {
             val deadline = SystemClock.elapsedRealtime() + 3_000L
             var sawOwnActivityWindow = false
             var imeHiddenWithOwnWindow = false
+            var settledSince = 0L
             while (SystemClock.elapsedRealtime() < deadline) {
                 val windows = automation.windows
                 val imeVisible: Boolean
@@ -152,8 +153,14 @@ class LiveProfileAppTest {
                 }
                 sawOwnActivityWindow = sawOwnActivityWindow || ownActivityWindow
                 if (ownActivityWindow && !imeVisible) {
-                    imeHiddenWithOwnWindow = true
-                    break
+                    val now = SystemClock.elapsedRealtime()
+                    if (settledSince == 0L) settledSince = now
+                    if (now - settledSince >= 500L) {
+                        imeHiddenWithOwnWindow = true
+                        break
+                    }
+                } else {
+                    settledSince = 0L
                 }
                 SystemClock.sleep(50L)
             }
