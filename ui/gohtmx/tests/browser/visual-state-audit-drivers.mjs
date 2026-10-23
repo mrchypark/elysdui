@@ -357,6 +357,33 @@ export async function runRegisteredCanvasActions(contract,root,runStep){
 }
 
 const settingsTargets={KeyboardShortcutsList:[1,'Keyboard'],ProxySettings:[2,'Network'],PrivacySettings:[3,'Privacy','telemetry'],NotificationSettings:[4,'Notifications','quiet'],StartupSettings:[5,'Startup','login'],StorageSettings:[6,'Storage'],ResetToDefault:[6,'Storage'],AdvancedSettings:[7,'Advanced','developer'],'DeveloperMode Toggle':[7,'Advanced','developer']};
+export function calendarDraftWheelDecision(metrics){
+  const fail=reason=>({axis:'unreachable',deltaX:0,deltaY:0,reason});
+  if(!metrics.textRects.length)return fail('Calendar draft has no painted text fragments');
+  const left=Math.min(...metrics.textRects.map(rect=>rect.left)),right=Math.max(...metrics.textRects.map(rect=>rect.right));
+  const top=Math.min(...metrics.textRects.map(rect=>rect.top)),bottom=Math.max(...metrics.textRects.map(rect=>rect.bottom));
+  if(right-left>metrics.clientWidth)return fail(`Calendar draft text spans ${right-left}px, wider than the owned ${metrics.clientWidth}px horizontal scrollport`);
+  if(bottom-top>metrics.clientHeight)return fail(`Calendar draft text spans ${bottom-top}px, taller than the owned ${metrics.clientHeight}px vertical scrollport`);
+  const scrollMaxX=Math.max(0,metrics.scrollWidth-metrics.clientWidth),scrollMaxY=Math.max(0,metrics.scrollHeight-metrics.clientHeight);
+  if(left<metrics.clip.left){
+    if(metrics.scrollLeft<=0)return fail('Calendar draft remains clipped at the horizontal start endpoint');
+    return {axis:'horizontal',deltaX:-Math.min(120,Math.max(1,Math.ceil(metrics.clip.left-left))),deltaY:0};
+  }
+  if(right>metrics.clip.right){
+    if(metrics.scrollLeft>=scrollMaxX)return fail('Calendar draft remains clipped at the horizontal end endpoint');
+    return {axis:'horizontal',deltaX:Math.min(120,Math.max(1,Math.ceil(right-metrics.clip.right))),deltaY:0};
+  }
+  if(top<metrics.clip.top){
+    if(metrics.scrollTop<=0)return fail('Calendar draft remains clipped at the vertical start endpoint');
+    return {axis:'vertical',deltaX:0,deltaY:-Math.min(120,Math.max(1,Math.ceil(metrics.clip.top-top)))};
+  }
+  if(bottom>metrics.clip.bottom){
+    if(metrics.scrollTop>=scrollMaxY)return fail('Calendar draft remains clipped at the vertical end endpoint');
+    return {axis:'vertical',deltaX:0,deltaY:Math.min(120,Math.max(1,Math.ceil(bottom-metrics.clip.bottom)))};
+  }
+  return {axis:'visible',deltaX:0,deltaY:0};
+}
+
 export function requestedStateContract(identity,trashFixture){
   if(identity==='misc/IframeEmbed'||identity==='misc/EmbedCard'){
     const stepId=identity==='misc/IframeEmbed'?'iframe-open-host':'embedcard-open-host',url='https://example.com';
@@ -955,10 +982,43 @@ export async function runRequestedStateActions(contract,root,runStep,failureDiag
       for(const value of ['samples','client'])await runStep(`${day?'day':'week'}-open-${value}`,()=>grid.locator(`[data-ely-calendar-event][value="${value}"]`).click(),async state=>{const event=assertAction(state,'open-event',value);return {action:event.action,value:event.value};});
       if(day){
         await runStep('day-create-event',async()=>{const start=grid.locator('.ely-calendar-time-slot[data-ely-date="2026-10-13"][data-ely-time="16:00"]'),end=grid.locator('.ely-calendar-time-slot[data-ely-date="2026-10-13"][data-ely-time="16:30"]');assert.equal(await start.count(),1,'Exactly one Tuesday 16:00 slot must exist');assert.equal(await end.count(),1,'Exactly one Tuesday 16:30 slot must exist');const from=await start.boundingBox(),to=await end.boundingBox();assert(from&&to&&from.width>0&&to.width>0&&to.y>from.y,'Adjacent Tuesday slots must have visible, increasing geometry');await root.page().mouse.move(from.x+from.width/2,from.y+1);await root.page().mouse.down();await root.page().mouse.move(to.x+to.width/2,to.y+1,{steps:3});await root.page().mouse.up();},async state=>{const event=assertAction(state,'create-event');assert.equal(event.start,'2026-10-13T16:00');assert.equal(event.end,'2026-10-13T16:30');return {action:event.action,start:event.start,end:event.end};});
-        const draftMetrics=()=>grid.evaluate(node=>{const draft=node.querySelector('[data-calendar-draft]');if(!draft)throw Error('The exact local calendar draft is missing');const bounds=node.getBoundingClientRect(),clip={top:bounds.top+node.clientTop,bottom:bounds.top+node.clientTop+node.clientHeight,left:bounds.left+node.clientLeft,right:bounds.left+node.clientLeft+node.clientWidth},range=document.createRange();range.selectNodeContents(draft);const textRects=[...range.getClientRects()].map(rect=>({top:rect.top,bottom:rect.bottom,left:rect.left,right:rect.right}));return {scrollTop:node.scrollTop,scrollHeight:node.scrollHeight,clientHeight:node.clientHeight,scrollMax:Math.max(0,node.scrollHeight-node.clientHeight),draftText:draft.textContent,textRects,draftVisible:draft.checkVisibility({checkOpacity:true,checkVisibilityCSS:true})&&textRects.length>0&&textRects.every(rect=>rect.top>=clip.top&&rect.bottom<=clip.bottom&&rect.left>=clip.left&&rect.right<=clip.right),clip,wheels:node.__calendarDraftRevealWheels||[]};});
+        const draftMetrics=()=>grid.evaluate(node=>{const draft=node.querySelector('[data-calendar-draft]');if(!draft)throw Error('The exact local calendar draft is missing');const bounds=node.getBoundingClientRect(),clip={top:bounds.top+node.clientTop,bottom:bounds.top+node.clientTop+node.clientHeight,left:bounds.left+node.clientLeft,right:bounds.left+node.clientLeft+node.clientWidth,width:node.clientWidth,height:node.clientHeight},range=document.createRange();range.selectNodeContents(draft);const textRects=[...range.getClientRects()].map(rect=>({top:rect.top,bottom:rect.bottom,left:rect.left,right:rect.right,width:rect.width,height:rect.height}));return {scrollLeft:node.scrollLeft,scrollWidth:node.scrollWidth,clientWidth:node.clientWidth,scrollMaxX:Math.max(0,node.scrollWidth-node.clientWidth),scrollTop:node.scrollTop,scrollHeight:node.scrollHeight,clientHeight:node.clientHeight,scrollMaxY:Math.max(0,node.scrollHeight-node.clientHeight),draftText:draft.textContent,textRects,draftVisible:draft.checkVisibility({checkOpacity:true,checkVisibilityCSS:true})&&textRects.length>0&&textRects.every(rect=>rect.top>=clip.top&&rect.bottom<=clip.bottom&&rect.left>=clip.left&&rect.right<=clip.right),clip,wheels:node.__calendarDraftRevealWheels||[]};});
         await grid.evaluate(node=>{node.__calendarDraftRevealWheels=[];node.__calendarDraftRevealListener=event=>node.__calendarDraftRevealWheels.push({trusted:event.isTrusted,deltaX:event.deltaX,deltaY:event.deltaY,targetInside:event.target===node||node.contains(event.target)});node.addEventListener('wheel',node.__calendarDraftRevealListener,true);});
-        let beforeDraftScrollTop=0,actionCursor=0;
-        try{await runStep('day-reveal-created-draft',async()=>{const before=await draftMetrics();assert.equal(before.draftText,'New event · 16:00 – 16:30','The exact local draft must retain both requested times');assert(before.scrollMax>0,'The owned time grid must have a measurable native scroll range');beforeDraftScrollTop=before.scrollTop;actionCursor=await root.evaluate(()=>globalThis.__visualDirectActions.length);await grid.hover();const box=await grid.boundingBox();assert(box&&box.height>0,'The exact time grid must provide a native wheel surface');let current=before,wheelCount=0;for(let attempt=0;attempt<8;attempt++){let deltaY;if(!current.draftVisible){deltaY=current.textRects.some(rect=>rect.bottom>current.clip.bottom)?Math.max(120,Math.round(box.height*.2)):-Math.max(120,Math.round(box.height*.2));}else if(current.textRects[0].top+current.textRects[0].bottom<current.clip.top+current.clip.bottom&&current.scrollTop>0)deltaY=-5;else deltaY=5;if(deltaY>0&&current.scrollTop>=current.scrollMax)deltaY=-Math.max(5,Math.min(120,current.scrollTop));else if(deltaY<0&&current.scrollTop<=0)deltaY=Math.max(5,Math.min(120,current.scrollMax-current.scrollTop));await root.page().mouse.wheel(0,deltaY);await root.page().evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));current=await draftMetrics();wheelCount++;if(current.draftVisible&&current.scrollTop!==before.scrollTop)break;}assert(wheelCount>0&&current.scrollTop!==before.scrollTop,'Trusted native wheel must measurably move the owned grid');return {method:'native Playwright wheel over the owned calendar grid',before,after:current,wheelCount};},async state=>{const after=await draftMetrics(),wheels=after.wheels;assert.equal(after.scrollMax,Math.max(0,after.scrollHeight-after.clientHeight),'Native grid endpoint metrics must reconcile');assert(after.scrollTop>=0&&after.scrollTop<=after.scrollMax,'Native scrollTop must remain within the measured endpoint');assert.notEqual(after.scrollTop,beforeDraftScrollTop,'Wheel input must move the calendar time grid');assert.equal(after.draftText,'New event · 16:00 – 16:30','Wheel reveal must preserve the complete 16:00–16:30 draft');assert(after.draftVisible,'Every painted draft text fragment must be visible inside the owned scrollport');assert(wheels.some(event=>event.trusted&&event.targetInside&&event.deltaY!==0),'A trusted native wheel must reach the exact time-grid scroller');assert.equal(state.actions.length,actionCursor,'The visual reveal must not emit a second host action');return {scrollTop:after.scrollTop,scrollHeight:after.scrollHeight,clientHeight:after.clientHeight,scrollMax:after.scrollMax,draftText:after.draftText,textRects:after.textRects,clip:after.clip,nativeWheel:wheels.at(-1),hostActionCount:state.actions.length};});}finally{await grid.evaluate(node=>{if(node.__calendarDraftRevealListener)node.removeEventListener('wheel',node.__calendarDraftRevealListener,true);delete node.__calendarDraftRevealListener;delete node.__calendarDraftRevealWheels;});}
+        let revealMetrics=null,revealFailure=null,actionCursor=0;
+        try{await runStep('day-reveal-created-draft',async()=>{
+          const before=await draftMetrics();assert.equal(before.draftText,'New event · 16:00 – 16:30','The exact local draft must retain both requested times');
+          actionCursor=await root.evaluate(()=>globalThis.__visualDirectActions.length);await grid.hover();
+          const decisions=[];let current=before,wheelCount=0;
+          for(let attempt=0;attempt<8;attempt++){
+            const decision=calendarDraftWheelDecision(current);if(decision.axis==='visible')break;
+            if(decision.reason){revealFailure=decision.reason;break;}
+            decisions.push(decision);await root.page().mouse.wheel(decision.deltaX,decision.deltaY);
+            await root.page().evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+            const next=await draftMetrics();wheelCount++;
+            if(next.scrollLeft===current.scrollLeft&&next.scrollTop===current.scrollTop){
+              current=next;revealFailure=`Trusted native ${decision.axis} wheel produced no scroll movement; ${decision.axis==='horizontal'?'horizontal':'vertical'} draft reveal is blocked`;
+              break;
+            }
+            current=next;
+          }
+          const finalDecision=calendarDraftWheelDecision(current);
+          if(!revealFailure&&finalDecision.axis!=='visible')revealFailure=finalDecision.reason||'Calendar draft remains clipped after eight axis-directed native wheel inputs';
+          revealMetrics={before,after:current,decisions,wheelCount,failure:revealFailure};
+          return {method:'axis-directed native Playwright wheel over the owned calendar grid',...revealMetrics};
+        },async state=>{
+          const after=await draftMetrics(),wheels=after.wheels;
+          assert.equal(after.scrollMaxX,Math.max(0,after.scrollWidth-after.clientWidth),'Native horizontal scroll endpoint metrics must reconcile');
+          assert.equal(after.scrollMaxY,Math.max(0,after.scrollHeight-after.clientHeight),'Native vertical scroll endpoint metrics must reconcile');
+          assert(after.scrollLeft>=0&&after.scrollLeft<=after.scrollMaxX,'Native scrollLeft must remain within the measured horizontal endpoint');
+          assert(after.scrollTop>=0&&after.scrollTop<=after.scrollMaxY,'Native scrollTop must remain within the measured vertical endpoint');
+          assert.equal(after.draftText,'New event · 16:00 – 16:30','Wheel reveal must preserve the complete 16:00–16:30 draft');
+          assert.equal(revealFailure,null,revealFailure||'Every painted draft text fragment must be visible inside the owned scrollport');
+          assert(after.draftVisible,'Every painted draft text fragment must be visible inside the owned scrollport');
+          if(!revealMetrics.before.draftVisible)assert(revealMetrics.wheelCount>0,'A clipped draft must be revealed with native wheel input');
+          if(revealMetrics.wheelCount)assert(wheels.some(event=>event.trusted&&event.targetInside&&(event.deltaX!==0||event.deltaY!==0)),'A trusted native wheel must reach the exact time-grid scroller');
+          assert.equal(state.actions.length,actionCursor,'The visual reveal must not emit a second host action');
+          return {scrollLeft:after.scrollLeft,scrollWidth:after.scrollWidth,clientWidth:after.clientWidth,scrollMaxX:after.scrollMaxX,scrollTop:after.scrollTop,scrollHeight:after.scrollHeight,clientHeight:after.clientHeight,scrollMaxY:after.scrollMaxY,draftText:after.draftText,textRects:after.textRects,clip:after.clip,nativeWheels:wheels,hostActionCount:state.actions.length};
+        });}finally{await grid.evaluate(node=>{if(node.__calendarDraftRevealListener)node.removeEventListener('wheel',node.__calendarDraftRevealListener,true);delete node.__calendarDraftRevealListener;delete node.__calendarDraftRevealWheels;});}
       }else{
         await runStep('week-create-event',async()=>{const start=grid.locator('.ely-calendar-time-slot[data-ely-date="2026-10-13"][data-ely-time="16:00"]'),end=grid.locator('.ely-calendar-time-slot[data-ely-date="2026-10-13"][data-ely-time="16:30"]');assert.equal(await start.count(),1,'Exactly one Tuesday 16:00 slot must exist');assert.equal(await end.count(),1,'Exactly one Tuesday 16:30 slot must exist');const from=await start.boundingBox(),to=await end.boundingBox();assert(from&&to&&from.width>0&&to.width>0&&to.y>from.y,'Adjacent Tuesday slots must have visible, increasing geometry');await root.page().mouse.move(from.x+from.width/2,from.y+1);await root.page().mouse.down();await root.page().mouse.move(to.x+to.width/2,to.y+1,{steps:3});await root.page().mouse.up();},async state=>{const event=assertAction(state,'create-event');assert.equal(event.start,'2026-10-13T16:00');assert.equal(event.end,'2026-10-13T16:30');return {action:event.action,start:event.start,end:event.end};});
         await runStep('week-open-allday',()=>root.locator('.ely-calendar-allday [data-ely-action="open-event"][value="offsite"]').click(),async state=>{const event=assertAction(state,'open-event','offsite');return {action:event.action,value:event.value};});

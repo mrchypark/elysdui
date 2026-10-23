@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import test from 'node:test';
-import {assertCommunicationCallerRequest,assertDockCallerAction,assertDockNativeEvents,assertEvalLastColumnGeometry,assertNativeEmbedOpen,requestedStateContract,runRequestedStateActions} from './visual-state-audit-drivers.mjs';
+import {assertCommunicationCallerRequest,assertDockCallerAction,assertDockNativeEvents,assertEvalLastColumnGeometry,assertNativeEmbedOpen,calendarDraftWheelDecision,requestedStateContract,runRequestedStateActions} from './visual-state-audit-drivers.mjs';
 
 const read=path=>readFile(new URL(`../../../../${path}`,import.meta.url),'utf8');
 
@@ -159,9 +159,21 @@ test('WebSocket history and day-event draft reveals append native-wheel checkpoi
   assert(socketStart>=0&&socketEnd>socketStart&&calendarStart>=0&&calendarEnd>calendarStart);
   const socketPath=driver.slice(socketStart,socketEnd),calendarPath=driver.slice(calendarStart,calendarEnd);
   assert.match(socketPath,/root\.page\(\)\.mouse\.wheel\(0,-Math\.max\(120/);assert.match(socketPath,/scrollTop:[^,]+,scrollHeight:[^,]+,clientHeight:[^,]+,scrollMax:/);assert.match(socketPath,/firstRowFullyVisible/);assert.match(socketPath,/history-log/);
-  assert.match(calendarPath,/root\.page\(\)\.mouse\.wheel\(0,deltaY\)/);assert.match(calendarPath,/draftVisible/);assert.match(calendarPath,/New event · 16:00 – 16:30/);assert.match(calendarPath,/nativeWheel/);
+  assert.match(calendarPath,/root\.page\(\)\.mouse\.wheel\(decision\.deltaX,decision\.deltaY\)/);assert.match(calendarPath,/scrollLeft:node\.scrollLeft,scrollWidth:node\.scrollWidth,clientWidth:node\.clientWidth,scrollMaxX/);assert.match(calendarPath,/scrollTop:node\.scrollTop,scrollHeight:node\.scrollHeight,clientHeight:node\.clientHeight,scrollMaxY/);assert.match(calendarPath,/draftVisible/);assert.match(calendarPath,/New event · 16:00 – 16:30/);assert.match(calendarPath,/nativeWheels/);
+  assert.match(driver,/export function calendarDraftWheelDecision/);assert.match(driver,/if\(left<metrics\.clip\.left\)[\s\S]*?if\(right>metrics\.clip\.right\)[\s\S]*?if\(top<metrics\.clip\.top\)[\s\S]*?if\(bottom>metrics\.clip\.bottom\)/,'The pure classifier resolves horizontal bounds before vertical bounds');
   assert.doesNotMatch(socketPath,/scrollTop\s*=(?!=)|\.scrollIntoView\(|\.style\s*\./,'WebSocket reveal uses native input without forced DOM scrolling or style writes');
   assert.doesNotMatch(calendarPath,/scrollTop\s*=(?!=)|\.scrollIntoView\(|\.style\s*\./,'Calendar reveal uses native input without forced DOM scrolling or style writes');
+});
+
+test('calendar draft reveal classifies horizontal clipping before vertical clipping and rejects unreachable text',()=>{
+  const metrics=({rects,scrollLeft=0,scrollTop=20})=>({textRects:rects,scrollLeft,scrollWidth:400,clientWidth:300,scrollMaxX:100,scrollTop,scrollHeight:300,clientHeight:100,scrollMaxY:200,clip:{left:0,right:300,top:0,bottom:100}});
+  assert.deepEqual(calendarDraftWheelDecision(metrics({rects:[{left:298,right:312,top:95,bottom:115}]})),{axis:'horizontal',deltaX:12,deltaY:0},'Horizontal overrun takes precedence and does not issue a vertical wheel');
+  assert.deepEqual(calendarDraftWheelDecision(metrics({rects:[{left:-5,right:50,top:20,bottom:35}],scrollLeft:10})),{axis:'horizontal',deltaX:-5,deltaY:0},'A left-clipped fragment uses native horizontal movement toward the start');
+  assert.deepEqual(calendarDraftWheelDecision(metrics({rects:[{left:20,right:80,top:95,bottom:115}]})),{axis:'vertical',deltaX:0,deltaY:15},'Vertical movement is selected only after horizontal bounds fit');
+  assert.deepEqual(calendarDraftWheelDecision(metrics({rects:[{left:20,right:80,top:-5,bottom:35}],scrollTop:10})),{axis:'vertical',deltaX:0,deltaY:-5},'A top-clipped fragment uses native vertical movement toward the start');
+  assert.equal(calendarDraftWheelDecision(metrics({rects:[{left:-5,right:20,top:10,bottom:30}]})).reason,'Calendar draft remains clipped at the horizontal start endpoint');
+  assert.equal(calendarDraftWheelDecision(metrics({rects:[{left:20,right:330,top:10,bottom:30}]})).reason,'Calendar draft text spans 310px, wider than the owned 300px horizontal scrollport');
+  assert.deepEqual(calendarDraftWheelDecision(metrics({rects:[{left:20,right:80,top:10,bottom:30}]})),{axis:'visible',deltaX:0,deltaY:0});
 });
 
 test('IframeEmbed and EmbedCard retain exact native host-open contracts without provider navigation',async()=>{
