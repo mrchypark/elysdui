@@ -18,6 +18,26 @@ test('hidden action shim style exits before outline color parsing',()=>{
   assert.equal(result,bounds);
 });
 
+test('canvas focus gap diagnostic pure: preserves exact gap and serializes computed SVG evidence',async()=>{
+  const family={},rect={left:12,top:18,right:212,bottom:158,width:200,height:140};
+  const element=(tag,id,parent=null)=>({localName:tag,namespaceURI:tag==='svg'?'http://www.w3.org/2000/svg':'http://www.w3.org/1999/xhtml',id,parentElement:parent,hasAttribute:name=>name==='data-cs-minimap'&&id==='minimap',getBoundingClientRect:()=>rect});
+  const html=element('div','root'),view=element('div','canvas-view',html),active=element('svg','minimap',view);
+  active.matches=selector=>selector===':focus-visible';active.closest=()=>family;active.getClientRects=()=>[rect];active.offsetParent=null;
+  html.parentElement=null;html.closest=()=>family;
+  const baseStyle={position:'relative',overflowX:'hidden',overflowY:'hidden',overflowClipMargin:'0px',clip:'auto',clipPath:'none',transform:'none',translate:'none',rotate:'none',scale:'none',perspective:'none',filter:'none',contain:'none'};
+  const styles=new Map([[active,{...baseStyle,display:'block',outlineStyle:'auto',outlineWidth:'auto',outlineOffset:'0px',outlineColor:'rgb(0, 0, 255)'}],[view,baseStyle],[html,{...baseStyle,position:'static'}]]);
+  const bounds={clip:{x:1,y:2,width:300,height:200},root:{left:4,top:5,right:304,bottom:205},extendsRoot:false,viewportTruncated:false,marker:'unchanged'};
+  const result=JSON.parse(JSON.stringify(runInNewContext(`(${activeOutlineBounds.toString()})(node,bounds)`,{
+    document:{activeElement:active},getComputedStyle:element=>styles.get(element),node:{contains:element=>element===active,closest:()=>family},bounds,scrollX:0,scrollY:0,innerWidth:400,innerHeight:300,
+  })));
+  assert.deepEqual(result.clip,bounds.clip);assert.deepEqual(result.root,bounds.root);assert.equal(result.marker,'unchanged');
+  assert.equal(result.focusOutline.status,'unsupported');assert.equal(result.focusOutline.reason,'unbounded outline style');
+  assert.deepEqual(result.focusOutline.diagnostic.active,{tag:'svg',namespace:'http://www.w3.org/2000/svg',id:'minimap',dataCsMinimap:true,rect,matchesFocusVisible:true,outlineStyle:'auto',outlineWidth:'auto',outlineOffset:'0px',outlineColor:'rgb(0, 0, 255)',clientRects:[rect]});
+  assert.equal(result.focusOutline.diagnostic.offsetParent,null);assert.deepEqual(result.focusOutline.diagnostic.ancestors.map(item=>[item.tag,item.id,item.position,item.overflowX,item.overflowY,item.clip,item.clipPath,item.transform,item.contain]),[['svg','minimap','relative','hidden','hidden','auto','none','none','none'],['div','canvas-view','relative','hidden','hidden','auto','none','none','none'],['div','root','static','hidden','hidden','auto','none','none','none']]);
+  const captureSource=await readFile(new URL('./visual-state-audit-actions.mjs',import.meta.url),'utf8');
+  assert(captureSource.includes('focusOutlineGap,bounds,foreignDOMIntersections,occludedForeignPaint'),'The existing report capture receipt retains the expanded bounds object');
+});
+
 test('popover overlay inventory requires exact identity, root, unique open reference and visible article',()=>{
   const make=(id,visible=true)=>({id,tagName:'ARTICLE',innerText:'Details',checkVisibility:()=>visible,getBoundingClientRect:()=>({x:0,y:0,width:200,height:120}),getAttribute:()=>null,matches:()=>false,closest:()=>null});
   const panel=make('owned-panel'),foreign=make('foreign-panel'),triggerFor=({expanded='true',controls='owned-panel'}={})=>({id:'open',getAttribute:name=>name==='aria-expanded'?expanded:name==='aria-controls'?controls:null});

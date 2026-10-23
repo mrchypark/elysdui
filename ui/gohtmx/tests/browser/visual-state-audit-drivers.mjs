@@ -40,7 +40,18 @@ export function activeOutlineBounds(node,bounds){
   const width=parseFloat(style.outlineWidth),offset=parseFloat(style.outlineOffset);
   const alpha=style.outlineColor.match(/\/\s*([\d.]+%?)\s*\)$/)?.[1]??style.outlineColor.match(/^rgba\([^,]+,[^,]+,[^,]+,\s*([\d.]+%?)\s*\)$/)?.[1];
   if(style.outlineStyle==='none'||style.outlineStyle==='hidden'||width===0||style.outlineColor==='transparent'||(alpha!==undefined&&parseFloat(alpha)===0))return bounds;
-  const gap=reason=>({...bounds,focusOutline:{status:'unsupported',reason}});
+  const diagnostic=()=>{
+    const rectJSON=rect=>rect?{left:rect.left,top:rect.top,right:rect.right,bottom:rect.bottom,width:rect.width,height:rect.height}:null;
+    const identity=element=>element?{tag:element.localName,namespace:element.namespaceURI,id:element.id||null,dataCsMinimap:element.hasAttribute('data-cs-minimap'),rect:rectJSON(element.getBoundingClientRect())}:null;
+    const ancestors=[];
+    for(let element=active;element;element=element.parentElement){
+      const s=getComputedStyle(element);
+      ancestors.push({...identity(element),position:s.position,overflowX:s.overflowX,overflowY:s.overflowY,overflowClipMargin:s.overflowClipMargin,clip:s.clip,clipPath:s.clipPath,transform:s.transform,translate:s.translate,rotate:s.rotate,scale:s.scale,perspective:s.perspective,filter:s.filter,contain:s.contain});
+    }
+    const offsetParent=identity(active.offsetParent);
+    return {active:{...identity(active),matchesFocusVisible:active.matches(':focus-visible'),outlineStyle:style.outlineStyle,outlineWidth:style.outlineWidth,outlineOffset:style.outlineOffset,outlineColor:style.outlineColor,clientRects:[...active.getClientRects()].map(rectJSON)},offsetParent,ancestors};
+  };
+  const gap=reason=>({...bounds,focusOutline:{status:'unsupported',reason,diagnostic:diagnostic()}});
   const positioned=[];
   if(active.closest('[data-ely-family]')!==node.closest('[data-ely-family]'))return gap('nested component focus ownership');
   if(style.outlineStyle==='auto'||!Number.isFinite(width)||!Number.isFinite(offset))return gap('unbounded outline style');
