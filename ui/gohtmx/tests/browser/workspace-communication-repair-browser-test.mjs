@@ -26,9 +26,32 @@ const groups={
   metadata:['chat/FileMessage','chat/AudioMessage','chat/LinkPreviewCard','chat/SuggestionChips','agent/ToolCallGroup','agent/ToolRegistry Panel','agent/MemoryPanel','agent/CheckpointList','agent/Rewind'],hue:['project/LabelManager']
 };
 const sourcePaths=['ui/gohtmx/assets/ely-api-workspace.css','ui/gohtmx/assets/ely-api-workspace.js','ui/gohtmx/assets/ely-api-communication.css','ui/gohtmx/assets/ely-api-calendar-parity.css','ui/gohtmx/assets/ely-api-foundation.css','ui/gohtmx/assets/ely-controls.css','ui/gohtmx/templates/ely-api-workspace.html','ui/gohtmx/templates/ely-api-communication.html','internal/gallery/advanced_communication_fixtures.go','ui/gohtmx/tests/browser/workspace-communication-repair-browser-test.mjs'];
-const report={phase,control,profile,viewport,colorScheme,node:process.version,nodeExecutable:process.execPath,checks:[],actions:[],console:[],invalidDateInputs:[],sourceHashes:{},cleanup:false};let child,browser;
+const report={phase,control,profile,viewport,colorScheme,node:process.version,nodeExecutable:process.execPath,checks:[],actions:[],console:[],invalidDateInputs:[],sourceHashes:{},cleanup:false};let child,browser,serverPort;
 const run=(cmd,args)=>{const r=spawnSync(cmd,args,{cwd:repo,env,encoding:'utf8'});assert.equal(r.status,0,r.stderr);return r.stdout.trim();};
-async function stop(){if(!child)return;const owned=child;report.serverPID=owned.pid;if(owned.exitCode===null&&owned.signalCode===null){const done=new Promise(r=>owned.once('exit',r));owned.kill('SIGTERM');const timer=setTimeout(()=>owned.kill('SIGKILL'),5000);try{await done;}finally{clearTimeout(timer);}}report.serverStopped=owned.exitCode!==null||owned.signalCode!==null;}
+const serverIdentity=()=>{
+  if(!child?.pid)return null;
+  const read=field=>{const result=spawnSync('ps',['-ww','-p',String(child.pid),'-o',field+'='],{encoding:'utf8'});return result.status===0?result.stdout.trim():'';};
+  const birth=read('lstart'),command=read('command');return birth&&command?{pid:child.pid,birth,command}:null;
+};
+async function stop(){
+  report.serverPID=child?.pid??null;
+  if(child?.pid&&child.exitCode===null&&child.signalCode===null){
+    const current=serverIdentity();report.serverIdentityBeforeTERM=current;
+    if(!report.serverIdentityAtSpawn||!current||current.birth!==report.serverIdentityAtSpawn.birth||current.command!==report.serverExpectedCommand||current.command!==report.serverIdentityAtSpawn.command)throw Error('CLEANUP_PENDING: owned server identity not verified; no signal sent');
+    let timer,onExit;
+    const done=new Promise(resolve=>{onExit=()=>resolve(true);child.once('exit',onExit);timer=setTimeout(()=>resolve(false),5000);});
+    try{assert(child.kill('SIGTERM'),'CLEANUP_PENDING: owned server TERM failed');assert(await done,'CLEANUP_PENDING: owned server exit timed out');}
+    finally{clearTimeout(timer);child.removeListener('exit',onExit);}
+  }
+  report.serverStopped=!child?.pid||child.exitCode!==null||child.signalCode!==null;
+  if(!report.serverStopped)throw Error('CLEANUP_PENDING: owned server still running');
+}
+async function verifyPortClosed(){
+  if(serverPort===undefined)return true;
+  const probe=createServer();let timer;
+  try{return await new Promise(resolve=>{timer=setTimeout(()=>resolve(false),2000);probe.once('error',()=>resolve(false));probe.listen(serverPort,'127.0.0.1',()=>probe.close(()=>resolve(true)));});}
+  finally{clearTimeout(timer);if(probe.listening)probe.close();}
+}
 try{
   report.revision=run('git',['rev-parse','HEAD']);report.go=run('go',['version']);report.dirtyStatus=run('git',['status','--short']);
   for(const path of sourcePaths)report.sourceHashes[path]=digest(await readFile(path));
@@ -43,7 +66,12 @@ try{
   }
   run('go',[...build,'-o',join(temp,'gallery'),'./examples/gohtmx/gallery']);
   const reserve=createServer();await new Promise(r=>reserve.listen(0,'127.0.0.1',r));const port=reserve.address().port;await new Promise(r=>reserve.close(r));
-  const base=`http://127.0.0.1:${port}`;child=spawn(join(temp,'gallery'),['-addr',`127.0.0.1:${port}`],{stdio:'ignore'});
+  const base=`http://127.0.0.1:${port}`;serverPort=port;report.serverPort=port;
+  report.serverExpectedCommand=`${join(temp,'gallery')} -addr 127.0.0.1:${port}`;
+  child=spawn(join(temp,'gallery'),['-addr',`127.0.0.1:${port}`],{stdio:'ignore'});
+  child.on('error',error=>{report.serverSpawnError=String(error);});
+  report.serverIdentityAtSpawn=serverIdentity();
+  assert(report.serverIdentityAtSpawn?.command===report.serverExpectedCommand,'owned server spawn identity');
   let ready=false;for(let i=0;i<200;i++){try{if((await fetch(base+'/components')).ok){ready=true;break;}}catch{}await new Promise(r=>setTimeout(r,50));}assert(ready,'owned gallery startup');
   browser=await chromium.launch({headless:true,...(process.env.WORKSPACE_CLASSIC_SCROLLBAR==='1'?{ignoreDefaultArgs:['--hide-scrollbars']}:{}),...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH?{executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH}:{})});
   const page=await browser.newPage({viewport,colorScheme,timezoneId:'UTC'});page.setDefaultTimeout(10000);
@@ -141,4 +169,19 @@ try{
   report.finalSourceHashes={};for(const path of sourcePaths)report.finalSourceHashes[path]=digest(await readFile(path));assert.deepEqual(report.finalSourceHashes,report.sourceHashes,'source freeze during verification');
   report.status='passed';
 }catch(error){report.status='failed';report.error=String(error);process.exitCode=1;}
-finally{try{await stop();if(browser){await browser.close();report.browserClosed=!browser.isConnected();}await rm(temp,{recursive:true,force:true});report.tempRemoved=await access(temp).then(()=>false,()=>true);report.cleanup=report.serverStopped&&report.browserClosed&&report.tempRemoved;assert(report.cleanup,'owned resource cleanup');}catch(error){report.status='failed';report.cleanupError=String(error);process.exitCode=1;}await writeFile(join(output,'report.json'),JSON.stringify(report,null,2)+'\n');console.log(JSON.stringify({status:report.status,failures:report.failureCount,error:report.error,output,cleanup:report.cleanup}));}
+finally{
+  const cleanupErrors=[];
+  try{await stop();}catch(error){cleanupErrors.push(String(error));}
+  try{if(browser)await browser.close();report.browserClosed=!browser||!browser.isConnected();}catch(error){cleanupErrors.push(String(error));}
+  try{report.serverPortClosed=await verifyPortClosed();}catch(error){cleanupErrors.push(String(error));}
+  try{
+    if(report.serverStopped&&report.serverPortClosed)await rm(temp,{recursive:true,force:true});
+    else cleanupErrors.push('CLEANUP_PENDING: private binary retained until server exit and port closure verified');
+    report.tempRemoved=await access(temp).then(()=>false,error=>{if(error.code==='ENOENT')return true;throw error;});
+  }catch(error){cleanupErrors.push(String(error));}
+  try{report.cleanupSourceHashes={};for(const path of sourcePaths)report.cleanupSourceHashes[path]=digest(await readFile(path));assert.deepEqual(report.cleanupSourceHashes,report.sourceHashes,'source freeze at cleanup');}catch(error){report.sourceFreezeError=String(error);cleanupErrors.push(String(error));}
+  report.cleanup=Boolean(report.serverStopped&&report.serverPortClosed&&report.browserClosed&&report.tempRemoved&&!cleanupErrors.length);
+  report.cleanupStatus=report.cleanup?'VERIFIED':'CLEANUP_PENDING';
+  if(!report.cleanup){report.status='failed';report.cleanupError=cleanupErrors.join('; ');process.exitCode=1;}
+  await writeFile(join(output,'report.json'),JSON.stringify(report,null,2)+'\n');console.log(JSON.stringify({status:report.status,failures:report.failureCount,error:report.error,output,cleanup:report.cleanup,cleanupStatus:report.cleanupStatus}));
+}
