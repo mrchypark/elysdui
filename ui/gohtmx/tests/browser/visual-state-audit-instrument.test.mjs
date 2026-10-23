@@ -1,13 +1,111 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {transform,staticCoverageManifest,registrationInventory,resolveCaseActionSites,actionModuleNames,prepareActionModule,synchronousTrace,compareActionTrace,synchronousTraceInit,registeredOutcomesEqual,registeredOutcomeDifferences,firstDifference,traceContractStatus} from './visual-state-audit-instrument.mjs';
-import {readFile,mkdtemp,writeFile,rm} from 'node:fs/promises';
+import {readFile,mkdtemp,mkdir,writeFile,rm} from 'node:fs/promises';
+import {createHash} from 'node:crypto';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {chromium} from 'playwright';
 import {compileFunction} from 'node:vm';
 import {parse} from 'acorn';
 import {caseActionContract,requestedStateContract,runRequestedStateActions,runRegisteredCanvasActions,assertRegisteredCanvasTransition,clickVisibleControl,ownedOverlayInventory,captureTargetPNG,inventoryReceipt,inventoryDrift,unhandledBrowserErrors} from './visual-state-audit-drivers.mjs';
+
+test('basic menu placement pure: non-origin bottom right and above collisions',async()=>{
+  const source=await readFile(new URL('../../assets/ely-patterns.js',import.meta.url),'utf8');
+  const body=source.slice(source.indexOf('  const menuPosition ='),source.indexOf('  const positionMenu ='));
+  const position=compileFunction(`${body};return menuPosition;`)();
+  const viewport={width:390,height:844},box={width:192,height:74};
+  assert.deepEqual(position({left:16,top:424,bottom:452},box,viewport),{left:16,top:458});
+  assert.deepEqual(position({left:350,top:800,bottom:828},box,viewport),{left:190,top:720});
+  assert.deepEqual(position({left:-20,top:2,bottom:30},box,viewport),{left:8,top:36});
+  assert.deepEqual(position({left:100,top:300,bottom:328},{width:192,height:828},viewport),{left:100,top:8});
+});
+
+test('basic menu placement pure: beforetoggle precedes focus and shared listeners do not retain roots',async()=>{
+  const source=await readFile(new URL('../../assets/ely-patterns.js',import.meta.url),'utf8');
+  const events=[],listeners=new Map(),windowListeners=new Map();
+  const roots=[0,1].map(index=>{
+    const values=new Map([['display',['inline-flex','']],['visibility',['visible','important']]]);
+    const style={setProperty:(name,value,priority='')=>values.set(name,[value,priority]),getPropertyValue:name=>values.get(name)?.[0]||'',getPropertyPriority:name=>values.get(name)?.[1]||'',removeProperty:name=>values.delete(name)};
+    const popup={style,offsetWidth:192,offsetHeight:74,open:false,matches(){return this.open;},handlers:new Map(),addEventListener(type,fn){this.handlers.set(type,fn);},querySelectorAll:()=>[{focus:()=>events.push({focus:index,left:style.left,top:style.top})}],hidePopover(){this.open=false;},parentElement:null};
+    const trigger={rect:{left:16+index*200,top:424,bottom:452},getBoundingClientRect(){return this.rect;},setAttribute(){},focus:()=>events.push({triggerFocus:index})};
+    const root={dataset:{},popup,trigger,querySelector:selector=>selector==='[popover]'?popup:trigger};popup.parentElement=root;return root;
+  });
+  const document={documentElement:{clientWidth:390,clientHeight:844},querySelectorAll:selector=>selector==='[data-ui-component="menu"]'?roots:selector.includes(':popover-open')?roots.filter(root=>root.popup.open).map(root=>root.popup):[],addEventListener:(type,fn)=>listeners.set(type,fn)};
+  const window={addEventListener:(type,fn,capture)=>{assert(!windowListeners.has(type),'Exactly one shared listener per event');windowListeners.set(type,{fn,capture});}};
+  compileFunction(source,['document','window'])(document,window);
+  listeners.get('htmx:after:swap')();
+  assert.equal(windowListeners.size,2);assert.equal(windowListeners.get('scroll').capture,true);
+  for(const root of roots){
+    root.popup.handlers.get('beforetoggle')({newState:'open'});
+    assert.equal(events.length,0,'Opening placement must not focus anything');
+    assert.equal(root.popup.style.top,'458px');
+    assert.equal(root.popup.style.getPropertyValue('display'),'inline-flex');assert.equal(root.popup.style.getPropertyPriority('visibility'),'important');
+    root.popup.open=true;
+  }
+  roots[0].popup.handlers.get('toggle')({newState:'open'});
+  assert.deepEqual(events,[{focus:0,left:'16px',top:'458px'}]);
+  events.length=0;roots[0].trigger.rect={left:40,top:100,bottom:128};
+  windowListeners.get('scroll').fn();assert.equal(roots[0].popup.style.top,'134px');assert.equal(roots[1].popup.style.left,'190px');assert.deepEqual(events,[]);
+  document.documentElement.clientWidth=360;windowListeners.get('resize').fn();assert.equal(roots[1].popup.style.left,'160px');assert.deepEqual(events,[]);
+  roots[0].popup.open=false;roots[0].trigger.rect={left:70,top:200,bottom:228};windowListeners.get('scroll').fn();assert.equal(roots[0].popup.style.top,'134px','Closed menus are not repositioned');
+  roots[0].trigger.getBoundingClientRect=()=>{throw new Error('measurement failed');};
+  assert.throws(()=>roots[0].popup.handlers.get('beforetoggle')({newState:'open'}),/measurement failed/);
+  assert.equal(roots[0].popup.style.getPropertyValue('display'),'inline-flex');assert.equal(roots[0].popup.style.getPropertyValue('visibility'),'visible');assert.equal(roots[0].popup.style.getPropertyPriority('visibility'),'important');
+  roots.splice(0);windowListeners.get('resize').fn();assert.deepEqual(events,[],'No removed-root registry remains');
+});
+
+test('basic menu positioning browser: native opening precedes focus and follows nested scroll without isolation',async()=>{
+  const names=['ely-patterns.js','ely-patterns.css','app.css'];
+  const hash=bytes=>createHash('sha256').update(bytes).digest('hex');
+  const sources=Object.fromEntries(await Promise.all(names.map(async name=>[name,await readFile(new URL('../../assets/'+name,import.meta.url),'utf8')])));
+  const sourceHashes=Object.fromEntries(names.map(name=>[name,hash(sources[name])]));
+  const parent=process.env.BASIC_MENU_OUTPUT_DIR||new URL('../../../../test-results/basic-menu-placement/',import.meta.url).pathname;
+  await mkdir(parent,{recursive:true});const output=await mkdtemp(join(parent,'run-'));
+  const receipt={kind:'controlled-native-browser-regression-not-gallery-render-proof',sourceHashes,cases:[],browserClosed:false,status:'running'};
+  let browser;
+  try{
+    browser=await chromium.launch({executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH||undefined});
+    for(const width of [1440,390])for(const theme of ['light','dark'])for(const old of [false,true]){
+      const context=await browser.newContext({viewport:{width,height:1000},colorScheme:theme}),page=await context.newPage();page.setDefaultTimeout(10000);
+      try{
+        const instance=id=>`<div class="ui-menu" data-ui-component="menu" id="${id}"><button type="button" popovertarget="${id}-popup" data-ui-menu-trigger aria-expanded="false" aria-controls="${id}-popup">Caller menu</button><div class="ui-menu-panel" id="${id}-popup" popover role="menu" aria-label="Caller menu"><a role="menuitem" href="#caller-first">Caller first link</a><button role="menuitem" disabled>Disabled</button></div></div>`;
+        const scoped='[data-ui-component="menu"]>.ui-menu-panel';
+        const css=old?sources['ely-patterns.css'].split('\n').filter(line=>!line.startsWith(scoped)).join('\n'):sources['ely-patterns.css'];
+        const js=old?sources['ely-patterns.js'].replace("if (event.newState === 'open') positionMenu(popup, trigger);","if (event.newState === 'open') void 0;"):sources['ely-patterns.js'];
+        if(old){assert.notEqual(css,sources['ely-patterns.css']);assert.notEqual(js,sources['ely-patterns.js']);}
+        await page.setContent(`<!doctype html><html data-theme="${theme}"><head><style>${sources['app.css']}\n${css}\nbody{margin:0}.scrollhost{height:700px;overflow:auto;margin-top:32px}.spacer{height:160px}.menus{margin-left:32px}.tail{height:1600px}</style></head><body><div class="scrollhost"><div class="spacer"></div><div class="menus">${instance('main')}${instance('twin')}</div><div class="tail"></div></div></body></html>`);
+        await page.addScriptTag({content:js});
+        const root=page.locator('#main'),trigger=root.locator('[data-ui-menu-trigger]'),popup=root.locator('[popover]');
+        const twin=await page.locator('#twin').evaluate(node=>node.outerHTML);
+        await page.evaluate(()=>{window.menuFocus=[];window.menuSelect=[];document.addEventListener('focusin',e=>{if(e.target.closest('#main-popup')){const r=document.getElementById('main-popup').getBoundingClientRect();menuFocus.push({left:r.left,top:r.top});}});document.getElementById('main').addEventListener('ui:select',e=>menuSelect.push({trusted:e.isTrusted,detail:e.detail}));});
+        await trigger.click();await page.waitForFunction(()=>document.getElementById('main-popup').matches(':popover-open'));
+        const geometry=()=>root.evaluate(node=>{const rect=n=>{const r=n.getBoundingClientRect();return {left:r.left,top:r.top,bottom:r.bottom,width:r.width,height:r.height};};return {trigger:rect(node.querySelector('[data-ui-menu-trigger]')),panel:rect(node.querySelector('[popover]')),viewport:{width:document.documentElement.clientWidth,height:document.documentElement.clientHeight},active:document.activeElement.closest('[role=menuitem]')!==null};});
+        const check=g=>{const left=Math.max(8,Math.min(g.trigger.left,g.viewport.width-g.panel.width-8)),below=g.trigger.bottom+6,above=g.trigger.top-g.panel.height-6;const top=Math.max(8,Math.min(below+g.panel.height>g.viewport.height-8?above:below,g.viewport.height-g.panel.height-8));assert(Math.abs(g.panel.left-left)<=1);assert(Math.abs(g.panel.top-top)<=1);assert(g.panel.top>=8&&g.panel.left>=8);assert(g.panel.left+g.panel.width<=g.viewport.width-7);};
+        const initial=await geometry();const row={width,theme,negativeControl:old,initial,captures:[]};receipt.cases.push(row);
+        if(old){assert.equal(initial.panel.left,0);assert.equal(initial.panel.top,0);assert.throws(()=>check(initial),'Old source must fail actual adjacency');continue;}
+        check(initial);
+        const focus=await page.evaluate(()=>menuFocus);assert(focus.length);for(const f of focus){assert(Math.abs(f.left-initial.panel.left)<=1&&Math.abs(f.top-initial.panel.top)<=1,'First item cannot focus at stale origin');}
+        const capture=async label=>{const path=join(output,`${width}-${theme}-${label}.png`);const png=await page.screenshot({path,caret:'initial',animations:'disabled'});row.captures.push({label,path,sha256:hash(png),geometry:await geometry()});};
+        await capture('opened');
+        await page.evaluate(()=>{window.menuActive=document.activeElement;document.querySelector('.scrollhost').scrollTop=80;});
+        await page.waitForFunction(()=>Math.abs(document.getElementById('main-popup').getBoundingClientRect().top-document.querySelector('#main [data-ui-menu-trigger]').getBoundingClientRect().bottom-6)<1);
+        check(await geometry());assert(await page.evaluate(()=>document.activeElement===menuActive));
+        await page.setViewportSize({width:width===390?360:1000,height:900});check(await geometry());assert(await page.evaluate(()=>document.activeElement===menuActive));
+        await root.evaluate(node=>{Object.assign(node.style,{position:'fixed',right:'8px',bottom:'8px'});window.dispatchEvent(new Event('resize'));});
+        const edge=await geometry();check(edge);assert(edge.panel.bottom<=edge.trigger.top-5,'Bottom edge flips above');assert(await page.evaluate(()=>document.activeElement===menuActive));await capture('edge');
+        await page.keyboard.press('Escape');await page.waitForFunction(()=>!document.getElementById('main-popup').matches(':popover-open'));
+        await trigger.click();await page.waitForFunction(()=>document.getElementById('main-popup').matches(':popover-open'));await page.mouse.click(4,4);await page.waitForFunction(()=>!document.getElementById('main-popup').matches(':popover-open'));
+        await trigger.click();await page.waitForFunction(()=>document.getElementById('main-popup').matches(':popover-open'));await page.keyboard.press('ArrowDown');assert.equal(await page.evaluate(()=>document.activeElement.textContent),'Caller first link','Disabled button is skipped');await popup.locator('a').click();
+        await page.waitForFunction(()=>!document.getElementById('main-popup').matches(':popover-open'));assert.deepEqual(await page.evaluate(()=>menuSelect),[{trusted:false,detail:{value:'#caller-first'}}]);
+        assert.equal(await page.locator('#twin').evaluate(node=>node.outerHTML),twin);
+      }finally{await context.close();}
+    }
+    for(const name of names)assert.equal(hash(await readFile(new URL('../../assets/'+name,import.meta.url))),sourceHashes[name],'Source drift: '+name);
+    receipt.status='passed';
+  }catch(error){receipt.status='failed';receipt.error=String(error);throw error;}
+  finally{try{await browser?.close();receipt.browserClosed=!browser?.isConnected();}catch(error){receipt.status='failed';receipt.cleanupError=String(error);throw error;}finally{await writeFile(join(output,'receipt.json'),JSON.stringify(receipt,null,2)+'\n',{flag:'wx'});}}
+});
 
 for(const id of ['zoom-in','fit-canvas','navigate-minimap']){
   test(`canvas supplemental payload pure: ${id} accepts view and rejects malformed contracts`,async()=>{
