@@ -285,7 +285,7 @@ const settingsTargets={KeyboardShortcutsList:[1,'Keyboard'],ProxySettings:[2,'Ne
 export function requestedStateContract(identity,trashFixture){
   const verticalRangeKind={'layout/Scrollbar':'Scrollbar','layout/StickyHeader':'StickyHeader'}[identity];
   if(verticalRangeKind)return {identity,kind:verticalRangeKind,family:'foundation',requestedStateOnly:true,focusedSequence:'vertical-range-native-scroll',mappingGaps:[],fixtureGuards:{component:identity,kind:verticalRangeKind},
-    steps:[['range-center-pointer','Trusted vertical pointer changes the native range and local scroll position'],['range-home-min','Trusted Home selects value 0 and scrollTop 0'],['range-end-max','Trusted End selects value 1000 and scrollTop max']].map(([id,expectedState])=>({id,control:'input[type="range"][data-foundation-scrollbar]',expectedState,event:'trusted native pointer or keyboard input; no public host event expected',source:{siteId:`vertical-range-state:${identity}:${id}`,sourceAnchor:'advanced_foundation_fixtures.go Scrollbar/StickyHeader; ely-api-foundation.html native range; ely-api-foundation.js onThumb/update; ely-api-foundation.css writing-mode/direction',provenance:'Exact canonical layout identity and its own fixture; direct native range state, no alias assumption'}})),scope:'Only layout/Scrollbar and layout/StickyHeader; three direct native states each; no aliases, registered-check approval, CSS approval, or full-catalog claim'};
+    steps:[['range-top-min-pointer','Trusted pointer at physical track top selects value 0 and scrollTop 0'],['range-bottom-max-pointer','Trusted pointer at physical track bottom selects value 1000 and scrollTop max'],['range-center-pointer','Trusted pointer at track center selects an interior value and scroll position'],['range-home-min','Trusted Home on the native range selects value 0 and scrollTop 0'],['range-end-max','Trusted End on the native range selects value 1000 and scrollTop max'],['content-wheel-up','Trusted content wheel-up from max moves content upward and synchronizes the range'],['scroll-home-min','Trusted Home on the scroll region selects scrollTop 0 and range value 0'],['scroll-end-max','Trusted End on the scroll region selects scrollTop max and range value 1000']].map(([id,expectedState])=>({id,control:id.startsWith('range-')?'input[type="range"][data-foundation-scrollbar]':'[data-foundation-scroll]',expectedState,event:id==='content-wheel-up'?'trusted native wheel; range input is not required':'trusted native pointer or keyboard input; no public host event expected',source:{siteId:`vertical-range-state:${identity}:${id}`,sourceAnchor:'advanced_foundation_fixtures.go Scrollbar/StickyHeader; ely-api-foundation.html native range; ely-api-foundation.js onThumb/update/onKey/scroll update; ely-api-foundation.css writing-mode/direction',provenance:'Exact canonical layout identity and its own fixture; direct native range/content state, no alias assumption'}})),scope:'Only layout/Scrollbar and layout/StickyHeader; eight direct native states each; no aliases, registered-check approval, CSS approval, or full-catalog claim'};
   if(identity==='git/ThreeWayMerge')return {identity,kind:'ThreeWayMerge',requestedStateOnly:true,focusedSequence:'threeway-native-submit',mappingGaps:[],fixtureGuards:{component:identity,kind:'ThreeWayMerge',action:'operate',required:true,disabled:false},
     steps:[['choose-theirs','input[name="resolution"][value="theirs"]','Only theirs checked; merged=return callerNew; Selected theirs.'],['edit-merged','textarea[name="merged"]','Trusted native fill then Tab commits resolved caller value'],['submit-merged','button[type="submit"]','One operate host request with exact actual FormData; no persistence claim']].map(([id,control,expectedState])=>({id,control,expectedState,event:'trusted native Playwright action',source:{siteId:`threeway-state:${id}`,sourceAnchor:'advanced_workspace_fixtures.go ThreeWayMerge; ely-api-workspace.html ws-conflict; ely-api-workspace.js resolution change; ely-api.js submit',provenance:'Canonical behavioral primary only, excluding nested source previews; not registered submitData coverage'}})),scope:'Three canonical steps only; four live profiles require 12 steps, 24 primary images and at most 24 context images. Aliases and registered submitData site remain unapproved.'};
   if(identity==='misc/LicenseViewer'){
@@ -583,18 +583,22 @@ export async function threewayCleanup(cleanup,primaryFailed,failureDiagnostics){
 
 export function assertVerticalRangeSnapshot(identity,stage,state,twinHTML){
   assert(['layout/Scrollbar','layout/StickyHeader'].includes(identity),'Only the two canonical vertical range identities are covered');
-  assert(['range-center-pointer','range-home-min','range-end-max'].includes(stage),'Unknown vertical range state');
-  assert.equal(state.component,identity);assert.equal(state.direction,'rtl');assert.equal(state.writingMode,'vertical-lr');
+  assert(['range-top-min-pointer','range-bottom-max-pointer','range-center-pointer','range-home-min','range-end-max','content-wheel-up','scroll-home-min','scroll-end-max'].includes(stage),'Unknown vertical range state');
+  assert.equal(state.component,identity);assert.equal(state.direction,'ltr');assert.equal(state.writingMode,'vertical-lr');
   assert(state.rect.height>state.rect.width,'The native range must be physically vertical');
-  assert(state.scrollMax>0);assert.equal(state.scrollMax,state.scrollHeight-state.clientHeight);assert.equal(state.scrollLeft,0);
+  assert(state.scrollMax>0);assert.equal(state.scrollMax,state.scrollHeight-state.clientHeight);assert.equal(state.scrollLeft,0);assert.equal(state.documentScrollTop,state.previousDocumentScrollTop,'The page must not jump while operating the local scroll fixture');
   assert(state.value>=0&&state.value<=1000);assert(Math.abs(state.scrollTop-state.scrollMax*state.value/1000)<=1,'Native range value must map to vertical scrollTop');
+  if(stage==='range-top-min-pointer'||stage==='range-home-min'||stage==='scroll-home-min'){assert.equal(state.value,0);assert.equal(state.scrollTop,0);}
+  if(stage==='range-bottom-max-pointer'||stage==='range-end-max'||stage==='scroll-end-max'){assert.equal(state.value,1000);assert.equal(state.scrollTop,state.scrollMax);}
   if(stage==='range-center-pointer')assert(state.value>0&&state.value<1000,'A center pointer action must select an interior range value');
-  if(stage==='range-home-min')assert.equal(state.value,0);if(stage==='range-end-max')assert.equal(state.value,1000);
-  if(stage==='range-home-min')assert.equal(state.scrollTop,0);if(stage==='range-end-max')assert.equal(state.scrollTop,state.scrollMax);
-  assert(state.nativeEvents.some(event=>event.type==='input'&&event.trusted===true),'Each native action must emit trusted input');
-  assert(state.nativeEvents.every(event=>event.trusted===true),'Native range events must remain trusted');
-  if(stage==='range-center-pointer')assert(state.nativeEvents.some(event=>event.type==='pointerdown')&&state.nativeEvents.some(event=>event.type==='click'),'Center selection must use a real pointer path');
-  if(stage==='range-home-min'||stage==='range-end-max')assert(state.nativeEvents.some(event=>event.type==='keydown'&&event.key===(stage==='range-home-min'?'Home':'End')),'Endpoint selection must use its native key');
+  if(stage.startsWith('range-')){
+    assert(state.nativeEvents.some(event=>event.type==='input'&&event.trusted===true),'Each native range action must emit trusted input');
+    assert(state.nativeEvents.every(event=>event.trusted===true),'Native range events must remain trusted');
+    if(stage.endsWith('-pointer'))assert(state.nativeEvents.some(event=>event.type==='pointerdown')&&state.nativeEvents.some(event=>event.type==='click'),'Range selection must use a real pointer path');
+    if(stage==='range-home-min'||stage==='range-end-max')assert(state.nativeEvents.some(event=>event.type==='keydown'&&event.key===(stage==='range-home-min'?'Home':'End')),'Range endpoint selection must use its native key');
+  }
+  if(stage==='content-wheel-up')assert(state.regionEvents.some(event=>event.type==='wheel'&&event.target==='content'&&event.trusted===true&&event.deltaY<0),'Scroll content must receive a trusted upward wheel; range input is not required');
+  if(stage==='scroll-home-min'||stage==='scroll-end-max')assert(state.regionEvents.some(event=>event.type==='keydown'&&event.target==='region'&&event.trusted===true&&event.key===(stage==='scroll-home-min'?'Home':'End')),'Content endpoint selection must use its trusted native key');
   assert.deepEqual(state.publicEvents,[],'The range has no public host event contract');
   assert.equal(state.twinHTML,twinHTML,'The independent twin must remain unchanged');assert.deepEqual(state.twinEvents,[]);
 }
@@ -613,20 +617,22 @@ export async function runRequestedStateActions(contract,root,runStep,failureDiag
       const input=ranges[0],region=scrolls[0],style=getComputedStyle(input),rect=input.getBoundingClientRect(),record=node.closest('[data-audit-name]'),twin=record?.querySelector('[data-audit-twin]>[data-ely-family]');
       if(!twin)throw Error('Independent vertical range twin required');
       const proof=node.__verticalRangeProof;
-      return {component:node.dataset.elyComponent,kind:node.dataset.elyKind,family:node.dataset.elyFamily,id:node.id,rangeMin:Number(input.min),rangeMax:Number(input.max),value:Number(input.value),scrollTop:region.scrollTop,scrollLeft:region.scrollLeft,scrollHeight:region.scrollHeight,clientHeight:region.clientHeight,scrollMax:Math.max(0,region.scrollHeight-region.clientHeight),scrollRole:region.getAttribute('role'),scrollTabIndex:region.tabIndex,rect:{width:rect.width,height:rect.height},writingMode:style.writingMode,direction:style.direction,
+      return {component:node.dataset.elyComponent,kind:node.dataset.elyKind,family:node.dataset.elyFamily,id:node.id,rangeMin:Number(input.min),rangeMax:Number(input.max),value:Number(input.value),scrollTop:region.scrollTop,scrollLeft:region.scrollLeft,scrollHeight:region.scrollHeight,clientHeight:region.clientHeight,scrollMax:Math.max(0,region.scrollHeight-region.clientHeight),documentScrollTop:document.scrollingElement?.scrollTop||0,scrollRole:region.getAttribute('role'),scrollTabIndex:region.tabIndex,rect:{width:rect.width,height:rect.height},writingMode:style.writingMode,direction:style.direction,
         lineCount:kind==='Scrollbar'?region.querySelectorAll('p').length:null,stickyHeaders:kind==='StickyHeader'?[...region.querySelectorAll(':scope > section > header')].map(header=>header.textContent):null,
-        twinHTML:twin.outerHTML,nativeEvents:proof?.nativeEvents||[],publicEvents:proof?.publicEvents||[],twinEvents:proof?.twinEvents||[]};
+        twinHTML:twin.outerHTML,nativeEvents:proof?.nativeEvents||[],regionEvents:proof?.regionEvents||[],publicEvents:proof?.publicEvents||[],twinEvents:proof?.twinEvents||[]};
     },kind);
     const initial=await snapshot();
     assert.equal(initial.family,contract.family);assert.deepEqual([initial.rangeMin,initial.rangeMax],[0,1000]);assert.equal(initial.scrollRole,'region');assert.equal(initial.scrollTabIndex,0);assert(initial.scrollMax>0);
     if(kind==='Scrollbar')assert.equal(initial.lineCount,30,'Scrollbar must use its 30-line canonical fixture');
     else assert.deepEqual(initial.stickyHeaders,['Today','Yesterday','Earlier'],'StickyHeader must use its three canonical fixture groups');
     await root.evaluate(node=>{
-      const proof=node.__verticalRangeProof={nativeEvents:[],publicEvents:[],twinEvents:[]},range=node.querySelector('input[type="range"][data-foundation-scrollbar]');
+      const proof=node.__verticalRangeProof={nativeEvents:[],regionEvents:[],publicEvents:[],twinEvents:[]},range=node.querySelector('input[type="range"][data-foundation-scrollbar]'),region=node.querySelector('[data-foundation-scroll]');
       proof.observeNative=event=>{if(event.target===range)proof.nativeEvents.push({type:event.type,key:event.key||null,value:range.value,trusted:event.isTrusted});};
+      proof.observeRegion=event=>{if(region.contains(event.target))proof.regionEvents.push({type:event.type,key:event.key||null,deltaY:event.deltaY??null,trusted:event.isTrusted,target:event.target===region?'region':'content'});};
       proof.observePublic=event=>proof.publicEvents.push({type:event.type,action:event.detail?.action||null,name:event.detail?.name||null});
       proof.twin=node.closest('[data-audit-name]').querySelector('[data-audit-twin]>[data-ely-family]');proof.observeTwin=event=>proof.twinEvents.push(event.type);
       for(const type of ['input','change','keydown','keyup','pointerdown','pointerup','click'])node.addEventListener(type,proof.observeNative,true);
+      for(const type of ['wheel','keydown'])region.addEventListener(type,proof.observeRegion,true);
       for(const type of ['ely:action','ely:change','ely:result'])node.addEventListener(type,proof.observePublic,true);
       for(const type of ['input','change','keydown','keyup','pointerdown','pointerup','click','ely:action','ely:change','ely:result'])proof.twin.addEventListener(type,proof.observeTwin,true);
     });
@@ -636,21 +642,27 @@ export async function runRequestedStateActions(contract,root,runStep,failureDiag
         let before;
         await runStep(stage,async()=>{
           before=await snapshot();
-          if(stage==='range-center-pointer'){
+          if(stage==='range-top-min-pointer'||stage==='range-bottom-max-pointer'||stage==='range-center-pointer'){
             const box=await range.boundingBox();assert(box&&box.height>box.width,'Visible native vertical range required');
-            await range.click({position:{x:box.width/2,y:box.height/2}});
-          }else await range.press(stage==='range-home-min'?'Home':'End');
-          return {method:stage==='range-center-pointer'?'native vertical pointer at track center':'native keyboard',key:stage==='range-center-pointer'?null:stage==='range-home-min'?'Home':'End'};
+            const y=stage==='range-top-min-pointer'?2:stage==='range-bottom-max-pointer'?box.height-2:box.height/2;
+            await range.click({position:{x:box.width/2,y}});
+          }else if(stage==='range-home-min'||stage==='range-end-max')await range.press(stage==='range-home-min'?'Home':'End');
+          else if(stage==='content-wheel-up'){
+            await scroll.hover();await root.page().mouse.wheel(0,-Math.max(600,before.scrollMax));
+            await root.page().waitForFunction(id=>{const node=document.getElementById(id),region=node?.querySelector('[data-foundation-scroll]'),input=node?.querySelector('input[type="range"][data-foundation-scrollbar]');if(!region||!input)return false;const max=Math.max(0,region.scrollHeight-region.clientHeight);return region.scrollTop<max&&Math.abs(region.scrollTop-max*Number(input.value)/1000)<=1;},initial.id,{timeout:2000});
+          }else{await scroll.focus();await scroll.press(stage==='scroll-home-min'?'Home':'End');}
+          return {method:stage==='content-wheel-up'?'native upward wheel over scroll content':stage.startsWith('range-')&&stage.endsWith('-pointer')?'native vertical pointer on track':stage.startsWith('range-')?'native range keyboard':'native scroll-region keyboard',key:stage==='range-home-min'||stage==='scroll-home-min'?'Home':stage==='range-end-max'||stage==='scroll-end-max'?'End':null};
         },async()=>{
           const after=await snapshot();
-          assertVerticalRangeSnapshot(identity,stage,{...after,nativeEvents:after.nativeEvents.slice(before.nativeEvents.length),publicEvents:after.publicEvents.slice(before.publicEvents.length),twinEvents:after.twinEvents.slice(before.twinEvents.length)},initial.twinHTML);
-          return {value:after.value,scrollTop:after.scrollTop,scrollMax:after.scrollMax,direction:after.direction,writingMode:after.writingMode,orientationRect:after.rect,trustedInput:true,publicEvents:after.publicEvents.slice(before.publicEvents.length)};
+          assertVerticalRangeSnapshot(identity,stage,{...after,previousDocumentScrollTop:before.documentScrollTop,nativeEvents:after.nativeEvents.slice(before.nativeEvents.length),regionEvents:after.regionEvents.slice(before.regionEvents.length),publicEvents:after.publicEvents.slice(before.publicEvents.length),twinEvents:after.twinEvents.slice(before.twinEvents.length)},initial.twinHTML);
+          return {value:after.value,scrollTop:after.scrollTop,scrollMax:after.scrollMax,direction:after.direction,writingMode:after.writingMode,orientationRect:after.rect, trustedInput:stage.startsWith('range-'),regionEvents:after.regionEvents.slice(before.regionEvents.length),publicEvents:after.publicEvents.slice(before.publicEvents.length)};
         });
       }
     }catch(error){primaryFailed=true;throw error;}
     finally{await threewayCleanup(()=>root.evaluate(node=>{
       const proof=node.__verticalRangeProof;if(!proof)return;
       for(const type of ['input','change','keydown','keyup','pointerdown','pointerup','click'])node.removeEventListener(type,proof.observeNative,true);
+      const region=node.querySelector('[data-foundation-scroll]');for(const type of ['wheel','keydown'])region?.removeEventListener(type,proof.observeRegion,true);
       for(const type of ['ely:action','ely:change','ely:result'])node.removeEventListener(type,proof.observePublic,true);
       for(const type of ['input','change','keydown','keyup','pointerdown','pointerup','click','ely:action','ely:change','ely:result'])proof.twin.removeEventListener(type,proof.observeTwin,true);
       delete node.__verticalRangeProof;
