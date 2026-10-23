@@ -596,10 +596,14 @@ export function assertVerticalRangeSnapshot(identity,stage,state,twinHTML){
     assert(state.nativeEvents.every(event=>event.trusted===true),'Native range events must remain trusted');
     if(stage.endsWith('-pointer'))assert(state.nativeEvents.some(event=>event.type==='pointerdown')&&state.nativeEvents.some(event=>event.type==='click'),'Range selection must use a real pointer path');
     if(stage==='range-home-min'||stage==='range-end-max')assert(state.nativeEvents.some(event=>event.type==='keydown'&&event.key===(stage==='range-home-min'?'Home':'End')),'Range endpoint selection must use its native key');
-  }
+    const nativeChanges=state.nativeEvents.filter(event=>event.type==='change');
+    assert.equal(nativeChanges.length,1,'Each changed native range action must emit exactly one native change');
+    const nativeChange=nativeChanges[0];assert.equal(nativeChange.trusted,true);
+    assert.equal(nativeChange.name,'');assert.equal(nativeChange.checked,false);assert.equal(nativeChange.controlType,'range');
+    assert.deepEqual(state.publicEvents,[{type:'ely:change',detail:{id:state.id,component:identity,name:'',value:nativeChange.value,checked:false,type:'range'}}],'Core API must forward the trusted native range change exactly once');
+  }else assert.deepEqual(state.publicEvents,[],'Wheel and scroll-region keys do not dispatch public host changes');
   if(stage==='content-wheel-up')assert(state.regionEvents.some(event=>event.type==='wheel'&&event.target==='content'&&event.trusted===true&&event.deltaY<0),'Scroll content must receive a trusted upward wheel; range input is not required');
   if(stage==='scroll-home-min'||stage==='scroll-end-max')assert(state.regionEvents.some(event=>event.type==='keydown'&&event.target==='region'&&event.trusted===true&&event.key===(stage==='scroll-home-min'?'Home':'End')),'Content endpoint selection must use its trusted native key');
-  assert.deepEqual(state.publicEvents,[],'The range has no public host event contract');
   assert.equal(state.twinHTML,twinHTML,'The independent twin must remain unchanged');assert.deepEqual(state.twinEvents,[]);
 }
 
@@ -627,9 +631,9 @@ export async function runRequestedStateActions(contract,root,runStep,failureDiag
     else assert.deepEqual(initial.stickyHeaders,['Today','Yesterday','Earlier'],'StickyHeader must use its three canonical fixture groups');
     await root.evaluate(node=>{
       const proof=node.__verticalRangeProof={nativeEvents:[],regionEvents:[],publicEvents:[],twinEvents:[]},range=node.querySelector('input[type="range"][data-foundation-scrollbar]'),region=node.querySelector('[data-foundation-scroll]');
-      proof.observeNative=event=>{if(event.target===range)proof.nativeEvents.push({type:event.type,key:event.key||null,value:range.value,trusted:event.isTrusted});};
+      proof.observeNative=event=>{if(event.target===range)proof.nativeEvents.push({type:event.type,key:event.key||null,value:event.target.value,trusted:event.isTrusted,...(event.type==='change'?{name:event.target.name,checked:event.target.checked,controlType:event.target.type}:{})});};
       proof.observeRegion=event=>{if(region.contains(event.target))proof.regionEvents.push({type:event.type,key:event.key||null,deltaY:event.deltaY??null,trusted:event.isTrusted,target:event.target===region?'region':'content'});};
-      proof.observePublic=event=>proof.publicEvents.push({type:event.type,action:event.detail?.action||null,name:event.detail?.name||null});
+      proof.observePublic=event=>proof.publicEvents.push({type:event.type,detail:event.detail===undefined?null:JSON.parse(JSON.stringify(event.detail))});
       proof.twin=node.closest('[data-audit-name]').querySelector('[data-audit-twin]>[data-ely-family]');proof.observeTwin=event=>proof.twinEvents.push(event.type);
       for(const type of ['input','change','keydown','keyup','pointerdown','pointerup','click'])node.addEventListener(type,proof.observeNative,true);
       for(const type of ['wheel','keydown'])region.addEventListener(type,proof.observeRegion,true);

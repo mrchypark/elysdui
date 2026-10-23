@@ -29,6 +29,7 @@ test('vertical range direct pure: exact canonical identities and finite native s
   const fixtures=await readFile(new URL('../../../../internal/gallery/advanced_foundation_fixtures.go',import.meta.url),'utf8');
   const checks=await readFile(new URL('../../../../internal/gallery/assets/advanced-foundation-checks.js',import.meta.url),'utf8');
   const behavior=await readFile(new URL('../../assets/ely-api-foundation.js',import.meta.url),'utf8');
+  const core=await readFile(new URL('../../assets/ely-api.js',import.meta.url),'utf8');
   const css=await readFile(new URL('../../assets/ely-api-foundation.css',import.meta.url),'utf8');
   const identities=['layout/Scrollbar','layout/StickyHeader'],steps=['range-center-pointer','range-top-min-pointer','range-bottom-max-pointer','range-home-min','range-end-max','content-wheel-up','scroll-home-min','scroll-end-max'];
   for(const identity of identities){
@@ -52,6 +53,8 @@ test('vertical range direct pure: exact canonical identities and finite native s
   assert(css.includes('min-inline-size:0;max-block-size:8px;'));
   assert(behavior.includes('const update = () => {')&&behavior.includes('thumb.value = String(Math.round(position * 1000));'));
   assert(behavior.includes("if (event.key === 'Home') { scroll.scrollTop = 0; event.preventDefault(); }")&&behavior.includes("if (event.key === 'End') { scroll.scrollTop = max(); event.preventDefault(); }"));
+  assert.match(core,/detail:\s*\{\s*id: root\.id,\s*component: root\.dataset\.elyComponent,\s*name: event\.target\.name,\s*value: event\.target\.value,\s*checked: event\.target\.checked,\s*type: event\.target\.type,/);
+  assert(core.includes("root.addEventListener('change', change)"));
   const runner=runRequestedStateActions.toString();
   assert(runner.includes("const y=stage==='range-top-min-pointer'?2:stage==='range-bottom-max-pointer'?box.height-2:box.height/2"));
   assert(runner.includes("range.press(stage==='range-home-min'?'Home':'End')"));
@@ -63,23 +66,39 @@ test('vertical range direct pure: exact canonical identities and finite native s
   assert(!runner.includes("thumb.value = '0'")&&!runner.includes("dispatchEvent(new Event('input'"));
 });
 
-test('vertical range direct pure: finite geometry, eight native source states, host silence, and twin invariants',()=>{
-  const base={component:'layout/Scrollbar',direction:'ltr',writingMode:'vertical-lr',rect:{width:8,height:120},scrollTop:250,scrollLeft:0,scrollHeight:600,clientHeight:100,scrollMax:500,documentScrollTop:17,previousDocumentScrollTop:17,value:500,nativeEvents:[{type:'input',trusted:true}],regionEvents:[],publicEvents:[],twinHTML:'same twin',twinEvents:[]};
-  const sample=stage=>{
-    const patch={};let nativeEvents=[...base.nativeEvents],regionEvents=[];
+test('vertical range direct pure: finite geometry, eight native source states, core change payload, and twin invariants',()=>{
+  const base={id:'range-fixture',component:'layout/Scrollbar',direction:'ltr',writingMode:'vertical-lr',rect:{width:8,height:120},scrollTop:250,scrollLeft:0,scrollHeight:600,clientHeight:100,scrollMax:500,documentScrollTop:17,previousDocumentScrollTop:17,value:500,nativeEvents:[{type:'input',trusted:true}],regionEvents:[],publicEvents:[],twinHTML:'same twin',twinEvents:[]};
+  const sample=(stage,component=base.component)=>{
+    const patch={};let nativeEvents=[...base.nativeEvents],regionEvents=[],publicEvents=[];
     if(stage==='range-top-min-pointer'||stage==='range-home-min'||stage==='scroll-home-min')Object.assign(patch,{value:0,scrollTop:0});
     if(stage==='range-bottom-max-pointer'||stage==='range-end-max'||stage==='scroll-end-max')Object.assign(patch,{value:1000,scrollTop:500});
     if(stage==='content-wheel-up'){Object.assign(patch,{value:760,scrollTop:380});nativeEvents=[];regionEvents=[{type:'wheel',target:'content',deltaY:-120,trusted:true}];}
     if(stage==='scroll-home-min'||stage==='scroll-end-max'){nativeEvents=[];regionEvents=[{type:'keydown',target:'region',key:stage==='scroll-home-min'?'Home':'End',trusted:true}];}
     if(stage.endsWith('-pointer'))nativeEvents.push({type:'pointerdown',trusted:true},{type:'click',trusted:true});
     else if(stage==='range-home-min'||stage==='range-end-max')nativeEvents.push({type:'keydown',key:stage==='range-home-min'?'Home':'End',trusted:true});
-    return {...base,...patch,nativeEvents,regionEvents};
+    if(stage.startsWith('range-')){
+      const value=String(patch.value??base.value),nativeChange={type:'change',trusted:true,value,name:'',checked:false,controlType:'range'};
+      nativeEvents.push(nativeChange);publicEvents=[{type:'ely:change',detail:{id:base.id,component,name:'',value,checked:false,type:'range'}}];
+    }
+    return {...base,...patch,nativeEvents,regionEvents,publicEvents};
   };
   for(const identity of ['layout/Scrollbar','layout/StickyHeader'])for(const {id:stage}of requestedStateContract(identity).steps)
-    assert.doesNotThrow(()=>assertVerticalRangeSnapshot(identity,stage,{...sample(stage),component:identity},'same twin'),`${identity} ${stage} must satisfy its native-state contract`);
+    assert.doesNotThrow(()=>assertVerticalRangeSnapshot(identity,stage,{...sample(stage,identity),component:identity},'same twin'),`${identity} ${stage} must satisfy its native-state contract`);
   assert.deepEqual(requestedStateContract('layout/Scrollbar').steps.slice(0,3).map(step=>step.id),['range-center-pointer','range-top-min-pointer','range-bottom-max-pointer']);
   assert(sample('content-wheel-up').scrollTop>0&&sample('content-wheel-up').scrollTop<sample('content-wheel-up').scrollMax&&sample('content-wheel-up').scrollTop<sample('range-end-max').scrollTop,'Wheel must move from max to a synchronized interior state before region Home');
-  for(const patch of [{direction:'rtl'},{writingMode:'horizontal-tb'},{rect:{width:120,height:8}},{scrollLeft:1},{scrollMax:499},{value:500,scrollTop:0},{nativeEvents:[]},{nativeEvents:[{type:'input',trusted:false}]},{publicEvents:[{type:'ely:action'}]},{documentScrollTop:18},{twinHTML:'changed twin'},{twinEvents:['input']}])assert.throws(()=>assertVerticalRangeSnapshot('layout/Scrollbar','range-center-pointer',{...base,...patch},'same twin'));
+  const rangeCenter=sample('range-center-pointer');
+  for(const detailPatch of [{id:'wrong-id'},{component:'layout/StickyHeader'},{name:'scroll'},{value:'499'},{type:'text'},{checked:true}]){
+    const bad=structuredClone(rangeCenter);Object.assign(bad.publicEvents[0].detail,detailPatch);assert.throws(()=>assertVerticalRangeSnapshot('layout/Scrollbar','range-center-pointer',bad,'same twin'));
+  }
+  const missingPayload=structuredClone(rangeCenter);delete missingPayload.publicEvents[0].detail.name;assert.throws(()=>assertVerticalRangeSnapshot('layout/Scrollbar','range-center-pointer',missingPayload,'same twin'));
+  const missingChange=structuredClone(rangeCenter);missingChange.publicEvents=[];assert.throws(()=>assertVerticalRangeSnapshot('layout/Scrollbar','range-center-pointer',missingChange,'same twin'));
+  const duplicateChange=structuredClone(rangeCenter);duplicateChange.publicEvents.push(structuredClone(duplicateChange.publicEvents[0]));assert.throws(()=>assertVerticalRangeSnapshot('layout/Scrollbar','range-center-pointer',duplicateChange,'same twin'));
+  const untrustedInput=structuredClone(rangeCenter);untrustedInput.nativeEvents.find(event=>event.type==='input').trusted=false;assert.throws(()=>assertVerticalRangeSnapshot('layout/Scrollbar','range-center-pointer',untrustedInput,'same twin'));
+  const untrustedChange=structuredClone(rangeCenter);untrustedChange.nativeEvents.find(event=>event.type==='change').trusted=false;assert.throws(()=>assertVerticalRangeSnapshot('layout/Scrollbar','range-center-pointer',untrustedChange,'same twin'));
+  for(const patch of [{direction:'rtl'},{writingMode:'horizontal-tb'},{rect:{width:120,height:8}},{scrollLeft:1},{scrollMax:499},{value:500,scrollTop:0},{nativeEvents:[]},{nativeEvents:[{type:'input',trusted:false},{type:'change',trusted:true,value:'500',name:'',checked:false,controlType:'range'}]},{publicEvents:[{type:'ely:action'}]},{documentScrollTop:18},{twinHTML:'changed twin'},{twinEvents:['input']}])assert.throws(()=>assertVerticalRangeSnapshot('layout/Scrollbar','range-center-pointer',{...rangeCenter,...patch},'same twin'));
+  for(const stage of ['content-wheel-up','scroll-home-min','scroll-end-max'])assert.deepEqual(sample(stage).publicEvents,[],`${stage} must stay silent at the public host boundary`);
+  assert.throws(()=>assertVerticalRangeSnapshot('layout/Scrollbar','content-wheel-up',{...sample('content-wheel-up'),publicEvents:[{type:'ely:change',detail:{}}]},'same twin'));
+  assert.throws(()=>assertVerticalRangeSnapshot('layout/Scrollbar','scroll-home-min',{...sample('scroll-home-min'),publicEvents:[{type:'ely:change',detail:{}}]},'same twin'));
   assert.throws(()=>assertVerticalRangeSnapshot('layout/Scrollbar','content-wheel-up',{...sample('content-wheel-up'),regionEvents:[{type:'wheel',target:'content',deltaY:600,trusted:true}]},'same twin'));
   assert.throws(()=>assertVerticalRangeSnapshot('layout/Scrollbar','scroll-home-min',{...sample('scroll-home-min'),regionEvents:[]},'same twin'));
   assert.throws(()=>assertVerticalRangeSnapshot('layout/ScrollbarAlias','range-center-pointer',base,'same twin'));
