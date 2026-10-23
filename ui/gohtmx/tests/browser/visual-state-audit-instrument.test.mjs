@@ -5,7 +5,70 @@ import {readFile,mkdtemp,writeFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {chromium} from 'playwright';
+import {compileFunction} from 'node:vm';
+import {parse} from 'acorn';
 import {caseActionContract,requestedStateContract,runRequestedStateActions,runRegisteredCanvasActions,assertRegisteredCanvasTransition,clickVisibleControl,ownedOverlayInventory,captureTargetPNG,inventoryReceipt,inventoryDrift,unhandledBrowserErrors} from './visual-state-audit-drivers.mjs';
+
+for(const id of ['zoom-in','fit-canvas','navigate-minimap']){
+  test(`canvas supplemental payload pure: ${id} accepts view and rejects malformed contracts`,async()=>{
+    // Read actual callbacks without importing an action runner or starting a browser.
+    const source=await readFile(new URL('./visual-state-audit-drivers.mjs',import.meta.url),'utf8');
+    const ast=parse(source,{ecmaVersion:'latest',sourceType:'module'}),nodes=[];
+    const visit=node=>{
+      if(!node||typeof node!=='object')return;
+      if(node.type)nodes.push(node);
+      for(const value of Object.values(node))if(Array.isArray(value))value.forEach(visit);else if(value&&typeof value==='object')visit(value);
+    };
+    visit(ast);
+    const oracle=nodes.find(node=>node.type==='FunctionDeclaration'&&node.id?.name==='assertMinimapViewport');
+    assert(oracle);
+    const assertMinimapViewport=compileFunction(`return (${source.slice(oracle.start,oracle.end)});`,['assert'])(assert);
+    const stage={width:820,height:460},bounds={x:0,y:0,w:860,h:640},point={x:110,y:80},ratio=.2;
+    const beforeZoom={stage,view:{x:-60,y:-60,zoom:.7}};
+    const zoom={zoom:.75,x:-60+410/.7-410/.75,y:-60+230/.7-230/.75};
+    const afterZoom={stage,view:zoom,artboards:[{...bounds}]};
+    const fitZoom=Math.min((820-96)/860,(460-96)/640);
+    const fit={zoom:fitZoom,x:430-410/fitZoom,y:320-230/fitZoom};
+    const beforeMinimap={stage,view:fit,mapBounds:{bounds,ratio}};
+    const pointerView={zoom:fitZoom,x:500-410/fitZoom,y:350-230/fitZoom};
+
+    const view={'zoom-in':zoom,'fit-canvas':fit,'navigate-minimap':pointerView}[id];
+    const calls=nodes.filter(node=>node.type==='CallExpression'&&node.callee.type==='Identifier'&&node.callee.name==='runStep'&&node.arguments[0]?.value===id);
+    assert.equal(calls.length,1,'Exactly one actual supplemental callback must be selected');
+    const callback=calls[0].arguments[2],body=source.slice(callback.start,callback.end);
+    const invoke=async({detail={view},events,clicks,rendered=view,oldShape=false}={})=>{
+      const world=[];
+      const payload={id:'canvas-main',component:'canvas/InfiniteCanvas',action:'change-viewport',...detail};
+      const bindings={
+        assert,id:'canvas-main',identity:'canvas/InfiniteCanvas',beforeZoom,afterZoom,beforeMinimap,
+        fresh:async()=>events??[{type:'ely:action',detail:payload}],
+        union:()=>bounds,
+        close:(actual,expected,message)=>assert(Math.abs(actual-expected)<=1e-6,message),
+        assertWorld:async actual=>{for(const key of ['x','y','zoom'])assert.equal(actual[key],rendered[key]);world.push(actual);},
+        assertMinimapViewport,
+        root:{evaluate:async()=>clicks??[{trusted:true,x:110,y:80}],locator:()=>({evaluate:async()=>point})},
+      };
+      const verify=compileFunction(`return (${oldShape?body.replaceAll('detail.view','detail.scene.view'):body});`,Object.keys(bindings))(...Object.values(bindings));
+      const result=await verify();assert.equal(world.length,1,'Rendered-world assertion remains mandatory');return result;
+    };
+    const result=await invoke();
+    for(const key of ['x','y','zoom'])assert.equal(result.view[key],view[key]);
+    await assert.rejects(()=>invoke({detail:{scene:{view}}}));
+    await assert.rejects(()=>invoke({detail:{}}));
+    for(const key of ['x','y','zoom'])await assert.rejects(()=>invoke({detail:{view:{...view,[key]:view[key]+1}}}));
+    await assert.rejects(()=>invoke({detail:{view,id:'foreign'}}));
+    await assert.rejects(()=>invoke({detail:{view,component:'canvas/Unknown'}}));
+    await assert.rejects(()=>invoke({detail:{view,action:'wrong'}}));
+    await assert.rejects(()=>invoke({events:[]}));
+    await assert.rejects(()=>invoke({events:[{type:'change'},{type:'ely:action'}]}));
+    await assert.rejects(()=>invoke({rendered:{...view,x:view.x+1}}));
+    await assert.rejects(()=>invoke({oldShape:true}),'Old scene.view reads must reject the documented public payload');
+    if(id==='navigate-minimap'){
+      await assert.rejects(()=>invoke({clicks:[{trusted:false,x:110,y:80}]}));
+      await assert.rejects(()=>invoke({clicks:[]}));
+    }
+  });
+}
 
 const returnFlowSites=body=>resolveCaseActionSites(`function entry(){${body}}`,'return-flow.js',{entry:'entry',facts:{selected:true}});
 const returnFlowControls=result=>result.sites.map(site=>site.control);

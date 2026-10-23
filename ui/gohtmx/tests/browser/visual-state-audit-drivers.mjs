@@ -599,30 +599,30 @@ export async function runRequestedStateActions(contract,root,runStep){
         let beforeZoom;
         await runStep('zoom-in',async()=>{await begin();beforeZoom=await scene();return clickVisibleControl(root.locator('[data-cs-zoom-in]'));},async()=>{
           const observed=await fresh();assert.deepEqual(observed.map(event=>event.type),['ely:action']);
-          const detail=observed[0].detail;assert.equal(detail.id,id);assert.equal(detail.component,identity);assert.equal(detail.action,'change-viewport');assert(detail.scene?.view,'Viewport action must carry the public scene view');
+          const detail=observed[0].detail;assert.equal(detail.id,id);assert.equal(detail.component,identity);assert.equal(detail.action,'change-viewport');assert(detail.view,'Viewport action must carry the public view');
           const stops=[.1,.25,.5,.75,1,1.5,2,3,4,6,8],zoom=stops.find(value=>value>beforeZoom.view.zoom+.001)??beforeZoom.view.zoom,center={x:beforeZoom.stage.width/2,y:beforeZoom.stage.height/2};
           const expected={zoom,x:beforeZoom.view.x+center.x/beforeZoom.view.zoom-center.x/zoom,y:beforeZoom.view.y+center.y/beforeZoom.view.zoom-center.y/zoom};
-          close(detail.scene.view.zoom,expected.zoom,'Zoom-in must advance exactly one canonical zoom stop from the pre-click state');close(detail.scene.view.x,expected.x,'Zoom-in must preserve the pre-click center anchor');close(detail.scene.view.y,expected.y,'Zoom-in must preserve the pre-click center anchor');
-          await assertWorld(detail.scene.view);return {action:detail.action,view:detail.scene.view,expected,preClick:beforeZoom.view,events:observed};
+          close(detail.view.zoom,expected.zoom,'Zoom-in must advance exactly one canonical zoom stop from the pre-click state');close(detail.view.x,expected.x,'Zoom-in must preserve the pre-click center anchor');close(detail.view.y,expected.y,'Zoom-in must preserve the pre-click center anchor');
+          await assertWorld(detail.view);return {action:detail.action,view:detail.view,expected,preClick:beforeZoom.view,events:observed};
         });
         const afterZoom=await scene();
         await runStep('fit-canvas',async()=>{await begin();return clickVisibleControl(root.locator('[data-cs-fit]'));},async()=>{
           const observed=await fresh();assert.deepEqual(observed.map(event=>event.type),['ely:action']);
-          const detail=observed[0].detail;assert.equal(detail.id,id);assert.equal(detail.component,identity);assert.equal(detail.action,'change-viewport');assert(detail.scene?.view,'Fit action must carry the public scene view');
+          const detail=observed[0].detail;assert.equal(detail.id,id);assert.equal(detail.component,identity);assert.equal(detail.action,'change-viewport');assert(detail.view,'Fit action must carry the public view');
           const bounds=union(afterZoom.artboards),margin=48,zoom=Math.max(.1,Math.min(1,Math.min(Math.max(1,afterZoom.stage.width-2*margin)/Math.max(1,bounds.w),Math.max(1,afterZoom.stage.height-2*margin)/Math.max(1,bounds.h))));
           const expected={zoom,x:bounds.x+bounds.w/2-afterZoom.stage.width/2/zoom,y:bounds.y+bounds.h/2-afterZoom.stage.height/2/zoom};
-          close(detail.scene.view.zoom,expected.zoom,'Fit zoom must be derived from rendered artboards and stage dimensions');close(detail.scene.view.x,expected.x,'Fit x must center rendered artboards');close(detail.scene.view.y,expected.y,'Fit y must center rendered artboards');
-          await assertWorld(detail.scene.view);return {action:detail.action,view:detail.scene.view,expected,geometry:{stage:afterZoom.stage,artboards:afterZoom.artboards}};
+          close(detail.view.zoom,expected.zoom,'Fit zoom must be derived from rendered artboards and stage dimensions');close(detail.view.x,expected.x,'Fit x must center rendered artboards');close(detail.view.y,expected.y,'Fit y must center rendered artboards');
+          await assertWorld(detail.view);return {action:detail.action,view:detail.view,expected,geometry:{stage:afterZoom.stage,artboards:afterZoom.artboards}};
         });
         let beforeMinimap;
         await runStep('navigate-minimap',async()=>{await begin();beforeMinimap=await scene();return clickVisibleControl(root.locator('[data-cs-minimap]'));},async()=>{
           const observed=await fresh();assert.deepEqual(observed.map(event=>event.type),['ely:action']);
-          const detail=observed[0].detail;assert.equal(detail.id,id);assert.equal(detail.component,identity);assert.equal(detail.action,'change-viewport');assert(detail.scene?.view,'Minimap action must carry the public scene view');
+          const detail=observed[0].detail;assert.equal(detail.id,id);assert.equal(detail.component,identity);assert.equal(detail.action,'change-viewport');assert(detail.view,'Minimap action must carry the public view');
           const clicks=await root.evaluate(node=>node.__visualCanvasClicks);assert.equal(clicks.length,1,'Exactly one native minimap pointer click must be observed');
           const click=clicks[0];assert.equal(click.trusted,true,'Minimap activation must use a trusted native pointer click');
           const point=await root.locator('[data-cs-minimap]').evaluate((map,click)=>{const local=new DOMPoint(click.x,click.y).matrixTransform(map.getScreenCTM().inverse());return {x:local.x,y:local.y};},click);
-          const expected=assertMinimapViewport(beforeMinimap,detail.scene.view,{bounds:beforeMinimap.mapBounds.bounds,ratio:beforeMinimap.mapBounds.ratio,point});
-          await assertWorld(detail.scene.view);return {action:detail.action,view:detail.scene.view,expected,pointer:click};
+          const expected=assertMinimapViewport(beforeMinimap,detail.view,{bounds:beforeMinimap.mapBounds.bounds,ratio:beforeMinimap.mapBounds.ratio,point});
+          await assertWorld(detail.view);return {action:detail.action,view:detail.view,expected,pointer:click};
         });
       }finally{await root.evaluate(node=>{node.removeEventListener('click',node.__visualCanvasClickObserver,true);delete node.__visualCanvasClickObserver;delete node.__visualCanvasClicks;});}
       return;

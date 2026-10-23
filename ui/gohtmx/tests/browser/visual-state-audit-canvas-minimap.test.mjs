@@ -69,8 +69,8 @@ test('source-only: eight separate canvas minimap contracts; 32 case/profile runt
   assert.match(driver,/const bounds=union\(afterZoom\.artboards\),margin=48/,'Fit expectation uses the actual artboard union and InfiniteCanvas fit margin');
   assert.match(driver,/beforeZoom=await scene\(\);return clickVisibleControl/,'Zoom oracle must snapshot the state before activating the zoom target');
   assert.match(driver,/beforeMinimap=await scene\(\);return clickVisibleControl/,'Minimap oracle must snapshot state before the native minimap pointer action');
-  assert.match(driver,/assertMinimapViewport\(beforeMinimap,detail\.scene\.view/,'Minimap post-state must be validated against its pre-click viewport');
-  assert.match(driver,/assertWorld\(detail\.scene\.view\)/,'Each public viewport action must match the rendered SVG transform');
+  assert.match(driver,/assertMinimapViewport\(beforeMinimap,detail\.view/,'Minimap post-state must be validated against its pre-click viewport');
+  assert.match(driver,/assertWorld\(detail\.view\)/,'Each public viewport action must match the rendered SVG transform');
   assert.match(driver,/fresh\(\)/,'Actions must retain the existing public-event and independent-twin guards');
   assert.match(driver,/assert\.equal\(identity,contract\.identity,'Exact alias identity is required'\)/);
   assert.match(driver,/initialTwin=await twinState\(\),id=await root\.getAttribute\('id'\)/);
