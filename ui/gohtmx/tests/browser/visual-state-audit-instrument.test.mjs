@@ -93,6 +93,7 @@ test('basic menu positioning browser: native opening precedes focus and follows 
     browser=await chromium.launch({executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH||undefined});
     for(const width of [1440,390])for(const theme of ['light','dark'])for(const old of [false,true]){
       const context=await browser.newContext({viewport:{width,height:1000},colorScheme:theme}),page=await context.newPage();page.setDefaultTimeout(10000);
+      const row={width,theme,negativeControl:old,captures:[]};receipt.cases.push(row);
       try{
         const instance=id=>`<div class="ui-menu" data-ui-component="menu" id="${id}"><button type="button" popovertarget="${id}-popup" data-ui-menu-trigger aria-expanded="false" aria-controls="${id}-popup">Caller menu</button><div class="ui-menu-panel" id="${id}-popup" popover role="menu" aria-label="Caller menu"><a role="menuitem" href="#caller-first">Caller first link</a><button role="menuitem" disabled>Disabled</button><a role="menuitem" href="#caller-last">Caller last link</a></div></div>`;
         const scoped='[data-ui-component="menu"]>.ui-menu-panel';
@@ -103,13 +104,26 @@ test('basic menu positioning browser: native opening precedes focus and follows 
         await page.addScriptTag({content:js});
         const root=page.locator('#main'),trigger=root.locator('[data-ui-menu-trigger]'),popup=root.locator('[popover]');
         const twin=await page.locator('#twin').evaluate(node=>node.outerHTML);
-        await page.evaluate(()=>{window.menuFocus=[];window.menuSelect=[];document.addEventListener('focusin',e=>{if(e.target.closest('#main-popup')){const r=document.getElementById('main-popup').getBoundingClientRect();menuFocus.push({left:r.left,top:r.top});}});document.getElementById('main').addEventListener('ui:select',e=>menuSelect.push({trusted:e.isTrusted,detail:e.detail}));});
-        await trigger.click();await page.waitForFunction(()=>document.getElementById('main-popup').matches(':popover-open'));
+        await page.evaluate(()=>{
+          window.menuFocus=[];window.menuSelect=[];window.menuTimeline=[];
+          const panel=document.getElementById('main-popup'),trigger=document.querySelector('#main [data-ui-menu-trigger]');
+          const identity=node=>node?.id||node?.getAttribute('href')||node?.tagName||null;
+          const rect=node=>{const r=node.getBoundingClientRect();return {left:r.left,top:r.top,bottom:r.bottom,width:r.width,height:r.height};};
+          window.menuSnapshot=(checkpoint,event)=>{const entry={sequence:menuTimeline.length,time:performance.now(),checkpoint,target:identity(event?.target),active:identity(document.activeElement),open:panel.matches(':popover-open'),expanded:trigger.getAttribute('aria-expanded'),panel:rect(panel),trigger:rect(trigger)};if(event){entry.oldState=event.oldState;entry.newState=event.newState;}menuTimeline.push(entry);return entry;};
+          for(const type of ['beforetoggle','toggle'])panel.addEventListener(type,event=>menuSnapshot(type,event),true);
+          document.addEventListener('focusin',event=>{const entry=menuSnapshot('focusin',event);if(panel.contains(event.target))menuFocus.push({left:entry.panel.left,top:entry.panel.top,target:entry.target,trigger:entry.trigger});});
+          document.getElementById('main').addEventListener('ui:select',e=>menuSelect.push({trusted:e.isTrusted,detail:e.detail}));
+          menuSnapshot('before-click');
+        });
+        await trigger.click();await page.evaluate(()=>menuSnapshot('after-click'));
+        await page.waitForFunction(()=>document.getElementById('main-popup').matches(':popover-open'));await page.evaluate(()=>menuSnapshot('after-open-predicate'));
         const geometry=()=>root.evaluate(node=>{const rect=n=>{const r=n.getBoundingClientRect();return {left:r.left,top:r.top,bottom:r.bottom,width:r.width,height:r.height};};return {trigger:rect(node.querySelector('[data-ui-menu-trigger]')),panel:rect(node.querySelector('[popover]')),viewport:{width:document.documentElement.clientWidth,height:document.documentElement.clientHeight},active:document.activeElement.closest('[role=menuitem]')!==null};});
         const check=g=>{const left=Math.max(8,Math.min(g.trigger.left,g.viewport.width-g.panel.width-8)),below=g.trigger.bottom+6,above=g.trigger.top-g.panel.height-6;const top=Math.max(8,Math.min(below+g.panel.height>g.viewport.height-8?above:below,g.viewport.height-g.panel.height-8));assert(Math.abs(g.panel.left-left)<=1);assert(Math.abs(g.panel.top-top)<=1);assert(g.panel.top>=8&&g.panel.left>=8);assert(g.panel.left+g.panel.width<=g.viewport.width-7);};
-        const initial=await geometry();const row={width,theme,negativeControl:old,initial,captures:[]};receipt.cases.push(row);
+        const initial=await geometry();row.initial=initial;
         if(old){assert.equal(initial.panel.left,0);assert.equal(initial.panel.top,0);assert.throws(()=>check(initial),'Old source must fail actual adjacency');continue;}
         check(initial);
+        await page.waitForFunction(()=>document.activeElement===document.querySelector('#main-popup [href="#caller-first"]')&&menuFocus.some(entry=>entry.target==='#caller-first'));
+        await page.evaluate(()=>menuSnapshot('after-initial-focus-wait'));row.initialFocused=await geometry();check(row.initialFocused);
         const focus=await page.evaluate(()=>menuFocus);assert(focus.length);for(const f of focus){assert(Math.abs(f.left-initial.panel.left)<=1&&Math.abs(f.top-initial.panel.top)<=1,'First item cannot focus at stale origin');}
         const capture=async label=>{const path=join(output,`${width}-${theme}-${label}.png`);const png=await page.screenshot({path,caret:'initial',animations:'disabled'});row.captures.push({label,path,sha256:hash(png),geometry:await geometry()});};
         await capture('opened');
@@ -134,7 +148,10 @@ test('basic menu positioning browser: native opening precedes focus and follows 
         await page.keyboard.press('Enter');
         await page.waitForFunction(()=>!document.getElementById('main-popup').matches(':popover-open')&&document.activeElement===document.querySelector('#main [data-ui-menu-trigger]'));assert.deepEqual(await page.evaluate(()=>menuSelect),[{trusted:false,detail:{value:'#caller-first'}}]);
         assert.equal(await page.locator('#twin').evaluate(node=>node.outerHTML),twin);
-      }finally{await context.close();}
+      }finally{
+        try{row.focusDiagnostics=await page.evaluate(()=>typeof menuSnapshot==='function'?{final:menuSnapshot('case-final'),timeline:menuTimeline,focus:menuFocus}:null);}catch(error){row.diagnosticError=String(error);}
+        await context.close();
+      }
     }
     for(const name of names)assert.equal(hash(await readFile(new URL('../../assets/'+name,import.meta.url))),sourceHashes[name],'Source drift: '+name);
     receipt.status='passed';
