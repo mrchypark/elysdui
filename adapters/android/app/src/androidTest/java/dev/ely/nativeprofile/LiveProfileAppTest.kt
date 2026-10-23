@@ -166,7 +166,6 @@ class LiveProfileAppTest {
             }
         }
 
-        val activity = compose.activity
         assertTrue("Activity is finishing after IME dismissal", !activity.isFinishing)
         assertTrue("Activity is destroyed after IME dismissal", !activity.isDestroyed)
         compose.onNodeWithTag("display-name")
