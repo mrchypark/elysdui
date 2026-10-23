@@ -1424,13 +1424,25 @@ test('websocket direct pure: only canonical source-backed identity has twelve se
 test('websocket direct pure: actual sequence preserves drafts messages native ordering and rerender ownership',async()=>{
   const full=runRequestedStateActions.toString(),start=full.indexOf("    if(contract.focusedSequence==='websocket-public-host-boundary'){"),end=full.indexOf("    if(['sheet-native-actions'",start);
   assert(start>=0&&end>start);const branch=full.slice(start,end);
+  const core=await readFile(new URL('../../assets/ely-api.js',import.meta.url),'utf8'),devtools=await readFile(new URL('../../assets/ely-api-workspace-devtools.js',import.meta.url),'utf8');
+  assert(core.includes("root.addEventListener('change', change)")&&core.includes("name: event.target.name,")&&core.includes("value: event.target.value, checked: event.target.checked, type: event.target.type"),'Named native changes must produce the public detail from the changed control');
+  assert(devtools.includes("field('A message to send',state.draft||'',v=>{state.draft=v;send.disabled=disabled||!connected||!v.trim();},'text',{'data-dt-socket-draft':''})"),'WebSocketConsole keeps its named draft input as the event source');
   const labels=['empty-enter','type-ping','send-enter','type-pong','send-button','request-disconnect','host-ack-closed','type-closed-draft','closed-enter','clear-closed-draft','request-connect','host-ack-open'];
   const run=async defect=>{
     const url='wss://stream.example.com/orders',identity='devtools/WebSocketConsole',id='socket-main';
     const rows=[['ⓘ',`Connected to ${url}`,'10m'],['↗',JSON.stringify({type:'subscribe',channel:'orders'},null,2),'10m'],['↙',JSON.stringify({type:'order',id:1011,total:42.5},null,2),'2m']];
-    const state={state:'open',draft:'',rows,revision:0},timeline=[],actions=[],receipts=[];let cursor=0,cleaned=false,initialized=false;
+    const state={state:'open',draft:'',rows,revision:0},timeline=[],actions=[],publicEvents=[],receipts=[];let cursor=0,dirty=false,committedDraft='',cleaned=false,initialized=false;
     const snapshot=()=>({state:state.state,url,draft:state.draft,sendDisabled:defect==='enabled-closed'&&state.state==='closed'?false:state.state!=='open'||!state.draft.trim(),toggleDisabled:false,toggle:state.state==='open'?'Disconnect':'Connect',rows:structuredClone(state.rows),model:defect==='model-drift'&&actions.length?'changed model':'original fixture model'});
-    const native=(type,key=null,control='draft')=>timeline.push({type,key,control,value:state.draft,trusted:defect!=='untrusted'});
+    const native=(type,key=null,control='draft')=>timeline.push({type,key,control,value:state.draft,trusted:defect!=='untrusted',name:'A message to send',checked:false,inputType:'text'});
+    const change=()=>{
+      const detail={id,component:identity,name:'A message to send',value:state.draft,checked:false,type:'text'};
+      if(defect==='wrong-change')detail.value='incorrect';
+      const event={type:'ely:change',detail};
+      if(defect==='reordered-change')pendingChanges.push(event);else if(defect!=='missing-change')publicEvents.push(event);
+      if(defect==='duplicate-change')publicEvents.push(event);
+    };
+    let pendingChanges=[];
+    const commitDraft=()=>{if(!dirty)return;if(state.draft!==committedDraft){native('change');change();}committedDraft=state.draft;dirty=false;};
     const emit=detail=>{
       detail={...detail,id,component:identity};
       if(defect==='wrong-url')detail.url='wss://foreign.example';
@@ -1439,8 +1451,10 @@ test('websocket direct pure: actual sequence preserves drafts messages native or
       if(defect==='wrong-text'&&detail.action==='send-socket')detail.text='wrong';
       if(defect==='wrong-state'&&detail.action==='toggle-socket')detail.state='opening';
       const event={type:'ely:action',detail};actions.push(event);
+      publicEvents.push(event);
       if(defect==='reordered')timeline.unshift(event);else timeline.push(event);
       if(defect==='duplicate'){actions.push(event);timeline.push(event);}
+      if(pendingChanges.length){publicEvents.push(...pendingChanges);pendingChanges=[];}
     };
     const send=()=>{if(state.state==='open'&&state.draft.trim()){emit({action:'send-socket',text:state.draft,url});if(defect!=='uncleared')state.draft='';if(defect==='fabricated')state.rows.push(['↗','new','now']);if(defect==='reordered-messages')state.rows.reverse();if(defect==='altered-message')state.rows[0][1]='changed';}};
     const root={evaluate:async(fn,arg)=>{
@@ -1450,7 +1464,7 @@ test('websocket direct pure: actual sequence preserves drafts messages native or
       if(text.includes('node.removeEventListener')){cleaned=true;return;}
       if(text.includes("node.dispatchEvent(new CustomEvent('ely:result'")){
         timeline.push({type:'ely:result',trusted:false,root:defect!=='foreign-host-root',action:'toggle-socket',state:arg});
-        if(defect!=='ignored-host'){state.state=arg;state.revision++;}return true;
+        if(defect!=='ignored-host'){state.state=arg;state.revision++;dirty=false;committedDraft=state.draft;}return true;
       }
       if(text.includes('node.__visualSocketTwinEvents'))return defect==='twin-event'&&state.revision?['ely:result']:[];
       if(text.includes('node.__visualSocketNative'))return timeline;
@@ -1458,13 +1472,13 @@ test('websocket direct pure: actual sequence preserves drafts messages native or
     },locator:selector=>{
       const revision=state.revision;
       const current=()=>assert.equal(revision,state.revision,'A stale control survived host rerender');
-      return {pressSequentially:async value=>{current();for(const character of value){native('keydown',character);state.draft+=character;native('input');native('keyup',character);}},
-        press:async key=>{current();native('keydown',key);if(key==='Enter'){send();if(defect==='cleared-closed'&&state.state==='closed')state.draft='';}else if(key==='Backspace'){state.draft='';native('input');}native('keyup',key);},
-        click:async()=>{current();const control=selector.includes('socket-send')?'send':'toggle';native('click',null,control);if(control==='send')send();else{emit({action:'toggle-socket',state:state.state,url});if(defect==='optimistic')state.state=state.state==='open'?'closed':'open';}},
+      return {pressSequentially:async value=>{current();for(const character of value){native('keydown',character);state.draft+=character;dirty=true;native('input');native('keyup',character);}},
+        press:async key=>{current();native('keydown',key);if(key==='Enter'){if(defect==='unexpected-change'&&!state.draft)publicEvents.push({type:'ely:change',detail:{id,component:identity,name:'unexpected',value:'',checked:false,type:'text'}});send();if(defect==='cleared-closed'&&state.state==='closed')state.draft='';}else if(key==='Backspace'){state.draft='';dirty=true;native('input');}native('keyup',key);},
+        click:async()=>{current();const control=selector.includes('socket-send')?'send':'toggle';commitDraft();native('click',null,control);if(control==='send')send();else{emit({action:'toggle-socket',state:state.state,url});if(defect==='optimistic')state.state=state.state==='open'?'closed':'open';}},
       };
     }};
-    const begin=async()=>{cursor=actions.length;};
-    const fresh=async()=>{assert.notEqual(defect==='twin-html'&&state.revision>0,true,'Independent twin drift');return actions.slice(cursor);};
+    const begin=async()=>{cursor=publicEvents.length;};
+    const fresh=async()=>{assert.notEqual(defect==='twin-html'&&state.revision>0,true,'Independent twin drift');return publicEvents.slice(cursor);};
     const runStep=async(label,action,verify)=>{assert.equal(label,labels[receipts.length]);const before=snapshot();await action();const result=await verify();receipts.push({label,before,after:snapshot(),result});};
     const executeBranch=compileFunction(`return (async()=>{${branch}})();`,['contract','root','runStep','begin','fresh','id','identity','assert','clickVisibleControl']);
     try{await executeBranch(requestedStateContract(identity),root,runStep,begin,fresh,id,identity,assert,async control=>control.click());}
@@ -1472,9 +1486,11 @@ test('websocket direct pure: actual sequence preserves drafts messages native or
     assert.deepEqual(receipts.map(receipt=>receipt.label),labels);assert.equal(state.revision,2);
     assert.equal(receipts[8].after.draft,'queued');assert.equal(receipts[6].after.state,'closed');assert.equal(receipts[11].after.state,'open');
     assert.deepEqual(actions.map(event=>event.detail.action),['send-socket','send-socket','toggle-socket','toggle-socket']);
+    assert.deepEqual(receipts[4].result.events.map(event=>[event.type,event.detail]),[{type:'ely:change',detail:{id,component:identity,name:'A message to send',value:'pong',checked:false,type:'text'}},{type:'ely:action',detail:{id,component:identity,action:'send-socket',text:'pong',url}}].map(event=>[event.type,event.detail]));
+    assert.deepEqual(receipts[10].result.events.map(event=>[event.type,event.detail]),[['ely:action',{id,component:identity,action:'toggle-socket',state:'closed',url}]],'Clearing back to the committed empty draft must not fabricate a change notification');
   };
   await run(null);
-  for(const defect of ['wrong-url','wrong-id','wrong-component','wrong-text','wrong-state','duplicate','reordered','untrusted','uncleared','fabricated','reordered-messages','altered-message','model-drift','enabled-closed','optimistic','foreign-host-root','ignored-host','cleared-closed','twin-event','twin-html'])await assert.rejects(()=>run(defect),defect);
+  for(const defect of ['wrong-url','wrong-id','wrong-component','wrong-text','wrong-state','duplicate','reordered','untrusted','uncleared','fabricated','reordered-messages','altered-message','model-drift','enabled-closed','optimistic','foreign-host-root','ignored-host','cleared-closed','twin-event','twin-html','wrong-change','missing-change','duplicate-change','reordered-change','unexpected-change'])await assert.rejects(()=>run(defect),defect);
 });
 test('registered canvas pure: exact eight identities map only two ordered scene sites',async()=>{
   const source=await fixtureSource('workspace');

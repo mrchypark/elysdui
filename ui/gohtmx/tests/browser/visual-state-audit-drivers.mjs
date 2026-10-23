@@ -1235,7 +1235,7 @@ export async function runRequestedStateActions(contract,root,runStep,failureDiag
           if(event.type==='ely:action'){node.__visualSocketNative.push({type:event.type,detail:{...event.detail}});return;}
           if(event.type==='ely:result'){node.__visualSocketNative.push({type:event.type,trusted:event.isTrusted,root:event.target===node,action:event.detail?.action,state:event.detail?.result?.state});return;}
           const control=event.target.closest?.('[data-dt-socket-draft],[data-dt-socket-send],[data-dt-socket-toggle]');if(!control)return;
-          node.__visualSocketNative.push({type:event.type,trusted:event.isTrusted,key:event.key||null,value:control.value||'',control:control.hasAttribute('data-dt-socket-draft')?'draft':control.hasAttribute('data-dt-socket-send')?'send':'toggle'});
+          node.__visualSocketNative.push({type:event.type,trusted:event.isTrusted,key:event.key||null,value:control.value||'',control:control.hasAttribute('data-dt-socket-draft')?'draft':control.hasAttribute('data-dt-socket-send')?'send':'toggle',name:control.name||'',checked:control.checked??false,inputType:control.type||''});
         };
         for(const type of ['input','change','keydown','keyup','click','ely:result','ely:action'])node.addEventListener(type,node.__visualSocketObserver,true);
       });
@@ -1266,11 +1266,16 @@ export async function runRequestedStateActions(contract,root,runStep,failureDiag
           else if(activation==='clear'){await input.press('ControlOrMeta+A');await input.press('Backspace');}
           else await input.pressSequentially(activation);
         },async()=>{
-          const observed=await fresh();assert.deepEqual(observed.map(event=>({type:event.type,detail:event.detail})),expected?[{type:'ely:action',detail:{...expected,id,component:identity}}]:[]);
+          const observed=await fresh(),timeline=(await native()).slice(nativeCursor),inputs=timeline.filter(event=>event.type!=='ely:action');
+          const nativeChanges=inputs.filter(event=>event.type==='change'),expectedChangeCount=label==='send-button'?1:0;
+          assert.equal(nativeChanges.length,expectedChangeCount,`${label} must retain only the source-backed draft blur change`);
+          for(const event of nativeChanges){assert.equal(event.trusted,true);assert.equal(event.control,'draft');assert.equal(event.name,'A message to send');assert.equal(event.checked,false);assert.equal(event.inputType,'text');assert.equal(event.value,'pong');}
+          const expectedPublic=timeline.flatMap(event=>event.type==='ely:action'?[{type:event.type,detail:event.detail}]:event.type==='change'&&event.control==='draft'?[{type:'ely:change',detail:{id,component:identity,name:event.name,value:event.value,checked:event.checked,type:event.inputType}}]:[]);
+          assert.deepEqual(observed.map(event=>({type:event.type,detail:event.detail})),expectedPublic,'Every public event must match the exact captured native change/action sequence');
+          assert.deepEqual(observed.filter(event=>event.type==='ely:action').map(event=>event.detail),expected?[{...expected,id,component:identity}]:[],'Native activation must produce only the exact requested host action');
           const current=await socket();assert.equal(current.state,state);assert.equal(current.url,url);assert.equal(current.draft,draft);assert.equal(current.sendDisabled,sendDisabled);assert.equal(current.toggle,state==='open'?'Disconnect':'Connect');assert.equal(current.toggleDisabled,false);
           assert.deepEqual(current.rows,initial.rows,'No fabricated, removed, reordered or changed message');assert.equal(current.model,initial.model,'Caller fixture data remains unchanged');
           assert.deepEqual(await root.evaluate(node=>node.__visualSocketTwinEvents),[],'Actions and host replies must not reach the independent twin');
-          const timeline=(await native()).slice(nativeCursor),inputs=timeline.filter(event=>event.type!=='ely:action');
           assert.deepEqual(timeline.filter(event=>event.type==='ely:action').map(event=>event.detail),expected?[{...expected,id,component:identity}]:[]);
           if(label.startsWith('host-ack-'))assert.deepEqual(inputs,[{type:'ely:result',trusted:false,root:true,action:'toggle-socket',state:activation}]);
           else{
