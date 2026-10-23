@@ -362,7 +362,7 @@
 [data-ely-family="interaction"] .ely-interaction--feedback-source [hidden]{display:none!important}
 [data-ely-family="interaction"] .ely-interaction--feedback-source :is(h2,p){margin:0}
 [data-ely-family="interaction"] .ely-interaction--feedback-source h2{font-size:14px;font-weight:600}
-[data-ely-family="interaction"] .ely-interaction--feedback-source :is(.is-info,.is-plain){--feedback-tone:var(--info,#669bd3)}
+[data-ely-family="interaction"] .ely-interaction--feedback-source :is(.is-info,.is-plain){--feedback-tone:var(--info,light-dark(#2e69b2,#77abec))}
 [data-ely-family="interaction"] .ely-interaction--feedback-source .is-success{--feedback-tone:var(--success,#4d9d70)}
 [data-ely-family="interaction"] .ely-interaction--feedback-source .is-warning{--feedback-tone:var(--warning,#bc8a35)}
 [data-ely-family="interaction"] .ely-interaction--feedback-source :is(.is-danger,.is-error){--feedback-tone:var(--error,#d26565)}

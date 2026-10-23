@@ -365,7 +365,7 @@
 [data-ely-family='native'] .ely-native-tune>header button{border-color:transparent;background:transparent}
 [data-ely-family='native'] .ely-native-tune [data-native-tune-progress] small{margin-top:6px}
 [data-ely-family='native'] [data-native-tune-progress] progress{mask:repeating-linear-gradient(to right,#000 0 calc(100% / var(--native-epochs,1) - 3px),transparent calc(100% / var(--native-epochs,1) - 3px) calc(100% / var(--native-epochs,1)))}
-[data-ely-family='native'] .ely-native-tune[data-state='running'] .ely-native-badge{background:var(--info-subtle,#e8eef6);color:var(--info,#2863ab)}
+[data-ely-family='native'] .ely-native-tune[data-state='running'] .ely-native-badge{background:var(--info-subtle,light-dark(#ebf4ff,#19273a));color:var(--info,light-dark(#2e69b2,#77abec))}
 [data-ely-family='native'] .ely-native-tune[data-state='done'] .ely-native-badge{background:var(--success-subtle,#e5f2e9);color:var(--success,#267b4c)}
 [data-ely-family='native'] .ely-native-loss nav{display:flex;gap:16px}
 [data-ely-family='native'] .ely-native-loss button{border:0;background:transparent;padding:0;font-size:11px;color:var(--muted-foreground,#605d5a)}
@@ -392,7 +392,7 @@
 [data-ely-family='native'] .ely-native-dataset [data-native-sample-detail] td{white-space:normal;padding:12px 40px}
 [data-ely-family='native'] .ely-native-dataset dl{margin:0}
 [data-ely-family='native'] .ely-native-dataset dd{margin:4px 0 12px}
-[data-ely-family='native'] .ely-native-dataset [data-split='Held out'] .ely-native-badge{background:var(--info-subtle,#e8eef6);color:var(--info,#2863ab)}
+[data-ely-family='native'] .ely-native-dataset [data-split='Held out'] .ely-native-badge{background:var(--info-subtle,light-dark(#ebf4ff,#19273a));color:var(--info,light-dark(#2e69b2,#77abec))}
 [data-ely-family='native'] .ely-native-dataset footer{display:flex;justify-content:space-between;align-items:center;font-size:11px}
 [data-ely-family='native'] .ely-native-dataset footer nav{display:flex;gap:4px}
 [data-ely-family='native'] .ely-native-dataset [aria-current='true']{border-color:var(--color-line,#e1dfdd)}
