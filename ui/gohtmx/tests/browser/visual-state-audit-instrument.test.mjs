@@ -1743,7 +1743,7 @@ test('action cameras distinguish covered foreign paint, exposed corners and empt
   const browser=await chromium.launch({executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH||undefined});
   try{
     const page=await browser.newPage({viewport:{width:600,height:400}});
-    await page.setContent(`<style>body{margin:0}#main{width:500px;height:30px}#panel{position:absolute;left:0;top:35px;width:200px;height:120px;background:white;border:1px solid black;border-radius:8px;z-index:2}#peer{position:absolute;top:60px;width:500px;height:30px}#peer button{margin-left:20px}#outside{position:absolute;top:250px}</style>
+    await page.setContent(`<style>body{margin:0}#main{width:500px;height:30px}#panel{position:absolute;left:0;top:35px;width:200px;height:120px;background:white;border:1px solid black;border-radius:8px;z-index:2}#peer{position:absolute;top:60px;width:500px;height:30px}#peer button{position:relative;z-index:1;margin-left:20px}#outside{position:absolute;top:250px}</style>
       <div data-audit-main><div id="main" data-ely-family="interaction"><span id="nested"><button aria-controls="panel">Open</button></span><aside id="panel" role="region"><strong>Owned source content</strong></aside></div></div>
       <div data-audit-twin><div id="peer" data-ely-family="interaction"><button>Twin content</button></div></div>
       <div data-audit-twin><div id="outside" data-ely-family="interaction"><div role="menu">Unrelated outside camera</div></div></div>
@@ -1756,6 +1756,9 @@ test('action cameras distinguish covered foreign paint, exposed corners and empt
     const panel=await captureTargetPNG(page,page.locator('#panel'));
     assert.deepEqual(panel.foreignDOMIntersections,[],'Opaque higher-stacked panel covers the twin paint, not merely its layout box');
     assert(panel.occludedForeignPaint.some(item=>item.id==='peer'));
+    await page.locator('#peer button').evaluate(node=>{node.style.zIndex='3';});
+    assert((await captureTargetPNG(page,page.locator('#panel'))).foreignDOMIntersections.some(item=>item.id==='peer'),'Higher local foreign z-index remains blocking');
+    await page.locator('#peer button').evaluate(node=>node.style.removeProperty('z-index'));
     assert.equal(await page.content(),originalHTML,'Camera must not hide, resize, detach or mutate either instance');
     for(const position of ['sticky','fixed']){
       await page.locator('#main').evaluate((node,position)=>{node.style.position=position;},position);
