@@ -18,3 +18,16 @@ func TestCalendarPopoverAuditTwinSpacingIsCaseScoped(t *testing.T) {
 		t.Fatalf("advanced audit CSS must contain exactly one case-scoped calendar twin-spacing rule")
 	}
 }
+
+func TestActionSheetAuditMainReservesViewportFlowSpace(t *testing.T) {
+	css, err := Files.ReadFile("assets/advanced.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := "/* Native modal sheets stay viewport-anchored; reserve flow space after the main audit specimen. */\n" +
+		"[data-audit-case][data-audit-name=\"buttons/ActionSheet\"]>.advanced-grid>[data-audit-main]{min-block-size:100vh}"
+	if strings.Count(string(css), want) != 1 {
+		t.Fatalf("ActionSheet viewport reservation must be a single case-scoped main-wrapper rule")
+	}
+}
