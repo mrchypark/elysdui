@@ -1,16 +1,62 @@
 #!/usr/bin/env bash
 
-# Print the focused window only when Window Manager shows a stable-ready system
-# surface and no visible ANR alert. Callers still require repeated identical samples.
-android_window_readiness_focus() {
-	local dump focus
+# Print a direct focus identity, or on API 29 the unique eligible window on the
+# top-focused display, only with visible system bars and no visible ANR alert.
+# Callers still require repeated identical samples.
+android_window_readiness_identity() {
+	local dump identity
 	dump=$(cat)
 	[[ -n "$dump" ]] || return 1
 	if grep -Eiq 'Window\{[^}]*Application Not Responding:' <<< "$dump"; then
 		return 1
 	fi
-	focus=$(sed -n 's/^[[:space:]]*mCurrentFocus=//p' <<< "$dump" | head -n 1)
-	[[ "$focus" == Window\{* ]] || return 1
+	if grep -Eq '^[[:space:]]*mCurrentFocus=' <<< "$dump"; then
+		identity=$(sed -n 's/^[[:space:]]*mCurrentFocus=//p' <<< "$dump" | head -n 1)
+		[[ "$identity" == Window\{* ]] || return 1
+	else
+		# API 29 windows dumps omit mCurrentFocus; accept only one surfaced,
+		# visible, touchable/focusable app window on the top-focused display.
+		identity=$(printf '%s\n' "$dump" | awk '
+			function finish_window() {
+				if (window != "" && display != "" && base_application &&
+				    !not_focusable && !not_touchable && surface_ready && on_screen && visible) {
+					candidate_count[display]++
+					candidate[display] = window
+				}
+			}
+			/^  Window #[0-9]+ / {
+				finish_window()
+				window = $0
+				sub(/^  Window #[0-9]+ /, "", window)
+				sub(/:$/, "", window)
+				display = ""; base_application = 0; not_focusable = 0; not_touchable = 0
+				surface_ready = 0; on_screen = 0; visible = 0
+			}
+			/^  mTopFocusedDisplayId=/ {
+				top_display = $0
+				sub(/^  mTopFocusedDisplayId=/, "", top_display)
+			}
+			/^[[:space:]]+mDisplayId=/ {
+				display = $0
+				sub(/^.*mDisplayId=/, "", display)
+				sub(/[[:space:]].*$/, "", display)
+			}
+			/ty=BASE_APPLICATION/ { base_application = 1 }
+			/^[[:space:]]+fl=/ {
+				if ($0 ~ /NOT_FOCUSABLE/) not_focusable = 1
+				if ($0 ~ /NOT_TOUCHABLE/) not_touchable = 1
+			}
+			/mHasSurface=true isReadyForDisplay\(\)=true/ { surface_ready = 1 }
+			/^[[:space:]]+isOnScreen=true/ { on_screen = 1 }
+			/^[[:space:]]+isVisible=true/ { visible = 1 }
+			END {
+				finish_window()
+				if (top_display != "" && candidate_count[top_display] == 1) print candidate[top_display]
+				else exit 1
+			}
+		') || return 1
+		[[ "$identity" == Window\{* ]] || return 1
+	fi
 	printf '%s\n' "$dump" | awk '
 		/^  Window #[0-9]+ / {
 			status = ($0 ~ / u0 StatusBar\}/)
@@ -20,7 +66,7 @@ android_window_readiness_focus() {
 		navigation && /isVisible=true/ { navigation_visible = 1; navigation = 0 }
 		END { exit !(status_visible && navigation_visible) }
 	' || return 1
-	printf '%s\n' "$focus"
+	printf '%s\n' "$identity"
 }
 
 android_anr_seen() {

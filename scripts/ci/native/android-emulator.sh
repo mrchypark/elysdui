@@ -98,7 +98,7 @@ READY_DUMP="$RESULTS/system-readiness-window.txt"
 READY_DEADLINE=$((SECONDS + 90))
 # This run's SystemUI ANR surfaced about 36 seconds after boot completion.
 READY_NOT_BEFORE=$((SECONDS + 60))
-READY_FOCUS=
+READY_WINDOW=
 READY_STREAK=0
 READY=false
 : > "$READY_LOG"
@@ -137,24 +137,24 @@ while [ "$SECONDS" -lt "$READY_DEADLINE" ]; do
 		else
 			printf '%s refused-to-signal-unverified-adb-pid=%s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$ADB_PID" >> "$READY_LOG"
 		fi
-		READY_FOCUS=
+		READY_WINDOW=
 		READY_STREAK=0
 		printf '%s window-dump-timeout\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" >> "$READY_LOG"
 	elif ! wait "$ADB_PID"; then
-		READY_FOCUS=
+		READY_WINDOW=
 		READY_STREAK=0
 		printf '%s window-dump-failed\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" >> "$READY_LOG"
 	elif grep -Eiq 'Window\{[^}]*Application Not Responding:' "$READY_DUMP"; then
 		printf '%s visible-anr-window\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" >> "$READY_LOG"
 		break
-	elif focus=$(android_window_readiness_focus < "$READY_DUMP"); then
-		if [ "$focus" = "$READY_FOCUS" ]; then READY_STREAK=$((READY_STREAK + 1)); else READY_FOCUS=$focus; READY_STREAK=1; fi
-		printf '%s ready-sample=%s focus=%s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$READY_STREAK" "$focus" >> "$READY_LOG"
+	elif window_identity=$(android_window_readiness_identity < "$READY_DUMP"); then
+		if [ "$window_identity" = "$READY_WINDOW" ]; then READY_STREAK=$((READY_STREAK + 1)); else READY_WINDOW=$window_identity; READY_STREAK=1; fi
+		printf '%s ready-sample=%s window-identity=%s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$READY_STREAK" "$window_identity" >> "$READY_LOG"
 		if [ "$READY_STREAK" -ge 3 ] && [ "$SECONDS" -ge "$READY_NOT_BEFORE" ] && [ "$SECONDS" -lt "$READY_DEADLINE" ]; then READY=true; break; fi
 	else
-		READY_FOCUS=
+		READY_WINDOW=
 		READY_STREAK=0
-		printf '%s focus-or-system-bars-unready\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" >> "$READY_LOG"
+		printf '%s window-identity-or-system-bars-unready\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" >> "$READY_LOG"
 	fi
 	if [ "$SECONDS" -ge "$READY_DEADLINE" ]; then
 		printf '%s readiness-deadline-reached\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" >> "$READY_LOG"
@@ -165,13 +165,13 @@ while [ "$SECONDS" -lt "$READY_DEADLINE" ]; do
 	sleep "$remaining"
 done
 if [ "$READY" != true ]; then
-	echo 'Android system readiness failed: no stable focused window with visible system bars and no ANR within 90 seconds.' >&2
+	echo 'Android system readiness failed: no stable window identity with visible system bars and no ANR within 90 seconds.' >&2
 	cat "$READY_LOG" >&2
 	tail -n 80 "$ANR_LOG" >&2
 	cat "$READY_DUMP" >&2
 	exit 1
 fi
-echo 'Android system window focus and visible system bars settled before instrumentation.'
+echo 'Android system window identity and visible system bars settled before instrumentation.'
 
 SERVER_BINARY="${RUNNER_TEMP:-/tmp}/ely-native-emulator-profile"
 go build -o "$SERVER_BINARY" ./examples/native-profile

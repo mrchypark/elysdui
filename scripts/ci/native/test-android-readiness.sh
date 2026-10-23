@@ -3,7 +3,7 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/../../.." && pwd)
 source "$ROOT/scripts/ci/native/android-readiness.sh"
 
-healthy=$(android_window_readiness_focus <<'WINDOWS'
+healthy=$(android_window_readiness_identity <<'WINDOWS'
   mCurrentFocus=Window{ab12 u0 com.android.launcher3/.Launcher}
   Window #0 Window{nav u0 NavigationBar0}:
     isVisible=true
@@ -47,7 +47,7 @@ kill "$child_pid"
 wait "$child_pid" 2>/dev/null || true
 child_pid=
 
-if android_window_readiness_focus <<'WINDOWS'
+if android_window_readiness_identity <<'WINDOWS'
   mCurrentFocus=Window{ab12 u0 com.android.launcher3/.Launcher}
   Window #0 Window{anr u0 Application Not Responding: com.android.systemui}:
     isVisible=true
@@ -61,7 +61,7 @@ then
 	exit 1
 fi
 
-if android_window_readiness_focus <<'WINDOWS'
+if android_window_readiness_identity <<'WINDOWS'
   Window #0 Window{nav u0 NavigationBar0}:
     isVisible=true
   Window #1 Window{status u0 StatusBar}:
@@ -72,7 +72,7 @@ then
 	exit 1
 fi
 
-if android_window_readiness_focus <<'WINDOWS'
+if android_window_readiness_identity <<'WINDOWS'
   mCurrentFocus=Window{ab12 u0 com.android.launcher3/.Launcher}
   Window #0 Window{nav u0 NavigationBar0}:
     isVisible=true
@@ -81,6 +81,74 @@ if android_window_readiness_focus <<'WINDOWS'
 WINDOWS
 then
 	echo 'hidden system UI unexpectedly passed the readiness check' >&2
+	exit 1
+fi
+
+api29_dump=$(cat <<'WINDOWS'
+WINDOW MANAGER WINDOWS (dumpsys window windows)
+  Window #0 Window{a83c8d1 u0 NavigationBar0}:
+    mDisplayId=0
+    mAttrs={(0,0)(fillxfill) sim={adjust=pan} ty=NAVIGATION_BAR fmt=TRANSLUCENT
+      fl=NOT_FOCUSABLE NOT_TOUCH_MODAL TOUCHABLE_WHEN_WAKING WATCH_OUTSIDE_TOUCH SPLIT_TOUCH HARDWARE_ACCELERATED FLAG_SLIPPERY
+    mHasSurface=true isReadyForDisplay()=true mWindowRemovalAllowed=false
+    isOnScreen=true
+    isVisible=true
+  Window #1 Window{a378841 u0 StatusBar}:
+    mDisplayId=0
+    mAttrs={(0,0)(fillx36) gr=TOP CENTER_VERTICAL sim={adjust=resize} layoutInDisplayCutoutMode=always ty=STATUS_BAR fmt=TRANSLUCENT
+      fl=NOT_FOCUSABLE TOUCHABLE_WHEN_WAKING WATCH_OUTSIDE_TOUCH SPLIT_TOUCH HARDWARE_ACCELERATED DRAWS_SYSTEM_BAR_BACKGROUNDS
+    mHasSurface=true isReadyForDisplay()=true mWindowRemovalAllowed=false
+    isOnScreen=true
+    isVisible=true
+  Window #2 Window{7f335bd u0 AssistPreviewPanel}:
+    mDisplayId=0
+    mAttrs={(0,0)(fillx375) gr=BOTTOM START CENTER sim={state=unchanged adjust=nothing} ty=VOICE_INTERACTION_STARTING fmt=TRANSLUCENT
+      fl=NOT_FOCUSABLE NOT_TOUCHABLE LAYOUT_IN_SCREEN HARDWARE_ACCELERATED
+    mHasSurface=false isReadyForDisplay()=false mWindowRemovalAllowed=false
+    isOnScreen=false
+    isVisible=false
+  Window #3 Window{be83e6e u0 DockedStackDivider}:
+    mDisplayId=0
+    mAttrs={(0,0)(fillx72) sim={adjust=pan} layoutInDisplayCutoutMode=always ty=DOCK_DIVIDER fmt=TRANSLUCENT
+      fl=NOT_FOCUSABLE NOT_TOUCH_MODAL WATCH_OUTSIDE_TOUCH SPLIT_TOUCH HARDWARE_ACCELERATED FLAG_SLIPPERY
+    mHasSurface=false isReadyForDisplay()=false mWindowRemovalAllowed=false
+    isOnScreen=false
+    isVisible=false
+  Window #4 Window{f2f7031 u0 com.android.launcher3/com.android.launcher3.Launcher}:
+    mDisplayId=0
+    mAttrs={(0,0)(fillxfill) sim={adjust=pan forwardNavigation} layoutInDisplayCutoutMode=always ty=BASE_APPLICATION fmt=TRANSPARENT wanim=0x10302f1
+      fl=LAYOUT_IN_SCREEN LAYOUT_INSET_DECOR SHOW_WALLPAPER SPLIT_TOUCH HARDWARE_ACCELERATED DRAWS_SYSTEM_BAR_BACKGROUNDS
+    mHasSurface=true isReadyForDisplay()=true mWindowRemovalAllowed=false
+    isOnScreen=true
+    isVisible=true
+  Window #5 Window{7fe3834 u0 com.android.systemui.ImageWallpaper}:
+    mDisplayId=0
+    mAttrs={(0,0)(1553x1280) gr=TOP START CENTER layoutInDisplayCutoutMode=always ty=WALLPAPER fmt=RGBX_8888 wanim=0x103030e
+      fl=NOT_FOCUSABLE NOT_TOUCHABLE LAYOUT_IN_SCREEN LAYOUT_NO_LIMITS SCALED LAYOUT_INSET_DECOR
+    mHasSurface=true isReadyForDisplay()=true mWindowRemovalAllowed=false
+    isOnScreen=true
+    isVisible=true
+  mTopFocusedDisplayId=0
+WINDOWS
+)
+api29_identity=$(android_window_readiness_identity <<< "$api29_dump")
+[[ "$api29_identity" == 'Window{f2f7031 u0 com.android.launcher3/com.android.launcher3.Launcher}' ]]
+
+if android_window_readiness_identity <<< "${api29_dump}
+  Window #6 Window{second u0 com.example.Second}:
+    mDisplayId=0
+    mAttrs={(0,0)(fillxfill) ty=BASE_APPLICATION
+      fl=LAYOUT_IN_SCREEN
+    mHasSurface=true isReadyForDisplay()=true mWindowRemovalAllowed=false
+    isOnScreen=true
+    isVisible=true"; then
+	echo 'ambiguous API 29 window identity unexpectedly passed' >&2
+	exit 1
+fi
+
+if android_window_readiness_identity <<< "  mCurrentFocus=null
+${api29_dump}"; then
+	echo 'explicitly null current focus unexpectedly fell back to a window candidate' >&2
 	exit 1
 fi
 
