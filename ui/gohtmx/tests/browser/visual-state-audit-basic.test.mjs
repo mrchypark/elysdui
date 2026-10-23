@@ -383,13 +383,47 @@ test('phase2 pure delivery mechanism requires the exact requestfinished object a
   assert(runner.includes("sourceBefore.files.find(f=>f.path==='ui/gohtmx'+path)?.sha256"));
 });
 
+test('phase2 source-only slider calibration requires independent same-geometry RGBA and old-clip loss proof',async()=>{
+  const camera=await source('ui/gohtmx/tests/browser/visual-state-audit-camera.browser.test.mjs');
+  for(const guard of [
+    "test('action camera slider checked-frame allocation contains native paint in four profiles'",
+    "for(const value of [0,50,100])for(const focused of [false,true])",
+    "await page.keyboard.press('Tab')",
+    'assert.equal(stage.allocated.rect.width,stage.unallocated.rect.width',
+    'assert.equal(stage.allocated.rect.height,stage.unallocated.rect.height',
+    'assert.equal(stage.allocated.rect.x,stage.unallocated.rect.x',
+    'assert.deepEqual(stage.allocated.metrics,stage.unallocated.metrics',
+    'assert.deepEqual(captured.bounds.camera.clip,frameClip',
+    'assert.deepEqual(stage.afterCamera,stage.beforeCamera',
+    'frameClip.x>0&&frameClip.y>0&&frameClip.x+frameClip.width<viewport.width',
+    '#basic-slider-main::-webkit-slider-thumb{opacity:0!important}',
+    'new OffscreenCanvas(bitmap.width,bitmap.height)',
+    'assert(stage.pixels.changed>0',
+    'assert(stage.pixels.outsideOld>0',
+    'assert.equal(stage.pixels.outsideFrame,0',
+    'assert.equal(stage.pixels.atReferenceEdge,0',
+    'assert.equal(stage.pixels.cropMismatch,0',
+    'assert(stage.pixels.trackChanged>0',
+    'assert.equal(stage.pixels.trackOutsideFrame,0)',
+    'stage.pixels.focusChanged>0&&stage.pixels.focusOutsideOld>0',
+    'assert.deepEqual(stage.refocused,before',
+    'assert.deepEqual(await twin(),peer)',
+    'assert.equal(receipt.states.length,24)',
+  ])assert(camera.includes(guard),guard);
+  assert(camera.includes('NOT11-asset requestfinished production delivery proof'));
+  assert(camera.includes('<span data-slot="slider" class="${wrapperClass}">'));
+});
+
 test('phase2 source-only spacing CSS is action-only and required by the existing frozen asset proof',async()=>{
   const fixture=await source('adapters/gohtmx/tests/fixtures/basic-audit/main.go');
   const css=fixture.match(/const fixtureCSS = `([^`]+)`/)[1];
   assert.equal(createHash('sha256').update(css).digest('hex'),'70dcc04d1c99b164f180c10049674f54af2bdcdb5b8a001686809c7a263e8b65');
-  assert(fixture.includes('const actionCSS = `.basic-record{margin-block-end:100vh}.basic-pair{row-gap:100vh}`'));
+  assert(fixture.includes('const actionCSS = `.basic-record{margin-block-end:100vh}.basic-pair{row-gap:100vh}.basic-frame[data-basic-component="basic/slider"]{padding:1rem .5rem;margin-inline:-.5rem}`'));
   assert(fixture.includes('{{if .Actions}}<link rel="stylesheet" href="/assets/basic-audit-actions.css">'));
   assert(fixture.includes('add("assets/basic-audit-actions.css", []byte(actionCSS))'));
+  const allocation=fixture.match(/const actionCSS = `([^`]+)`/)[1];
+  assert.equal(allocation.split('basic/slider').length,2,'Only the exact slider host receives allocation');
+  assert(!/overflow|clip|opacity|input|focus|height|width/.test(allocation),'Allocation must not restyle or hide the component');
   const expected=Object.fromEntries(requiredBasicActionAssets.map(path=>[path,'a'.repeat(64)]));
   const delivered=requiredBasicActionAssets.map(path=>({path,bytes:8,sha256:expected[path],expectedSHA256:expected[path],loadedProof:'owned-route identical bytes; exact browser requestfinished'}));
   assert.throws(()=>assertBasicActionAssets(delivered.filter(r=>!r.path.endsWith('basic-audit-actions.css')),expected));

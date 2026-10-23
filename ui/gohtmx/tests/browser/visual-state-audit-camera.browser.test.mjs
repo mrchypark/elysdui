@@ -64,7 +64,7 @@ test('action camera tall-page, outline and centered native-modal causal pixels',
     assert(controlCSS.includes('dialog[data-ui-component="dialog"], [data-ui-component] dialog { margin: auto; }'),'Production root-dialog centering must be fixed before camera calibration');
     const fixtureSource=await readFile(new URL('../../../../adapters/gohtmx/tests/fixtures/basic-audit/main.go',import.meta.url),'utf8');
     const actionCSS=fixtureSource.match(/const actionCSS = `([^`]+)`/)[1];
-    assert.equal(actionCSS,'.basic-record{margin-block-end:100vh}.basic-pair{row-gap:100vh}');
+    assert.equal(actionCSS,'.basic-record{margin-block-end:100vh}.basic-pair{row-gap:100vh}.basic-frame[data-basic-component="basic/slider"]{padding:1rem .5rem;margin-inline:-.5rem}');
     receipt.modalCausal={stages:[]};
     for(const spacing of ['320px','100vh']){
       await page.setContent(`<style>body{margin:0;background:magenta}#spacer{height:2000px}.gallery{max-width:1248px;margin:auto}.basic-pair{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:24px}.basic-frame{min-width:0;height:50px}#next-title{height:80px;margin:0}select{box-sizing:border-box;width:100%;height:110px}dialog{box-sizing:border-box;position:fixed;inset:0;margin:0;width:196.203125px;height:54px;padding:0;border:0;background:white;color:black}button[data-slot]:focus-visible{outline:2px solid blue;outline-offset:4px}</style><div id="spacer"></div><main class="gallery"><article class="basic-record"><div class="basic-pair"><div data-audit-main><section class="basic-frame" id="main-frame" data-basic-component="basic/dialog"><button id="open">Open</button><dialog id="owned-dialog" data-ui-component="dialog">Native modal<form method="dialog"><button id="close" data-slot="button">Close</button></form></dialog></section></div><div data-audit-twin><section class="basic-frame" id="twin-frame" data-basic-component="basic/dialog"><select size="3"><option>Independent peer</option></select></section></div></div></article><article class="basic-record"><h2 id="next-title">Following case</h2><div data-audit-main><section id="next-frame" data-basic-component="basic/selectable-list"><select size="3"><option>Following foreign native control</option></select></section></div></article></main><div style="height:2000px"></div>`);
@@ -140,4 +140,126 @@ test('action camera tall-page, outline and centered native-modal causal pixels',
     catch(error){receipt.status='failed';receipt.cleanupError=String(error);throw error;}
     finally{await writeFile(join(output,'receipt.json'),JSON.stringify(receipt,null,2)+'\n',{flag:'wx'});}
   }
+});
+
+// Independent finite paint proof; no pseudo geometry parser and no camera changes.
+test('action camera slider checked-frame allocation contains native paint in four profiles',{
+  skip:process.env.RUN_ACTION_CAMERA_BROWSER!=='1',timeout:120000,
+},async()=>{
+  const repo=fileURLToPath(new URL('../../../../',import.meta.url)),parent=join(repo,'test-results/action-camera');
+  await mkdir(parent,{recursive:true});
+  const output=await mkdtemp(join(parent,'run-')),hash=bytes=>createHash('sha256').update(bytes).digest('hex');
+  const paths=['adapters/gohtmx/tests/fixtures/basic-audit/main.go','ui/gohtmx/templates/shadcn-slider.html','ui/gohtmx/assets/app.css','ui/gohtmx/assets/ely-controls.css','ui/gohtmx/tests/browser/visual-state-audit-drivers.mjs','ui/gohtmx/tests/browser/visual-state-audit-bounds.mjs','ui/gohtmx/tests/browser/visual-state-audit-camera.browser.test.mjs'];
+  const sources=async()=>Object.fromEntries(await Promise.all(paths.map(async path=>[path,hash(await readFile(join(repo,path)))])));
+  const fixture=await readFile(join(repo,paths[0]),'utf8'),slider=await readFile(join(repo,paths[1]),'utf8');
+  const fixtureCSS=fixture.match(/const fixtureCSS = `([^`]+)`/)[1],actionCSS=fixture.match(/const actionCSS = `([^`]+)`/)[1];
+  const inputClass=slider.match(/class="(h-2 w-full[^\"]+)"/)[1];
+  const wrapperClass=slider.match(/<span data-slot="slider"[\s\S]*?class="([^"]+)"/)[1].replace('{{if .Disabled}}opacity-50{{end}}','');
+  assert(!wrapperClass.includes('{{'),'Controlled enabled wrapper must contain no unrendered template action');
+  const receipt={node:process.version,runnerPID:process.pid,revision:execFileSync('git',['rev-parse','HEAD'],{cwd:repo,encoding:'utf8'}).trim(),sources:await sources(),status:'running',browserClosed:false,states:[],loadedAssets:[],assetProofKind:'Local file bytes read and route-fulfilled; NOT11-asset requestfinished production delivery proof',scope:'Controlled CSS/native paint calibration with extracted enabled wrapper/input classes and named endpoint variants; actual canonical fixture/props, all11 delivered assets and4-profile Slider action proof still required'};
+  let browser;
+  try{
+    browser=await chromium.launch({executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH||undefined});receipt.chromium=browser.version();
+    for(const [size,viewport]of [['desktop',{width:1440,height:1000}],['mobile',{width:390,height:844}]])for(const theme of ['light','dark']){
+      const context=await browser.newContext({viewport,colorScheme:theme,deviceScaleFactor:1}),page=await context.newPage();page.setDefaultTimeout(10000);
+      const errors=[];page.on('pageerror',error=>errors.push(String(error)));
+      await page.route('https://slider-calibration.invalid/**',async route=>{
+        const path=new URL(route.request().url()).pathname;
+        if(!/^\/assets\/(?:app\.css|ely-controls\.css|ely\/fonts\/[A-Za-z0-9-]+\.ttf|[a-z-]+\.woff2)$/.test(path)){errors.push('Unexpected calibration request '+path);return route.abort();}
+        const body=await readFile(join(repo,'ui/gohtmx',path.slice(1)));receipt.loadedAssets.push({path,sha256:hash(body),bytes:body.length});
+        await route.fulfill({body,contentType:path.endsWith('.css')?'text/css':path.endsWith('.ttf')?'font/ttf':'font/woff2'});
+      });
+      try{for(const value of [0,50,100])for(const focused of [false,true]){
+        const key=`${size}-${theme}-${value}-${focused?'focused':'unfocused'}`,stage={key,viewport,value,focused};receipt.states.push(stage);
+        const instance=scope=>`<div data-audit-${scope==='main'?'main':'twin'}><section class="basic-frame" id="basic-slider-${scope}-frame" data-basic-component="basic/slider"><span data-slot="slider" class="${wrapperClass}"><input id="basic-slider-${scope}" name="basic-slider-${scope}_value" aria-label="Caller control" type="range" min="0" max="100" value="${value}" class="${inputClass}"></span></section></div>`;
+        await page.setContent(`<html data-theme="${theme}"><head><base href="https://slider-calibration.invalid/"><link rel="stylesheet" href="/assets/app.css"><link rel="stylesheet" href="/assets/ely-controls.css"><style>${fixtureCSS}${actionCSS}</style><style id="allocation-control">.basic-frame[data-basic-component="basic/slider"]{padding:0;margin-inline:0}</style><style id="thumb-negative"></style><style id="track-negative"></style></head><body><div style="height:64419px"></div><main><article class="basic-record"><div class="basic-pair">${instance('main')}${instance('twin')}</div></article></main><div style="height:2000px"></div></body></html>`);
+        await page.evaluate(async()=>{await document.fonts.load('16px Inter','Slider');await document.fonts.ready;});
+        const root=page.locator('#basic-slider-main-frame'),input=page.locator('#basic-slider-main');
+        const snapshot=()=>input.evaluate(node=>{
+          const r=node.getBoundingClientRect(),s=getComputedStyle(node),frame=node.closest('.basic-frame').getBoundingClientRect();
+          return {rect:{x:r.x,y:r.y,width:r.width,height:r.height},frame:{x:frame.x,y:frame.y,width:frame.width,height:frame.height},value:node.value,activeID:document.activeElement?.id,focusVisible:node.matches(':focus-visible'),fontReady:document.fonts.status,fontLoaded:document.fonts.check('16px Inter','Slider'),rootFontSize:getComputedStyle(document.documentElement).fontSize,metrics:Object.fromEntries(['fontFamily','fontSize','lineHeight','appearance','boxSizing','padding','borderWidth','margin','width','height','direction','writingMode','outlineStyle','outlineWidth'].map(key=>[key,s[key]]))};
+        });
+        stage.unallocated=await snapshot();
+        await page.locator('#allocation-control').evaluate(node=>node.textContent='');
+        await root.scrollIntoViewIfNeeded();
+        if(focused){await page.keyboard.press('Tab');assert.equal(await input.evaluate(node=>node===document.activeElement),true,'Real Tab must reach the primary slider');}
+        stage.allocated=await snapshot();
+        assert.equal(stage.allocated.rect.width,stage.unallocated.rect.width,'Host allocation must preserve actual input width');
+        assert.equal(stage.allocated.rect.height,stage.unallocated.rect.height,'Host allocation must preserve actual input height');
+        assert.equal(stage.allocated.rect.x,stage.unallocated.rect.x,'Negative inline margins compensate padding, not shrink/reposition the input');
+        assert.deepEqual(stage.allocated.metrics,stage.unallocated.metrics,'All recorded component metrics/styles remain unchanged');
+        assert.equal(stage.allocated.rect.height,8,'Calibration must exercise the actual old eight-pixel range box');
+        assert.equal(stage.allocated.frame.width,stage.allocated.rect.width+16);
+        assert.equal(stage.allocated.frame.height,stage.allocated.rect.height+32);
+        assert.equal(stage.allocated.rootFontSize,'16px');assert(stage.allocated.fontLoaded);assert.equal(stage.allocated.fontReady,'loaded');
+        assert.equal(stage.allocated.focusVisible,focused);assert.equal(stage.allocated.value,String(value));
+        const twin=()=>page.locator('#basic-slider-twin-frame').evaluate(node=>({html:node.innerHTML,value:node.querySelector('input').value}));
+        const peer=await twin();
+        stage.beforeCamera=await snapshot();
+        const captured=await captureTargetPNG(page,root,join(output,key+'-component.png'));
+        stage.afterCamera=await snapshot();assert.deepEqual(stage.afterCamera,stage.beforeCamera,'Camera must preserve native focus, geometry, styles and value');
+        assert.equal(captured.bounds.camera.fullPage,false);assert.deepEqual(captured.foreignDOMIntersections,[]);
+        const reference=await screenshotWithoutCaretMutation(page,{path:join(output,key+'-reference.png'),animations:'disabled',scale:'css'});
+        const before=await snapshot();let negative;
+        const frameClip={x:Math.floor(before.frame.x),y:Math.floor(before.frame.y),width:Math.ceil(before.frame.x+before.frame.width)-Math.floor(before.frame.x),height:Math.ceil(before.frame.y+before.frame.height)-Math.floor(before.frame.y)};
+        assert.deepEqual(captured.bounds.camera.clip,frameClip,'Checked allocation must be the actual frame, not a camera-expanded paint estimate');
+        assert(frameClip.x>0&&frameClip.y>0&&frameClip.x+frameClip.width<viewport.width&&frameClip.y+frameClip.height<viewport.height,'Independent reference must have actual pixels outside every checked-frame edge');
+        let blurred=null;
+        if(focused){
+          await page.mouse.click(2,2);stage.blurred=await snapshot();assert(!stage.blurred.focusVisible);assert.notEqual(stage.blurred.activeID,'basic-slider-main');
+          for(const field of ['rect','frame','metrics','value','fontReady','fontLoaded','rootFontSize'])assert.deepEqual(stage.blurred[field],before[field],'Blur comparison preserves '+field);
+          blurred=await screenshotWithoutCaretMutation(page,{path:join(output,key+'-blurred-focus-negative.png'),animations:'disabled',scale:'css'});
+          for(let tabs=0;tabs<4;tabs++){await page.keyboard.press('Tab');if(await input.evaluate(node=>node===document.activeElement))break;}
+          stage.refocused=await snapshot();assert.deepEqual(stage.refocused,before,'Real Tab restores identical focus-visible state without changing geometry/value');
+        }
+        try{
+          await page.locator('#thumb-negative').evaluate(node=>node.textContent='#basic-slider-main::-webkit-slider-thumb{opacity:0!important}');
+          negative=await screenshotWithoutCaretMutation(page,{path:join(output,key+'-thumb-opacity0.png'),animations:'disabled',scale:'css'});
+          assert.deepEqual(await snapshot(),before,'Opacity negative must preserve geometry, metrics, value and actual native focus');
+        }finally{await page.locator('#thumb-negative').evaluate(node=>node.textContent='');}
+        let trackNegative;
+        try{
+          await page.locator('#track-negative').evaluate(node=>node.textContent='#basic-slider-main::-webkit-slider-runnable-track{background-color:transparent!important}');
+          trackNegative=await screenshotWithoutCaretMutation(page,{path:join(output,key+'-track-background-negative.png'),animations:'disabled',scale:'css'});
+          assert.deepEqual(await snapshot(),before,'Track background negative must preserve geometry and native state');
+        }finally{await page.locator('#track-negative').evaluate(node=>node.textContent='');}
+        const old={x:Math.floor(before.rect.x),y:Math.floor(before.rect.y),width:Math.ceil(before.rect.x+before.rect.width)-Math.floor(before.rect.x),height:Math.ceil(before.rect.y+before.rect.height)-Math.floor(before.rect.y)};
+        const oldPNG=await screenshotWithoutCaretMutation(page,{path:join(output,key+'-old8px-negative.png'),clip:old,animations:'disabled',scale:'css'});
+        stage.pixels=await page.evaluate(async({positive,negative,component,trackNegative,blurred,clip,old})=>{
+          const decode=async encoded=>{const bitmap=await createImageBitmap(new Blob([Uint8Array.from(atob(encoded),c=>c.charCodeAt(0))],{type:'image/png'}));try{const canvas=new OffscreenCanvas(bitmap.width,bitmap.height),context=canvas.getContext('2d');context.drawImage(bitmap,0,0);return {width:bitmap.width,height:bitmap.height,data:context.getImageData(0,0,bitmap.width,bitmap.height).data};}finally{bitmap.close();}};
+          const a=await decode(positive),b=await decode(negative),c=await decode(component),t=await decode(trackNegative),f=blurred?await decode(blurred):null;
+          for(const other of [b,t,...(f?[f]:[])])if(a.width!==other.width||a.height!==other.height)throw new Error('Negative reference dimensions changed');
+          let changed=0,outsideFrame=0,outsideOld=0,atReferenceEdge=0,cropMismatch=0,trackChanged=0,trackOutsideFrame=0,focusChanged=0,focusOutsideOld=0,focusOutsideFrame=0;
+          for(let y=0;y<a.height;y++)for(let x=0;x<a.width;x++){
+            const i=(y*a.width+x)*4,outside=x<clip.x||x>=clip.x+clip.width||y<clip.y||y>=clip.y+clip.height,oldOutside=x<old.x||x>=old.x+old.width||y<old.y||y>=old.y+old.height;
+            if([0,1,2,3].some(channel=>a.data[i+channel]!==t.data[i+channel])){trackChanged++;if(outside)trackOutsideFrame++;}
+            if(f&&[0,1,2,3].some(channel=>a.data[i+channel]!==f.data[i+channel])){focusChanged++;if(oldOutside)focusOutsideOld++;if(outside)focusOutsideFrame++;}
+            if(![0,1,2,3].some(channel=>a.data[i+channel]!==b.data[i+channel]))continue;
+            changed++;if(outside)outsideFrame++;
+            if(oldOutside)outsideOld++;
+            if(x===0||y===0||x===a.width-1||y===a.height-1)atReferenceEdge++;
+          }
+          if(c.width!==clip.width||c.height!==clip.height)throw new Error('Component camera dimensions differ from checked frame');
+          for(let y=0;y<c.height;y++)for(let x=0;x<c.width;x++)for(let channel=0;channel<4;channel++)if(c.data[(y*c.width+x)*4+channel]!==a.data[((y+clip.y)*a.width+x+clip.x)*4+channel])cropMismatch++;
+          return {changed,outsideFrame,outsideOld,atReferenceEdge,cropMismatch,trackChanged,trackOutsideFrame,focusChanged,focusOutsideOld,focusOutsideFrame,oldClip:old,checkedFrameClip:clip};
+        },{positive:reference.toString('base64'),negative:negative.toString('base64'),component:captured.png.toString('base64'),trackNegative:trackNegative.toString('base64'),blurred:blurred?.toString('base64')??null,clip:captured.bounds.camera.clip,old});
+        stage.bounds=captured.bounds;stage.hashes={component:hash(captured.png),reference:hash(reference),negative:hash(negative)};
+        stage.images={component:join(output,key+'-component.png'),reference:join(output,key+'-reference.png'),negative:join(output,key+'-thumb-opacity0.png'),old8px:{path:join(output,key+'-old8px-negative.png'),sha256:hash(oldPNG)}};
+        stage.images.trackNegative={path:join(output,key+'-track-background-negative.png'),sha256:hash(trackNegative)};
+        if(blurred)stage.images.focusNegative={path:join(output,key+'-blurred-focus-negative.png'),sha256:hash(blurred)};
+        assert(stage.pixels.changed>0,'The same-geometry opacity negative must remove actual thumb/ring/shadow ink');
+        assert(stage.pixels.outsideOld>0,'The old input-height clip must demonstrably omit ink, not merely have different dimensions');
+        assert.equal(stage.pixels.outsideFrame,0,'Any native thumb/ring/shadow outside the checked frame retains HOLD; never auto-increase allocation');
+        assert.equal(stage.pixels.atReferenceEdge,0,'Reference must not itself crop the differential paint');
+        assert.equal(stage.pixels.cropMismatch,0,'Unmodified camera pixels must equal the independently cropped viewport RGBA');
+        assert(stage.pixels.trackChanged>0,'Track negative must remove actual visible track paint');assert.equal(stage.pixels.trackOutsideFrame,0);
+        if(focused){assert(stage.pixels.focusChanged>0&&stage.pixels.focusOutsideOld>0,'Focused-versus-blurred pixels must demonstrate real focus paint outside the input box');assert.equal(stage.pixels.focusOutsideFrame,0);}
+        assert.deepEqual(await twin(),peer);assert.deepEqual(await snapshot(),before);assert.deepEqual(errors,[]);stage.status='passed';
+      }}finally{await context.close();}
+    }
+    assert.equal(receipt.states.length,24);assert.deepEqual(await sources(),receipt.sources);
+    for(const asset of receipt.loadedAssets)assert.equal(hash(await readFile(join(repo,'ui/gohtmx',asset.path.slice(1)))),asset.sha256,'Delivered calibration font/style bytes remain stable');
+    receipt.status='passed';
+  }catch(error){receipt.status='failed';receipt.error=String(error);throw error;}
+  finally{try{await browser?.close();receipt.browserClosed=!browser?.isConnected();}catch(error){receipt.status='failed';receipt.cleanupError=String(error);throw error;}finally{await writeFile(join(output,'receipt.json'),JSON.stringify(receipt,null,2)+'\n',{flag:'wx'});}}
 });

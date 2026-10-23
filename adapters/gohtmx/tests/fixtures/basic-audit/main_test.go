@@ -411,8 +411,8 @@ func TestActionSpacingLeavesInitialRouteAndCSSUnchanged(t *testing.T) {
 	if hex.EncodeToString(digest[:]) != initialCSSHash {
 		t.Fatal("initial fixture CSS bytes changed")
 	}
-	if actionCSS != `.basic-record{margin-block-end:100vh}.basic-pair{row-gap:100vh}` {
-		t.Fatal("action spacing must not resize, hide or clip component roots")
+	if actionCSS != `.basic-record{margin-block-end:100vh}.basic-pair{row-gap:100vh}.basic-frame[data-basic-component="basic/slider"]{padding:1rem .5rem;margin-inline:-.5rem}` {
+		t.Fatal("action spacing and slider-only compensated host allocation changed")
 	}
 	var initial, actions bytes.Buffer
 	if err := render(&initial); err != nil {
@@ -423,6 +423,16 @@ func TestActionSpacingLeavesInitialRouteAndCSSUnchanged(t *testing.T) {
 	}
 	if strings.Contains(initial.String(), cssPath) || strings.Count(actions.String(), `<link rel="stylesheet" href="`+cssPath+`">`) != 1 {
 		t.Fatal("spacing stylesheet must load exactly once on the action route only")
+	}
+	if strings.Contains(initial.String(), "padding:1rem") || strings.Contains(fixtureCSS, "basic/slider") {
+		t.Fatal("slider allocation must not enter initial HTML or initial fixture CSS")
+	}
+	for _, page := range []string{initial.String(), actions.String()} {
+		for _, scope := range []string{"basic-slider-main", "basic-slider-twin"} {
+			if !strings.Contains(page, `class="basic-frame" id="`+scope+`-frame" data-basic-component="basic/slider"`) || !strings.Contains(page, `id="`+scope+`"`) {
+				t.Fatal("existing independent slider frame/input identity must remain unchanged")
+			}
+		}
 	}
 	h, err := handler()
 	if err != nil {
