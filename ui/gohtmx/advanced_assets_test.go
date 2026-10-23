@@ -127,6 +127,28 @@ func TestLicenseViewerWrapsWithinItsContainerAndKeepsLicenseScrolling(t *testing
 	}
 }
 
+func TestMobileDockReflowsEveryZoneAndKeepsPaneContentScrollable(t *testing.T) {
+	css, err := Files.ReadFile("assets/ely-api-foundation.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"@media(max-width:560px){\n  [data-ely-family='foundation'] .ely-foundation__dock{grid-template-columns:repeat(2,minmax(0,1fr));grid-template-rows:repeat(2,minmax(0,1fr))}",
+		".ely-foundation__dock-left{grid-column:1;grid-row:1}",
+		".ely-foundation__dock-right{grid-column:2;grid-row:1}",
+		".ely-foundation__dock main{grid-column:1;grid-row:2}",
+		".ely-foundation__dock footer{grid-column:2;grid-row:2}",
+		".ely-foundation__dock :is(aside,footer,main){min-inline-size:0;min-block-size:0;overflow:auto}",
+		".ely-foundation__dock :is(aside,footer){display:grid;grid-template-rows:auto minmax(0,1fr)}",
+		".ely-foundation__dock nav{block-size:auto;min-block-size:2rem;flex-wrap:wrap;align-items:flex-start}",
+		".ely-foundation__dock output{min-block-size:0;overflow:auto}",
+	} {
+		if !strings.Contains(string(css), want) {
+			t.Errorf("mobile Dock CSS is missing %q", want)
+		}
+	}
+}
+
 func TestAdvancedFamilyEntrypointsAreEmbeddedAndServed(t *testing.T) {
 	mux := http.NewServeMux()
 	if err := BindAssets(mux); err != nil {
