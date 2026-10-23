@@ -25,7 +25,7 @@ const groups={
   graph:['git/CommitGraph','git/CommitList','git/CommitItem','documents/Backlinks','documents/GraphView'],network:['debug/NetworkInspector'],
   metadata:['chat/FileMessage','chat/AudioMessage','chat/LinkPreviewCard','chat/SuggestionChips','agent/ToolCallGroup','agent/ToolRegistry Panel','agent/MemoryPanel','agent/CheckpointList','agent/Rewind'],hue:['project/LabelManager']
 };
-const sourcePaths=['ui/gohtmx/assets/ely-api-workspace.css','ui/gohtmx/assets/ely-api-communication.css','ui/gohtmx/assets/ely-api-calendar-parity.css','ui/gohtmx/assets/ely-api-foundation.css','ui/gohtmx/assets/ely-controls.css','ui/gohtmx/templates/ely-api-workspace.html','ui/gohtmx/templates/ely-api-communication.html','internal/gallery/advanced_communication_fixtures.go','ui/gohtmx/tests/browser/workspace-communication-repair-browser-test.mjs'];
+const sourcePaths=['ui/gohtmx/assets/ely-api-workspace.css','ui/gohtmx/assets/ely-api-workspace.js','ui/gohtmx/assets/ely-api-communication.css','ui/gohtmx/assets/ely-api-calendar-parity.css','ui/gohtmx/assets/ely-api-foundation.css','ui/gohtmx/assets/ely-controls.css','ui/gohtmx/templates/ely-api-workspace.html','ui/gohtmx/templates/ely-api-communication.html','internal/gallery/advanced_communication_fixtures.go','ui/gohtmx/tests/browser/workspace-communication-repair-browser-test.mjs'];
 const report={phase,control,profile,viewport,colorScheme,node:process.version,nodeExecutable:process.execPath,checks:[],actions:[],console:[],invalidDateInputs:[],sourceHashes:{},cleanup:false};let child,browser;
 const run=(cmd,args)=>{const r=spawnSync(cmd,args,{cwd:repo,env,encoding:'utf8'});assert.equal(r.status,0,r.stderr);return r.stdout.trim();};
 async function stop(){if(!child)return;const owned=child;report.serverPID=owned.pid;if(owned.exitCode===null&&owned.signalCode===null){const done=new Promise(r=>owned.once('exit',r));owned.kill('SIGTERM');const timer=setTimeout(()=>owned.kill('SIGKILL'),5000);try{await done;}finally{clearTimeout(timer);}}report.serverStopped=owned.exitCode!==null||owned.signalCode!==null;}
@@ -91,6 +91,32 @@ try{
       await page.evaluate(()=>{window.repairActions=[];document.addEventListener('ely:action',event=>{window.repairActions.push({action:event.detail.action,values:event.detail.values,hue:event.detail.hue});event.preventDefault();});});
       if(family==='workspace'){
         const main=name=>page.locator(`[data-audit-name="${name}"] [data-audit-main]`);
+        // Same left-side native Restore press as the retained 7d blur failure.
+        // No retry, forced click, or confirmation-cancellation timing change.
+        const trash=main('documents/TrashBin').locator(':scope > [data-ely-family]'),restore=trash.locator('[data-ely-action="restore-file"]'),remove=trash.locator('[data-ely-action="delete-file-permanently"]');
+        const trashTwin=page.locator('[data-audit-name="documents/TrashBin"] [data-audit-twin]>[data-ely-family]');
+        const twinBefore=await trashTwin.evaluate(node=>node.outerHTML);
+        await trash.evaluate(node=>{node.__trashPointerEvents=[];node.addEventListener('ely:action',event=>node.__trashPointerEvents.push({kind:'action',detail:event.detail}));document.addEventListener('click',event=>{const button=event.target.closest('button');if(button&&node.contains(button))node.__trashPointerEvents.push({kind:'click',trusted:event.isTrusted,action:button.dataset.elyAction});},true);});
+        await trash.scrollIntoViewIfNeeded();
+        const restoreBefore=await restore.boundingBox();assert(restoreBefore);
+        const stableRestore=async()=>{const rect=await restore.boundingBox();assert(rect);for(const key of ['x','y','width','height'])assert(Math.abs(rect[key]-restoreBefore[key])<=.5,`Trash Restore ${key} moved while confirmation changed`);return rect;};
+        const trashImages=[];
+        for(const stage of ['initial','armed','blur-restore']){
+          if(stage==='armed')await remove.click();
+          if(stage==='blur-restore')await restore.click({position:{x:restoreBefore.width*.05,y:restoreBefore.height/2}});
+          await stableRestore();
+          const events=await trash.evaluate(node=>node.__trashPointerEvents),actions=events.filter(event=>event.kind==='action');
+          assert.equal((await remove.textContent()).trim(),stage==='armed'?'Confirm delete':'Delete');
+          if(stage==='blur-restore'){
+            assert.deepEqual(actions.map(event=>event.detail),[{value:'deleted-8',formData:null,values:[],id:await trash.getAttribute('id'),component:'documents/TrashBin',action:'restore-file'}]);
+            assert.deepEqual(events.filter(event=>event.kind==='click').map(event=>[event.trusted,event.action]),[[true,'delete-file-permanently'],[true,'restore-file']]);
+          }else assert.deepEqual(actions,[],'Arming confirmation must not dispatch a host action');
+          assert.equal(await trash.locator('[data-ws-trash-item="deleted-8"]').count(),1,'Restore is only a host request, not local deletion');
+          assert.equal(await trashTwin.evaluate(node=>node.outerHTML),twinBefore,'Trash pointer sequence must not mutate the twin');
+          const screenshot=`trash-confirm-${stage}.png`;await trash.screenshot({path:join(output,screenshot)});trashImages.push({stage,screenshot,sha256:digest(await readFile(join(output,screenshot))),restore:await stableRestore()});
+        }
+        report.trashPointerRegression={images:trashImages,events:await trash.evaluate(node=>node.__trashPointerEvents)};
+        report.actions.push('Trash confirmation blur preserves native Restore target and exact once request');
         const completion=main('editor/CompletionMenu'),first=completion.locator('[data-ws-complete]').first(),insert=await first.getAttribute('data-insert');await first.click();
         assert((await completion.locator('[data-ws-completion-source]').inputValue()).includes(insert));report.actions.push('completion insertion');
         const print=main('documents/PrintPreview');await print.locator('[data-ws-print-thumb="1"]').click();assert.equal(await print.locator('[data-ws-print-page-content="1"]').isVisible(),true);assert.equal(await print.locator('[data-ws-print-page-content="0"]').isVisible(),false);report.actions.push('print page selection');
