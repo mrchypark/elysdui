@@ -6,7 +6,7 @@ import {join} from 'node:path';
 import {createHash} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
 import {chromium} from 'playwright';
-import {captureTargetPNG,screenshotWithoutCaretMutation,ownedOverlayInventory} from './visual-state-audit-drivers.mjs';
+import {captureTargetPNG,screenshotWithoutCaretMutation,ownedOverlayInventory,captureForeignPaint} from './visual-state-audit-drivers.mjs';
 import {captureBounds} from './visual-state-audit-bounds.mjs';
 import {basicOwnedModal,basicModalCaptureTarget} from './visual-state-audit-basic-actions.mjs';
 
