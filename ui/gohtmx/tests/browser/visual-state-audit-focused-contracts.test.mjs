@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import test from 'node:test';
-import {assertCommunicationCallerRequest,assertDockCallerAction,assertDockNativeEvents,assertEvalLastColumnGeometry,assertNativeEmbedOpen,assertPresenceNativeRequest,calendarDraftWheelDecision,requestedStateContract,runRequestedStateActions} from './visual-state-audit-drivers.mjs';
+import {assertCommunicationCallerRequest,assertDockCallerAction,assertDockNativeEvents,assertEvalLastColumnGeometry,assertNativeEmbedOpen,activatePresenceStep,assertPresenceNativeRequest,calendarDraftWheelDecision,requestedStateContract,runRequestedStateActions} from './visual-state-audit-drivers.mjs';
 
 const read=path=>readFile(new URL(`../../../../${path}`,import.meta.url),'utf8');
 
@@ -64,9 +64,19 @@ test('five rendered presence aliases keep exact native follow and stop request c
   assert.match(handler,/follow\(following\); emit\(root, 'follow-user', \{value: button\.value, following\}\)/);assert.match(handler,/follow\(''\); emit\(root, 'stop-following', \{\}\)/);assert.match(handler,/if \(presence\?\.dataset\.following\) \{ follow\(''\); emit\(root, 'stop-following', \{\}\); \}/);
   assert.match(emitter,/detail: \{ \.\.\.detail, id: root\.id, component: root\.dataset\.elyComponent, action \}/);
   const start=driver.indexOf("if(contract.focusedSequence==='workspace-native-presence-follow')"),end=driver.indexOf("if(contract.focusedSequence==='native-embed-open-host')",start),branch=driver.slice(start,end);
-  assert(start>=0&&end>start);for(const source of [...steps,"ada.click()","stop.click()","ada.press('Escape')","event.isTrusted","assertPresenceNativeRequest(id,newEvents,newActions","fixtureSource","document.addEventListener('click'","document.addEventListener('keydown'"])assert(branch.includes(source),source);
+  assert(start>=0&&end>start);for(const source of [...steps,"activatePresenceStep(id,{ada,stop})","event.isTrusted","assertPresenceNativeRequest(id,newEvents,newActions","fixtureSource","document.addEventListener('click'","document.addEventListener('keydown'"])assert(branch.includes(source),source);
   assert.match(assertPresenceNativeRequest.toString(),/trusted:true/);assert.match(assertPresenceNativeRequest.toString(),/control:step==='presence-stop-button'\?'stop':'ada'/);assert.match(assertPresenceNativeRequest.toString(),/assert\.deepEqual\(actions,\[request\]/);
   assert.doesNotMatch(branch,/dispatchEvent\(/,'Presence controls use native Playwright activation, not synthetic dispatch');
+});
+
+test('presence activation invokes the requested native control, including Escape on Ada',async()=>{
+  const calls=[],ada={click(){calls.push(['ada','click']);return 'follow';},press(key){calls.push(['ada','press',key]);return 'escape-stop';}},stop={click(){calls.push(['stop','click']);return 'button-stop';}};
+  assert.equal(await activatePresenceStep('presence-follow-ada',{ada,stop}),'follow');
+  assert.equal(await activatePresenceStep('presence-stop-button',{ada,stop}),'button-stop');
+  assert.equal(await activatePresenceStep('presence-follow-ada-again',{ada,stop}),'follow');
+  assert.equal(await activatePresenceStep('presence-stop-escape',{ada,stop}),'escape-stop');
+  assert.deepEqual(calls,[['ada','click'],['stop','click'],['ada','click'],['ada','press','Escape']]);
+  assert.throws(()=>activatePresenceStep('presence-stop-unknown',{ada,stop}),/Unknown presence step/);
 });
 
 test('presence native request assertion distinguishes Escape target from stop outcome',()=>{

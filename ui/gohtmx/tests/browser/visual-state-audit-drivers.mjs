@@ -394,6 +394,13 @@ export function assertPresenceNativeRequest(step,events,actions,{id,component}){
   return {native:events[0],request:actions[0]};
 }
 
+export function activatePresenceStep(step,{ada,stop}){
+  if(step==='presence-follow-ada'||step==='presence-follow-ada-again')return ada.click();
+  if(step==='presence-stop-button')return stop.click();
+  if(step==='presence-stop-escape')return ada.press('Escape');
+  throw new Error(`Unknown presence step: ${step}`);
+}
+
 export function requestedStateContract(identity,trashFixture){
   if(identity==='misc/IframeEmbed'||identity==='misc/EmbedCard'){
     const stepId=identity==='misc/IframeEmbed'?'iframe-open-host':'embedcard-open-host',url='https://example.com';
@@ -882,7 +889,7 @@ export async function runRequestedStateActions(contract,root,runStep,failureDiag
       fixtureSource={peers:initial.peers.map(({value,name,hue,title,hidden})=>({value,name,hue,title,hidden})),live:initial.live,sourceText:initial.sourceText,selection:initial.selection,cursors:initial.cursors};
       for(const [id,kind]of sequences){
         const click=kind==='follow',expectedFollowing=click?'ada':'',expectedPriorFollowing=click?'':'ada';
-        await runStep(id,async()=>{const current=await read();assert.equal(current.following,expectedPriorFollowing,'Presence action sequence must start from its expected prior local state');return click?ada.click():kind==='stop'?stop.click():ada.press('Escape');},async(state,before)=>{
+        await runStep(id,async()=>{const current=await read();assert.equal(current.following,expectedPriorFollowing,'Presence action sequence must start from its expected prior local state');return activatePresenceStep(id,{ada,stop});},async(state,before)=>{
           const after=await read(),nativeEvents=await native(),newEvents=nativeEvents.slice(nativeOffset),newActions=state.actions.slice(actionOffset);
           const proof=assertPresenceNativeRequest(id,newEvents,newActions,{id:initial.id,component:identity});nativeOffset+=newEvents.length;actionOffset=state.actions.length;
           assert.equal(after.following,expectedFollowing);assert.deepEqual(after.peers.map(peer=>peer.pressed),after.peers.map(peer=>peer.value===expectedFollowing?'true':'false'));
