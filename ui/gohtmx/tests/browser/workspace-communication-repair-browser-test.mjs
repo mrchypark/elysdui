@@ -26,6 +26,8 @@ const groups={
   metadata:['chat/FileMessage','chat/AudioMessage','chat/LinkPreviewCard','chat/SuggestionChips','agent/ToolCallGroup','agent/ToolRegistry Panel','agent/MemoryPanel','agent/CheckpointList','agent/Rewind'],hue:['project/LabelManager']
 };
 const sourcePaths=['ui/gohtmx/assets/ely-api-workspace.css','ui/gohtmx/assets/ely-api-workspace.js','ui/gohtmx/assets/ely-api-communication.css','ui/gohtmx/assets/ely-api-calendar-parity.css','ui/gohtmx/assets/ely-api-foundation.css','ui/gohtmx/assets/ely-controls.css','ui/gohtmx/templates/ely-api-workspace.html','ui/gohtmx/templates/ely-api-communication.html','internal/gallery/advanced_communication_fixtures.go','ui/gohtmx/tests/browser/workspace-communication-repair-browser-test.mjs'];
+sourcePaths.push('ui/gohtmx/assets/ely-api.css','ui/gohtmx/assets/ely-api-native.css','ui/gohtmx/assets/ely-api-interaction.css','ui/gohtmx/assets/ely-api-native-tooling.js','ui/gohtmx/assets/ely-api-native.js','ui/gohtmx/assets/theme.js','ui/gohtmx/assets/app.css','internal/gallery/advanced_native_tooling_fixtures.go','internal/gallery/advanced_native_generative_fixtures.go','internal/gallery/advanced_interaction_fixtures.go','ui/gohtmx/templates/ely-api-native.html','ui/gohtmx/templates/ely-api-native-tooling.html','ui/gohtmx/templates/ely-api-interaction.html');
+sourcePaths.push('ui/gohtmx/assets/ely-api.js','ui/gohtmx/assets/ely-api-native-entry.js','ui/gohtmx/assets/ely-api-native-generative-tools.js','ui/gohtmx/assets/ely-api-interaction.js','internal/gallery/advanced_native_fixtures.go','ui/gohtmx/templates/ely-api.html');
 const report={phase,control,profile,viewport,colorScheme,node:process.version,nodeExecutable:process.execPath,checks:[],actions:[],console:[],invalidDateInputs:[],sourceHashes:{},cleanup:false};let child,browser,serverPort;
 const run=(cmd,args)=>{const r=spawnSync(cmd,args,{cwd:repo,env,encoding:'utf8'});assert.equal(r.status,0,r.stderr);return r.stdout.trim();};
 const serverIdentity=()=>{
@@ -162,6 +164,74 @@ try{
         await page.emulateMedia({forcedColors:'active'});const forced=await hue.evaluate(n=>{const s=getComputedStyle(n);return {appearance:s.appearance,background:s.backgroundImage,color:s.color};});assert.equal(forced.appearance,'auto');assert.equal(forced.background,'none');assert.notEqual(forced.color,'rgba(0, 0, 0, 0)');await page.emulateMedia({forcedColors:'none'});report.actions.push('native hue select forced-colors fallback');
       }
     }
+  }
+  if(phase==='after'){
+    report.browserVersion=browser.version();report.infoCascade=[];report.infoRestoreErrors=[];
+    const nativeInfo=[
+      {key:'generative/FineTuneJobCard',selector:'.ely-native-tune[data-state="running"]',role:'badge'},
+      {key:'generative/DatasetViewer',selector:'.ely-native-dataset',role:'dataset'},
+      {key:'tooling/A11yChecker',selector:'[data-front-token="--info"][data-back-token="--info-subtle"]',role:'checker'},
+      {key:'tooling/DesignTokenViewer',selector:'.ely-tooling-token-group',role:'tokens'},
+    ];
+    const feedbackInfo=[{key:'feedback/Alert',selector:'.ely-interaction__alert.is-info',role:'alert'},{key:'feedback/Callout',selector:'.ely-interaction__callout.is-info',role:'callout'},{key:'feedback/InlineMessage',selector:'.ely-interaction__message.is-info',role:'inline'}];
+    for(const family of ['native','interaction']){
+      await page.goto(`${base}/components/audit?family=${family}&aliases=1`,{waitUntil:'networkidle'});
+      await page.evaluate(mode=>window.ElyTheme.apply('ely',mode),colorScheme);await page.evaluate(()=>document.fonts.ready);
+      const items=family==='native'?nativeInfo:feedbackInfo;
+      for(const scenario of family==='native'?['default','scheme-only-dark','layered-nested','inline-low','old-alias-negative']:['default-feedback']){
+        const receipt={family,scenario,kind:scenario==='old-alias-negative'?'injected-negative-control-not-historical-before':scenario==='default'||scenario==='default-feedback'?'unmodified-default':'explicit-host-style-test',images:[]};report.infoCascade.push(receipt);let originalError;
+        try{
+          receipt.setup=await page.evaluate(({items,scenario,mode})=>{
+            const roots=items.map(item=>document.querySelector(`[data-audit-name="${item.key}"] [data-audit-main]>[data-ely-family]`));if(roots.some(root=>!root))throw Error('Missing real Info caller root');
+            const undo=[],verify=[];window.__workspaceInfoRestore=()=>{const errors=[];for(const restore of undo.reverse())try{restore();}catch(error){errors.push(String(error));}for(const root of roots)root.dispatchEvent(new Event('ely:theme'));for(const check of verify)if(!check())errors.push('Scenario restoration verification failed');delete window.__workspaceInfoRestore;if(errors.length)throw Error(errors.join('; '));return {verified:true,checks:verify.length};};
+            const saveStyle=node=>{const value=node.getAttribute('style');undo.push(()=>value===null?node.removeAttribute('style'):node.setAttribute('style',value));verify.push(()=>node.getAttribute('style')===value);};
+            const tokens=root=>Object.fromEntries(['--focus','--ring','--color-focus','--color-info','--color-info-subtle'].map(key=>[key,getComputedStyle(root).getPropertyValue(key).trim()]));
+            const before=roots.map(tokens),rootLayer=[];const negative=roots.map(root=>({focus:getComputedStyle(root).getPropertyValue('--focus').trim()}));
+            if(scenario==='scheme-only-dark'){
+              for(const node of document.querySelectorAll('[data-theme],.dark')){const theme=node.getAttribute('data-theme'),cls=node.getAttribute('class');undo.push(()=>{theme===null?node.removeAttribute('data-theme'):node.setAttribute('data-theme',theme);cls===null?node.removeAttribute('class'):node.setAttribute('class',cls);});verify.push(()=>node.getAttribute('data-theme')===theme&&node.getAttribute('class')===cls);node.removeAttribute('data-theme');node.classList.remove('dark');}
+              saveStyle(document.documentElement);document.documentElement.style.colorScheme='dark';
+            }
+            if(scenario==='layered-nested'){
+              const style=document.createElement('style');style.textContent='@layer workspace-info-host { :root { --info:#234567;--info-subtle:#ffffff } .workspace-info-host { --info:#123456;--info-subtle:#ffffff } }';undo.push(()=>style.remove());verify.push(()=>!style.isConnected);document.head.prepend(style);
+              for(const root of roots){root.dispatchEvent(new Event('ely:theme'));rootLayer.push({info:getComputedStyle(root).getPropertyValue('--info').trim(),subtle:getComputedStyle(root).getPropertyValue('--info-subtle').trim()});}
+              for(const root of roots){const host=document.createElement('div'),nested=document.createElement('div'),parent=root.parentNode,next=root.nextSibling;host.className='workspace-info-host';nested.dataset.theme=mode==='dark'?'light':'dark';nested.style.colorScheme=nested.dataset.theme;parent.insertBefore(host,root);undo.push(()=>host.remove());undo.push(()=>parent.insertBefore(root,next));verify.push(()=>root.parentNode===parent&&root.nextSibling===next&&!host.isConnected);host.append(nested);nested.append(root);}
+            }
+            if(scenario==='inline-low'||scenario==='old-alias-negative')for(const [index,root]of roots.entries()){saveStyle(root);root.style.setProperty('--info',scenario==='inline-low'?'#777777':'var(--focus)');root.style.setProperty('--info-subtle',scenario==='inline-low'?'#ffffff':index===0?'#e8eef6':'#ebf4ff');}
+            for(const root of roots)root.dispatchEvent(new Event('ely:theme'));
+            const support=CSS.supports('color','light-dark(#010203,#fefdfc)'),branches=[],branchSamples=[],probeCanvas=document.createElement('canvas');probeCanvas.width=probeCanvas.height=1;const probeContext=probeCanvas.getContext('2d');if(!probeContext)throw Error('Unsupported light-dark branch measurement');
+            const probe=document.createElement('span');undo.push(()=>probe.remove());probe.style.color='light-dark(#010203,#fefdfc)';document.body.append(probe);for(const scheme of ['light','dark']){probe.style.colorScheme=scheme;const color=getComputedStyle(probe).color;branches.push(color);probeContext.clearRect(0,0,1,1);probeContext.fillStyle=color;probeContext.fillRect(0,0,1,1);branchSamples.push([...probeContext.getImageData(0,0,1,1).data]);}probe.remove();
+            return {before,after:roots.map(tokens),rootLayer,negative,support,branches,branchSamples,schemes:roots.map(root=>getComputedStyle(root).colorScheme),modeAncestors:roots.map(root=>{const result=[];for(let node=root;node;node=node.parentElement)if(node.hasAttribute('data-theme')||node.classList.contains('dark'))result.push({tag:node.tagName,theme:node.getAttribute('data-theme'),dark:node.classList.contains('dark')});return result;})};
+          },{items,scenario,mode:colorScheme});
+          receipt.measurements=await page.evaluate(({items,scenario})=>{
+            const canvas=document.createElement('canvas');canvas.width=canvas.height=1;const ctx=canvas.getContext('2d',{willReadFrequently:true});if(!ctx)throw Error('Unsupported color measurement: no Canvas2D');
+            const sample=raw=>{if(!CSS.supports('color',raw))throw Error(`Unsupported computed color ${raw}`);ctx.clearRect(0,0,1,1);ctx.fillStyle=raw;ctx.fillRect(0,0,1,1);return [...ctx.getImageData(0,0,1,1).data];};
+            const luminance=rgb=>{const c=rgb.slice(0,3).map(v=>{v/=255;return v<=.04045?v/12.92:((v+.055)/1.055)**2.4;});return .2126*c[0]+.7152*c[1]+.0722*c[2];};
+            const measure=(node,role)=>{if(!node)throw Error(`Missing measured ${role}`);const style=getComputedStyle(node),layers=[];for(let parent=role==='icon'?node.parentElement:node;parent;parent=parent.parentElement){const s=getComputedStyle(parent);if(Number(s.opacity)!==1||s.backgroundImage!=='none'||s.filter!=='none'||s.mixBlendMode!=='normal')throw Error(`Unsupported contrast backdrop: ${parent.tagName} opacity/gradient/filter/blend`);layers.push({tag:parent.tagName,background:s.backgroundColor});}
+              ctx.clearRect(0,0,1,1);for(const layer of layers.slice().reverse()){ctx.fillStyle=layer.background;ctx.fillRect(0,0,1,1);}const background=[...ctx.getImageData(0,0,1,1).data];if(background[3]!==255)throw Error('Unsupported transparent contrast backing');ctx.fillStyle=style.color;ctx.fillRect(0,0,1,1);const foreground=[...ctx.getImageData(0,0,1,1).data],a=luminance(foreground),b=luminance(background),rect=node.getBoundingClientRect();return {role,text:node.textContent,rawColor:style.color,rawBackground:style.backgroundColor,foregroundSample:sample(style.color),compositedForeground:foreground,compositedBackground:background,layers,fontSize:style.fontSize,fontWeight:style.fontWeight,threshold:role==='icon'?3:4.5,ratio:(Math.max(a,b)+.05)/(Math.min(a,b)+.05),bounds:{x:rect.x,y:rect.y,width:rect.width,height:rect.height}};};
+            return items.map(item=>{const root=document.querySelector(`[data-audit-name="${item.key}"] [data-audit-main]>[data-ely-family]`),target=root.querySelector(item.selector),result={key:item.key,role:item.role,info:getComputedStyle(root).getPropertyValue('--info').trim(),subtle:getComputedStyle(root).getPropertyValue('--info-subtle').trim(),samples:[]};try{
+              if(item.role==='badge'||item.role==='dataset')result.samples.push(measure(target.querySelector('.ely-native-badge'),'text'));
+              if(item.role==='checker'){const swatch=target.querySelector('[data-tool-a11y-sample]');result.samples.push(measure(swatch,'text'));result.need=Number(target.dataset.need);result.displayedRatio=target.querySelector('[data-tool-a11y-ratio]').textContent;result.grade=target.querySelector('[data-tool-a11y-grade]').textContent;}
+              if(item.role==='tokens')result.tokens=['--info','--info-subtle'].map(token=>{const el=root.querySelector(`[data-token="${token}"]`);return {token,output:el.querySelector('output').textContent,swatch:getComputedStyle(el.querySelector('i')).backgroundColor,sample:sample(getComputedStyle(el.querySelector('i')).backgroundColor)};});
+              if(['alert','callout','inline'].includes(item.role)){result.samples.push(measure(item.role==='callout'?target.querySelector('header'):item.role==='alert'?target.querySelector('strong'):target,'text'));result.samples.push(measure(target.querySelector('.ely-interaction__feedback-icon'),'icon'));}
+            }catch(error){result.unsupported=String(error);}return result;});
+          },{items,scenario});
+          const captureItems=items.filter(item=>scenario==='old-alias-negative'?['badge','checker'].includes(item.role):['layered-nested','inline-low'].includes(scenario)?item.role!=='dataset':true);
+          for(const item of captureItems){const target=page.locator(`[data-audit-name="${item.key}"] [data-audit-main] ${item.selector}`).first(),file=`info-${scenario}-${item.key.replaceAll('/','-')}.png`;await target.screenshot({path:join(output,file),animations:'disabled'});receipt.images.push({caseId:item.key,screenshot:file,sha256:digest(await readFile(join(output,file)))});}
+          assert(receipt.setup.support,'Actual browser must support light-dark, not skip');assert.deepEqual(receipt.setup.branchSamples,[[1,2,3,255],[254,253,252,255]],'Actual used color-scheme must select both branches');assert.deepEqual(receipt.setup.after,receipt.setup.before,'Focus and excluded color-info aliases unchanged');
+          if(scenario==='scheme-only-dark'){assert(receipt.setup.schemes.every(mode=>mode==='dark'));assert(receipt.setup.modeAncestors.every(list=>list.length===0),'Scheme-only host must have no mode attributes/classes');}
+          if(scenario==='layered-nested')assert(receipt.setup.rootLayer.every(row=>row.info==='#234567'&&row.subtle==='#ffffff'),'Layered root overrides survive library roots before nested host overrides');
+          for(const row of receipt.measurements){assert(!row.unsupported,`${scenario}/${row.key}: ${row.unsupported}`);if(scenario==='layered-nested')assert.deepEqual([row.info,row.subtle],['#123456','#ffffff']);if(scenario==='inline-low')assert.deepEqual([row.info,row.subtle],['#777777','#ffffff']);
+            for(const metric of row.samples){const red=(scenario==='inline-low'||scenario==='old-alias-negative')&&['badge','dataset','checker'].includes(row.role);assert(red?metric.ratio<metric.threshold:metric.ratio>=metric.threshold,`${scenario}/${row.key}/${metric.role} contrast ${metric.ratio}, threshold ${metric.threshold}`);}
+            if(row.role==='checker'){assert.equal(row.need,4.5);assert.notEqual(row.grade,'Invalid');assert.equal(row.displayedRatio,row.samples[0].ratio.toFixed(2)+':1');assert.equal(row.grade==='Fail',scenario==='inline-low'||scenario==='old-alias-negative');}
+            if(['badge','dataset'].includes(row.role)&&scenario!=='old-alias-negative'){const checker=receipt.measurements.find(value=>value.role==='checker').samples[0];assert.deepEqual(row.samples[0].foregroundSample,checker.foregroundSample,'Actual badge foreground matches resolved checker pair');assert.deepEqual(row.samples[0].compositedBackground,checker.compositedBackground,'Actual badge background matches resolved checker pair');}
+            if(row.role==='tokens'){const front=receipt.measurements.find(value=>value.role==='checker').samples[0];assert.deepEqual(row.tokens[0].sample,front.foregroundSample);assert.deepEqual(row.tokens[1].sample,front.compositedBackground);}
+          }
+        }catch(error){originalError=error;throw error;}finally{
+          try{receipt.restoration=await page.evaluate(()=>window.__workspaceInfoRestore?.());assert(receipt.restoration?.verified,'Info scenario restore receipt missing');receipt.restored=true;}catch(error){receipt.restoreError=String(error);report.infoRestoreErrors.push(String(error));if(!originalError)throw error;}
+        }
+      }
+    }
+    assert.equal(report.infoCascade.reduce((count,row)=>count+row.images.length,0),19,'Exactly19 Info images per profile (17positive,2negative)');
   }
   const failures=report.checks.filter(c=>!c.ok);report.failureCount=failures.length;
   if(phase==='before'){assert(failures.length>0,'red control must witness real geometry failures');if(control==='original-head')assert(report.invalidDateInputs.some(n=>n.raw==='review'),'red control must locate invalid review datetime fixture');else{assert.deepEqual(failures.map(c=>c.name).sort(),[...groups.graph,...groups.network,...groups.metadata,...groups.hue].sort(),'current prior CSS must reproduce the precise 16 adjudicated defects');assert.equal(report.invalidDateInputs.length,0);}}
