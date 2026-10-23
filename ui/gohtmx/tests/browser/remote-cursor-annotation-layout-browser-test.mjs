@@ -1,20 +1,35 @@
 import assert from 'node:assert/strict';
+import {createHash} from 'node:crypto';
 import {spawn, spawnSync} from 'node:child_process';
 import {createServer} from 'node:http';
-import {mkdtemp, rm} from 'node:fs/promises';
+import {access, mkdir, mkdtemp, readFile, rm, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {chromium} from 'playwright';
 
 const repo = resolve(fileURLToPath(new URL('../../../../', import.meta.url)));
+const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
+const sourcePin = async () => {
+  const revision = spawnSync('git', ['rev-parse', 'HEAD'], {cwd: repo, encoding: 'utf8'});
+  assert.equal(revision.status, 0, revision.stderr);
+  const status = spawnSync('git', ['status', '--porcelain', '--untracked-files=no'], {cwd: repo, encoding: 'utf8'});
+  assert.equal(status.status, 0, status.stderr);
+  return {sourceSHA: revision.stdout.trim(), trackedClean: status.stdout === '', testSHA256: sha256(await readFile(fileURLToPath(import.meta.url)))};
+};
+const sourceBefore = await sourcePin();
+assert(sourceBefore.trackedClean, 'source checkout must be clean before browser capture');
+const outputRoot = join(repo, 'test-results/action-camera');
+await mkdir(outputRoot, {recursive: true});
+const output = await mkdtemp(join(outputRoot, 'remote-cursor-layout-'));
 const temp = await mkdtemp(join(tmpdir(), 'ely-remote-cursor-layout-'));
 const galleryPath = join(temp, 'gallery');
+const receipt = {node: process.version, runnerPID: process.pid, deviceScaleFactor: 1, sourceBefore, status: 'running', browserClosed: false, galleryExited: false, tempRemoved: false, captures: []};
 const run = (cmd, args) => {
   const result = spawnSync(cmd, args, {cwd: repo, encoding: 'utf8'});
   assert.equal(result.status, 0, result.stderr);
 };
-let gallery, browser, server;
+let gallery, browser, server, failure;
 try {
   run('go', ['build', '-o', galleryPath, './examples/gohtmx/gallery']);
   const reservation = createServer();
@@ -22,6 +37,7 @@ try {
   const port = reservation.address().port;
   await new Promise(resolveClose => reservation.close(resolveClose));
   server = spawn(galleryPath, ['-addr', `127.0.0.1:${port}`], {stdio: 'ignore'});
+  receipt.galleryPID = server.pid;
   const base = `http://127.0.0.1:${port}`;
   let ready = false;
   for (let i = 0; i < 200; i++) {
@@ -30,9 +46,11 @@ try {
   }
   assert(ready, 'owned gallery startup');
   browser = await chromium.launch({headless: true, executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined});
+  receipt.browserVersion = browser.version();
+  receipt.browserPID = browser.process()?.pid ?? null;
 
   for (const viewport of [{width: 1440, height: 1000}, {width: 390, height: 844}]) {
-    const page = await browser.newPage({viewport});
+    const page = await browser.newPage({viewport, deviceScaleFactor: 1});
     await page.goto(`${base}/components/audit?family=workspace&aliases=1`);
     await page.evaluate(() => document.fonts.ready);
     const root = page.locator('[data-audit-name="collab/RemoteSelection"] [data-audit-main]');
@@ -125,9 +143,34 @@ try {
     }
     assert(metrics.firstLine.label.top >= metrics.firstLine.contentTop - 1, 'first-line badge remains inside the presence editor top gutter');
     assert(metrics.firstLine.textRects.every(rect => !overlaps(metrics.firstLine.label, rect)), 'first-line badge must clear its text');
+    const record = page.locator('[data-audit-name="collab/RemoteSelection"]');
+    const auditMain = record.locator(':scope > [data-audit-main]');
+    const ownedRoot = auditMain.locator(':scope > [data-ely-family]');
+    assert.equal(await record.count(), 1, 'component audit record is unique');
+    assert.equal(await auditMain.count(), 1, 'component has one owned audit main');
+    assert.equal(await ownedRoot.count(), 1, 'audit main has one exact component root');
+    assert.equal(await ownedRoot.getAttribute('data-ely-component'), 'collab/RemoteSelection');
+    assert.equal(await ownedRoot.evaluate(node => node.parentElement === node.closest('[data-audit-main]')), true, 'capture root belongs to its audit main');
+    const stem = viewport.width === 1440 ? 'desktop' : 'mobile';
+    const targetPath = join(output, `${stem}-target.png`);
+    const target = await captureTargetPNG(page, ownedRoot, targetPath);
+    const contextPath = join(output, `${stem}-viewport-context.png`);
+    const context = await screenshotWithoutCaretMutation(page, {path: contextPath, animations: 'disabled', scale: 'css'});
+    const pngReceipt = (path, png) => ({path, sha256: sha256(png), bytes: png.length, width: png.readUInt32BE(16), height: png.readUInt32BE(20)});
+    assert.deepEqual([context.readUInt32BE(16), context.readUInt32BE(20)], [viewport.width, viewport.height], 'context PNG preserves the full viewport');
+    receipt.captures.push({
+      viewport,
+      target: pngReceipt(targetPath, target.png),
+      viewportContext: {...pngReceipt(contextPath, context), scroll: await page.evaluate(() => ({x: scrollX, y: scrollY}))},
+      camera: target.bounds,
+      ownership: {foreignDOMIntersections: target.foreignDOMIntersections, occludedForeignPaint: target.occludedForeignPaint},
+    });
     console.log(JSON.stringify({viewport, metrics}));
     await page.close();
   }
+} catch (error) {
+  failure = error;
+  receipt.error = error.stack || String(error);
 } finally {
   if (browser) await browser.close();
   if (server && server.exitCode === null && server.signalCode === null) {
@@ -137,4 +180,14 @@ try {
     if (server.exitCode === null && server.signalCode === null) { server.kill('SIGKILL'); await exited; }
   }
   await rm(temp, {recursive: true, force: true});
+  receipt.browserClosed = !browser || !browser.isConnected();
+  receipt.galleryExited = !server || server.exitCode !== null || server.signalCode !== null;
+  receipt.tempRemoved = await access(temp).then(() => false, () => true);
+  receipt.sourceAfter = await sourcePin();
+  receipt.sourceStable = JSON.stringify(receipt.sourceBefore) === JSON.stringify(receipt.sourceAfter);
+  if (!receipt.sourceStable) failure ||= new Error('source revision or test file hash changed during capture');
+  if (!receipt.browserClosed || !receipt.galleryExited || !receipt.tempRemoved) failure ||= new Error('owned browser, gallery, or temporary build directory cleanup failed');
+  receipt.status = failure ? 'failed' : 'passed';
+  await writeFile(join(output, 'receipt.json'), `${JSON.stringify(receipt, null, 2)}\n`);
 }
+if (failure) throw failure;
