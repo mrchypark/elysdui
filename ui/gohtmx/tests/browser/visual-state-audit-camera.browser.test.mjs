@@ -97,19 +97,26 @@ test('opaque panel subtracts only covered foreign paint with provably inactive s
   const browser=await chromium.launch({executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH||undefined});
   try{
     const page=await browser.newPage({viewport:{width:240,height:120}});
-    const capture=async({parentDisplay='block',chipStyle='position:static;z-index:1;overflow:hidden',ownerStyle='',left=10,width=60}={})=>{
+    const capture=async({parentDisplay='block',chipStyle='position:static;z-index:1;overflow:hidden',ownerStyle='',pseudoStyle='',left=10,width=60}={})=>{
       await page.setContent(`<style>
         body{margin:0}[data-audit-main],[data-audit-twin]{position:absolute;inset:0}
         .root{position:relative;width:220px;height:100px}
         #owned-panel{position:absolute;left:0;top:0;width:100px;height:60px;z-index:5;background:#fff;border:0;border-radius:0;${ownerStyle}}
         .chip-parent{display:${parentDisplay};width:220px;height:80px}
         #foreign-chip{position:static;width:${width}px;height:20px;margin:0 0 0 ${left}px;padding:0;border:0;background:#c22;${chipStyle}}
+        #foreign-chip::after{${pseudoStyle}}
       </style><div data-audit-main><section class="root" id="owned-root" data-ely-family="fixture"><article id="owned-panel">owned panel</article></section></div><div data-audit-twin><section class="root" id="twin-root" data-ely-family="fixture"><div class="chip-parent"><button id="foreign-chip">foreign chip</button></div></section></div>`);
       return page.locator('#owned-panel').evaluate(captureForeignPaint,{clip:{x:0,y:0,width:220,height:100},checkedRootID:'owned-root'});
     };
     const covered=await capture();
     assert.deepEqual(covered.foreignDOMIntersections,[],'Static z-index under a computed block parent is inactive; node overflow can only shrink its covered paint');
     assert(covered.occludedForeignPaint.some(peer=>peer.id==='twin-root'));
+    const clippedStaticDot=await capture({pseudoStyle:'content:"";display:inline-block;width:8px;height:8px;background:#c22'});
+    assert.deepEqual(clippedStaticDot.foreignDOMIntersections,[],'A static in-flow pseudo dot clipped by its own button stays within the covered button box');
+    assert(clippedStaticDot.occludedForeignPaint.some(peer=>peer.id==='twin-root'));
+    const escapingPseudo=await capture({pseudoStyle:'content:"";position:absolute;z-index:10;top:10px;left:10px;width:60px;height:20px;background:red'});
+    assert(escapingPseudo.foreignDOMIntersections.some(peer=>peer.id==='twin-root'),'A positioned high-z pseudo escapes the static chip overflow clip and remains foreign evidence');
+    assert.deepEqual(escapingPseudo.occludedForeignPaint,[],'The pseudo-element stacking counterexample blocks opaque subtraction');
     for(const [label,style,parentDisplay]of [
       ['lower active flex-item z-index','z-index:1;overflow:hidden','flex'],
       ['equal active grid-item z-index','z-index:5;overflow:hidden','grid'],
