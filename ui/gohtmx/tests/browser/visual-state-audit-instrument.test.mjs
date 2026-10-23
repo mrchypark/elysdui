@@ -8,7 +8,7 @@ import {join} from 'node:path';
 import {chromium} from 'playwright';
 import {compileFunction} from 'node:vm';
 import {parse} from 'acorn';
-import {caseActionContract,requestedStateContract,runRequestedStateActions,runRegisteredCanvasActions,assertRegisteredCanvasTransition,clickVisibleControl,ownedOverlayInventory,captureTargetPNG,inventoryReceipt,inventoryDrift,unhandledBrowserErrors,assertThreewayState,threewaySourcePins,threewayCleanup} from './visual-state-audit-drivers.mjs';
+import {caseActionContract,requestedStateContract,runRequestedStateActions,runRegisteredCanvasActions,assertRegisteredCanvasTransition,assertVerticalRangeSnapshot,clickVisibleControl,ownedOverlayInventory,captureTargetPNG,inventoryReceipt,inventoryDrift,unhandledBrowserErrors,assertThreewayState,threewaySourcePins,threewayCleanup} from './visual-state-audit-drivers.mjs';
 
 test('threeway direct pure: primary identity survives cleanup and diagnostic attachment failures',async()=>{
   const primary=Object.freeze(new Error('before-first-capture')),cleanup=new Error('listener cleanup failed');
@@ -21,6 +21,58 @@ test('threeway direct pure: primary identity survives cleanup and diagnostic att
   const unprintable={toString(){throw Error('format failed');}},fallback={threewayCleanupFailures:[]};
   await threewayCleanup(async()=>{throw unprintable;},true,fallback);
   assert.equal(fallback.threewayCleanupFailures[0].error,'[unprintable cleanup error]');
+});
+
+test('vertical range direct pure: exact canonical identities and finite native sequence',async()=>{
+  const registry=JSON.parse(await readFile(new URL('../../components.json',import.meta.url),'utf8'));
+  const layout=registry.pages.find(page=>page.slug==='layout');
+  const fixtures=await readFile(new URL('../../../../internal/gallery/advanced_foundation_fixtures.go',import.meta.url),'utf8');
+  const checks=await readFile(new URL('../../../../internal/gallery/assets/advanced-foundation-checks.js',import.meta.url),'utf8');
+  const behavior=await readFile(new URL('../../assets/ely-api-foundation.js',import.meta.url),'utf8');
+  const css=await readFile(new URL('../../assets/ely-api-foundation.css',import.meta.url),'utf8');
+  const identities=['layout/Scrollbar','layout/StickyHeader'],steps=['range-center-pointer','range-home-min','range-end-max'];
+  for(const identity of identities){
+    const name=identity.split('/')[1],story=layout.stories.find(item=>item.name===name);
+    assert(story,`${identity} must exist in the canonical registry`);assert.deepEqual(story.components,[name]);
+    const contract=requestedStateContract(identity);
+    assert.equal(contract.identity,identity);assert.equal(contract.kind,name);assert.equal(contract.family,'foundation');
+    assert.equal(contract.requestedStateOnly,true);assert.equal(contract.focusedSequence,'vertical-range-native-scroll');assert.deepEqual(contract.mappingGaps,[]);
+    assert.deepEqual(contract.steps.map(step=>step.id),steps);assert(contract.steps.every(step=>step.source.siteId.startsWith(`vertical-range-state:${identity}:`)));
+    assert(contract.steps.every(step=>step.control==='input[type="range"][data-foundation-scrollbar]'&&step.event.includes('trusted native')));
+  }
+  assert.equal(requestedStateContract('layout/ScrollBar'),null);assert.equal(requestedStateContract('layout/StickyHeaderAlias'),null);
+  assert(fixtures.includes('"layout":     {')&&fixtures.includes('"Scrollbar"')&&fixtures.includes('"StickyHeader"'));
+  assert(fixtures.includes('props["Items"], props["Value"], props["Label"] = lines(30), "Scrollbar", "Scroll position"'));
+  assert(fixtures.includes('case "StickyHeader":')&&fixtures.includes('{"Label": "Today", "Items": lines(8)}'));
+  assert(checks.includes("Scrollbar:['.ely-foundation__scrollbar','scrollAids']")&&checks.includes("StickyHeader:['.ely-foundation__sticky','scrollAids']"));
+  assert(checks.includes("thumb.value = '0'; thumb.dispatchEvent(new Event('input'));"),'The registered Scrollbar check remains explicitly synthetic');
+  assert(behavior.includes('const onThumb = () => { scroll.scrollTop = max() * Number(thumb.value || 0) / 1000; };'));
+  assert(behavior.includes('thumb?.addEventListener(\'input\', onThumb)'));
+  assert(css.includes('writing-mode:vertical-lr;direction:rtl;'));
+  const runner=runRequestedStateActions.toString();
+  assert(runner.includes("range.click({position:{x:box.width/2,y:box.height/2}})"));
+  assert(runner.includes("range.press(stage==='range-home-min'?'Home':'End')"));
+  assert(runner.includes('assertVerticalRangeSnapshot')&&runner.includes('finally{await threewayCleanup'));
+  assert(!runner.includes("thumb.value = '0'")&&!runner.includes("dispatchEvent(new Event('input'"));
+});
+
+test('vertical range direct pure: finite geometry, native input, host silence, and twin invariants',()=>{
+  const base={component:'layout/Scrollbar',direction:'rtl',writingMode:'vertical-lr',rect:{width:8,height:120},scrollTop:250,scrollLeft:0,scrollHeight:600,clientHeight:100,scrollMax:500,value:500,nativeEvents:[{type:'input',trusted:true}],publicEvents:[],twinHTML:'same twin',twinEvents:[]};
+  for(const identity of ['layout/Scrollbar','layout/StickyHeader'])for(const [stage,patch,nativeEvents]of [
+    ['range-center-pointer',{component:identity},[...base.nativeEvents,{type:'pointerdown',trusted:true},{type:'click',trusted:true}]],
+    ['range-home-min',{component:identity,value:0,scrollTop:0},[...base.nativeEvents,{type:'keydown',key:'Home',trusted:true}]],
+    ['range-end-max',{component:identity,value:1000,scrollTop:500},[...base.nativeEvents,{type:'keydown',key:'End',trusted:true}],
+  ]])assert.doesNotThrow(()=>assertVerticalRangeSnapshot(identity,stage,{...base,...patch,nativeEvents},'same twin'));
+  for(const patch of [{direction:'ltr'},{writingMode:'horizontal-tb'},{rect:{width:120,height:8}},{scrollLeft:1},{scrollMax:499},{value:500,scrollTop:0},{nativeEvents:[]},{nativeEvents:[{type:'input',trusted:false}]},{publicEvents:[{type:'ely:action'}]},{twinHTML:'changed twin'},{twinEvents:['input']}])assert.throws(()=>assertVerticalRangeSnapshot('layout/Scrollbar','range-center-pointer',{...base,...patch},'same twin'));
+  assert.throws(()=>assertVerticalRangeSnapshot('layout/ScrollbarAlias','range-center-pointer',base,'same twin'));
+});
+
+test('vertical range direct pure: listener cleanup preserves action failures',async()=>{
+  const primary=new Error('range action failed'),cleanup=new Error('range listener cleanup failed'),diagnostics={threewayCleanupFailures:[]};
+  const run=async()=>{let failed=false;try{throw primary;}catch(error){failed=true;throw error;}finally{await threewayCleanup(async()=>{throw cleanup;},failed,diagnostics);}};
+  await assert.rejects(run(),error=>error===primary);
+  assert.deepEqual(diagnostics.threewayCleanupFailures,[{phase:'threeway-listener-cleanup',error:'Error: range listener cleanup failed',primaryFailed:true}]);
+  await assert.rejects(threewayCleanup(async()=>{throw cleanup;},false,diagnostics),error=>error===cleanup);
 });
 test('threeway direct pure: cleanup-only failure remains exact failure and clean cleanup adds nothing',async()=>{
   const cleanup=Object.freeze(new Error('sole cleanup failure')),diagnostics={threewayCleanupFailures:[]};
