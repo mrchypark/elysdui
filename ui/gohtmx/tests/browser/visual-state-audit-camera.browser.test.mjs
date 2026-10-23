@@ -114,6 +114,9 @@ test('opaque panel subtracts only covered foreign paint with provably inactive s
     const clippedStaticDot=await capture({pseudoStyle:'content:"";display:inline-block;width:8px;height:8px;background:#c22'});
     assert.deepEqual(clippedStaticDot.foreignDOMIntersections,[],'A static in-flow pseudo dot clipped by its own button stays within the covered button box');
     assert(clippedStaticDot.occludedForeignPaint.some(peer=>peer.id==='twin-root'));
+    const extendedClipPseudo=await capture({chipStyle:'position:static;z-index:1;overflow:clip;overflow-clip-margin:30px',pseudoStyle:'content:"";display:inline-block;width:120px;height:40px;background:red'});
+    assert(extendedClipPseudo.foreignDOMIntersections.some(peer=>peer.id==='twin-root'),'A nonzero overflow-clip-margin lets static pseudo paint escape its button box');
+    assert.deepEqual(extendedClipPseudo.occludedForeignPaint,[],'A clip margin outside the raw paint bound blocks opaque subtraction');
     const escapingPseudo=await capture({pseudoStyle:'content:"";position:absolute;z-index:10;top:10px;left:10px;width:60px;height:20px;background:red'});
     assert(escapingPseudo.foreignDOMIntersections.some(peer=>peer.id==='twin-root'),'A positioned high-z pseudo escapes the static chip overflow clip and remains foreign evidence');
     assert.deepEqual(escapingPseudo.occludedForeignPaint,[],'The pseudo-element stacking counterexample blocks opaque subtraction');

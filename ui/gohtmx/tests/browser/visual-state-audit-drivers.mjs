@@ -101,6 +101,7 @@ export function captureForeignPaint(node,{clip,checkedRootID}){
     if(element!==paintNode)return false;
     const parent=getComputedStyle(element);
     if(!['hidden','clip'].includes(parent.overflowX)||!['hidden','clip'].includes(parent.overflowY))return false;
+    if((parent.overflowX==='clip'||parent.overflowY==='clip')&&parent.overflowClipMargin!=='0px')return false;
     return generated.every(s=>{
       const outlineWidth=parseFloat(s.outlineWidth);
       return s.position==='static'&&s.zIndex==='auto'&&Number(s.opacity)===1&&s.transform==='none'&&s.translate==='none'&&s.rotate==='none'&&s.scale==='none'&&s.filter==='none'&&s.perspective==='none'&&s.maskImage==='none'&&s.backdropFilter==='none'&&s.containerType==='normal'&&s.isolation==='auto'&&s.mixBlendMode==='normal'&&s.contain==='none'&&s.willChange==='auto'&&s.clipPath==='none'&&s.boxShadow==='none'&&s.textShadow==='none'&&(['none','hidden'].includes(s.outlineStyle)||Number.isFinite(outlineWidth)&&outlineWidth===0);
