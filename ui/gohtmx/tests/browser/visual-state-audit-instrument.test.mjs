@@ -8,7 +8,55 @@ import {join} from 'node:path';
 import {chromium} from 'playwright';
 import {compileFunction} from 'node:vm';
 import {parse} from 'acorn';
-import {caseActionContract,requestedStateContract,runRequestedStateActions,runRegisteredCanvasActions,assertRegisteredCanvasTransition,clickVisibleControl,ownedOverlayInventory,captureTargetPNG,inventoryReceipt,inventoryDrift,unhandledBrowserErrors} from './visual-state-audit-drivers.mjs';
+import {caseActionContract,requestedStateContract,runRequestedStateActions,runRegisteredCanvasActions,assertRegisteredCanvasTransition,clickVisibleControl,ownedOverlayInventory,captureTargetPNG,inventoryReceipt,inventoryDrift,unhandledBrowserErrors,assertThreewayState,threewaySourcePins} from './visual-state-audit-drivers.mjs';
+
+test('threeway direct pure: canonical three steps preserve registered unsupported boundary',()=>{
+  const contract=requestedStateContract('git/ThreeWayMerge');
+  assert.deepEqual(contract.steps.map(step=>step.id),['choose-theirs','edit-merged','submit-merged']);
+  assert.equal(contract.requestedStateOnly,true);assert.equal(contract.fixtureGuards.action,'operate');
+  for(const identity of ['git/ConflictResolver','git/ThreeWayMergeExtra','editor/ThreeWayMerge'])assert.equal(requestedStateContract(identity),null);
+  assert(contract.steps.every(step=>step.source.siteId.startsWith('threeway-state:')));
+  assert(contract.scope.includes('registered submitData site remain unapproved'));
+});
+
+test('threeway direct pure: independent source pins and behavioral fixture differ from preview',async()=>{
+  for(const [path,expected]of Object.entries(threewaySourcePins)){
+    const bytes=await readFile(new URL('../../../../'+path,import.meta.url));
+    assert.equal(createHash('sha256').update(bytes).digest('hex'),expected,path);
+    const changed=Buffer.from(bytes);changed[0]^=1;
+    assert.notEqual(createHash('sha256').update(changed).digest('hex'),expected);
+  }
+  const fixture=await readFile(new URL('../../../../internal/gallery/advanced_workspace_fixtures.go',import.meta.url),'utf8');
+  assert(fixture.includes('"return callerOld", "return callerBase", "return callerNew", "return callerOld", true'));
+  assert(fixture.includes('props["PreviewExamples"] = []map[string]any{source}'));
+  const source=runRequestedStateActions.toString(),start=source.indexOf("if(contract.focusedSequence==='threeway-native-submit')"),end=source.indexOf("if(contract.focusedSequence==='license-native-selection-scroll')",start),branch=source.slice(start,end);
+  assert(branch.includes("node.parentElement===record.querySelector('[data-audit-main]')"));
+  assert(branch.includes("root.locator(':scope > form[data-ws-merge]')"));
+  assert(branch.includes(".press('Tab')"));assert(!branch.includes('.focus('));assert(!branch.includes('force:'));
+  assert(branch.indexOf('contract.threewayEvidence.push({stage,state})')<branch.indexOf('assertThreewayState(state'));
+});
+
+function threewayPureFixture(stage){
+  const id='merge-primary',component='git/ThreeWayMerge',twin={html:'independent twin',fields:[['merged','return callerOld',undefined]]},edited=['edit-merged','submit-merged'].includes(stage),initial=stage==='initial';
+  const events=initial?[]:[{type:'ely:change',detail:{id,component,name:'resolution',value:'theirs',checked:true,type:'radio'}},{type:'ely:change',detail:{id,component,name:'merged',value:'return callerNew'}}];
+  const native=initial?[]:[['click','resolution','theirs'],['input','resolution','theirs'],['change','resolution','theirs']];
+  if(edited){events.push({type:'ely:change',detail:{id,component,name:'merged',value:'resolved caller value',checked:undefined,type:'textarea'}});native.push(['input','merged','resolved caller value'],['change','merged','resolved caller value']);}
+  if(stage==='submit-merged'){events.push({type:'ely:action',detail:{id,component,action:'operate',submitter:'',formData:[['resolution','theirs'],['merged','resolved caller value']],values:[['resolution','theirs'],['merged','resolved caller value']]},actualFormData:true});native.push(['click','',''],['submit',null,null]);}
+  const timeline=initial?[]:['click','input','change','ely:change:resolution','ely:change:merged'];
+  if(edited)timeline.push('input','change','ely:change:merged');
+  if(stage==='submit-merged')timeline.push('click','submit','ely:action:operate');
+  return {id,stage,twin,state:{primary:true,id,component,kind:'ThreeWayMerge',panes:[['ours','main','return callerOld'],['base','base','return callerBase'],['theirs','feature/caller','return callerNew']],action:'operate',required:true,disabled:false,checked:[initial?'ours':'theirs'],value:initial?'return callerOld':edited?'resolved caller value':'return callerNew',status:initial?'':'Selected theirs.',twin:structuredClone(twin),twinEvents:[],events,timeline,native:native.map(([type,name,value])=>({type,name,value,trusted:true}))}};
+}
+test('threeway direct pure: exact state event FormData and native order positives',()=>{
+  for(const stage of ['initial','choose-theirs','edit-merged','submit-merged']){const fixture=threewayPureFixture(stage);assertThreewayState(fixture.state,fixture);}
+});
+test('threeway direct pure: causal identity payload order trust twin and preview negatives',()=>{
+  const defects=[
+    state=>state.primary=false,state=>state.component='git/ConflictResolver',state=>state.id='foreign',state=>state.panes[2][2]='wrong source',state=>state.required=false,state=>state.disabled=true,state=>state.checked=['ours'],state=>state.value='wrong draft',state=>state.status='Saved',state=>state.twin.fields[0][1]='mutated',state=>state.twinEvents.push('change'),
+    state=>state.events.pop(),state=>state.events.push(state.events.at(-1)),state=>state.events.reverse(),state=>state.events.at(-1).detail.action='resolve-conflict',state=>state.events.at(-1).detail.id='twin',state=>state.events.at(-1).actualFormData=false,state=>state.events.at(-1).detail.formData.reverse(),state=>state.events.at(-1).detail.values[1][1]='stale',state=>state.events.at(-1).detail.formData.push(['extra','value']),state=>state.native[0].trusted=false,state=>state.native.splice(3,1),state=>state.native.reverse(),state=>state.timeline.reverse(),
+  ];
+  for(const defect of defects){const fixture=threewayPureFixture('submit-merged');defect(fixture.state);assert.throws(()=>assertThreewayState(fixture.state,fixture));}
+});
 
 test('basic menu placement pure: non-origin bottom right and above collisions',async()=>{
   const source=await readFile(new URL('../../assets/ely-patterns.js',import.meta.url),'utf8');

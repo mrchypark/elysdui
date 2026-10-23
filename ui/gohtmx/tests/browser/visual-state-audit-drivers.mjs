@@ -283,6 +283,8 @@ export async function runRegisteredCanvasActions(contract,root,runStep){
 
 const settingsTargets={KeyboardShortcutsList:[1,'Keyboard'],ProxySettings:[2,'Network'],PrivacySettings:[3,'Privacy','telemetry'],NotificationSettings:[4,'Notifications','quiet'],StartupSettings:[5,'Startup','login'],StorageSettings:[6,'Storage'],ResetToDefault:[6,'Storage'],AdvancedSettings:[7,'Advanced','developer'],'DeveloperMode Toggle':[7,'Advanced','developer']};
 export function requestedStateContract(identity,trashFixture){
+  if(identity==='git/ThreeWayMerge')return {identity,kind:'ThreeWayMerge',requestedStateOnly:true,focusedSequence:'threeway-native-submit',mappingGaps:[],fixtureGuards:{component:identity,kind:'ThreeWayMerge',action:'operate',required:true,disabled:false},
+    steps:[['choose-theirs','input[name="resolution"][value="theirs"]','Only theirs checked; merged=return callerNew; Selected theirs.'],['edit-merged','textarea[name="merged"]','Trusted native fill then Tab commits resolved caller value'],['submit-merged','button[type="submit"]','One operate host request with exact actual FormData; no persistence claim']].map(([id,control,expectedState])=>({id,control,expectedState,event:'trusted native Playwright action',source:{siteId:`threeway-state:${id}`,sourceAnchor:'advanced_workspace_fixtures.go ThreeWayMerge; ely-api-workspace.html ws-conflict; ely-api-workspace.js resolution change; ely-api.js submit',provenance:'Canonical behavioral primary only, excluding nested source previews; not registered submitData coverage'}})),scope:'Three canonical steps only; four live profiles require 12 steps, 24 primary images and at most 24 context images. Aliases and registered submitData site remain unapproved.'};
   if(identity==='misc/LicenseViewer'){
     const labels=['inspect-license','pick-inter','next-jetbrains','wrap-first','wrap-last','home-first','next-lucide','end-last','scroll-license-horizontal','scroll-license-text'];
     return {identity,kind:'LicenseViewer',requestedStateOnly:true,focusedSequence:'license-native-selection-scroll',mappingGaps:[],fixtureGuards:{component:identity,kind:'LicenseViewer'},
@@ -530,7 +532,80 @@ export function assertTrashLayout(observed){
   }
 }
 
+export const threewaySourcePins={
+  'internal/gallery/advanced_workspace_fixtures.go':'c80d3265b34db38b95bdf67816e54b9e794dae140754c7efbefd5d8567dc9a8f',
+  'ui/gohtmx/templates/ely-api-workspace.html':'f66a0245d2287fb20a12355a7989b4af8151cc9497707a84667baebd78cf698b',
+  'ui/gohtmx/assets/ely-api-workspace.js':'5c38659eb2af5a3ee65bc1bc452f6c687ab1092b001758959af07ce50272f455',
+};
+export function assertThreewayState(state,{id,stage,twin}){
+  assert(['initial','choose-theirs','edit-merged','submit-merged'].includes(stage));
+  assert.equal(state.primary,true,'Exact behavioral primary, not a nested preview');
+  assert.equal(state.id,id);assert.equal(state.component,'git/ThreeWayMerge');assert.equal(state.kind,'ThreeWayMerge');
+  assert.deepEqual(state.panes,[['ours','main','return callerOld'],['base','base','return callerBase'],['theirs','feature/caller','return callerNew']]);
+  assert.equal(state.action,'operate');assert.equal(state.required,true);assert.equal(state.disabled,false);
+  assert.deepEqual(state.twin,twin);assert.deepEqual(state.twinEvents,[]);
+  const initial=stage==='initial',edited=stage==='edit-merged'||stage==='submit-merged';
+  assert.deepEqual(state.checked,initial?['ours']:['theirs']);
+  assert.equal(state.value,initial?'return callerOld':edited?'resolved caller value':'return callerNew');
+  assert.equal(state.status,initial?'':'Selected theirs.');
+  const detail={id,component:'git/ThreeWayMerge'},events=initial?[]:[
+    {type:'ely:change',detail:{...detail,name:'resolution',value:'theirs',checked:true,type:'radio'}},
+    {type:'ely:change',detail:{...detail,name:'merged',value:'return callerNew'}},
+  ];
+  if(edited)events.push({type:'ely:change',detail:{...detail,name:'merged',value:'resolved caller value',checked:undefined,type:'textarea'}});
+  if(stage==='submit-merged')events.push({type:'ely:action',detail:{...detail,action:'operate',submitter:'',formData:[['resolution','theirs'],['merged','resolved caller value']],values:[['resolution','theirs'],['merged','resolved caller value']]},actualFormData:true});
+  assert.deepEqual(state.events,events);
+  const native=initial?[]:[['click','resolution','theirs'],['input','resolution','theirs'],['change','resolution','theirs']];
+  if(edited)native.push(['input','merged','resolved caller value'],['change','merged','resolved caller value']);
+  if(stage==='submit-merged')native.push(['click','',''],['submit',null,null]);
+  assert.deepEqual(state.native.map(event=>[event.type,event.name,event.value]),native);
+  assert(state.native.every(event=>event.trusted===true),'Every recorded native event must be trusted');
+  const timeline=initial?[]:['click','input','change','ely:change:resolution','ely:change:merged'];
+  if(edited)timeline.push('input','change','ely:change:merged');
+  if(stage==='submit-merged')timeline.push('click','submit','ely:action:operate');
+  assert.deepEqual(state.timeline,timeline,'Native and public events retain their combined causal order');
+}
+
 export async function runRequestedStateActions(contract,root,runStep){
+  if(contract.focusedSequence==='threeway-native-submit'){
+    assert.equal(contract.identity,'git/ThreeWayMerge');
+    const pinReceipts=[];
+    for(const [path,sha256]of Object.entries(threewaySourcePins)){
+      const bytes=await readFile(new URL('../../../../'+path,import.meta.url));
+      assert.equal(createHash('sha256').update(bytes).digest('hex'),sha256,'ThreeWayMerge independent source pin: '+path);pinReceipts.push({path,sha256});
+    }
+    contract.sourcePins=pinReceipts;
+    const snapshot=()=>root.evaluate(node=>{
+      const own=selector=>[...node.querySelectorAll(selector)].filter(child=>child.closest('[data-ely-family]')===node),forms=own('form[data-ws-merge]');
+      if(forms.length!==1)throw Error('Exactly one own merge form required');
+      const form=forms[0],field=form.elements.namedItem('merged'),record=node.closest('[data-audit-name]'),twin=record?.querySelector('[data-audit-twin]>[data-ely-family]');
+      if(!twin||twin===node)throw Error('Separate merge twin required');
+      return {primary:record.dataset.auditName==='git/ThreeWayMerge'&&node.parentElement===record.querySelector('[data-audit-main]'),id:node.id,component:node.dataset.elyComponent,kind:node.dataset.elyKind,panes:[...form.querySelectorAll('[data-ws-merge-side]')].map(side=>[side.dataset.wsMergeSide,side.querySelector('h3').textContent,side.querySelector('pre').textContent]),action:form.dataset.elySubmit,required:field.required,disabled:field.disabled||form.querySelector('button[type="submit"]').disabled,checked:[...form.querySelectorAll('[name="resolution"]:checked')].map(control=>control.value),value:field.value,status:form.querySelector('[data-ws-merge-status]').textContent,twin:{html:twin.outerHTML,fields:[...twin.querySelectorAll('input,textarea,select')].map(control=>[control.name,control.value,control.checked])},events:node.__threeway?.events||[],native:node.__threeway?.native||[],timeline:node.__threeway?.timeline||[],twinEvents:node.__threeway?.twinEvents||[]};
+    });
+    const initial=await snapshot(),id=initial.id,twin=initial.twin;
+    assertThreewayState(initial,{id,stage:'initial',twin});
+    const form=root.locator(':scope > form[data-ws-merge]');
+    assert.equal(await form.count(),1,'Exactly one direct behavioral form; never first nested preview');
+    await root.evaluate(node=>{
+      const proof=node.__threeway={events:[],native:[],timeline:[],twinEvents:[]};proof.twin=node.closest('[data-audit-name]').querySelector('[data-audit-twin]>[data-ely-family]');
+      proof.observe=event=>{
+        if(event.type.startsWith('ely:')){if(event.target!==node)return;const detail={...event.detail},actualFormData=detail.formData instanceof FormData;if(actualFormData)detail.formData=[...detail.formData];proof.events.push({type:event.type,detail,...(event.type==='ely:action'?{actualFormData}:{})});proof.timeline.push(event.type+':'+(detail.action||detail.name));}
+        else if(event.target.closest('[data-ely-family]')===node){proof.native.push({type:event.type,name:event.type==='submit'?null:event.target.name,value:event.type==='submit'?null:event.target.value,trusted:event.isTrusted});proof.timeline.push(event.type);}
+      };
+      proof.observeTwin=event=>proof.twinEvents.push(event.type);
+      for(const type of ['click','input','change','submit','ely:change','ely:action']){node.addEventListener(type,proof.observe,true);proof.twin.addEventListener(type,proof.observeTwin,true);}
+    });
+    try{
+      for(const stage of contract.steps.map(step=>step.id))await runStep(stage,async()=>{
+        if(stage==='choose-theirs')await form.locator('input[name="resolution"][value="theirs"]').click();
+        else if(stage==='edit-merged'){await form.locator('textarea[name="merged"]').fill('resolved caller value');await form.locator('textarea[name="merged"]').press('Tab');}
+        else await form.locator('button[type="submit"]').click();
+        // Existing runStep persists actionActivation even when later assertions fail.
+        return {stage,rawState:await snapshot(),sourcePins:pinReceipts};
+      },async()=>{const state=await snapshot();contract.threewayEvidence??=[];contract.threewayEvidence.push({stage,state});assertThreewayState(state,{id,stage,twin});return {stage,state,sourcePins:pinReceipts};});
+    }finally{await root.evaluate(node=>{const proof=node.__threeway;if(!proof)return;for(const type of ['click','input','change','submit','ely:change','ely:action']){node.removeEventListener(type,proof.observe,true);proof.twin.removeEventListener(type,proof.observeTwin,true);}});}
+    return;
+  }
   if(contract.focusedSequence==='license-native-selection-scroll'){
     assert.equal(contract.identity,'misc/LicenseViewer');
     assert.equal(await root.getAttribute('data-ely-component'),contract.identity);
