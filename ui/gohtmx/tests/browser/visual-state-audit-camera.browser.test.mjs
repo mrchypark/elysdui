@@ -133,7 +133,7 @@ test('opaque panel subtracts only covered foreign paint with provably inactive s
   try{
     const page=await browser.newPage({viewport:{width:240,height:120}});
     const twinMarkup='<div data-audit-twin><section class="root" id="twin-root" data-ely-family="fixture"><div class="chip-parent"><button id="foreign-chip">foreign chip</button></div></section></div>';
-    const capture=async({parentDisplay='block',chipStyle='position:static;z-index:1;overflow:hidden',ownerStyle='',pseudoStyle='',left=10,width=60,includeTwin=true}={})=>{
+    const capture=async({parentDisplay='block',chipStyle='position:static;z-index:1;overflow:hidden',ownerStyle='',pseudoStyle='',left=10,width=60,includeTwin=true,focus=false}={})=>{
       await page.setContent(`<style>
         body{margin:0}[data-audit-main],[data-audit-twin]{position:absolute;inset:0}
         .root{position:relative;width:220px;height:100px}
@@ -142,6 +142,7 @@ test('opaque panel subtracts only covered foreign paint with provably inactive s
         #foreign-chip{position:static;width:${width}px;height:20px;margin:0 0 0 ${left}px;padding:0;border:0;background:#c22;${chipStyle}}
         #foreign-chip::after{${pseudoStyle}}
       </style><div data-audit-main><section class="root" id="owned-root" data-ely-family="fixture"><article id="owned-panel">owned panel</article></section></div>${includeTwin?twinMarkup:''}`);
+      if(focus)await page.locator('#foreign-chip').focus();
       return page.locator('#owned-panel').evaluate(captureForeignPaint,{clip:{x:0,y:0,width:220,height:100},checkedRootID:'owned-root'});
     };
     const pixelClip={x:0,y:0,width:100,height:60};
@@ -152,6 +153,19 @@ test('opaque panel subtracts only covered foreign paint with provably inactive s
     assert(covered.occludedForeignPaint.some(peer=>peer.id==='twin-root'));
     const coveredPixels=await screenshotWithoutCaretMutation(page,{clip:pixelClip,animations:'disabled',scale:'css'});
     assert.deepEqual(coveredPixels,ownerOnlyPixels,'The independently captured owner panel pixels are unchanged by fully covered static foreign paint');
+    const lowerPositioned=await capture({chipStyle:'position:relative;z-index:1;overflow:hidden'});
+    assert.deepEqual(lowerPositioned.foreignDOMIntersections,[],'A positioned foreign stacking level below the opaque panel is covered');
+    assert(lowerPositioned.occludedForeignPaint.some(peer=>peer.id==='twin-root'));
+    const lowerPositionedPixels=await screenshotWithoutCaretMutation(page,{clip:pixelClip,animations:'disabled',scale:'css'});
+    assert.deepEqual(lowerPositionedPixels,ownerOnlyPixels,'Independent pixels confirm the lower positioned chip adds no paint above the owner panel');
+    const higherPositioned=await capture({chipStyle:'position:relative;z-index:6;overflow:hidden'});
+    assert(higherPositioned.foreignDOMIntersections.some(peer=>peer.id==='twin-root'),'A positioned foreign stacking level above the panel remains blocking');
+    assert.deepEqual(higherPositioned.occludedForeignPaint,[]);
+    const higherPositionedPixels=await screenshotWithoutCaretMutation(page,{clip:pixelClip,animations:'disabled',scale:'css'});
+    assert.notDeepEqual(higherPositionedPixels,ownerOnlyPixels,'Independent pixels see the higher positioned chip above the owner panel');
+    const focusedLower=await capture({chipStyle:'position:relative;z-index:1;overflow:hidden',focus:true});
+    assert(focusedLower.foreignDOMIntersections.some(peer=>peer.id==='twin-root'),'Focused paint in a lower foreign stacking level remains conservative');
+    assert.deepEqual(focusedLower.occludedForeignPaint,[]);
     const clippedStaticDot=await capture({pseudoStyle:'content:"";display:inline-block;width:8px;height:8px;background:#c22'});
     assert.deepEqual(clippedStaticDot.foreignDOMIntersections,[],'A static in-flow pseudo dot clipped by its own button stays within the covered button box');
     assert(clippedStaticDot.occludedForeignPaint.some(peer=>peer.id==='twin-root'));
@@ -178,6 +192,9 @@ test('opaque panel subtracts only covered foreign paint with provably inactive s
       ['foreign individual translate','z-index:1;overflow:hidden;translate:1px 0','block'],
       ['foreign individual rotate','z-index:1;overflow:hidden;rotate:1deg','block'],
       ['foreign individual scale','z-index:1;overflow:hidden;scale:1.1','block'],
+      ['lower positioned foreign box shadow','position:relative;z-index:1;overflow:hidden;box-shadow:0 0 8px #c22','block'],
+      ['lower positioned foreign text shadow','position:relative;z-index:1;overflow:hidden;text-shadow:0 0 8px #c22','block'],
+      ['lower positioned foreign outline','position:relative;z-index:1;overflow:hidden;outline:2px solid #c22','block'],
     ]){
       const result=await capture({chipStyle:style,parentDisplay});
       assert(result.foreignDOMIntersections.some(peer=>peer.id==='twin-root'),`${label} must remain blocking`);
