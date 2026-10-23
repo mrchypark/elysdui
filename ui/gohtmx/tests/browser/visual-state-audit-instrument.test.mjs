@@ -819,14 +819,65 @@ test('explicit async domain tail awaits seal capture before helper return or rej
   }
 });
 
-test('workspace domain and canvas keep exactly three explicit async source tail awaits',async()=>{
+test('devtools normalization pure: actual code tail waits and preserves returned identity or rejection',async()=>{
+  const source=await fixtureSource('workspace'),ast=parse(source,{ecmaVersion:'latest',sourceType:'module'});
+  const declaration=ast.body.find(node=>node.type==='VariableDeclaration'&&node.declarations[0].id.name==='code').declarations[0].init;
+  const body=source.slice(declaration.start,declaration.end);
+  for(const rejects of [false,true]){
+    const sentinel={node:true},failure=new Error('controlled rejection'),events=[];
+    let release;
+    const pending=new Promise((resolve,reject)=>{release=()=>rejects?reject(failure):resolve(sentinel);});
+    const code=compileFunction(`return (${body});`,['devtoolsSource'])(()=>{events.push('helper');return pending;});
+    const result=code({root:{querySelector:()=>true},actions:[]}).then(value=>{events.push('returned');assert.equal(value,sentinel);},error=>{events.push('rejected');assert.equal(error,failure);});
+    assert.deepEqual(events,['helper']);await Promise.resolve();assert.deepEqual(events,['helper']);
+    release();await result;assert.deepEqual(events,['helper',rejects?'rejected':'returned']);
+  }
+});
+test('devtools normalization pure: actual WebSocket branch awaits same node before Enter and rejects before key',async()=>{
+  const source=await fixtureSource('workspace'),start=source.indexOf("    case 'WebSocketConsole': {"),end=source.indexOf("    case 'GraphQLExplorer':",start);
+  assert(start>=0&&end>start);
+  const branch=source.slice(start,end),body=branch.slice(branch.indexOf('{')+1,branch.lastIndexOf('break;'));
+  assert(body.includes("const draft=await input('[data-dt-socket-draft]','ping')"));
+  for(const rejects of [false,true]){
+    const events=[],actions=[],node={value:'ping'},log={children:[1,2]},failure=new Error('input rejected');let release;
+    const pending=new Promise((resolve,reject)=>{release=()=>rejects?reject(failure):resolve(node);});
+    const input=(selector,value)=>{assert.equal(selector,'[data-dt-socket-draft]');assert.equal(value,'ping');events.push('input');return pending;};
+    const key=(actual,value)=>{assert.equal(actual,node);assert.equal(value,'Enter');events.push('key');actual.value='';actions.push({action:'send-socket',text:'ping'});return false;};
+    const one=(_root,selector)=>selector==='[data-dt-socket-log]'?log:selector==='[data-dt-socket-toggle]'?{click(){events.push('toggle');actions.push({action:'toggle-socket',state:'open'});}}:assert.fail(selector);
+    const run=compileFunction(`return (async()=>{${body}})();`,['one','root','actions','input','key','assert']);
+    const result=run(one,{},actions,input,key,assert);
+    assert.deepEqual(events,['input']);await Promise.resolve();assert.deepEqual(events,['input']);
+    release();
+    if(rejects){await assert.rejects(result,error=>error===failure);assert.deepEqual(events,['input']);assert.deepEqual(actions,[]);}
+    else{await result;assert.deepEqual(events,['input','key','toggle']);assert.equal(node.value,'');assert.equal(log.children.length,2);}
+  }
+});
+test('devtools normalization pure: transformed capture completes before returned node is used and old shapes block',async()=>{
+  for(const rejects of [false,true]){
+    const source=`
+      const failure=new Error('capture rejected');
+      globalThis.__visualCheckpoint=async()=>{events.push('capture-start');await Promise.resolve();events.push('capture-end');${rejects?'throw failure;':''}};
+      const node={dispatchEvent(){events.push('input');return false;}};
+      const input=()=>{node.dispatchEvent(new Event('input'));return node;};
+      const key=(actual,value)=>{assert(actual===node&&value==='Enter');events.push('key-same-node');return false;};
+      const devtoolsSource=async()=>{const draft=await input();events.push('node-returned');key(draft,'Enter');return draft;};
+      const code=async()=>{return await devtoolsSource();};
+      try{const result=await code();assert(result===node);events.push('complete');}catch(error){assert(error===failure);events.push('rejected');}
+    `;
+    const transformed=transform(source,'devtools-normalization.js');assert.equal(transformed.unsupported.length,0);assert.equal(transformed.interactionSites.length,1);
+    const actual=await execute(transformed.source);
+    assert.deepEqual(actual,rejects?['before:dispatchEvent','input','capture-start','capture-end','rejected']:['before:dispatchEvent','input','capture-start','capture-end','node-returned','key-same-node','complete']);
+    for(const old of [source.replace('const draft=await input()','const draft=input()'),source.replace('return await devtoolsSource()','return devtoolsSource()')])assert(transform(old,'devtools-old.js').unsupported.some(site=>site.siteId),'Old nested shapes remain fail-closed');
+  }
+});
+test('workspace domain canvas and code keep exactly four explicit async source tail awaits',async()=>{
   const source=await readFile(new URL('../../../../internal/gallery/assets/advanced-workspace-checks.js',import.meta.url),'utf8');
   const domain=source.slice(source.indexOf('const domain = async '),source.indexOf('const domain = async ')+350);
   assert.match(domain,/return await devtoolsSource\(\{root,actions\}\);/);
   assert.match(domain,/return await canvasScene\(\{root,actions\}\);/);
-  assert.equal((source.match(/return await (?:devtoolsSource|canvasScene)\(/g)||[]).length,3);
+  assert.equal((source.match(/return await (?:devtoolsSource|canvasScene)\(/g)||[]).length,4);
   assert.match(source,/const canvas = async [\s\S]*?return await canvasScene\(\{root,actions\}\);/);
-  assert.match(source,/const code = async [\s\S]*?return devtoolsSource\(\{root,actions\}\);/,'Other callers are not normalized by this bounded change');
+  assert.match(source,/const code = async [\s\S]*?return await devtoolsSource\(\{root,actions\}\);/);
 });
 
 test('braces eligible unbraced for, for-of, for-in, while and do loops without moving actions',async()=>{
