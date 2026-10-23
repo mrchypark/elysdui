@@ -145,7 +145,7 @@ try {
     assert(metrics.firstLine.textRects.every(rect => !overlaps(metrics.firstLine.label, rect)), 'first-line badge must clear its text');
     const record = page.locator('[data-audit-name="collab/RemoteSelection"]');
     const auditMain = record.locator('[data-audit-main]');
-    const ownedRoot = record.locator('[data-audit-main] > [data-ely-family]');
+    const ownedRoot = auditMain.locator(':scope > [data-ely-family]');
     assert.equal(await record.count(), 1, 'component audit record is unique');
     assert.equal(await auditMain.count(), 1, 'component has one owned audit main');
     assert.equal(await ownedRoot.count(), 1, 'audit main has one exact component root');
