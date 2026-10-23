@@ -5,6 +5,12 @@ import {assertCommunicationCallerRequest,assertDockCallerAction,assertDockNative
 
 const read=path=>readFile(new URL(`../../../../${path}`,import.meta.url),'utf8');
 
+test('forced scroll source guard rejects assignments without mistaking equality comparisons',()=>{
+  const forcedScrollAssignment=/scrollTop\s*=(?!=)/;
+  assert.match('node.scrollTop = 12',forcedScrollAssignment,'A direct forced-scroll assignment remains forbidden');
+  assert.doesNotMatch('next.scrollTop===current.scrollTop',forcedScrollAssignment,'A scroll-position equality check is not an assignment');
+});
+
 test('focused five-case action contracts stay explicit and source-backed',async()=>{
   const cases=[
     ['forms/HotkeyInput','HotkeyInput','hotkey-record-clear-restore',['record-shortcut','clear-shortcut','restore-shortcut']],
@@ -162,7 +168,7 @@ test('Missing35 shipped communication fixtures have finite native local-action c
   const [driver,template,fixture,communicationJS,communicationCSS,actions]=await Promise.all([read('ui/gohtmx/tests/browser/visual-state-audit-drivers.mjs'),read('ui/gohtmx/templates/ely-api-communication.html'),read('internal/gallery/advanced_communication_fixtures.go'),read('ui/gohtmx/assets/ely-api-communication.js'),read('ui/gohtmx/assets/ely-api-communication.css'),read('ui/gohtmx/tests/browser/visual-state-audit-actions.mjs')]);
   assert.match(driver,/if\(contract\.focusedSequence\?\.startsWith\('communication-'\)\)/,'Legacy requested-state contracts may omit focusedSequence and must retain the safe optional guard');
   const communicationPath=driver.slice(driver.indexOf("if(contract.focusedSequence?.startsWith('communication-'))"),driver.indexOf("if(contract.focusedSequence==='vertical-range-native-scroll')"));
-  assert.doesNotMatch(communicationPath,/\.dispatchEvent\(|innerHTML|scrollTop\s*=/,'Input stays native and no DOM injection or forced scroll substitutes for user actions');
+  assert.doesNotMatch(communicationPath,/\.dispatchEvent\(|innerHTML|scrollTop\s*=(?!=)/,'Input stays native and no DOM injection or forced scroll substitutes for user actions');
   assert.match(communicationPath,/mouse\.wheel/);assert.match(communicationPath,/keyboard\.press\('Escape'\)/);assert.match(communicationPath,/aria-expanded/);assert.match(communicationPath,/assertCommunicationCallerRequest/);
   assert.match(actions,/if\(contract\.requestedStateOnly\)\{\s*await runRequestedStateActions\(contract,root,step,failureDiagnostics\);/,'The existing generic requested-state route must execute these communication contracts without a new whitelist');
   assert.match(communicationPath,/let beforeDate='',expectedDate='';[\s\S]*PageDown selection must equal the independently derived clamped next-month date/,'PageDown result must be checked against a date derived from the pre-action selected date');
