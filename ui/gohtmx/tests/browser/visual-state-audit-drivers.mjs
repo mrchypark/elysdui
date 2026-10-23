@@ -1631,17 +1631,18 @@ export function ownedOverlayInventory(node){
   const attributes=['aria-controls','popovertarget','data-foundation-dialog-open','data-interaction-dialog','data-ely-dialog-open'];
   for(const control of [node,...node.querySelectorAll(attributes.map(name=>`[${name}]`).join(','))])for(const attribute of attributes)for(const value of(control.getAttribute(attribute)||'').split(/\s+/))if(value)references.add(value.replace(/^#/,''));
   const selectorAll='dialog[open],:popover-open,[role=dialog],[role=menu],[role=region],[data-ely-portal]';
+  const idElements=[...document.querySelectorAll('[id]')],rootIDs=idElements.filter(element=>element.id===node.id);
   const candidates=[...document.querySelectorAll(selectorAll)]
     .filter(element=>{const rect=element.getBoundingClientRect();return rect.width>0&&rect.height>0&&element.checkVisibility({checkOpacity:true,checkVisibilityCSS:true});})
   let calendarPanel=null;
-  if(['calendar/EventPopover','calendar/AttendeeList'].includes(node.dataset.elyComponent)&&node.dataset.elyKind==='EventPopover'){
+  if(node.id&&rootIDs.length===1&&rootIDs[0]===node&&['calendar/EventPopover','calendar/AttendeeList'].includes(node.dataset.elyComponent)&&node.dataset.elyKind==='EventPopover'){
     const triggers=[...node.querySelectorAll('[data-calendar-popover-open]')];
     const references=(triggers[0]?.getAttribute('aria-controls')||'').trim().split(/\s+/).filter(Boolean);
     const visible=[...node.querySelectorAll('article[data-calendar-popover]')].filter(element=>{
       const rect=element.getBoundingClientRect();
       return element.id&&element.checkVisibility({checkOpacity:true,checkVisibilityCSS:true})&&rect.width>0&&rect.height>0;
     });
-    const matchingIDs=[...document.querySelectorAll('[id]')].filter(element=>element.id===references[0]);
+    const matchingIDs=idElements.filter(element=>element.id===references[0]);
     if(triggers.length===1&&triggers[0].getAttribute('aria-expanded')==='true'&&references.length===1&&visible.length===1&&visible[0].id===references[0]&&matchingIDs.length===1&&matchingIDs[0]===visible[0]){
       calendarPanel=visible[0];
       if(!candidates.includes(calendarPanel))candidates.push(calendarPanel);

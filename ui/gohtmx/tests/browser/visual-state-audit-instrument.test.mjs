@@ -13,7 +13,7 @@ import {caseActionContract,requestedStateContract,runRequestedStateActions,runRe
 test('popover overlay inventory requires exact identity, root, unique open reference and visible article',()=>{
   const make=(id,visible=true)=>({id,tagName:'ARTICLE',innerText:'Details',checkVisibility:()=>visible,getBoundingClientRect:()=>({x:0,y:0,width:200,height:120}),getAttribute:()=>null,matches:()=>false,closest:()=>null});
   const panel=make('owned-panel'),foreign=make('foreign-panel'),triggerFor=({expanded='true',controls='owned-panel'}={})=>({id:'open',getAttribute:name=>name==='aria-expanded'?expanded:name==='aria-controls'?controls:null});
-  const run=({identity='calendar/EventPopover',kind='EventPopover',trigger=triggerFor(),triggers=[trigger],panels=[panel],resolved=panel}={})=>{
+  const run=({identity='calendar/EventPopover',kind='EventPopover',trigger=triggerFor(),triggers=[trigger],panels=[panel],resolved=panel,extraIDs=[]}={})=>{
     const root={id:'owned-root',dataset:{elyComponent:identity,elyKind:kind},getAttribute:()=>null,contains:element=>panels.includes(element),querySelectorAll:selector=>{
       if(selector==='[id]')return [];
       if(selector==='[aria-controls],[popovertarget],[data-foundation-dialog-open],[data-interaction-dialog],[data-ely-dialog-open]'||selector==='[aria-controls]')return [trigger];
@@ -21,10 +21,12 @@ test('popover overlay inventory requires exact identity, root, unique open refer
       if(selector==='article[data-calendar-popover]')return panels;
       return [];
     }};
-    const document={querySelectorAll:selector=>selector==='[id]'?(resolved===panel?[panel]:[panel,resolved]):[]};
+    const idElements=[...extraIDs,root,...panels,...(panels.includes(resolved)?[]:[resolved])];
+    const document={querySelectorAll:selector=>selector==='[id]'?idElements:[]};
     return JSON.parse(JSON.stringify(runInNewContext(`(${ownedOverlayInventory.toString()})(node)`,{node:root,document})));
   };
   const accepted=run();assert.equal(accepted.length,1);assert.equal(accepted[0].id,'owned-panel');assert.equal(accepted[0].owned,true);assert.equal(accepted[0].checkedRootID,'owned-root');assert.equal(accepted[0].ownershipScope,'trigger-reference');
+  assert.equal(run({extraIDs:[{id:'owned-root'}]}).length,0,'A duplicate root ID before the checked root cannot produce a custom overlay');
   assert.equal(run({identity:'calendar/Other'}).length,0,'Unrelated component identities cannot add custom articles');
   assert.equal(run({kind:'CalendarWeekView'}).length,0,'Only exact EventPopover kind is eligible');
   assert.equal(run({trigger:triggerFor({expanded:'false'})}).length,0,'Closed popovers stay outside the overlay inventory');
