@@ -35,7 +35,9 @@ const actionBounds=new Function('node',`
 export function activeOutlineBounds(node,bounds){
   const active=document.activeElement;
   if(!active||!node.contains(active))return bounds;
-  const style=getComputedStyle(active),width=parseFloat(style.outlineWidth),offset=parseFloat(style.outlineOffset);
+  const style=getComputedStyle(active);
+  if(style.display==='none')return bounds;
+  const width=parseFloat(style.outlineWidth),offset=parseFloat(style.outlineOffset);
   const alpha=style.outlineColor.match(/\/\s*([\d.]+%?)\s*\)$/)?.[1]??style.outlineColor.match(/^rgba\([^,]+,[^,]+,[^,]+,\s*([\d.]+%?)\s*\)$/)?.[1];
   if(style.outlineStyle==='none'||style.outlineStyle==='hidden'||width===0||style.outlineColor==='transparent'||(alpha!==undefined&&parseFloat(alpha)===0))return bounds;
   const gap=reason=>({...bounds,focusOutline:{status:'unsupported',reason}});

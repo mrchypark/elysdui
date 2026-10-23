@@ -8,7 +8,15 @@ import {join} from 'node:path';
 import {chromium} from 'playwright';
 import {compileFunction,runInNewContext} from 'node:vm';
 import {parse} from 'acorn';
-import {caseActionContract,requestedStateContract,runRequestedStateActions,runRegisteredCanvasActions,assertRegisteredCanvasTransition,assertVerticalRangeSnapshot,clickVisibleControl,ownedOverlayInventory,captureTargetPNG,inventoryReceipt,inventoryDrift,unhandledBrowserErrors,assertThreewayState,threewaySourcePins,threewayCleanup} from './visual-state-audit-drivers.mjs';
+import {caseActionContract,requestedStateContract,runRequestedStateActions,runRegisteredCanvasActions,assertRegisteredCanvasTransition,assertVerticalRangeSnapshot,clickVisibleControl,ownedOverlayInventory,captureTargetPNG,inventoryReceipt,inventoryDrift,unhandledBrowserErrors,assertThreewayState,threewaySourcePins,threewayCleanup,activeOutlineBounds} from './visual-state-audit-drivers.mjs';
+
+test('hidden action shim style exits before outline color parsing',()=>{
+  const bounds={clip:{x:0,y:0,width:10,height:10}},active={},node={contains:candidate=>candidate===active};
+  const result=runInNewContext(`(${activeOutlineBounds.toString()})(node,bounds)`,{
+    document:{activeElement:active},getComputedStyle:()=>({display:'none'}),node,bounds,
+  });
+  assert.equal(result,bounds);
+});
 
 test('popover overlay inventory requires exact identity, root, unique open reference and visible article',()=>{
   const make=(id,visible=true)=>({id,tagName:'ARTICLE',innerText:'Details',checkVisibility:()=>visible,getBoundingClientRect:()=>({x:0,y:0,width:200,height:120}),getAttribute:()=>null,matches:()=>false,closest:()=>null});
