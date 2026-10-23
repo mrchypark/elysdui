@@ -9,15 +9,25 @@ export function captureBounds(element) {
       const style = getComputedStyle(ancestor);
       if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0 || style.contentVisibility === 'hidden') return;
       if (ancestor === node && !text) continue;
+      if (style.overflowX !== 'visible' || style.overflowY !== 'visible') {
+        if (style.overflowClipMargin !== '0px') continue;
+        let unproven = false;
+        for (let positioned = node; positioned && positioned !== ancestor; positioned = positioned.parentElement) {
+          if (!['absolute', 'fixed'].includes(getComputedStyle(positioned).position)) continue;
+          const containingBlock = positioned.offsetParent;
+          if (!containingBlock || !ancestor.contains(containingBlock)) { unproven = true; break; }
+        }
+        if (unproven) continue;
+      }
       const area = ancestor.getBoundingClientRect();
       const prior = {...box};
       if (style.overflowX !== 'visible') {
-        box.left = Math.max(box.left, area.left + ancestor.clientLeft);
-        box.right = Math.min(box.right, area.left + ancestor.clientLeft + ancestor.clientWidth);
+        box.left = Math.max(box.left, area.left);
+        box.right = Math.min(box.right, area.right);
       }
       if (style.overflowY !== 'visible') {
-        box.top = Math.max(box.top, area.top + ancestor.clientTop);
-        box.bottom = Math.min(box.bottom, area.top + ancestor.clientTop + ancestor.clientHeight);
+        box.top = Math.max(box.top, area.top);
+        box.bottom = Math.min(box.bottom, area.bottom);
       }
       if (box.left !== prior.left || box.right !== prior.right || box.top !== prior.top || box.bottom !== prior.bottom) clippedCount++;
       if (!(box.right > box.left && box.bottom > box.top)) return;

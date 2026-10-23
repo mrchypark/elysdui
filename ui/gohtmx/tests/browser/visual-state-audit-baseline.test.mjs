@@ -240,3 +240,61 @@ test('capture contains target overflow/text, preserves clipping, excludes unrela
     console.log(`BOUNDS_EVIDENCE ${output}`);
   } finally { await browser.close(); }
 });
+
+test('captureBounds preserves positioned-wrapper escape and fractional clip edges', async () => {
+  const browser = await chromium.launch({executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined});
+  try {
+    const page = await browser.newPage({viewport: {width: 320, height: 240}});
+    await page.setContent(`<style>
+      body{margin:0}
+      .root{position:relative;width:80px;height:30px;margin:0}
+      .clip{width:40px;height:30px;overflow:hidden}
+      .wrapper-child{display:block;width:60px;height:20px}
+      #absolute-root{left:10px;top:20px}
+      #absolute-wrapper{position:absolute;left:30px;top:5px;width:60px;height:20px}
+      #fixed-root{left:10px;top:70px}
+      #fixed-wrapper{position:fixed;left:40px;top:75px;width:60px;height:20px}
+      #nested-root{left:10px;top:200px}
+      #nested-outer{position:absolute;left:30px;top:5px;width:10px;height:20px}
+      #nested-inner{position:absolute;left:30px;top:0;width:60px;height:20px}
+      #fractional-outer{position:absolute;left:200.9px;top:120px;width:40.4px;height:30px;overflow:hidden}
+      #fractional-root{position:relative;width:1px;height:10px}
+      #fractional-child{position:relative;left:39.3px;display:block;width:1px;height:4px;background:red}
+      #margin-root{left:10px;top:160px}
+      #margin-clip{position:absolute;left:50px;top:0;width:40px;height:30px;overflow:clip;overflow-clip-margin:8px}
+      #margin-child{position:relative;left:35px;display:block;width:20px;height:20px}
+    </style>
+    <div id="absolute-root" class="root"><div class="clip"><div id="absolute-wrapper"><span class="wrapper-child">absolute child</span></div></div></div>
+    <div id="fixed-root" class="root"><div class="clip"><div id="fixed-wrapper"><span class="wrapper-child">fixed child</span></div></div></div>
+    <div id="nested-root" class="root"><div class="clip"><div id="nested-outer"><div id="nested-inner"><span class="wrapper-child">nested absolute child</span></div></div></div></div>
+    <div id="fractional-outer"><div id="fractional-root"><span id="fractional-child"></span></div></div>
+    <div id="margin-root" class="root"><div id="margin-clip"><span id="margin-child"></span></div></div>`);
+
+    for (const id of ['absolute-root', 'fixed-root', 'nested-root']) {
+      const bounds = await page.locator('#' + id).evaluate(captureBounds);
+      assert(bounds.clip.x + bounds.clip.width >= 100, `${id}: raw static-child paint must remain beyond the unrelated overflow clip: ${JSON.stringify(bounds)}`);
+      assert.equal(bounds.extendsRoot, true, `${id}: escaped paint extends the camera root`);
+    }
+    const marginBounds = await page.locator('#margin-root').evaluate(captureBounds);
+    assert(marginBounds.clip.x + marginBounds.clip.width >= 115,
+      `nonzero overflow-clip-margin must retain raw AABB rather than trim visible paint: ${JSON.stringify(marginBounds)}`);
+
+    const fractional = await page.locator('#fractional-child').evaluate(node => {
+      const outer = node.parentElement.parentElement, root = node.parentElement, clip = outer.getBoundingClientRect();
+      const paint = node.getBoundingClientRect(), legacyRight = clip.left + outer.clientLeft + outer.clientWidth;
+      return {clip: {left: clip.left, right: clip.right, top: clip.top, bottom: clip.bottom},
+        root: root.getBoundingClientRect().toJSON(), paint: paint.toJSON(), clientLeft: outer.clientLeft,
+        clientWidth: outer.clientWidth, legacyRight, color: getComputedStyle(node).backgroundColor};
+    });
+    assert.equal(fractional.color, 'rgb(255, 0, 0)', 'edge witness has visible colored paint');
+    assert(fractional.clip.left < fractional.paint.right && fractional.paint.left < fractional.clip.right,
+      `colored paint intersects the outer clip: ${JSON.stringify(fractional)}`);
+    assert(fractional.paint.right > fractional.legacyRight && fractional.paint.right <= fractional.clip.right,
+      `colored paint occupies the fractional edge lost by integer client geometry: ${JSON.stringify(fractional)}`);
+    const fractionalBounds = await page.locator('#fractional-root').evaluate(captureBounds);
+    assert.equal(fractionalBounds.clip.x + fractionalBounds.clip.width, Math.ceil(fractional.paint.right),
+      `the small camera retains the measured colored edge: ${JSON.stringify({fractional, fractionalBounds})}`);
+    assert(Math.ceil(fractional.paint.right) > Math.ceil(fractional.legacyRight),
+      `measured legacy integer clip would lose an output pixel: ${JSON.stringify(fractional)}`);
+  } finally { await browser.close(); }
+});
