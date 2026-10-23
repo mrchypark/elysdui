@@ -707,3 +707,4 @@
 [data-ely-family="interaction"] .ely-interaction__countdown>div{display:flex;gap:.5rem;align-items:center}
 [data-ely-family="interaction"] .ely-interaction__countdown output{font-size:1.3rem;font-weight:700;font-variant-numeric:tabular-nums}
 [data-ely-family="interaction"] .ely-interaction__countdown small{color:var(--color-muted,#687087)}
+[data-ely-family="interaction"] .ely-interaction--feedback-source:is([data-interaction-kind="Alert"],[data-interaction-kind="Callout"]){grid-template-columns:minmax(0,1fr)}

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
 
 	"golang.org/x/net/html"
@@ -78,6 +79,34 @@ func TestAdvancedAllAssetsRemainCompatible(t *testing.T) {
 	}
 	if !reflect.DeepEqual(styles, wantStyles) {
 		t.Fatalf("all-family styles = %v; want %v", styles, wantStyles)
+	}
+}
+
+func TestMobileGenerativeAndFeedbackWrappersUseShrinkableGridTracks(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		path string
+		want string
+	}{
+		{"FineTune and DatasetViewer", "assets/ely-api-native.css", "[data-ely-family='native'] .ely-native-card:is([data-native-kind='FineTuneJobCard'],[data-native-kind='DatasetViewer']) .ely-native-controls{grid-template-columns:minmax(0,1fr)}"},
+		{"Alert and Callout", "assets/ely-api-interaction.css", "[data-ely-family=\"interaction\"] .ely-interaction--feedback-source:is([data-interaction-kind=\"Alert\"],[data-interaction-kind=\"Callout\"]){grid-template-columns:minmax(0,1fr)}"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			css, err := Files.ReadFile(tc.path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(css), tc.want) {
+				t.Fatalf("%s is missing the constrained component grid rule %q", tc.path, tc.want)
+			}
+		})
+	}
+	nativeCSS, err := Files.ReadFile("assets/ely-api-native.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(nativeCSS), ".ely-native-card:is([data-native-kind='FineTuneJobCard'],[data-native-kind='DatasetViewer']){grid-template-columns:minmax(0,1fr)}") {
+		t.Fatal("generative track constraint must be on the inner controls grid, not the outer card")
 	}
 }
 

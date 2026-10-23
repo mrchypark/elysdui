@@ -391,7 +391,7 @@
 [data-ely-family='foundation'] .ely-foundation__icons .ely-foundation__icon{inline-size:36px;block-size:36px;mask-size:16px;-webkit-mask-size:16px;flex:none}
 [data-ely-family='foundation'] .ely-foundation__icon-demo[data-specimen-rows]{display:grid;grid-template-columns:repeat(6,max-content);gap:24px 16px;justify-content:start;align-items:end}
 [data-ely-family='foundation'] .ely-foundation__icon-demo [data-foundation-icon]:not([data-foundation-icon-size]){inline-size:16px;block-size:16px}
-[data-ely-family='foundation'] .ely-foundation__slots{align-items:center}
+[data-ely-family='foundation'] .ely-foundation__slots{align-items:center;flex-wrap:wrap}
 [data-ely-family='foundation'] .ely-foundation__slots>div{box-sizing:border-box;inline-size:180px;flex:none}
 [data-ely-family='foundation'] .ely-foundation__slots button{inline-size:100%;background:var(--color-primary);color:var(--color-primary-foreground)}
 [data-ely-family='foundation'] .ely-foundation__slots .ely-foundation__icon{inline-size:16px;block-size:16px}

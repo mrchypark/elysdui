@@ -800,3 +800,6 @@
 [data-ely-family='native'] .ely-native-document pre{margin:0;padding:12px;overflow:auto;background:var(--surface-sunken,var(--draft-tint,#f6f4f1));color:var(--foreground,#181613);font:12px/18px var(--font-mono,monospace)}
 [data-ely-family='native'] .ely-native-player-seek{display:block;width:100%}
 [data-ely-family='native'] .ely-native-shape-specimens{display:grid;gap:16px}
+
+/* Give fixed-width generative controls a definite, shrinkable content track. */
+[data-ely-family='native'] .ely-native-card:is([data-native-kind='FineTuneJobCard'],[data-native-kind='DatasetViewer']) .ely-native-controls{grid-template-columns:minmax(0,1fr)}
