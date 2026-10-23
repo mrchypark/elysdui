@@ -281,7 +281,23 @@ export async function runRegisteredCanvasActions(contract,root,runStep){
 }
 
 const settingsTargets={KeyboardShortcutsList:[1,'Keyboard'],ProxySettings:[2,'Network'],PrivacySettings:[3,'Privacy','telemetry'],NotificationSettings:[4,'Notifications','quiet'],StartupSettings:[5,'Startup','login'],StorageSettings:[6,'Storage'],ResetToDefault:[6,'Storage'],AdvancedSettings:[7,'Advanced','developer'],'DeveloperMode Toggle':[7,'Advanced','developer']};
-export function requestedStateContract(identity){
+export function requestedStateContract(identity,trashFixture){
+  if(identity==='documents/TrashBin'){
+    if(!trashFixture)return null;
+    assert(['default','empty','longpath'].includes(trashFixture),'Unknown explicit Trash fixture');
+    const steps=[['inspect-layout','[data-ws-trash]','Full readable default/empty/long-path state stays inside its own card']];
+    if(trashFixture!=='empty')steps.push(
+      ['restore','[data-ely-action="restore-file"]','One exact restore request; caller records remain'],
+      ['delete-arm','[data-ely-action="delete-file-permanently"]','First press only exposes complete Confirm delete label'],
+      ['delete-blur-restore','[data-ely-action="restore-file"]','Native focus loss cancels delete; only restore request emitted'],
+      ['delete-rearm','[data-ely-action="delete-file-permanently"]','First press after blur arms again without delete'],
+      ['delete-confirm','[data-ely-action="delete-file-permanently"]','Second press emits exactly one delete request; caller records remain'],
+      ['empty-arm','[data-ely-action="empty-trash"]','First press only exposes complete Confirm empty trash label'],
+      ['empty-blur-restore','[data-ely-action="restore-file"]','Native focus loss cancels empty; only restore request emitted'],
+      ['empty-rearm','[data-ely-action="empty-trash"]','First press after blur arms again without empty request'],
+      ['empty-confirm','[data-ely-action="empty-trash"]','Second press emits exactly one empty request; caller records remain']);
+    return {identity,kind:'TrashBin',trashFixture,requestedStateOnly:true,mappingGaps:[],fixtureGuards:{component:identity,kind:'TrashBin'},steps:steps.map(([id,control,expectedState])=>({id,control,expectedState,event:id==='inspect-layout'?'passive rendered-state inspection':'trusted native pointer click',source:{siteId:`trash-state:${trashFixture}:${id}`,sourceAnchor:'ely-api-workspace.html ws-trash; ely-api-workspace.js capture confirmation/focusout; ely-api.js action dispatch',provenance:'Explicit action-only Trash fixture; no alias, canonical initial inventory or host persistence approval'}})),scope:'Only selected opt-in Trash fixture; passive empty-state inspection is not an action; restore/delete/empty are host requests, never local persistence'};
+  }
   const canvasIdentity=['canvas/InfiniteCanvas','canvas/CanvasGrid','canvas/Guides','canvas/Ruler','canvas/ArtboardFrame','canvas/ZoomControls','canvas/ZoomIndicator','canvas/MiniMap'].includes(identity);
   const focused={
     'buttons/ActionSheet':{kind:'ActionSheet',sequence:'sheet-native-actions',steps:[
@@ -475,7 +491,75 @@ export function assertMinimapViewport(before,actual,{bounds,ratio,point}){
   return expected;
 }
 
+export function assertTrashLayout(observed){
+  const finite=box=>['left','top','right','bottom'].every(key=>Number.isFinite(box[key]))&&box.right>box.left&&box.bottom>box.top;
+  assert(finite(observed.card),'Actual trash card must have positive finite bounds');
+  assert(observed.boxes.length,'Visible card content required');
+  for(const box of observed.boxes){
+    assert(finite(box),'Visible content needs actual positive bounds');
+    for(const key of ['left','top'])assert(box[key]>=observed.card[key]-.5,`Trash ${box.label} escapes card ${key}`);
+    for(const key of ['right','bottom'])assert(box[key]<=observed.card[key]+.5,`Trash ${box.label} escapes card ${key}`);
+    if(box.kind==='button'){assert(box.scrollWidth<=box.clientWidth+1,'Button label horizontally clipped');assert(box.scrollHeight<=box.clientHeight+1,'Button label vertically clipped');}
+  }
+  const overlap=(a,b)=>Math.min(a.right,b.right)-Math.max(a.left,b.left)>.5&&Math.min(a.bottom,b.bottom)-Math.max(a.top,b.top)>.5;
+  for(let i=0;i<observed.boxes.length;i++)for(let j=i+1;j<observed.boxes.length;j++){
+    const a=observed.boxes[i],b=observed.boxes[j];
+    if((a.kind==='button'&&b.kind==='button')||(a.kind==='button'&&!b.insideButton&&b.kind==='text')||(b.kind==='button'&&!a.insideButton&&a.kind==='text'))assert(!overlap(a,b),'Trash controls overlap another control or caller text');
+  }
+}
+
 export async function runRequestedStateActions(contract,root,runStep){
+  if(contract.trashFixture){
+    const fixture=contract.trashFixture,empty=fixture==='empty',id=fixture==='longpath'?'deleted-long':'deleted-8';
+    const path=fixture==='longpath'?'docs/'+'long-unbroken-path'.repeat(12)+'/caller-notes.md':'docs/retired.md';
+    const card=root.locator('[data-ws-trash]'),restore=root.locator('[data-ely-action="restore-file"]'),remove=root.locator('[data-ely-action="delete-file-permanently"]'),clear=root.locator('[data-ely-action="empty-trash"]');
+    assert.equal(await card.count(),1);assert.equal(await root.getAttribute('data-ely-component'),'documents/TrashBin');
+    const peer=()=>root.evaluate(node=>{const twin=node.closest('[data-audit-case]').querySelector('[data-audit-twin]>[data-ely-family]');if(!twin)throw new Error('Independent trash twin missing');return twin.outerHTML;});
+    const initialPeer=await peer();
+    await root.evaluate(node=>{node.__trashClicks=[];document.addEventListener('click',event=>{const button=event.target.closest('button');if(button&&node.contains(button))node.__trashClicks.push({trusted:event.isTrusted,action:button.dataset.elyAction,value:button.value});},true);});
+    const layout=async()=>{
+      const observed=await card.evaluate(node=>{
+        const box=r=>({left:r.left,top:r.top,right:r.right,bottom:r.bottom});
+        const boxes=[...node.querySelectorAll('button')].map(button=>({kind:'button',label:button.textContent,...box(button.getBoundingClientRect()),scrollWidth:button.scrollWidth,clientWidth:button.clientWidth,scrollHeight:button.scrollHeight,clientHeight:button.clientHeight}));
+        for(const element of node.querySelectorAll('strong,small,time,output,button,p'))for(const child of element.childNodes){if(child.nodeType!==Node.TEXT_NODE||!child.textContent.trim())continue;const range=document.createRange();range.selectNodeContents(child);for(const rect of range.getClientRects())boxes.push({kind:'text',insideButton:Boolean(element.closest('button')),label:child.textContent,...box(rect)});}
+        const html=getComputedStyle(document.documentElement);
+        return {card:box(node.getBoundingClientRect()),boxes,text:node.textContent,theme:{attribute:document.documentElement.getAttribute('data-theme'),colorScheme:html.colorScheme,paper:html.getPropertyValue('--color-paper').trim(),ink:html.getPropertyValue('--color-ink').trim(),surface:getComputedStyle(node).backgroundColor}};
+      });
+      assertTrashLayout(observed);
+      assert.equal(await peer(),initialPeer,'Every Trash state must preserve its independent twin');
+      assert.equal(await root.locator('[data-ws-trash-item]').count(),empty?0:1,'Host request must not remove caller records');
+      if(empty){assert(observed.text.includes('The trash is empty'));assert.equal(await card.locator('button').count(),0);}
+      else{assert.equal(await root.locator('[data-ws-trash-item]').getAttribute('data-ws-trash-item'),id);assert.equal(await root.locator('[data-ws-trash-item] strong').textContent(),path);}
+      return observed;
+    };
+    await runStep('inspect-layout',async()=>({method:'passive rendered-state inspection'}),async()=>({fixture,layout:await layout()}));
+    if(empty)return;
+    const press=async(label,control,expectedAction,expectedValue,armed)=>{
+      const count=await root.evaluate(node=>node.__trashClicks.length);
+      await runStep(label,()=>clickVisibleControl(control),async(after,before)=>{
+        const clicks=await root.evaluate(node=>node.__trashClicks);
+        assert.equal(clicks.length,count+1);assert.equal(clicks.at(-1).trusted,true);
+        assert.equal(clicks.at(-1).action,await control.getAttribute('data-ely-action'));
+        assert.deepEqual(after.actions.slice(before.actions.length),expectedAction?[{id:await root.getAttribute('id'),component:'documents/TrashBin',action:expectedAction,value:expectedValue,formData:null,values:[]}]:[]);
+        assert.equal((await restore.textContent()).trim(),'Restore');
+        assert.equal((await remove.textContent()).trim(),armed==='delete'?'Confirm delete':'Delete');
+        assert.equal((await clear.textContent()).trim(),armed==='empty'?'Confirm empty trash':'Empty trash');
+        assert.equal(await remove.getAttribute('data-confirming')==='true',armed==='delete');
+        assert.equal(await clear.getAttribute('data-confirming')==='true',armed==='empty');
+        return {fixture,click:clicks.at(-1),layout:await layout(),hostPersistence:'not supplied; caller record unchanged'};
+      });
+    };
+    await press('restore',restore,'restore-file',id);
+    await press('delete-arm',remove,null,null,'delete');
+    await press('delete-blur-restore',restore,'restore-file',id);
+    await press('delete-rearm',remove,null,null,'delete');
+    await press('delete-confirm',remove,'delete-file-permanently',id);
+    await press('empty-arm',clear,null,null,'empty');
+    await press('empty-blur-restore',restore,'restore-file',id);
+    await press('empty-rearm',clear,null,null,'empty');
+    await press('empty-confirm',clear,'empty-trash','');
+    return;
+  }
   if(['task-due-submit','remove-four-tags','radio-groups-reselection','eventlogger-public-timestamps','button-public-boundary','textarea-public-multiline','canvas-minimap-zoom-fit-hit-test','sheet-native-actions','bulk-canonical-zero','native-disclosure'].includes(contract.focusedSequence)){
     const identity=await root.getAttribute('data-ely-component');
     assert.equal(identity,contract.identity,'Exact alias identity is required');

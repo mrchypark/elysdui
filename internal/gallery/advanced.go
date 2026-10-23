@@ -2,6 +2,8 @@ package uiexamples
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"html/template"
 	"net/http"
@@ -56,6 +58,11 @@ func (s *Server) advancedAudit(w http.ResponseWriter, r *http.Request) {
 		fixtures[fixture.Component.Chapter+"/"+fixture.Component.Name] = fixture
 	}
 	family, aliases := r.URL.Query().Get("family"), r.URL.Query().Get("aliases") == "1"
+	trashFixture := r.URL.Query().Get("trash-fixture")
+	if trashFixture != "" && (family != "workspace" || (trashFixture != "default" && trashFixture != "empty" && trashFixture != "longpath")) {
+		http.Error(w, "invalid action-only trash fixture", http.StatusBadRequest)
+		return
+	}
 	seen := map[string]bool{}
 	p := advancedPage{Family: family}
 	for _, definition := range definitions {
@@ -68,6 +75,9 @@ func (s *Server) advancedAudit(w http.ResponseWriter, r *http.Request) {
 		}
 		for _, name := range names {
 			key := definition.Chapter + "/" + name
+			if trashFixture != "" && key != "documents/TrashBin" {
+				continue
+			}
 			if seen[key] {
 				continue
 			}
@@ -88,6 +98,20 @@ func (s *Server) advancedAudit(w http.ResponseWriter, r *http.Request) {
 			component := fixture.Component
 			component.Name, component.ID = name, fmt.Sprintf("audit-instance-%d", len(p.Cases))
 			component.Props = aliasFixtureProps(component.Props, key)
+			if trashFixture != "" {
+				if trashFixture == "empty" {
+					component.Props["Deleted"] = []map[string]any{}
+				} else if trashFixture == "longpath" {
+					component.Props["Deleted"] = []map[string]any{{"ID": "deleted-long", "Path": "docs/" + strings.Repeat("long-unbroken-path", 12) + "/caller-notes.md", "DeletedAt": "2026-10-09"}}
+				}
+				data, marshalErr := json.Marshal(component.Props)
+				if marshalErr != nil {
+					http.Error(w, "invalid trash fixture props", http.StatusInternalServerError)
+					return
+				}
+				w.Header().Set("X-Ely-Audit-Fixture", "documents/TrashBin@"+trashFixture)
+				w.Header().Set("X-Ely-Audit-Props-SHA256", fmt.Sprintf("%x", sha256.Sum256(data)))
+			}
 			var preview, twin bytes.Buffer
 			if err = ui.RenderComponent(s.templates, &preview, component); err != nil {
 				break

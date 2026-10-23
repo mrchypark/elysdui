@@ -45,6 +45,7 @@ function parseArgs(argv) {
     else if(arg.startsWith('--fixture='))options.fixture=arg.slice('--fixture='.length);
     else if(arg.startsWith('--fixture-manifest='))options.fixtureManifest=resolve(arg.slice('--fixture-manifest='.length));
     else if(arg==='--states-only')options.statesOnly=true;
+    else if(arg.startsWith('--trash-fixture='))options.trashFixture=arg.slice('--trash-fixture='.length);
     else if (arg.startsWith('--evidence-root=')) options.evidenceRoot = resolve(arg.slice('--evidence-root='.length));
     else if (arg.startsWith('--output-dir=')) options.output = resolve(arg.slice('--output-dir='.length));
     else if (arg.startsWith('--matrix=')) options.matrixPath = resolve(arg.slice('--matrix='.length));
@@ -62,6 +63,7 @@ function parseArgs(argv) {
   assert(Number.isSafeInteger(options.maxCaptureBytes) && options.maxCaptureBytes > 0, '--max-capture-bytes must be a positive safe integer');
   assert(!options.full || (!options.caseIds.length && !options.families.length), '--full cannot be combined with --case or --family');
   assert(!options.full||!options.statesOnly,'--states-only is a bounded proof mode, not --full');
+  if(options.trashFixture){assert(['default','empty','longpath'].includes(options.trashFixture));assert(options.statesOnly&&options.fixture==='advanced'&&options.surface==='live-audit'&&options.profileId.startsWith('live-'),'Trash fixtures require explicit live requested-state proof');assert.deepEqual(options.caseIds,['documents/TrashBin']);}
   assert(profiles[options.profileId], `Unsupported profile: ${options.profileId}`);
   assert(['advanced','basic'].includes(options.fixture),'Unsupported fixture');
   assert((options.fixture==='basic'?['live-basic','static-basic']:['live-audit','static-audit']).includes(options.surface), `Unsupported surface: ${options.surface}`);
@@ -327,7 +329,28 @@ async function directCaseDriver({item, familyURL, captures, reference, semanticS
   page.on('pageerror',error=>browserErrors.push({family:item.family,driver:'direct-playwright',caseId:item.caseId,type:'pageerror',text:String(error)}));
   try {
     await page.addInitScript(semanticSnapshotInit);
-    await page.goto(familyURL, {waitUntil: 'networkidle'});
+    const trashAssets=[];
+    if(contract.trashFixture)await page.route('**/assets/**',async route=>{
+      const url=new URL(route.request().url());assert.equal(url.origin,new URL(familyURL).origin);
+      if(!/\.(?:css|js)$/.test(url.pathname))return route.continue();
+      const relative=url.pathname.slice('/assets/'.length);assert(!relative.split('/').includes('..'));
+      let bytes;
+      try{bytes=await readFile(resolve(repo,'ui/gohtmx/assets',relative));}
+      catch(error){if(error.code!=='ENOENT')throw error;bytes=await readFile(resolve(repo,'internal/gallery/assets',relative));}
+      const expected={[url.pathname]:sha256(bytes)};
+      const proof=fulfillBasicActionAsset(route,page,expected).catch(async error=>{await route.abort().catch(()=>{});return {path:url.pathname,error:String(error)};});trashAssets.push(proof);return proof;
+    });
+    const response=await page.goto(familyURL, {waitUntil: 'networkidle'});
+    let fixtureProof=null;
+    if(contract.trashFixture){
+      assert.equal(response.status(),200);const headers=await response.allHeaders();
+      assert.equal(headers['x-ely-audit-fixture'],`documents/TrashBin@${contract.trashFixture}`);
+      assert.match(headers['x-ely-audit-props-sha256']||'',/^[a-f0-9]{64}$/);
+      fixtureProof={identity:headers['x-ely-audit-fixture'],propsSHA256:headers['x-ely-audit-props-sha256'],url:response.url()};
+      fixtureProof.assets=await Promise.all(trashAssets);
+      for(const asset of fixtureProof.assets)assert(!asset.error,asset.error);
+      for(const path of ['/assets/app.css','/assets/ely-api.js','/assets/ely-api-workspace.js','/assets/ely-api-workspace.css'])assert(fixtureProof.assets.some(asset=>asset.path===path),'Required actual Trash runtime asset missing: '+path);
+    }
     const record = page.locator(`[data-audit-name=${JSON.stringify(item.componentIdentity)}]`);
     const root = record.locator('[data-audit-main] > [data-ely-family]');
     const twin = record.locator('[data-audit-twin] > [data-ely-family]');
@@ -362,7 +385,7 @@ async function directCaseDriver({item, familyURL, captures, reference, semanticS
       const index = receipts.length + 1, siteId = `direct-playwright:${label}`;
       const expected=contract.steps[index-1];assert.equal(expected?.id,label,'Driver order must equal the exact contract');
       assert.equal(typeof verify,'function','Each action requires an observable state assertion');
-      const receipt = {siteId, executionMode: 'direct-playwright', action: label, sourceSiteId:expected.source.siteId, sourceAnchor:expected.source.sourceAnchor,
+      const receipt = {siteId, fixture:fixtureProof, executionMode: 'direct-playwright', action: label, sourceSiteId:expected.source.siteId, sourceAnchor:expected.source.sourceAnchor,
         control:expected.control,event:expected.event,expectedState:expected.expectedState,beforeState:await observe()};
       receipts.push(receipt);
       for (const phase of ['before', 'after']) {
@@ -437,7 +460,7 @@ async function directCaseDriver({item, familyURL, captures, reference, semanticS
       ['finalState', reference.result.finalState, finalState], ['twinState', reference.finalTwin, finalTwin]]
       .map(([field, left, right]) => { const difference = firstDifference(left, right); return difference ? {field, ...difference} : null; }).filter(Boolean):[];
     return {driver: 'Playwright native clicks and dispatched input events after the registered check DOM mutations; unmodified production and registered-check modules',
-      status: differences.length ? 'mismatch' : 'passed', differences, receipts, actionsSHA256: digest(actions), finalStateSHA256: digest(finalState),
+      status: differences.length ? 'mismatch' : 'passed', differences, receipts, ...(fixtureProof?{fixture:fixtureProof}:{}), actionsSHA256: digest(actions), finalStateSHA256: digest(finalState),
       visualActionabilityGaps:receipts.filter(receipt=>receipt.actionActivation?.pointerActionabilityGap||receipt.visualEvidenceGap).map(receipt=>({action:receipt.action,control:receipt.control,reason:receipt.actionActivation?.pointerActionabilityGap||receipt.visualEvidenceGap})),
       comparisonScope:contract.requestedStateOnly?'Explicit target state assertions; registered ending state is different and not compared':'Exact registered-check actions, host events, final semantic state and unchanged twin',
       limitation: 'Independent action sequence; does not replace or inflate registered-check assertion counts or prove unreached variant branches.'};
@@ -459,7 +482,7 @@ try {
   if(!basic){
   if (options.families.length) cases = cases.filter(item => options.families.includes(item.family));
   if (options.caseIds.length) cases = cases.filter(item => options.caseIds.includes(item.caseId) || options.caseIds.includes(item.componentIdentity));
-  if(options.statesOnly&&!basic)cases=cases.filter(item=>requestedStateContract(item.componentIdentity));
+  if(options.statesOnly&&!basic)cases=cases.filter(item=>requestedStateContract(item.componentIdentity,options.trashFixture));
   if (!basic&&!options.statesOnly && !options.full && !options.families.length && !options.caseIds.length) {
     cases = pilotNames.map(name => matrix.auditCases.find(item => item.componentIdentity === name && item.aliasMapping.relation !== 'alias-shared-check')).filter(Boolean);
   } else if (!options.full && options.pilot) cases = cases.slice(0, options.pilot);
@@ -565,7 +588,7 @@ try {
     await originalPage.addInitScript(synchronousTraceInit);
     const familyURL = options.surface === 'static-audit'
       ? `${origin}${staticBasePath}components/audit/${encodeURIComponent(family)}/aliases/`
-      : `${origin}/components/audit?aliases=1&family=${encodeURIComponent(family)}`;
+      : `${origin}/components/audit?aliases=1&family=${encodeURIComponent(family)}${options.trashFixture?'&trash-fixture='+encodeURIComponent(options.trashFixture):''}`;
     let interceptCount = 0, interceptionError = null;
     const moduleInterceptCounts=new Map(preparedModules.map(module=>[module.filename,0]));
     for(const module of preparedModules)await instrumentedPage.route(`**/assets/advanced-${module.name}-checks.js`, async route => {
@@ -657,7 +680,7 @@ try {
     for (const item of familyCases) {
       checkpointIndex = 0;
       if(options.statesOnly){
-        const contract=requestedStateContract(item.componentIdentity);
+        const contract=requestedStateContract(item.componentIdentity,options.trashFixture);
         const proof=await directCaseDriver({item,familyURL,captures,reference:null,semanticSnapshotInit,contract,browserErrors});
         reports.push({caseId:item.caseId,componentIdentity:item.componentIdentity,comparison:{classification:proof.status==='passed'?'target-state-contract-passed':'harness-error-target-state-driver',equivalent:null,semanticDifferences:[]},
           actionSites:[],directFallback:null,requestedStateEvidence:proof,originalError:null,instrumentedError:proof.error||null,namedUnsupportedActionSites:[],
