@@ -31,7 +31,7 @@ test('layout attribution pure: exact identities, measured widths and bounded tru
   assert.equal(result.ancestors[0].clientWidth,308);assert.equal(result.layoutViewport.clientWidth,375);assert.equal(result.visualViewport.width,390);
   assert.equal(result.ancestors[0].scrollWidth,496);assert.equal(result.ancestors[0].style.overflowX,'hidden');
   assert.equal(result.diagnosticOnly,true);assert.equal(Object.hasOwn(result,'pass'),false);
-  const exact=['layout/Layer','layout/ResizeHandle','layout/Dock','primitives/Canvas','primitives/Slot','canvas/InspectorPanel','misc/LicenseViewer'];
+  const exact=['layout/Layer','layout/ResizeHandle','layout/Dock','primitives/Canvas','primitives/Slot','canvas/InspectorPanel','misc/LicenseViewer','generative/FineTuneJobCard','generative/DatasetViewer','feedback/Alert','feedback/Callout'];
   for(const identity of exact)assert(evaluate(`gallery:${identity}`));
   assert.equal(evaluate('gallery:canvas/LayerPanel'),null,'behavior key cannot substitute for exact InspectorPanel');
   assert.equal(evaluate('gallery:misc/Terms'),null);

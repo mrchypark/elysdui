@@ -479,7 +479,11 @@ try {
             'gallery:primitives/Canvas': '.ely-foundation__canvas-demo',
             'gallery:primitives/Slot': '.ely-foundation__slots',
             'gallery:canvas/InspectorPanel': '[data-ws-scene-ui],[data-ws-layer-layout]',
-            'gallery:misc/LicenseViewer': '[data-misc-licenses],[data-misc-licenses] nav,[data-misc-licenses] article'
+            'gallery:misc/LicenseViewer': '[data-misc-licenses],[data-misc-licenses] nav,[data-misc-licenses] article',
+            'gallery:generative/FineTuneJobCard': '[data-native-tune], [data-native-tune] > header, [data-native-tune] > header > *, [data-native-tune] > [data-native-tune-progress], [data-native-tune] > .ely-native-loss, [data-native-tune] > .ely-native-loss > nav, [data-native-tune] > .ely-native-loss > svg, [data-native-tune] > table',
+            'gallery:generative/DatasetViewer': '[data-native-dataset], [data-native-dataset] > header, .ely-native-table, .ely-native-table > colgroup, .ely-native-table > thead, .ely-native-table > thead > tr, .ely-native-table > thead > tr > th, .ely-native-table > tbody > tr, .ely-native-table > tbody > tr > td, [data-native-dataset] > footer, [data-native-pages]',
+            'gallery:feedback/Alert': '.ely-interaction__alert-list, .ely-interaction__alert-list > *, [data-interaction-alert], [data-interaction-alert] > *',
+            'gallery:feedback/Callout': '.ely-interaction__callout-list, .ely-interaction__callout, .ely-interaction__callout > *',
           };
           if (!Object.hasOwn(selectors, caseId)) return null;
           const measure = node => {
