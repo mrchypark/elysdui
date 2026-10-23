@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import test from 'node:test';
-import {assertCommunicationCallerRequest,assertEvalLastColumnGeometry,requestedStateContract,runRequestedStateActions} from './visual-state-audit-drivers.mjs';
+import {assertCommunicationCallerRequest,assertDockCallerAction,assertDockNativeEvents,assertEvalLastColumnGeometry,requestedStateContract,runRequestedStateActions} from './visual-state-audit-drivers.mjs';
 
 const read=path=>readFile(new URL(`../../../../${path}`,import.meta.url),'utf8');
 
@@ -134,4 +134,36 @@ test('Missing35 shipped communication fixtures have finite native local-action c
   assert.match(template,/<td>\{\{\.\}\}<\/td>/,'Evaluation cells remain html/template-escaped text');
   assert.match(template,/\{\{\.Content\}\}/);assert.match(template,/\{\{\.Name\}\}/);assert.doesNotMatch(template,/template\.HTML/,'Communication caller data is not promoted to trusted HTML');
   assert.match(fixture,/case "CalendarWeekView"/);assert.match(fixture,/case "CalendarDayView"/);assert.match(fixture,/case "EventPopover"/);
+});
+
+test('Dock default fixture covers four native tab clicks, Enter/Space activation, and one native HTML drop',async()=>{
+  const contract=requestedStateContract('layout/Dock'),ids=['dock-click-files','dock-click-outline','dock-click-search','dock-click-terminal','dock-key-enter-search','dock-key-space-search','dock-drag-files-center'];
+  assert.equal(contract?.kind,'Dock');assert.equal(contract.requestedStateOnly,true);assert.deepEqual(contract.mappingGaps,[]);assert.deepEqual(contract.steps.map(step=>step.id),ids);
+  assert(contract.steps.every(step=>step.source.siteId.startsWith('dock-state:layout/Dock:')&&step.source.sourceAnchor.includes('ely-api-foundation')));
+  assert.match(contract.steps[4].event,/trusted native.*keyboard/);assert.match(contract.steps[5].event,/trusted native.*keyboard/);assert.match(contract.steps[6].event,/trusted native.*HTML drag-and-drop/);
+  assert.equal(ids.length,7,'Dock contributes seven distinct target checkpoints per selected profile');
+
+  assertDockCallerAction([{action:'change',component:'layout/Dock',value:'Files'}],0,'layout/Dock','Files');
+  assertDockCallerAction([{action:'change',component:'layout/Dock',value:'Files',dock:'center'}],0,'layout/Dock','Files','center');
+  assert.throws(()=>assertDockCallerAction([{action:'change',component:'layout/Dock',value:'Outline'}],0,'layout/Dock','Files'),/Files/,'A wrong tab payload cannot pass');
+  assert.throws(()=>assertDockCallerAction([{action:'change',component:'layout/Dock',value:'Files'},{action:'change',component:'layout/Dock',value:'Files'}],0,'layout/Dock','Files'),/exactly one/,'Duplicate host requests cannot pass');
+  assert.throws(()=>assertDockCallerAction([{action:'change',component:'layout/Dock',value:'Files',dock:'right'}],0,'layout/Dock','Files','center'),/center/,'A drop into a different zone cannot pass');
+  assertDockNativeEvents('dock-click-files',[{type:'click',trusted:true,detail:1,tab:'Files'}],'Files');
+  assertDockNativeEvents('dock-key-enter-search',[{type:'keydown',trusted:true,key:'Enter',tab:'Search'},{type:'click',trusted:true,detail:0,tab:'Search'},{type:'keyup',trusted:true,key:'Enter',tab:'Search'}],'Search');
+  assertDockNativeEvents('dock-key-space-search',[{type:'keydown',trusted:true,key:' ',tab:'Search'},{type:'keyup',trusted:true,key:' ',tab:'Search'},{type:'click',trusted:true,detail:0,tab:'Search'}],'Search');
+  assertDockNativeEvents('dock-drag-files-center',[{type:'dragstart',trusted:true,tab:'Files'},{type:'dragover',trusted:true,zone:'center'},{type:'drop',trusted:true,zone:'center',transferText:'Files'}],'Files');
+  assert.throws(()=>assertDockNativeEvents('dock-click-files',[{type:'click',trusted:false,detail:1,tab:'Files'}],'Files'),/trusted browser input/,'Synthetic click dispatch cannot pass');
+  assert.throws(()=>assertDockNativeEvents('dock-key-enter-search',[{type:'keydown',trusted:true,key:'Enter',tab:'Search'},{type:'keyup',trusted:true,key:'Enter',tab:'Search'},{type:'click',trusted:true,detail:0,tab:'Search'}],'Search'),/browser key order/,'Enter in Space order cannot pass');
+  assert.throws(()=>assertDockNativeEvents('dock-key-space-search',[{type:'keydown',trusted:true,key:' ',tab:'Search'},{type:'click',trusted:true,detail:0,tab:'Search'},{type:'keyup',trusted:true,key:' ',tab:'Search'}],'Search'),/browser key order/,'Space in Enter order cannot pass');
+  assert.throws(()=>assertDockNativeEvents('dock-drag-files-center',[{type:'dragstart',trusted:true,tab:'Files'},{type:'drop',trusted:false,zone:'center',transferText:'Files'}],'Files'),/trusted browser input/,'Synthetic drop cannot pass');
+  assert.throws(()=>assertDockNativeEvents('dock-drag-files-center',[{type:'dragstart',trusted:true,tab:'Files'},{type:'drop',trusted:true,zone:'right',transferText:'Files'}],'Files'),/center/,'A drop into the wrong zone cannot pass');
+
+  const [template,fixture,foundation,driver,actions]=await Promise.all([read('ui/gohtmx/templates/ely-api-foundation.html'),read('internal/gallery/advanced_foundation_fixtures.go'),read('ui/gohtmx/assets/ely-api-foundation.js'),read('ui/gohtmx/tests/browser/visual-state-audit-drivers.mjs'),read('ui/gohtmx/tests/browser/visual-state-audit-actions.mjs')]);
+  assert.match(template,/data-foundation-dock-zone="left"[\s\S]*data-foundation-dock-zone="center"[\s\S]*data-foundation-dock-zone="right"[\s\S]*data-foundation-dock-zone="bottom"/,'The contract targets the four default template zones');
+  assert.match(fixture,/case "Dock":[\s\S]*"Items": \[\]string\{"Files", "Outline", "Search"\}/,'The default Dock labels are source-backed');
+  assert.match(foundation,/const dockTab = event\.target\.closest\('\[data-foundation-dock-tab\]'\)/);assert.match(foundation,/emit\(root, 'change', \{value: dockTab\.textContent\}\)/);
+  assert.match(foundation,/const onDragStart = event => \{ const tab = event\.target\.closest\?\.\('\[data-foundation-dock-tab\]'\)/);assert.match(foundation,/emit\(root, 'change', \{dock: dockZone\.dataset\.foundationDockZone, value: label\}\)/);
+  const dockPath=runRequestedStateActions.toString().slice(runRequestedStateActions.toString().indexOf("if(contract.focusedSequence==='dock-native-actions')"),runRequestedStateActions.toString().indexOf("if(contract.focusedSequence?.startsWith('communication-'))"));
+  assert.match(dockPath,/\.click\(\)/);assert.match(dockPath,/\.press\(key\)/);assert.match(dockPath,/\.dragTo\(target\)/);assert.match(dockPath,/event\.isTrusted/);assert.doesNotMatch(dockPath,/dispatchEvent|new DataTransfer/,'Dock input must come from Playwright native interaction, not synthetic dispatch');
+  assert.match(actions,/if\(contract\.requestedStateOnly\)\{\s*await runRequestedStateActions\(contract,root,step,failureDiagnostics\);/,'The existing generic requested-state path must execute Dock without a new whitelist');
 });

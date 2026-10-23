@@ -305,6 +305,15 @@ export async function runRegisteredCanvasActions(contract,root,runStep){
 
 const settingsTargets={KeyboardShortcutsList:[1,'Keyboard'],ProxySettings:[2,'Network'],PrivacySettings:[3,'Privacy','telemetry'],NotificationSettings:[4,'Notifications','quiet'],StartupSettings:[5,'Startup','login'],StorageSettings:[6,'Storage'],ResetToDefault:[6,'Storage'],AdvancedSettings:[7,'Advanced','developer'],'DeveloperMode Toggle':[7,'Advanced','developer']};
 export function requestedStateContract(identity,trashFixture){
+  if(identity==='layout/Dock')return {identity,kind:'Dock',family:'foundation',requestedStateOnly:true,focusedSequence:'dock-native-actions',mappingGaps:[],fixtureGuards:{component:identity,kind:'Dock'},steps:[
+    ['dock-click-files','.ely-foundation__dock-left [data-foundation-dock-tab]:nth-of-type(1)','Native click selects Files in the left zone and updates its local output','trusted native Playwright pointer click'],
+    ['dock-click-outline','.ely-foundation__dock-left [data-foundation-dock-tab]:nth-of-type(2)','Native click selects Outline in the left zone and updates its local output','trusted native Playwright pointer click'],
+    ['dock-click-search','.ely-foundation__dock-right [data-foundation-dock-tab]','Native click selects Search in the right zone and updates its local output','trusted native Playwright pointer click'],
+    ['dock-click-terminal','.ely-foundation__dock-bottom [data-foundation-dock-tab]','Native click selects Terminal in the bottom zone and updates its local output','trusted native Playwright pointer click'],
+    ['dock-key-enter-search','.ely-foundation__dock-right [data-foundation-dock-tab]','Native Enter activates the focused Search button using browser button semantics','trusted native Playwright keyboard activation; browser-generated click'],
+    ['dock-key-space-search','.ely-foundation__dock-right [data-foundation-dock-tab]','Native Space activates the focused Search button using browser button semantics','trusted native Playwright keyboard activation; browser-generated click'],
+    ['dock-drag-files-center','.ely-foundation__dock-left [data-foundation-dock-tab]:nth-of-type(1) → [data-foundation-dock-zone="center"]','Native HTML drag moves the existing Files tab into the center zone and updates that zone; no external operation','trusted native Playwright HTML drag-and-drop; no synthetic event dispatch'],
+  ].map(([id,control,expectedState,event])=>({id,control,expectedState,event,source:{siteId:`dock-state:${identity}:${id}`,sourceAnchor:'internal/gallery/advanced_foundation_fixtures.go Dock; ui/gohtmx/templates/ely-api-foundation.html Dock; ui/gohtmx/assets/ely-api-foundation.js dock click/drag handlers',provenance:'Exact shipped layout/Dock default fixture and its local UI state only; no provider, persistence, or business-effect claim'}})),scope:'Four default-fixture tab clicks, native Enter and Space activation, and one native same-component move to center. This is requested-state coverage, separate from registered instrumentation and visual approval.'};
   const verticalRangeKind={'layout/Scrollbar':'Scrollbar','layout/StickyHeader':'StickyHeader'}[identity];
   if(verticalRangeKind)return {identity,kind:verticalRangeKind,family:'foundation',requestedStateOnly:true,focusedSequence:'vertical-range-native-scroll',mappingGaps:[],fixtureGuards:{component:identity,kind:verticalRangeKind},
     steps:[['range-center-pointer','Trusted pointer at track center selects an interior value and scroll position'],['range-top-min-pointer','Trusted pointer at physical track top selects value 0 and scrollTop 0'],['range-bottom-max-pointer','Trusted pointer at physical track bottom selects value 1000 and scrollTop max'],['range-home-min','Trusted Home on the native range selects value 0 and scrollTop 0'],['range-end-max','Trusted End on the native range selects value 1000 and scrollTop max'],['content-wheel-up','Trusted content wheel-up from max moves content upward and synchronizes the range'],['scroll-home-min','Trusted Home on the scroll region selects scrollTop 0 and range value 0'],['scroll-end-max','Trusted End on the scroll region selects scrollTop max and range value 1000']].map(([id,expectedState])=>({id,control:id.startsWith('range-')?'input[type="range"][data-foundation-scrollbar]':'[data-foundation-scroll]',expectedState,event:id==='content-wheel-up'?'trusted native wheel; range input is not required':'trusted native pointer or keyboard input; no public host event expected',source:{siteId:`vertical-range-state:${identity}:${id}`,sourceAnchor:'advanced_foundation_fixtures.go Scrollbar/StickyHeader; ely-api-foundation.html native range; ely-api-foundation.js onThumb/update/onKey/scroll update; ely-api-foundation.css writing-mode/direction',provenance:'Exact canonical layout identity and its own fixture; direct native range/content state, no alias assumption'}})),scope:'Only layout/Scrollbar and layout/StickyHeader; eight direct native states each; no aliases, registered-check approval, CSS approval, or full-catalog claim'};
@@ -680,6 +689,33 @@ export function assertCommunicationCallerRequest(actions,offset,identity,action,
   return {event,nextOffset:actions.length};
 }
 
+export function assertDockCallerAction(actions,offset,identity,value,dock){
+  assert(Array.isArray(actions)&&Number.isInteger(offset)&&offset>=0&&offset<=actions.length,'Dock action observation offset must be valid');
+  const emitted=actions.slice(offset);assert.equal(emitted.length,1,'One native Dock activation must emit exactly one caller request');
+  const event=emitted[0];assert.equal(event.action,'change');assert.equal(event.component,identity);assert.equal(event.value,value);
+  if(dock!==undefined)assert.equal(event.dock,dock);
+  return actions.length;
+}
+
+export function assertDockNativeEvents(stepId,events,label){
+  assert(Array.isArray(events)&&events.length>0,'Dock input must produce observed native browser events');
+  assert(events.every(event=>event.trusted===true),'Dock input must be trusted browser input, not dispatched synthetic events');
+  if(stepId.startsWith('dock-click-')){
+    const clicks=events.filter(event=>event.type==='click');assert.equal(clicks.length,1);assert.equal(clicks[0].tab,label);assert(clicks[0].detail>0,'Mouse click must retain pointer activation detail');
+  }else if(stepId==='dock-key-enter-search'||stepId==='dock-key-space-search'){
+    const isEnter=stepId==='dock-key-enter-search',key=isEnter?'Enter':' ',sequence=events.filter(event=>['keydown','keyup','click'].includes(event.type));
+    const expectedOrder=isEnter?['keydown','click','keyup']:['keydown','keyup','click'];
+    assert.deepEqual(sequence.map(event=>event.type),expectedOrder,`Native ${isEnter?'Enter':'Space'} button activation must follow its browser key order`);
+    assert(sequence.every(event=>event.tab===label),'Keyboard activation must stay on the requested Dock button');
+    assert.equal(sequence.find(event=>event.type==='keydown').key,key);assert.equal(sequence.find(event=>event.type==='keyup').key,key);
+    assert.equal(sequence.find(event=>event.type==='click').detail,0,'Keyboard-generated click must not masquerade as pointer input');
+  }else if(stepId==='dock-drag-files-center'){
+    const start=events.find(event=>event.type==='dragstart'),drop=events.find(event=>event.type==='drop');
+    assert(start&&drop,'Native drag must reach both dragstart and drop');assert.equal(start.tab,label);assert.equal(drop.zone,'center');assert.equal(drop.transferText,label,'Drop must carry the browser DataTransfer text from the source tab');
+  }else assert.fail(`Unknown Dock native-input checkpoint ${stepId}`);
+  return {stepId,label,trusted:true};
+}
+
 export function assertEvalLastColumnGeometry({scrollLeft,previousScrollLeft,scrollWidth,clientWidth,columns,actionsBefore,actionsAfter,initiallyVisible,didScroll}){
   assert.equal(actionsAfter,actionsBefore,'Reading the final table column must not emit a host action');
   assert.equal(columns.length,6,'The final Time header and all five fixture values must be present');
@@ -690,6 +726,22 @@ export function assertEvalLastColumnGeometry({scrollLeft,previousScrollLeft,scro
 }
 
 export async function runRequestedStateActions(contract,root,runStep,failureDiagnostics){
+  if(contract.focusedSequence==='dock-native-actions'){
+    const identity='layout/Dock';assert.equal(contract.identity,identity);assert.equal(contract.kind,'Dock');assert.equal(await root.getAttribute('data-ely-component'),identity);assert.equal(await root.getAttribute('data-ely-kind'),'Dock');
+    let actionOffset=0,nativeOffset=0;
+    await root.evaluate(node=>{node.__visualDockNativeEvents=[];for(const type of ['click','keydown','keyup','dragstart','dragenter','dragover','dragleave','drop','dragend'])node.addEventListener(type,event=>{const tab=event.target.closest?.('[data-foundation-dock-tab]'),zone=event.target.closest?.('[data-foundation-dock-zone]');node.__visualDockNativeEvents.push({type,trusted:event.isTrusted,key:event.key||null,detail:event.detail??null,tab:tab?.textContent.trim()||null,zone:zone?.dataset.foundationDockZone||null,transferText:type==='drop'?event.dataTransfer?.getData('text/plain')||null:null});},true);});
+    const nativeSinceOffset=async()=>root.evaluate((node,offset)=>node.__visualDockNativeEvents.slice(offset),nativeOffset);
+    const assertLocalSelection=async(zone,label)=>root.locator(`[data-foundation-dock-zone="${zone}"]`).evaluate((node,wanted)=>{const tabs=[...node.querySelectorAll('[data-foundation-dock-tab]')],selected=tabs.filter(tab=>tab.getAttribute('aria-selected')==='true').map(tab=>tab.textContent.trim()),target=tabs.find(tab=>tab.textContent.trim()===wanted);return {selected,labelSelected:target?.getAttribute('aria-selected')==='true',output:node.querySelector('output')?.textContent.trim()||''};},label);
+    for(const [id,zone,index,label]of [['dock-click-files','left',0,'Files'],['dock-click-outline','left',1,'Outline'],['dock-click-search','right',0,'Search'],['dock-click-terminal','bottom',0,'Terminal']]){
+      const tab=root.locator(`[data-foundation-dock-zone="${zone}"] [data-foundation-dock-tab]`).nth(index);assert.equal(await tab.count(),1,`Exact ${label} tab required in ${zone} zone`);
+      await runStep(id,()=>tab.click(),async state=>{const events=await nativeSinceOffset();assertDockNativeEvents(id,events,label);nativeOffset+=events.length;actionOffset=assertDockCallerAction(state.actions,actionOffset,identity,label);const local=await assertLocalSelection(zone,label);assert.deepEqual(local,{selected:[label],labelSelected:true,output:`${label} panel`});return {zone,label,local};});
+    }
+    const search=root.locator('.ely-foundation__dock-right [data-foundation-dock-tab]');
+    for(const [id,key]of [['dock-key-enter-search','Enter'],['dock-key-space-search','Space']])await runStep(id,()=>search.press(key),async state=>{const events=await nativeSinceOffset();assertDockNativeEvents(id,events,'Search');nativeOffset+=events.length;actionOffset=assertDockCallerAction(state.actions,actionOffset,identity,'Search');const local=await assertLocalSelection('right','Search');assert.deepEqual(local,{selected:['Search'],labelSelected:true,output:'Search panel'});assert.equal(await search.evaluate(node=>node===document.activeElement),true,'Keyboard Dock activation must retain focus on its native button');return {key,local,focused:true};});
+    const source=root.locator('.ely-foundation__dock-left [data-foundation-dock-tab]').filter({hasText:'Files'}),target=root.locator('[data-foundation-dock-zone="center"]');assert.equal(await source.count(),1);assert.equal(await target.count(),1);
+    await runStep('dock-drag-files-center',()=>source.dragTo(target),async state=>{const events=await nativeSinceOffset();assertDockNativeEvents('dock-drag-files-center',events,'Files');nativeOffset+=events.length;actionOffset=assertDockCallerAction(state.actions,actionOffset,identity,'Files','center');const moved=await root.evaluate(node=>{const left=node.querySelector('.ely-foundation__dock-left'),center=node.querySelector('[data-foundation-dock-zone="center"]'),tabs=[...center.querySelectorAll('[data-foundation-dock-tab]')],tab=tabs.find(item=>item.textContent.trim()==='Files');return {remainingLeft:[...left.querySelectorAll('[data-foundation-dock-tab]')].map(item=>item.textContent.trim()),centerTabs:tabs.map(item=>item.textContent.trim()),centerSelected:tab?.getAttribute('aria-selected')==='true',output:center.querySelector('output')?.textContent.trim()||''};});assert.deepEqual(moved,{remainingLeft:['Outline'],centerTabs:['Files'],centerSelected:true,output:'Files panel'},'Native drop must move the original tab into the target zone without duplicating it');return moved;});
+    return;
+  }
   if(contract.focusedSequence?.startsWith('communication-')){
     const identity=contract.identity,grid=root.locator('.ely-calendar-time-grid');
     assert.equal(await root.getAttribute('data-ely-component'),identity,'Exact alias/canonical gallery identity is required');
