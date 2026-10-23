@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import test from 'node:test';
-import {assertCommunicationCallerRequest,assertDockCallerAction,assertDockNativeEvents,assertEvalLastColumnGeometry,assertNativeEmbedOpen,calendarDraftWheelDecision,requestedStateContract,runRequestedStateActions} from './visual-state-audit-drivers.mjs';
+import {assertCommunicationCallerRequest,assertDockCallerAction,assertDockNativeEvents,assertEvalLastColumnGeometry,assertNativeEmbedOpen,assertPresenceNativeRequest,calendarDraftWheelDecision,requestedStateContract,runRequestedStateActions} from './visual-state-audit-drivers.mjs';
 
 const read=path=>readFile(new URL(`../../../../${path}`,import.meta.url),'utf8');
 
@@ -64,8 +64,23 @@ test('five rendered presence aliases keep exact native follow and stop request c
   assert.match(handler,/follow\(following\); emit\(root, 'follow-user', \{value: button\.value, following\}\)/);assert.match(handler,/follow\(''\); emit\(root, 'stop-following', \{\}\)/);assert.match(handler,/if \(presence\?\.dataset\.following\) \{ follow\(''\); emit\(root, 'stop-following', \{\}\); \}/);
   assert.match(emitter,/detail: \{ \.\.\.detail, id: root\.id, component: root\.dataset\.elyComponent, action \}/);
   const start=driver.indexOf("if(contract.focusedSequence==='workspace-native-presence-follow')"),end=driver.indexOf("if(contract.focusedSequence==='native-embed-open-host')",start),branch=driver.slice(start,end);
-  assert(start>=0&&end>start);for(const source of [...steps,"ada.click()","stop.click()","ada.press('Escape')","trusted:true","event.isTrusted","assert.deepEqual(newActions,[expectedPayload]","fixtureSource","document.addEventListener('click'","document.addEventListener('keydown'"])assert(branch.includes(source),source);
+  assert(start>=0&&end>start);for(const source of [...steps,"ada.click()","stop.click()","ada.press('Escape')","event.isTrusted","assertPresenceNativeRequest(id,newEvents,newActions","fixtureSource","document.addEventListener('click'","document.addEventListener('keydown'"])assert(branch.includes(source),source);
+  assert.match(assertPresenceNativeRequest.toString(),/trusted:true/);assert.match(assertPresenceNativeRequest.toString(),/control:step==='presence-stop-button'\?'stop':'ada'/);assert.match(assertPresenceNativeRequest.toString(),/assert\.deepEqual\(actions,\[request\]/);
   assert.doesNotMatch(branch,/dispatchEvent\(/,'Presence controls use native Playwright activation, not synthetic dispatch');
+});
+
+test('presence native request assertion distinguishes Escape target from stop outcome',()=>{
+  const id='presence-root',component='collab/RemoteCursor';
+  const cases=[
+    ['presence-follow-ada',{type:'click',trusted:true,key:null,control:'ada'},{id,component,action:'follow-user',value:'ada',following:'ada'}],
+    ['presence-stop-button',{type:'click',trusted:true,key:null,control:'stop'},{id,component,action:'stop-following'}],
+    ['presence-follow-ada-again',{type:'click',trusted:true,key:null,control:'ada'},{id,component,action:'follow-user',value:'ada',following:'ada'}],
+    ['presence-stop-escape',{type:'keydown',trusted:true,key:'Escape',control:'ada'},{id,component,action:'stop-following'}],
+  ];
+  for(const [step,native,request]of cases)assert.deepEqual(assertPresenceNativeRequest(step,[native],[request],{id,component}),{native,request});
+  assert.throws(()=>assertPresenceNativeRequest('presence-stop-escape',[{type:'keydown',trusted:true,key:'Escape',control:'stop'}],[cases[3][2]],{id,component}),/actual target/,'Escape targets the focused Ada button, not the stop button');
+  assert.throws(()=>assertPresenceNativeRequest('presence-stop-escape',[cases[3][1]],[cases[0][2]],{id,component}),/expected alias-scoped host request/,'Escape still must emit stop-following');
+  assert.throws(()=>assertPresenceNativeRequest('presence-stop-escape',[{...cases[3][1],trusted:false}],[cases[3][2]],{id,component}),/trusted native input/,'Synthetic key dispatch cannot stand in for native Escape');
 });
 
 test('each declared focused sequence has a matching asserted driver path',()=>{

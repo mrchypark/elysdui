@@ -384,6 +384,16 @@ export function calendarDraftWheelDecision(metrics){
   return {axis:'visible',deltaX:0,deltaY:0};
 }
 
+export function assertPresenceNativeRequest(step,events,actions,{id,component}){
+  const escape=step==='presence-stop-escape',follow=step==='presence-follow-ada'||step==='presence-follow-ada-again';
+  assert(follow||step==='presence-stop-button'||escape,`Unknown presence step: ${step}`);
+  const native={type:escape?'keydown':'click',trusted:true,key:escape?'Escape':null,control:step==='presence-stop-button'?'stop':'ada'};
+  const request=follow?{id,component,action:'follow-user',value:'ada',following:'ada'}:{id,component,action:'stop-following'};
+  assert.deepEqual(events,[native],`${step} must be exactly one trusted native input to its actual target`);
+  assert.deepEqual(actions,[request],`${step} must emit exactly its expected alias-scoped host request`);
+  return {native:events[0],request:actions[0]};
+}
+
 export function requestedStateContract(identity,trashFixture){
   if(identity==='misc/IframeEmbed'||identity==='misc/EmbedCard'){
     const stepId=identity==='misc/IframeEmbed'?'iframe-open-host':'embedcard-open-host',url='https://example.com';
@@ -865,22 +875,21 @@ export async function runRequestedStateActions(contract,root,runStep,failureDiag
     let actionOffset=0,nativeOffset=0,fixtureSource=null;
     const native=()=>root.evaluate(node=>node.__presenceNativeEvents);
     const sequences=[
-      ['presence-follow-ada','follow','click'],['presence-stop-button','stop','click'],['presence-follow-ada-again','follow','click'],['presence-stop-escape','stop','keydown'],
+      ['presence-follow-ada','follow'],['presence-stop-button','stop'],['presence-follow-ada-again','follow'],['presence-stop-escape','stop'],
     ];
     try{
       const initial=await read();assert.equal(initial.following,'');assert(initial.bannerHidden);assert.equal(initial.label,'');assert.deepEqual(initial.peers.map(peer=>peer.value),['ada','grace','alan','mae','tim','joan']);assert(initial.peers.every(peer=>peer.pressed==='false'));
       fixtureSource={peers:initial.peers.map(({value,name,hue,title,hidden})=>({value,name,hue,title,hidden})),live:initial.live,sourceText:initial.sourceText,selection:initial.selection,cursors:initial.cursors};
-      for(const [id,kind,eventType]of sequences){
-        const click=kind==='follow',expectedFollowing=click?'ada':'',expectedPriorFollowing=click?'':'ada',expectedPayload=click?{id:initial.id,component:identity,action:'follow-user',value:'ada',following:'ada'}:{id:initial.id,component:identity,action:'stop-following'};
+      for(const [id,kind]of sequences){
+        const click=kind==='follow',expectedFollowing=click?'ada':'',expectedPriorFollowing=click?'':'ada';
         await runStep(id,async()=>{const current=await read();assert.equal(current.following,expectedPriorFollowing,'Presence action sequence must start from its expected prior local state');return click?ada.click():kind==='stop'?stop.click():ada.press('Escape');},async(state,before)=>{
           const after=await read(),nativeEvents=await native(),newEvents=nativeEvents.slice(nativeOffset),newActions=state.actions.slice(actionOffset);
-          assert.deepEqual(newEvents,[{type:eventType,trusted:true,key:eventType==='keydown'?'Escape':null,control:kind==='follow'?'ada':'stop'}],`${identity} ${id} must be one trusted native input to the exact control`);nativeOffset+=newEvents.length;
-          assert.deepEqual(newActions,[expectedPayload],`${identity} ${id} emits the exact alias-scoped host request and no extra request`);actionOffset=state.actions.length;
+          const proof=assertPresenceNativeRequest(id,newEvents,newActions,{id:initial.id,component:identity});nativeOffset+=newEvents.length;actionOffset=state.actions.length;
           assert.equal(after.following,expectedFollowing);assert.deepEqual(after.peers.map(peer=>peer.pressed),after.peers.map(peer=>peer.value===expectedFollowing?'true':'false'));
           assert.equal(after.bannerHidden,!click);assert.equal(after.label,click?'Following Ada Park':'');
           assert.deepEqual({peers:after.peers.map(({value,name,hue,title,hidden})=>({value,name,hue,title,hidden})),live:after.live,sourceText:after.sourceText,selection:after.selection,cursors:after.cursors},fixtureSource,'Only local follow presentation may change; fixture peer/document data remains intact');
           assert.equal(after.id,initial.id);assert.equal(after.component,identity);assert.equal(after.kind,kind);
-          return {identity,following:after.following,pressed:after.peers.filter(peer=>peer.pressed==='true').map(peer=>peer.value),bannerHidden:after.bannerHidden,label:after.label,request:expectedPayload,native:newEvents[0],fixtureSourceUnchanged:true};
+          return {identity,following:after.following,pressed:after.peers.filter(peer=>peer.pressed==='true').map(peer=>peer.value),bannerHidden:after.bannerHidden,label:after.label,...proof,fixtureSourceUnchanged:true};
         });
       }
     }finally{await root.evaluate(node=>{if(node.__presenceNativeListener){document.removeEventListener('click',node.__presenceNativeListener,true);document.removeEventListener('keydown',node.__presenceNativeListener,true);}delete node.__presenceNativeListener;delete node.__presenceNativeEvents;});}
