@@ -285,8 +285,25 @@ export function resolveCaseActionSites(source,filename,{entry,facts}){
       return execute(selected?node.consequent:node.alternate,stack,unknown,conservative);
     }
     if(node.type==='SwitchStatement'){
-      mappingGaps.push({reason:'conservative-control-flow-boundary',boundary:node.type,line:node.loc.start.line,column:node.loc.start.column});
       const selected=value(node.discriminant);
+      const labels=node.cases.filter(branch=>branch.test).map(branch=>branch.test);
+      const literalLabels=labels.every(label=>label.type==='Literal'&&(label.value===null||['string','number','boolean'].includes(typeof label.value)));
+      const uniqueLabels=new Set(labels.map(label=>label.value)).size===labels.length;
+      const branch=literalLabels&&uniqueLabels&&selected!==undefined?node.cases.find(branch=>branch.test&&branch.test.value===selected):null;
+      const statements=branch?.consequent.length===1&&branch.consequent[0].type==='BlockStatement'?branch.consequent[0].body:branch?.consequent;
+      const terminal=statements?.at(-1),prefix=statements?.slice(0,-1);
+      const hasAbrupt=node=>{
+        if(!node||typeof node!=='object'||functionNode(node))return false;
+        if(['ReturnStatement','ThrowStatement','BreakStatement','ContinueStatement'].includes(node.type))return true;
+        return Object.values(node).some(child=>Array.isArray(child)?child.some(hasAbrupt):hasAbrupt(child));
+      };
+      // Only a selected literal case with a direct terminal break is proved here.
+      // A prefix return/throw/nested break must not make the suffix look reachable.
+      if(terminal?.type==='BreakStatement'&&!terminal.label&&!prefix.some(hasAbrupt)){
+        for(const statement of prefix)execute(statement,stack,unknown,conservative);
+        return 'continues';
+      }
+      mappingGaps.push({reason:'conservative-control-flow-boundary',boundary:node.type,line:node.loc.start.line,column:node.loc.start.column});
       if(selected===undefined){for(const branch of node.cases)for(const stmt of branch.consequent)execute(stmt,stack,[...unknown,'unresolved switch'],true);}
       else {let active=false;for(const branch of node.cases){active ||= literal(branch.test)===selected;if(active){for(const stmt of branch.consequent)execute(stmt,stack,unknown,true);if(branch.consequent.some(stmt=>stmt.type==='BreakStatement'))break;}}}
       return 'unresolved';

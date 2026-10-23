@@ -930,6 +930,47 @@ test('registered canvas pure: awaited entry preserves return rejection and captu
     assert.deepEqual(await execute(old.source),original);
   }
 });
+test('switch literal flow pure: selected unique literal break preserves after-switch action',()=>{
+  for(const body of ["first.click();break;","{first.click();break;}"]){
+    const result=returnFlowSites(`switch(selected){case 'true':wrong.click();break;case true:${body}default:other.click();}later.click();`);
+    assert.deepEqual(returnFlowControls(result),['first','later']);assert.deepEqual(result.mappingGaps,[]);
+  }
+});
+test('switch literal flow pure: unknown dynamic duplicate and fallthrough stay blocked',()=>{
+  for(const body of [
+    'switch(unknown){case true:return;}target.click();',
+    'switch(selected){case dynamic:break;case true:first.click();break;}target.click();',
+    'switch(selected){case true:first.click();break;case true:second.click();break;}target.click();',
+    'switch(selected){case true:first.click();case false:second.click();break;}target.click();',
+    'switch(selected){case true:first.click();if(selected)break;}target.click();',
+    'outer:{switch(selected){case true:first.click();break outer;}}target.click();',
+  ]){
+    const result=returnFlowSites(body);
+    assert(result.mappingGaps.some(gap=>gap.reason==='conservative-control-flow-boundary'&&gap.boundary==='SwitchStatement'),body);
+    assert(returnFlowControls(result).includes('target'),body);
+  }
+});
+test('switch literal flow pure: terminal break cannot hide prefix abrupt completion',()=>{
+  for(const prefix of ['return;','throw failure;','if(unknown)return;','while(unknown){break;}']){
+    for(const body of [`switch(selected){case true:${prefix}break;}target.click();`,`switch(selected){case true:{${prefix}break;}}target.click();`]){
+      const result=returnFlowSites(body);
+      assert(result.mappingGaps.some(gap=>gap.reason==='conservative-control-flow-boundary'&&gap.boundary==='SwitchStatement'),body);
+      assert(returnFlowControls(result).includes('target'),'Conservative suffix enumeration is not reachability proof');
+    }
+  }
+  for(const prefix of ['while(unknown){}','try{}finally{}','label:{}']){
+    const result=returnFlowSites(`switch(selected){case true:${prefix}break;}target.click();`);
+    assert(result.mappingGaps.some(gap=>gap.reason==='conservative-control-flow-boundary'),'Selected case cannot waive a nested boundary gap');
+  }
+});
+test('switch literal flow pure: ArchiveViewer exact sites reject unknown kind extra and missing actions',async()=>{
+  const source=await fixtureSource('workspace'),contract=caseActionContract('files/ArchiveViewer',source,'workspace.js');
+  assert.deepEqual(contract.mappingGaps,[]);
+  assert.deepEqual(contract.steps.map(step=>[step.source.owner,step.source.method,step.source.event]),[['domain','click','click'],['domain','dispatchEvent','keydown']]);
+  const unknown=caseActionContract('files/ArchiveViewer',source.replace('switch(kind)','switch(unreviewedKind)'),'workspace.js');
+  assert(unknown.mappingGaps.some(gap=>gap.reason==='conservative-control-flow-boundary'));
+  for(const changed of [source.replace('folder.click();','folder.click();folder.click();'),source.replace('folder.click();','')])assert(caseActionContract('files/ArchiveViewer',changed,'workspace.js').mappingGaps.length>0);
+});
 test('maps only ArchiveViewer branch and called helpers; rejects new or missing exact actions',async()=>{
   const source=await fixtureSource('workspace');
   const contract=caseActionContract('files/ArchiveViewer',source,'workspace.js');
