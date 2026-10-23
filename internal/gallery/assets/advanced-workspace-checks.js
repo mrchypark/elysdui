@@ -189,7 +189,7 @@ const data = async ({root}) => {
   row.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', bubbles: true})); assert(row.tabIndex === 0 && row.getAttribute('aria-selected') === 'true', 'data row did not select');
 };
 const filesDevtools = async ({root,actions,expectError}) => {
-  if(root.querySelector("[data-ws-devtools-source]"))return devtoolsSource({root,actions});
+  if(root.querySelector("[data-ws-devtools-source]"))return await devtoolsSource({root,actions});
   const kind=root.dataset.elyKind;
   switch(kind) {
     case 'FileIcon': { const icons=[...root.querySelectorAll('[data-ws-file-icon]')];assert(icons.length===14&&icons[0].dataset.iconName==='folder'&&icons[1].dataset.iconName==='folder-open'&&icons.find(icon=>icon.dataset.name==='Budget.csv')?.dataset.iconName==='file-spreadsheet','source icon samples missing');break; }
@@ -268,7 +268,7 @@ const canvas = async ({root,actions}) => {
   }
 };
 const request = async ({root, actions}) => {
-  if(root.querySelector("[data-ws-devtools-source]"))return devtoolsSource({root,actions});
+  if(root.querySelector("[data-ws-devtools-source]"))return await devtoolsSource({root,actions});
   if(root.dataset.elyKind==='ShareDialog'){
     const open=one(root,'[data-ws-share-open]'),dialog=one(root,'[data-ws-share-dialog]');open.click();assert(dialog.open,'share dialog did not open');
     const pending=one(dialog,'[data-ws-invite-chip] input'),before=actions.length;pending.value='invalid';one(dialog,'[data-ws-invite-form] button[type="submit"]').click();assert(actions.length===before,'invalid invite emitted a host action');pending.value='pending@example.test';

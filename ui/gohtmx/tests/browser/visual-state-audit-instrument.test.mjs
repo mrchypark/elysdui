@@ -968,12 +968,82 @@ test('devtools normalization pure: transformed capture completes before returned
     for(const old of [source.replace('const draft=await input()','const draft=input()'),source.replace('return await devtoolsSource()','return devtoolsSource()')])assert(transform(old,'devtools-old.js').unsupported.some(site=>site.siteId),'Old nested shapes remain fail-closed');
   }
 });
-test('workspace domain canvas and code keep exactly four explicit async source tail awaits',async()=>{
+test('devtools remaining tails pure: exact four callers and six awaited tails retain all other source bytes',async()=>{
+  const source=await fixtureSource('workspace'),ast=parse(source,{ecmaVersion:'latest',sourceType:'module'}),nodes=[],parents=new Map();
+  const visit=(node,parent)=>{
+    if(!node||typeof node!=='object')return;
+    if(node.type){nodes.push(node);parents.set(node,parent);}
+    for(const value of Object.values(node)){
+      if(Array.isArray(value)){for(const child of value)visit(child,node);}
+      else if(value&&typeof value==='object')visit(value,node);
+    }
+  };
+  visit(ast,null);
+  const declarations=ast.body.filter(node=>node.type==='VariableDeclaration').flatMap(node=>node.declarations);
+  const calls=nodes.filter(node=>node.type==='CallExpression'&&node.callee.type==='Identifier'&&node.callee.name==='devtoolsSource');
+  assert.equal(calls.length,4);
+  assert.deepEqual(calls.map(call=>declarations.find(declaration=>declaration.init?.start<call.start&&declaration.init?.end>call.end)?.id.name),['code','filesDevtools','request','domain']);
+  for(const call of calls){assert.equal(parents.get(call).type,'AwaitExpression');assert.equal(parents.get(parents.get(call)).type,'ReturnStatement');assert.equal(source.slice(call.start,call.end),'devtoolsSource({root,actions})');}
+  assert.equal((source.match(/return await (?:devtoolsSource|canvasScene)\(/g)||[]).length,6);
+  let previous=source;
+  for(const name of ['request','filesDevtools']){
+    const fn=declarations.find(declaration=>declaration.id.name===name).init,first=fn.body.body[0];
+    assert.equal(fn.async,true);assert.equal(first.type,'IfStatement');assert.equal(first.consequent.type,'ReturnStatement');assert.equal(first.consequent.argument.type,'AwaitExpression');
+    const at=first.consequent.argument.start;assert.equal(source.slice(at,at+6),'await ');
+    previous=previous.slice(0,at)+previous.slice(at+6);
+  }
+  assert.equal(transform(previous,'workspace-prior.js').originalSHA,'5ac03d6f62b8d99373d0a214cf739a3eb4b60121ca6bc3fe2cfdad7dd55d5942','Reversing only two awaits must restore the exact prior module, including every legacy branch byte');
+});
+test('devtools remaining tails pure: actual routes preserve delayed result and rejection identity',async()=>{
+  const source=await fixtureSource('workspace'),ast=parse(source,{ecmaVersion:'latest',sourceType:'module'});
+  for(const name of ['filesDevtools','request'])for(const rejects of [false,true]){
+    const fn=ast.body.find(node=>node.type==='VariableDeclaration'&&node.declarations[0].id.name===name).declarations[0].init;
+    const sentinel={name},failure=new Error(name),events=[],root={querySelector:selector=>{assert.equal(selector,'[data-ws-devtools-source]');return true;}},actions=[];let release;
+    const pending=new Promise((resolve,reject)=>{release=()=>rejects?reject(failure):resolve(sentinel);});
+    const route=compileFunction(`return (${source.slice(fn.start,fn.end)});`,['devtoolsSource'])(context=>{assert.equal(context.root,root);assert.equal(context.actions,actions);events.push('helper');return pending;});
+    const result=route({root,actions}).then(value=>{assert.equal(value,sentinel);events.push('returned');},error=>{assert.equal(error,failure);events.push('rejected');});
+    await Promise.resolve();assert.deepEqual(events,['helper']);release();await result;
+    assert.deepEqual(events,['helper',rejects?'rejected':'returned']);
+  }
+});
+test('devtools remaining tails pure: absent host keeps actual legacy branch and error identity',async()=>{
+  const source=await fixtureSource('workspace'),ast=parse(source,{ecmaVersion:'latest',sourceType:'module'});
+  for(const name of ['filesDevtools','request']){
+    const fn=ast.body.find(node=>node.type==='VariableDeclaration'&&node.declarations[0].id.name===name).declarations[0].init;
+    const current=source.slice(fn.start,fn.end),old=current.replace('return await devtoolsSource({root,actions});','return devtoolsSource({root,actions});');
+    const events=[],failure=new Error('legacy '+name),dataset={};Object.defineProperty(dataset,'elyKind',{get(){events.push('legacy');throw failure;}});
+    const root={dataset,querySelector:selector=>{assert.equal(selector,'[data-ws-devtools-source]');events.push('absent-host');return false;}};
+    for(const body of [old,current]){
+      events.length=0;
+      const route=compileFunction(`return (${body});`,['devtoolsSource'])(()=>assert.fail('Absent source host must not delegate'));
+      await assert.rejects(()=>route({root,actions:[]}),error=>error===failure);
+      assert.deepEqual(events,['absent-host','legacy']);
+    }
+  }
+});
+test('devtools remaining tails pure: each awaited route seals capture and each old tail stays unsupported',async()=>{
+  for(const name of ['filesDevtools','request'])for(const rejects of [false,true]){
+    const source=`
+      const sentinel={},failure=new Error('helper rejected');
+      globalThis.__visualCheckpoint=async()=>{events.push('capture-start');await Promise.resolve();events.push('capture-end');};
+      const devtoolsSource=async()=>{target.click();events.push('helper-complete');${rejects?'throw failure;':'return sentinel;'}};
+      const ${name}=async({root,actions})=>{if(root.querySelector('[data-ws-devtools-source]'))return await devtoolsSource({root,actions});};
+      const root={querySelector:()=>true};
+      try{const result=await ${name}({root,actions:[]});assert(result===sentinel);events.push('returned');}catch(error){assert(error===failure);events.push('rejected');}
+    `;
+    const original=await execute(source),result=transform(source,name+'-awaited.js');
+    assert.equal(result.unsupported.length,0);assert.equal(result.interactionSites.length,1);
+    assert.deepEqual(await execute(result.source),['before:click','click','capture-start','capture-end','helper-complete',rejects?'rejected':'returned']);
+    const old=transform(source.replace('return await devtoolsSource','return devtoolsSource'),name+'-old.js');
+    assert.equal(old.interactionSites.length,0);assert(old.unsupported.some(site=>site.siteId));assert.deepEqual(await execute(old.source),original);
+  }
+});
+test('workspace all four devtools callers and canvas keep exactly six explicit async source tail awaits',async()=>{
   const source=await readFile(new URL('../../../../internal/gallery/assets/advanced-workspace-checks.js',import.meta.url),'utf8');
   const domain=source.slice(source.indexOf('const domain = async '),source.indexOf('const domain = async ')+350);
   assert.match(domain,/return await devtoolsSource\(\{root,actions\}\);/);
   assert.match(domain,/return await canvasScene\(\{root,actions\}\);/);
-  assert.equal((source.match(/return await (?:devtoolsSource|canvasScene)\(/g)||[]).length,4);
+  assert.equal((source.match(/return await (?:devtoolsSource|canvasScene)\(/g)||[]).length,6);
   assert.match(source,/const canvas = async [\s\S]*?return await canvasScene\(\{root,actions\}\);/);
   assert.match(source,/const code = async [\s\S]*?return await devtoolsSource\(\{root,actions\}\);/);
 });
