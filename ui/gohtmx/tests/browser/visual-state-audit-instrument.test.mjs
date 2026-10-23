@@ -963,12 +963,20 @@ test('switch literal flow pure: terminal break cannot hide prefix abrupt complet
     assert(result.mappingGaps.some(gap=>gap.reason==='conservative-control-flow-boundary'),'Selected case cannot waive a nested boundary gap');
   }
 });
-test('switch literal flow pure: ArchiveViewer exact sites reject unknown kind extra and missing actions',async()=>{
+test('switch literal flow pure: ArchiveViewer exact sites reject unknown kind extra and missing actions',async t=>{
   const source=await fixtureSource('workspace'),contract=caseActionContract('files/ArchiveViewer',source,'workspace.js');
   assert.deepEqual(contract.mappingGaps,[]);
   assert.deepEqual(contract.steps.map(step=>[step.source.owner,step.source.method,step.source.event]),[['domain','click','click'],['domain','dispatchEvent','keydown']]);
-  const unknown=caseActionContract('files/ArchiveViewer',source.replace('switch(kind)','switch(unreviewedKind)'),'workspace.js');
-  assert(unknown.mappingGaps.some(gap=>gap.reason==='conservative-control-flow-boundary'));
+  const oldMutation=caseActionContract('files/ArchiveViewer',source.replace('switch(kind)','switch(unreviewedKind)'),'workspace.js');
+  assert.deepEqual(oldMutation.mappingGaps,[],'The previous mutation changed the unreachable devtoolsSource switch, not the ArchiveViewer domain switch');
+  const domainStart=source.indexOf('const domain = async ');assert(domainStart>=0);
+  const domain=source.slice(domainStart);assert.equal(domain.split('switch(kind)').length,2);
+  const changedDomain=domain.replace('switch(kind)','switch(unreviewedKind)');
+  const changedSource=source.slice(0,domainStart)+changedDomain;
+  assert.equal(changedSource.replace('switch(unreviewedKind)','switch(kind)'),source,'Only the selected domain discriminant may change');
+  const unknown=caseActionContract('files/ArchiveViewer',changedSource,'workspace.js');
+  t.diagnostic(JSON.stringify({previousUnreachableMutationGaps:oldMutation.mappingGaps,selectedDomainMutationGaps:unknown.mappingGaps}));
+  assert(unknown.mappingGaps.some(gap=>gap.reason==='conservative-control-flow-boundary'&&gap.boundary==='SwitchStatement'&&gap.line===418),JSON.stringify(unknown.mappingGaps));
   for(const changed of [source.replace('folder.click();','folder.click();folder.click();'),source.replace('folder.click();','')])assert(caseActionContract('files/ArchiveViewer',changed,'workspace.js').mappingGaps.length>0);
 });
 test('maps only ArchiveViewer branch and called helpers; rejects new or missing exact actions',async()=>{
