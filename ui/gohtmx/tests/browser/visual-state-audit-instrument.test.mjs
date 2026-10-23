@@ -8,7 +8,7 @@ import {join} from 'node:path';
 import {chromium} from 'playwright';
 import {compileFunction,runInNewContext} from 'node:vm';
 import {parse} from 'acorn';
-import {caseActionContract,requestedStateContract,runRequestedStateActions,runRegisteredCanvasActions,assertRegisteredCanvasTransition,assertVerticalRangeSnapshot,clickVisibleControl,ownedOverlayInventory,captureTargetPNG,inventoryReceipt,inventoryDrift,unhandledBrowserErrors,assertThreewayState,threewaySourcePins,threewayCleanup,activeOutlineBounds} from './visual-state-audit-drivers.mjs';
+import {caseActionContract,requestedStateContract,runRequestedStateActions,runRegisteredCanvasActions,assertRegisteredCanvasTransition,assertVerticalRangeSnapshot,clickVisibleControl,ownedOverlayInventory,captureTargetPNG,inventoryReceipt,inventoryDrift,unhandledBrowserErrors,assertThreewayState,threewaySourcePins,threewayCleanup,activeOutlineBounds,lastPaintedLicenseFragment} from './visual-state-audit-drivers.mjs';
 
 test('hidden action shim style exits before outline color parsing',()=>{
   const bounds={clip:{x:0,y:0,width:10,height:10}},active={},node={contains:candidate=>candidate===active};
@@ -1386,6 +1386,18 @@ test('license direct pure: exact identity ten bounded steps and capture cap',()=
   assert.deepEqual(contract.steps.map(step=>step.id),['inspect-license','pick-inter','next-jetbrains','wrap-first','wrap-last','home-first','next-lucide','end-last','scroll-license-horizontal','scroll-license-text']);
   assert.equal(contract.steps.length*2*contract.captureLimits.totalRows,100);assert.equal(contract.captureLimits.totalPNGs,200);assert.equal(contract.captureLimits.wheelAttemptsPerAxis,6);
   for(const identity of ['misc/LicenseViewerExtra','misc/Licenses','misc/Changelog'])assert.equal(requestedStateContract(identity),null);
+});
+test('license endpoint pure: skip only zero-area trailing fragments and keep the last painted line fully clipped',()=>{
+  const rect=(left,top,right,bottom)=>({left,top,right,bottom,width:right-left,height:bottom-top}),clip={left:0,top:0,right:100,bottom:100};
+  const painted=rect(80,90,96,98),terminalNewline=rect(96,98,96,98);
+  assert.deepEqual(lastPaintedLicenseFragment([painted,terminalNewline],clip),{rect:painted,visible:true});
+  const clippedLastLine=rect(96,90,104,98);
+  assert.deepEqual(lastPaintedLicenseFragment([painted,clippedLastLine,terminalNewline],clip),{rect:clippedLastLine,visible:false},'A clipped last painted fragment cannot fall back to an earlier visible fragment');
+  assert.deepEqual(lastPaintedLicenseFragment([terminalNewline,rect(10,10,10,20)],clip),{rect:null,visible:false},'No positive-area painted range fragment is a failure');
+  assert.deepEqual(lastPaintedLicenseFragment([rect(10,10,10,20)],clip),{rect:null,visible:false},'Whitespace-only zero-width lines are not painted evidence');
+  assert.deepEqual(lastPaintedLicenseFragment([],clip),{rect:null,visible:false},'Empty/all-whitespace content cannot silently pass');
+  assert.deepEqual(lastPaintedLicenseFragment([painted],clip,false),{rect:null,visible:false},'Whitespace-only content cannot pass merely because layout reports a positive-area box');
+  assert.deepEqual(lastPaintedLicenseFragment([rect(-2,20,8,30)],clip),{rect:rect(-2,20,8,30),visible:false},'Positive-area fragments must retain full-width viewport containment');
 });
 test('license direct pure: independent complete fixture and event-shaped state negatives',async()=>{
   const items=JSON.parse(await readFile(new URL('../../../../internal/gallery/assets/native-misc-fixtures.json',import.meta.url),'utf8')).LicenseViewer.Items;
