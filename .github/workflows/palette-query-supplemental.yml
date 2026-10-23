@@ -33,7 +33,7 @@ jobs:
       - run: node scripts/palette-query-causal-controls-test.mjs
   supplemental:
     needs: schema
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:

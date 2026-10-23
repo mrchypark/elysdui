@@ -27,7 +27,7 @@ jobs:
       - run: npm run build:css
       - run: git diff --exit-code ui/gohtmx/assets/app.css
   browser:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -67,7 +67,7 @@ jobs:
             test-results/contracts/
           if-no-files-found: error
   static-pages:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5

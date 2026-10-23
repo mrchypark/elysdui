@@ -7,7 +7,7 @@ on:
     paths: ['ui/gohtmx/**', 'adapters/gohtmx/**', 'sdui/**', 'scripts/palette-*.mjs', 'package*.json', '.github/workflows/palette-activation.yml']
 jobs:
   activation:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
