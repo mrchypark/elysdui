@@ -107,14 +107,18 @@ test('masked empty leaves are trimmed only by proven ancestor overflow clips',{
       </style><div data-audit-main><section class="root" id="owned-root" data-ely-family="fixture"><article id="owned-panel">owned panel</article></section></div><div data-audit-twin><section class="root" id="twin-root" data-ely-family="fixture"><div class="scrollport"><span id="masked-leaf"></span></div></section></div>`);
       return page.locator('#owned-panel').evaluate(captureForeignPaint,{clip:{x:0,y:0,width:220,height:100},checkedRootID:'owned-root'});
     };
-    const clipped=await capture();
+    const pixelClip={x:105,y:25,width:30,height:25};
+    const clipped=await capture({scrollMargin:110});
     assert.deepEqual(clipped.foreignDOMIntersections,[],'An empty masked leaf wholly outside an ordinary ancestor scrollport is clipped before intersection');
+    const clippedPixels=await screenshotWithoutCaretMutation(page,{clip:pixelClip,animations:'disabled',scale:'css'});
     const visible=await capture({leafTop:0});
     assert(visible.foreignDOMIntersections.some(peer=>peer.id==='twin-root'),'Visible masked pixels remain a foreign witness');
     const protruding=await capture({scrollWidth:20,scrollMargin:70,leafTop:0,leafWidth:40});
     assert(protruding.foreignDOMIntersections.some(peer=>peer.id==='twin-root'),'A partially visible masked box protruding beyond its scrollport remains blocking');
-    const noClip=await capture({overflow:'visible'});
+    const noClip=await capture({overflow:'visible',scrollMargin:110});
     assert(noClip.foreignDOMIntersections.some(peer=>peer.id==='twin-root'),'Without an ancestor clip the original masked bounds remain blocking');
+    const visibleOverflowPixels=await screenshotWithoutCaretMutation(page,{clip:pixelClip,animations:'disabled',scale:'css'});
+    assert.notDeepEqual(clippedPixels,visibleOverflowPixels,'An independent raster comparison sees masked paint only when the ancestor overflow clip is removed');
     const noClipMask=await capture({leafTop:0,maskClip:'no-clip'});
     assert(noClipMask.foreignDOMIntersections.some(peer=>peer.id==='twin-root'),'A mask whose clip is not border-box remains unproven');
     const fixed=await capture({leafStyle:'position:fixed;left:10px;top:10px',leafTop:0});
@@ -128,7 +132,8 @@ test('opaque panel subtracts only covered foreign paint with provably inactive s
   const browser=await chromium.launch({executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH||undefined});
   try{
     const page=await browser.newPage({viewport:{width:240,height:120}});
-    const capture=async({parentDisplay='block',chipStyle='position:static;z-index:1;overflow:hidden',ownerStyle='',pseudoStyle='',left=10,width=60}={})=>{
+    const twinMarkup='<div data-audit-twin><section class="root" id="twin-root" data-ely-family="fixture"><div class="chip-parent"><button id="foreign-chip">foreign chip</button></div></section></div>';
+    const capture=async({parentDisplay='block',chipStyle='position:static;z-index:1;overflow:hidden',ownerStyle='',pseudoStyle='',left=10,width=60,includeTwin=true}={})=>{
       await page.setContent(`<style>
         body{margin:0}[data-audit-main],[data-audit-twin]{position:absolute;inset:0}
         .root{position:relative;width:220px;height:100px}
@@ -136,21 +141,30 @@ test('opaque panel subtracts only covered foreign paint with provably inactive s
         .chip-parent{display:${parentDisplay};width:220px;height:80px}
         #foreign-chip{position:static;width:${width}px;height:20px;margin:0 0 0 ${left}px;padding:0;border:0;background:#c22;${chipStyle}}
         #foreign-chip::after{${pseudoStyle}}
-      </style><div data-audit-main><section class="root" id="owned-root" data-ely-family="fixture"><article id="owned-panel">owned panel</article></section></div><div data-audit-twin><section class="root" id="twin-root" data-ely-family="fixture"><div class="chip-parent"><button id="foreign-chip">foreign chip</button></div></section></div>`);
+      </style><div data-audit-main><section class="root" id="owned-root" data-ely-family="fixture"><article id="owned-panel">owned panel</article></section></div>${includeTwin?twinMarkup:''}`);
       return page.locator('#owned-panel').evaluate(captureForeignPaint,{clip:{x:0,y:0,width:220,height:100},checkedRootID:'owned-root'});
     };
+    const pixelClip={x:0,y:0,width:100,height:60};
+    await capture({includeTwin:false});
+    const ownerOnlyPixels=await screenshotWithoutCaretMutation(page,{clip:pixelClip,animations:'disabled',scale:'css'});
     const covered=await capture();
     assert.deepEqual(covered.foreignDOMIntersections,[],'Static z-index under a computed block parent is inactive; node overflow can only shrink its covered paint');
     assert(covered.occludedForeignPaint.some(peer=>peer.id==='twin-root'));
+    const coveredPixels=await screenshotWithoutCaretMutation(page,{clip:pixelClip,animations:'disabled',scale:'css'});
+    assert.deepEqual(coveredPixels,ownerOnlyPixels,'The independently captured owner panel pixels are unchanged by fully covered static foreign paint');
     const clippedStaticDot=await capture({pseudoStyle:'content:"";display:inline-block;width:8px;height:8px;background:#c22'});
     assert.deepEqual(clippedStaticDot.foreignDOMIntersections,[],'A static in-flow pseudo dot clipped by its own button stays within the covered button box');
     assert(clippedStaticDot.occludedForeignPaint.some(peer=>peer.id==='twin-root'));
+    const staticDotPixels=await screenshotWithoutCaretMutation(page,{clip:pixelClip,animations:'disabled',scale:'css'});
+    assert.deepEqual(staticDotPixels,ownerOnlyPixels,'A static clipped pseudo dot adds no pixels above the opaque owner panel');
     const extendedClipPseudo=await capture({chipStyle:'position:static;z-index:1;overflow:clip;overflow-clip-margin:40px',pseudoStyle:'content:"";display:inline-block;width:120px;height:40px;background:red'});
     assert(extendedClipPseudo.foreignDOMIntersections.some(peer=>peer.id==='twin-root'),'A nonzero overflow-clip-margin lets static pseudo paint escape its button box');
     assert.deepEqual(extendedClipPseudo.occludedForeignPaint,[],'A clip margin outside the raw paint bound blocks opaque subtraction');
     const escapingPseudo=await capture({pseudoStyle:'content:"";position:absolute;z-index:10;top:10px;left:10px;width:60px;height:20px;background:red'});
     assert(escapingPseudo.foreignDOMIntersections.some(peer=>peer.id==='twin-root'),'A positioned high-z pseudo escapes the static chip overflow clip and remains foreign evidence');
     assert.deepEqual(escapingPseudo.occludedForeignPaint,[],'The pseudo-element stacking counterexample blocks opaque subtraction');
+    const escapingPseudoPixels=await screenshotWithoutCaretMutation(page,{clip:pixelClip,animations:'disabled',scale:'css'});
+    assert.notDeepEqual(escapingPseudoPixels,ownerOnlyPixels,'The independent raster sees the high-z pseudo painted above the owner panel');
     for(const [label,style,parentDisplay]of [
       ['lower active flex-item z-index','z-index:1;overflow:hidden','flex'],
       ['equal active grid-item z-index','z-index:5;overflow:hidden','grid'],
