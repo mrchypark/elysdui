@@ -112,7 +112,7 @@ test('foreign paint clip source: only plain flow ancestors may trim measured pai
   assert(guard.includes('for(let p=element;p;p=p.parentElement)')&&guard.includes('if(p===element&&!text)continue'),'Positioned painted elements must remain conservative without clipping their own border box');
   assert(guard.includes("!['static','relative'].includes(position)"),'Absolute, fixed and sticky descendants keep raw paint bounds');
   assert(guard.includes("p.matches(':modal,:popover-open')"),'Top-layer ancestors keep raw paint bounds');
-  for(const unsupported of ['s.transform!==\'none\'','s.filter!==\'none\'','s.maskImage!==\'none\'','s.clipPath!==\'none\'','s.overflowClipMargin!==\'0px\''])assert(compact.includes(unsupported),`${unsupported} must remain conservative`);
+  for(const unsupported of ['s.transform!==\'none\'','s.filter' + '!==\'none\'','s.maskImage!==\'none\'','s.clipPath!==\'none\'','s.overflowClipMargin!==\'0px\''])assert(compact.includes(unsupported),`${unsupported} must remain conservative`);
   for(const longhand of ['s.translate!==\'none\'','s.rotate!==\'none\'','s.scale!==\'none\''])assert(compact.includes(longhand),`${longhand} must keep raw paint bounds`);
   assert(guard.includes('r.right+scrollX')&&guard.includes('r.bottom+scrollY')&&!guard.includes('clientLeft')&&!guard.includes('clientTop')&&!guard.includes('clientWidth')&&!guard.includes('clientHeight'),'Fractional clips use conservative border-box bounds, not rounded client metrics');
   assert(!guard.includes('borderTopLeftRadius'),'Rounded overflow clips use their rectangular padding-box over-approximation');
