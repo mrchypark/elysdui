@@ -172,6 +172,54 @@ test('phase2 source-only PIN requires exact four-event native/runtime sequence, 
   }
 });
 
+test('phase2 source-only map zoom derives exact projection while reset retains exact seed and event cardinality',async()=>{
+  const contract=basicActionContract('basic/map-view'),id='basic-map-view-main',center='37.5665, 126.9780';
+  // Independently pinned binary64 result for two centered Mercator round trips, not a browser-event read.
+  const projected={latitude:37.566500000000005,longitude:126.97800000000007,zoom:2};
+  for(const defect of [null,'latitude','longitude','zoom','id','component','value','reset-projected','reset-zoom','reset-missing','reset-duplicate','oversized','clamped']){
+    const state={__basicEvents:[],__basicCursor:0};let zoom=1,active='zoom',completed=0;
+    const detail=(reset=false)=>({action:'change-viewport',viewport:reset?{latitude:37.5665,longitude:126.978,zoom:1}:{...projected},value:center,id,component:'maps/MapView'});
+    const emit=reset=>{
+      const payload=detail(reset);
+      if(!reset){
+        if(defect==='latitude')payload.viewport.latitude+=1e-10;
+        if(defect==='longitude')payload.viewport.longitude+=1e-10;
+        if(defect==='zoom')payload.viewport.zoom=3;
+        if(defect==='id')payload.id='basic-map-view-twin';
+        if(defect==='component')payload.component='maps/MapPopup';
+        if(defect==='value')payload.value='0.0000, 0.0000';
+      }else{
+        if(defect==='reset-projected')payload.viewport={...projected,zoom:1};
+        if(defect==='reset-zoom')payload.viewport.zoom=2;
+      }
+      state.__basicEvents=reset&&defect==='reset-missing'?[]:[{type:'ely:action',detail:payload}];
+      if(reset&&defect==='reset-duplicate')state.__basicEvents.push(structuredClone(state.__basicEvents[0]));
+    };
+    const map={getAttribute:async key=>({'data-map-zoom':String(zoom),'data-map-center':center,id,'data-map-latitude':'37.5665','data-map-longitude':'126.978'})[key]};
+    const canvas={evaluate:async fn=>fn.toString().includes('clientHeight')?(defect==='oversized'?1025:defect==='clamped'?1000:360):active==='canvas'};
+    const plus={click:async()=>{zoom=2;active='zoom';emit(false);},evaluate:async()=>active==='zoom'};
+    const stop=new Error('stop before unrelated marker actions');
+    const root={page:()=>({keyboard:{press:async key=>{if(key==='Shift+Tab'){active='canvas';return;}assert.equal(key,'0');zoom=1;emit(true);}}}),evaluate:async fn=>fn(state),locator:selector=>{
+      if(selector==='[data-ui-component="map-view"]')return map;
+      if(selector==='[data-map-canvas]')return canvas;
+      if(selector==='[data-map-zoom="in"]')return plus;
+      if(selector==='[data-map-zoom="reset"]')return {count:async()=>0};
+      throw new Error('Unexpected locator '+selector);
+    }};
+    const execute=()=>runBasicActions(contract,root,async(action,selector,act,verify)=>{
+      if(completed===2)throw stop;
+      assert.equal(action,['zoom-in','reset-view'][completed]);state.__basicCursor=0;
+      await act();await verify();completed++;
+    });
+    await assert.rejects(execute,error=>defect?error!==stop:error===stop,defect??'positive');
+    if(!defect)assert.equal(completed,2);
+  }
+  // A successful map payload cannot make an independently changed twin safe.
+  const result={initialTwinSHA256:'a'.repeat(64),receipts:[{beforeCaptureOwnership:{ownedStateEvidence:true}}]};
+  await retainBasicFailureEvidence(result,new Error('map twin drift'),async()=>'b'.repeat(64),async()=>({ownedStateEvidence:true}));
+  assert.equal(result.status,'failed');assert.equal(result.failureEvidence.gaps.length,2);
+});
+
 test('phase2 source-only textarea uses explicit native newline edits with exact intermediate events and blur commit',async()=>{
   const contract=basicActionContract('basic/textarea');assert.deepEqual(contract.steps.map(s=>s.id),['edit','commit']);
   for(const defect of [null,'wrong-intermediate','untrusted','wrong-input-type','wrong-data','missing-final','extra-input','early-change','wrong-final-value','missing-commit','wrong-commit']){

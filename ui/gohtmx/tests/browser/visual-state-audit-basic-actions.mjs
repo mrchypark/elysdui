@@ -306,7 +306,19 @@ export async function runBasicActions(contract,root,runStep){
     assert.equal(zoom,1,'Canonical missing Zoom uses the existing source default1');assert.equal(center,'37.5665, 126.9780');
     assert.equal(await one('[data-map-zoom="reset"]').count(),0,'Canonical ShowReset is absent; do not fabricate a Reset button');
     const action=async name=>{const events=await nativeTypes(['ely:action']);assert.equal(events[0].detail.action,name);assert.equal(events[0].detail.id,mapID);assert.equal(events[0].detail.component,'maps/MapView');return events[0].detail;};
-    await step('zoom-in','[data-map-zoom="in"]',()=>one('[data-map-zoom="in"]').click(),async()=>{assert.equal(Number(await map.getAttribute('data-map-zoom')),zoom+1);const detail=await action('change-viewport');assert.deepEqual(detail,{action:'change-viewport',viewport:{latitude:37.5665,longitude:126.978,zoom:2},value:center,id:mapID,component:'maps/MapView'});});
+    const latitude=Number(await map.getAttribute('data-map-latitude')),longitude=Number(await map.getAttribute('data-map-longitude'));
+    assert.equal(latitude,37.5665);assert.equal(longitude,126.978);
+    const height=await one('[data-map-canvas]').evaluate(node=>node.clientHeight),side=256*2**(zoom+1);
+    assert(height>0&&height<=side,'Centered zoom fixture requires a positive non-oversized canvas');
+    // Centered zoomAbout then panCenter perform two Mercator round trips; derive before observing events.
+    let expectedLatitude=latitude,expectedLongitude=longitude;
+    for(let pass=0;pass<2;pass++){
+      const phi=expectedLatitude*Math.PI/180,x=(expectedLongitude+180)/360,y=(1-Math.asinh(Math.tan(phi))/Math.PI)/2;
+      if(pass===1){const half=height/side/2;assert(y>=half&&y<=1-half,'Centered zoom fixture must not clamp its latitude');}
+      expectedLatitude=Math.atan(Math.sinh(Math.PI*(1-2*y)))*180/Math.PI;
+      expectedLongitude=(((x%1)+1)%1)*360-180;
+    }
+    await step('zoom-in','[data-map-zoom="in"]',()=>one('[data-map-zoom="in"]').click(),async()=>{assert.equal(Number(await map.getAttribute('data-map-zoom')),zoom+1);const detail=await action('change-viewport');assert.deepEqual(detail,{action:'change-viewport',viewport:{latitude:expectedLatitude,longitude:expectedLongitude,zoom:2},value:center,id:mapID,component:'maps/MapView'});});
     await step('reset-view','[data-map-canvas]',async()=>{assert.equal(await one('[data-map-zoom="in"]').evaluate(n=>n===document.activeElement),true);await page.keyboard.press('Shift+Tab');assert.equal(await one('[data-map-canvas]').evaluate(n=>n===document.activeElement),true,'Native Shift+Tab from Zoom in must reach the focusable map canvas');await page.keyboard.press('0');},async()=>{assert.equal(await one('[data-map-canvas]').evaluate(n=>n===document.activeElement),true);assert.equal(Number(await map.getAttribute('data-map-zoom')),zoom);assert.equal(await map.getAttribute('data-map-center'),center);const detail=await action('change-viewport');assert.deepEqual(detail,{action:'change-viewport',viewport:{latitude:37.5665,longitude:126.978,zoom:1},value:center,id:mapID,component:'maps/MapView'});});
     await step('select-marker','[data-map-markers] [data-map-point]',()=>one('[data-map-markers] [data-map-point]').click(),async()=>{assert.equal(await one('[data-map-popup]').isVisible(),true);const detail=await action('select-marker');assert.deepEqual(detail,{action:'select-marker',key:'Caller Seoul',value:'seoul',latitude:37.5665,longitude:126.978,id:mapID,component:'maps/MapView'});});
     await step('close-popup','[data-map-close]',()=>one('[data-map-close]').click(),async()=>{assert.equal(await one('[data-map-popup]').isVisible(),false);const detail=await action('close-map-popup');assert.deepEqual(detail,{action:'close-map-popup',key:'Caller Seoul',id:mapID,component:'maps/MapView'});});
