@@ -1,11 +1,14 @@
 package dev.ely.nativeprofile
 
 import android.graphics.Bitmap
+import android.accessibilityservice.AccessibilityServiceInfo
+import android.os.SystemClock
+import android.view.KeyEvent
+import android.view.accessibility.AccessibilityWindowInfo
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
-import androidx.test.espresso.Espresso
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import java.io.File
@@ -18,8 +21,10 @@ import org.junit.Assert.assertTrue
 @RunWith(AndroidJUnit4::class)
 class LiveProfileAppTest {
     @get:Rule val compose = createAndroidComposeRule<MainActivity>()
+    private val instrumentation by lazy { InstrumentationRegistry.getInstrumentation() }
+    private val automation by lazy { instrumentation.uiAutomation }
     private val focusedWindow by lazy {
-        FocusedWindowGate(compose.activity, InstrumentationRegistry.getInstrumentation().uiAutomation, ::screenshotDirectory)
+        FocusedWindowGate(compose.activity, automation, ::screenshotDirectory)
     }
 
     @Test fun realAppLoadsValidatesAndSavesThroughGo() {
@@ -49,7 +54,7 @@ class LiveProfileAppTest {
         screenshot("01-ready.png")
 
         compose.onNodeWithTag("display-name").performScrollTo().performClick().performTextClearance()
-        closeKeyboard()
+        closeKeyboard(expectedEditableText = "")
         compose.onNodeWithTag("save-profile").performScrollTo().assertIsDisplayed().performClick()
         val validation = "Use 2 to 60 characters for your display name."
         awaitPhase("server validation") {
@@ -62,7 +67,7 @@ class LiveProfileAppTest {
         screenshot("02-invalid.png")
 
         compose.onNodeWithTag("display-name").performClick().performTextReplacement("  Android Emulator  ")
-        closeKeyboard()
+        closeKeyboard(expectedEditableText = "  Android Emulator  ")
         compose.onNodeWithText(validation).assertDoesNotExist()
         compose.onNodeWithTag("save-profile").performScrollTo().assertIsDisplayed().performClick()
         awaitPhase("canonical save") {
@@ -93,10 +98,56 @@ class LiveProfileAppTest {
         }
     }
 
-    private fun closeKeyboard() {
-        // Hide the real IME without invoking Done, which is an explicit save action.
-        Espresso.closeSoftKeyboard()
-        compose.waitForIdle()
+    private fun closeKeyboard(expectedEditableText: String) {
+        val serviceInfo = requireNotNull(automation.serviceInfo) {
+            "Cannot determine whether the IME is visible: UiAutomation service info is unavailable"
+        }
+        val originalFlags = serviceInfo.flags
+        val retrieveWindows = AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
+        try {
+            if ((originalFlags and retrieveWindows) == 0) {
+                serviceInfo.flags = originalFlags or retrieveWindows
+                automation.setServiceInfo(serviceInfo)
+            }
+
+            val imeWasVisible = hasInputMethodWindow()
+            if (imeWasVisible) {
+                // A single trusted native Back dismisses the IME without invoking IME Done/save.
+                instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
+                val deadline = SystemClock.elapsedRealtime() + 3_000L
+                var imeHidden = false
+                while (SystemClock.elapsedRealtime() < deadline) {
+                    if (!hasInputMethodWindow()) {
+                        imeHidden = true
+                        break
+                    }
+                    SystemClock.sleep(50L)
+                }
+                assertTrue("IME remained visible after one native Back", imeHidden)
+            }
+        } finally {
+            if (serviceInfo.flags != originalFlags) {
+                serviceInfo.flags = originalFlags
+                automation.setServiceInfo(serviceInfo)
+            }
+        }
+
+        val activity = compose.activity
+        assertTrue("Activity is finishing after IME dismissal", !activity.isFinishing)
+        assertTrue("Activity is destroyed after IME dismissal", !activity.isDestroyed)
+        compose.onNodeWithTag("display-name")
+            .assertIsFocused()
+            .assert(SemanticsMatcher.expectValue(
+                SemanticsProperties.EditableText, AnnotatedString(expectedEditableText)))
+    }
+
+    private fun hasInputMethodWindow(): Boolean {
+        val windows = automation.windows
+        return try {
+            windows.any { it.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD }
+        } finally {
+            windows.forEach { it.recycle() }
+        }
     }
 
     private fun screenshotDirectory(): File {
