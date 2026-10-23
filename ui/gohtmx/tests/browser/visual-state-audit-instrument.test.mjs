@@ -6,9 +6,35 @@ import {createHash} from 'node:crypto';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {chromium} from 'playwright';
-import {compileFunction} from 'node:vm';
+import {compileFunction,runInNewContext} from 'node:vm';
 import {parse} from 'acorn';
 import {caseActionContract,requestedStateContract,runRequestedStateActions,runRegisteredCanvasActions,assertRegisteredCanvasTransition,assertVerticalRangeSnapshot,clickVisibleControl,ownedOverlayInventory,captureTargetPNG,inventoryReceipt,inventoryDrift,unhandledBrowserErrors,assertThreewayState,threewaySourcePins,threewayCleanup} from './visual-state-audit-drivers.mjs';
+
+test('popover overlay inventory requires exact identity, root, unique open reference and visible article',()=>{
+  const make=(id,visible=true)=>({id,tagName:'ARTICLE',innerText:'Details',checkVisibility:()=>visible,getBoundingClientRect:()=>({x:0,y:0,width:200,height:120}),getAttribute:()=>null,matches:()=>false,closest:()=>null});
+  const panel=make('owned-panel'),foreign=make('foreign-panel'),triggerFor=({expanded='true',controls='owned-panel'}={})=>({id:'open',getAttribute:name=>name==='aria-expanded'?expanded:name==='aria-controls'?controls:null});
+  const run=({identity='calendar/EventPopover',kind='EventPopover',trigger=triggerFor(),triggers=[trigger],panels=[panel],resolved=panel}={})=>{
+    const root={id:'owned-root',dataset:{elyComponent:identity,elyKind:kind},getAttribute:()=>null,contains:element=>panels.includes(element),querySelectorAll:selector=>{
+      if(selector==='[id]')return [];
+      if(selector==='[aria-controls],[popovertarget],[data-foundation-dialog-open],[data-interaction-dialog],[data-ely-dialog-open]'||selector==='[aria-controls]')return [trigger];
+      if(selector==='[data-calendar-popover-open]')return triggers;
+      if(selector==='article[data-calendar-popover]')return panels;
+      return [];
+    }};
+    const document={querySelectorAll:selector=>selector==='[id]'?(resolved===panel?[panel]:[panel,resolved]):[]};
+    return JSON.parse(JSON.stringify(runInNewContext(`(${ownedOverlayInventory.toString()})(node)`,{node:root,document})));
+  };
+  const accepted=run();assert.equal(accepted.length,1);assert.equal(accepted[0].id,'owned-panel');assert.equal(accepted[0].owned,true);assert.equal(accepted[0].checkedRootID,'owned-root');assert.equal(accepted[0].ownershipScope,'trigger-reference');
+  assert.equal(run({identity:'calendar/Other'}).length,0,'Unrelated component identities cannot add custom articles');
+  assert.equal(run({kind:'CalendarWeekView'}).length,0,'Only exact EventPopover kind is eligible');
+  assert.equal(run({trigger:triggerFor({expanded:'false'})}).length,0,'Closed popovers stay outside the overlay inventory');
+  assert.equal(run({trigger:triggerFor({controls:'foreign-panel'}),resolved:foreign}).length,0,'A foreign panel reference cannot grant ownership');
+  assert.equal(run({resolved:{...foreign,id:'owned-panel'}}).length,0,'An owned article listed before a duplicate ID cannot pass');
+  assert.equal(run({resolved:{...foreign,id:'owned-panel'},panels:[{...panel}]}).length,0,'A duplicate ID resolving after the owned article cannot pass');
+  assert.equal(run({triggers:[triggerFor(),triggerFor()]}).length,0,'Multiple open triggers remain ambiguous');
+  assert.equal(run({panels:[panel,make('hidden-panel',false)]}).length,1,'Hidden extra articles do not make the visible target ambiguous');
+  assert.equal(run({panels:[panel,foreign]}).length,0,'Multiple visible in-root articles remain ambiguous');
+});
 
 test('threeway direct pure: primary identity survives cleanup and diagnostic attachment failures',async()=>{
   const primary=Object.freeze(new Error('before-first-capture')),cleanup=new Error('listener cleanup failed');

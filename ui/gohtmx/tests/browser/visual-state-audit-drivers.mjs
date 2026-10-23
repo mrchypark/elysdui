@@ -1631,16 +1631,30 @@ export function ownedOverlayInventory(node){
   const attributes=['aria-controls','popovertarget','data-foundation-dialog-open','data-interaction-dialog','data-ely-dialog-open'];
   for(const control of [node,...node.querySelectorAll(attributes.map(name=>`[${name}]`).join(','))])for(const attribute of attributes)for(const value of(control.getAttribute(attribute)||'').split(/\s+/))if(value)references.add(value.replace(/^#/,''));
   const selectorAll='dialog[open],:popover-open,[role=dialog],[role=menu],[role=region],[data-ely-portal]';
-  return [...document.querySelectorAll(selectorAll)]
+  const candidates=[...document.querySelectorAll(selectorAll)]
     .filter(element=>{const rect=element.getBoundingClientRect();return rect.width>0&&rect.height>0&&element.checkVisibility({checkOpacity:true,checkVisibilityCSS:true});})
-    .map(element=>{
-      const selector=selectorAll;
+  let calendarPanel=null;
+  if(['calendar/EventPopover','calendar/AttendeeList'].includes(node.dataset.elyComponent)&&node.dataset.elyKind==='EventPopover'){
+    const triggers=[...node.querySelectorAll('[data-calendar-popover-open]')];
+    const references=(triggers[0]?.getAttribute('aria-controls')||'').trim().split(/\s+/).filter(Boolean);
+    const visible=[...node.querySelectorAll('article[data-calendar-popover]')].filter(element=>{
+      const rect=element.getBoundingClientRect();
+      return element.id&&element.checkVisibility({checkOpacity:true,checkVisibilityCSS:true})&&rect.width>0&&rect.height>0;
+    });
+    const matchingIDs=[...document.querySelectorAll('[id]')].filter(element=>element.id===references[0]);
+    if(triggers.length===1&&triggers[0].getAttribute('aria-expanded')==='true'&&references.length===1&&visible.length===1&&visible[0].id===references[0]&&matchingIDs.length===1&&matchingIDs[0]===visible[0]){
+      calendarPanel=visible[0];
+      if(!candidates.includes(calendarPanel))candidates.push(calendarPanel);
+    }
+  }
+  return candidates.map(element=>{
+      const calendar=element===calendarPanel,selector=calendar?'article[data-calendar-popover]:visible':selectorAll;
       const inside=node.contains(element),foreign=element.closest('[data-audit-main]>[data-ely-family],[data-audit-twin]>[data-ely-family],[data-audit-main]>[data-basic-component],[data-audit-twin]>[data-basic-component]')||element.closest('[data-ely-family]');
       const explicitOwner=element.getAttribute('data-ely-owner')?.replace(/^#/,'');
       const scope=foreign&&!inside&&foreign!==node&&!owners.has(foreign.id)?'foreign-component':explicitOwner&&!owners.has(explicitOwner)?'foreign-portal-owner':owners.has(explicitOwner)?'portal-owner-attribute':references.has(element.id)?'trigger-reference':inside&&!element.matches('[role=region]')?'component-root':'unowned';
       const rect=element.getBoundingClientRect();
       return {tag:element.tagName,id:element.id||null,role:element.getAttribute('role'),text:(element.innerText||'').trim().slice(0,180),bounds:{x:rect.x,y:rect.y,width:rect.width,height:rect.height},
-        nativeOpen:element.matches('dialog')?element.open:null,popoverOpen:element.matches(':popover-open'),locatorSelector:selector,locatorIndex:[...document.querySelectorAll(selector)].indexOf(element),
+        nativeOpen:element.matches('dialog')?element.open:null,popoverOpen:element.matches(':popover-open'),locatorSelector:selector,locatorIndex:calendar?0:[...document.querySelectorAll(selector)].indexOf(element),
         ownerID:explicitOwner||null,checkedRootID:node.id,openerReferences:[...node.querySelectorAll('[aria-controls]')].filter(control=>(control.getAttribute('aria-controls')||'').split(/\s+/).includes(element.id)).map(control=>({id:control.id||null,ariaControls:control.getAttribute('aria-controls')})),
         ownershipScope:scope,owned:['component-root','portal-owner-attribute','trigger-reference'].includes(scope)};
     });
