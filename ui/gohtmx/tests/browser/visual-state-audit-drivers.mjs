@@ -389,6 +389,16 @@ export function requestedStateContract(identity,trashFixture){
     const stepId=identity==='misc/IframeEmbed'?'iframe-open-host':'embedcard-open-host',url='https://example.com';
     return {identity,kind:'IframeEmbed',family:'native',requestedStateOnly:true,focusedSequence:'native-embed-open-host',mappingGaps:[],fixtureGuards:{component:identity,kind:'IframeEmbed',url,sourceNote:'Web views need macOS for now.'},steps:[{id:stepId,control:'header button[data-ely-action="open"][data-value="https://example.com"]',expectedState:'One trusted native click emits exactly open with this root ID, alias-preserving component identity, and exact URL; the source note and iframe-free local state remain unchanged.',event:'trusted native Playwright button click; one host request only; no navigation',source:{siteId:`native-state:${identity}:${stepId}`,sourceAnchor:'ui/gohtmx/components.json IframeEmbed/EmbedCard; internal/gallery/assets/native-misc-fixtures.json IframeEmbed; ui/gohtmx/templates/ely-api-native.html IframeEmbed; ui/gohtmx/assets/ely-api.js generic click emitter',provenance:`Exact default native identity ${identity}; EmbedCard keeps its own alias identity; the fixture source note and local state are preserved, with no provider or navigation claim`}}],scope:'One default header-button action for each of the two catalogue identities; no external provider, browser navigation, alias-family, or registered-check approval claim'};
   }
+  const presenceAliases=['collab/PresenceAvatars','collab/LiveIndicator','collab/FollowMode','collab/RemoteSelection','collab/RemoteCursor'];
+  if(presenceAliases.includes(identity)){
+    const steps=[
+      ['presence-follow-ada','[data-ws-follow][value="ada"]','Local follow state selects Ada and shows the following banner; emits one exact follow-user request'],
+      ['presence-stop-button','[data-ws-follow-stop]','Local follow state clears and hides the banner; emits one exact stop-following request'],
+      ['presence-follow-ada-again','[data-ws-follow][value="ada"]','Local follow state selects Ada again; emits one exact follow-user request'],
+      ['presence-stop-escape','[data-ws-follow][value="ada"]','Native Escape clears local follow state and emits one exact stop-following request'],
+    ];
+    return {identity,kind:'PresenceAvatars',family:'workspace',fixtureIdentity:'execution-fixture:collab/PresenceAvatars',behaviorKey:'collab/PresenceAvatars',requestedStateOnly:true,focusedSequence:'workspace-native-presence-follow',mappingGaps:[],fixtureGuards:{component:identity,kind:'PresenceAvatars'},steps:steps.map(([id,control,expectedState])=>({id,control,expectedState,event:id==='presence-stop-escape'?'trusted native Escape key on the focused Ada follow button':'trusted native Playwright button click',source:{siteId:`presence-state:${identity}:${id}`,sourceAnchor:'ui/gohtmx/components.json PresenceAvatars aliases; internal/gallery/advanced_workspace_fixtures.go collab/PresenceAvatars; ui/gohtmx/templates/ely-api-workspace.html ws-presence; ui/gohtmx/assets/ely-api-workspace.js follow/stop/Escape; ui/gohtmx/assets/ely-api.js emit',provenance:`Exact rendered gallery identity ${identity}; shared PresenceAvatars fixture and handler. Following state/banner are local optimistic presentation; events are host requests only, with no provider fulfillment claim.`}})),scope:'Only the five exact collab presence gallery identities and their shared default fixture; four trusted native follow/stop steps per alias, with exact alias identity, unchanged fixture source and independent twin; no provider fulfillment or registered-check approval claim'};
+  }
   if(identity==='layout/Dock')return {identity,kind:'Dock',family:'foundation',requestedStateOnly:true,focusedSequence:'dock-native-actions',mappingGaps:[],fixtureGuards:{component:identity,kind:'Dock'},steps:[
     ['dock-click-files','.ely-foundation__dock-left [data-foundation-dock-tab]:nth-of-type(1)','Native click selects Files in the left zone and updates its local output','trusted native Playwright pointer click'],
     ['dock-click-outline','.ely-foundation__dock-left [data-foundation-dock-tab]:nth-of-type(2)','Native click selects Outline in the left zone and updates its local output','trusted native Playwright pointer click'],
@@ -846,6 +856,36 @@ export function assertEvalLastColumnGeometry({scrollLeft,previousScrollLeft,scro
 }
 
 export async function runRequestedStateActions(contract,root,runStep,failureDiagnostics){
+  if(contract.focusedSequence==='workspace-native-presence-follow'){
+    const {identity,kind}=contract;assert(['collab/PresenceAvatars','collab/LiveIndicator','collab/FollowMode','collab/RemoteSelection','collab/RemoteCursor'].includes(identity));
+    assert.equal(kind,'PresenceAvatars');assert.equal(await root.getAttribute('data-ely-component'),identity);assert.equal(await root.getAttribute('data-ely-kind'),kind);
+    const ada=root.locator('[data-ws-follow][value="ada"]'),stop=root.locator('[data-ws-follow-stop]');assert.equal(await ada.count(),1);assert.equal(await ada.isEnabled(),true);assert.equal(await stop.count(),1);assert.equal(await stop.isEnabled(),true);
+    await root.evaluate(node=>{node.__presenceNativeEvents=[];node.__presenceNativeListener=event=>{if(!['click','keydown'].includes(event.type))return;const target=event.target.closest?.('[data-ws-follow],[data-ws-follow-stop]');if(!target||!node.contains(target))return;node.__presenceNativeEvents.push({type:event.type,trusted:event.isTrusted,key:event.key||null,control:target.matches('[data-ws-follow-stop]')?'stop':target.value});};document.addEventListener('click',node.__presenceNativeListener,true);document.addEventListener('keydown',node.__presenceNativeListener,true);});
+    const read=()=>root.evaluate(node=>{const presence=node.querySelector('[data-ws-presence]'),peers=[...presence.querySelectorAll('[data-ws-follow]')],editor=presence.querySelector('[data-ws-presence-text]');return {id:node.id,component:node.dataset.elyComponent,kind:node.dataset.elyKind,following:presence.dataset.following,peers:peers.map(peer=>({value:peer.value,name:peer.dataset.name,hue:peer.dataset.hue,title:peer.title,hidden:peer.hidden,pressed:peer.getAttribute('aria-pressed')})),bannerHidden:presence.querySelector('[data-ws-follow-banner]').hidden,label:presence.querySelector('[data-ws-follow-label]').textContent,live:presence.querySelector('[data-ws-live]').textContent,sourceText:editor.textContent,selection:[...editor.querySelectorAll('mark')].map(mark=>({text:mark.textContent,hue:mark.dataset.hue,title:mark.title})),cursors:[...editor.querySelectorAll('[data-ws-remote-cursor]')].map(cursor=>({text:cursor.textContent,hue:cursor.dataset.hue,title:cursor.title}))};});
+    let actionOffset=0,nativeOffset=0,fixtureSource=null;
+    const native=()=>root.evaluate(node=>node.__presenceNativeEvents);
+    const sequences=[
+      ['presence-follow-ada','follow','click'],['presence-stop-button','stop','click'],['presence-follow-ada-again','follow','click'],['presence-stop-escape','stop','keydown'],
+    ];
+    try{
+      const initial=await read();assert.equal(initial.following,'');assert(initial.bannerHidden);assert.equal(initial.label,'');assert.deepEqual(initial.peers.map(peer=>peer.value),['ada','grace','alan','mae','tim','joan']);assert(initial.peers.every(peer=>peer.pressed==='false'));
+      fixtureSource={peers:initial.peers.map(({value,name,hue,title,hidden})=>({value,name,hue,title,hidden})),live:initial.live,sourceText:initial.sourceText,selection:initial.selection,cursors:initial.cursors};
+      for(const [id,kind,eventType]of sequences){
+        const click=kind==='follow',expectedFollowing=click?'ada':'',expectedPriorFollowing=click?'':'ada',expectedPayload=click?{id:initial.id,component:identity,action:'follow-user',value:'ada',following:'ada'}:{id:initial.id,component:identity,action:'stop-following'};
+        await runStep(id,async()=>{const current=await read();assert.equal(current.following,expectedPriorFollowing,'Presence action sequence must start from its expected prior local state');return click?ada.click():kind==='stop'?stop.click():ada.press('Escape');},async(state,before)=>{
+          const after=await read(),nativeEvents=await native(),newEvents=nativeEvents.slice(nativeOffset),newActions=state.actions.slice(actionOffset);
+          assert.deepEqual(newEvents,[{type:eventType,trusted:true,key:eventType==='keydown'?'Escape':null,control:kind==='follow'?'ada':'stop'}],`${identity} ${id} must be one trusted native input to the exact control`);nativeOffset+=newEvents.length;
+          assert.deepEqual(newActions,[expectedPayload],`${identity} ${id} emits the exact alias-scoped host request and no extra request`);actionOffset=state.actions.length;
+          assert.equal(after.following,expectedFollowing);assert.deepEqual(after.peers.map(peer=>peer.pressed),after.peers.map(peer=>peer.value===expectedFollowing?'true':'false'));
+          assert.equal(after.bannerHidden,!click);assert.equal(after.label,click?'Following Ada Park':'');
+          assert.deepEqual({peers:after.peers.map(({value,name,hue,title,hidden})=>({value,name,hue,title,hidden})),live:after.live,sourceText:after.sourceText,selection:after.selection,cursors:after.cursors},fixtureSource,'Only local follow presentation may change; fixture peer/document data remains intact');
+          assert.equal(after.id,initial.id);assert.equal(after.component,identity);assert.equal(after.kind,kind);
+          return {identity,following:after.following,pressed:after.peers.filter(peer=>peer.pressed==='true').map(peer=>peer.value),bannerHidden:after.bannerHidden,label:after.label,request:expectedPayload,native:newEvents[0],fixtureSourceUnchanged:true};
+        });
+      }
+    }finally{await root.evaluate(node=>{if(node.__presenceNativeListener){document.removeEventListener('click',node.__presenceNativeListener,true);document.removeEventListener('keydown',node.__presenceNativeListener,true);}delete node.__presenceNativeListener;delete node.__presenceNativeEvents;});}
+    return;
+  }
   if(contract.focusedSequence==='native-embed-open-host'){
     const {identity,kind}=contract,url='https://example.com';assert(['misc/IframeEmbed','misc/EmbedCard'].includes(identity));assert.equal(kind,'IframeEmbed');
     const button=root.locator('header button[data-ely-action="open"][data-value="https://example.com"]');assert.equal(await button.count(),1,'The exact default host-open button must remain present');assert.equal(await button.isEnabled(),true,'The default host-open button must remain enabled');

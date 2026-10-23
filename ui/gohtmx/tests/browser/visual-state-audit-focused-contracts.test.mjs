@@ -53,6 +53,21 @@ test('focused driver does not imply neighboring cases or catalog approval',()=>{
     assert.equal(requestedStateContract(identity),null,`${identity} is outside this focused five-case scope`);
 });
 
+test('five rendered presence aliases keep exact native follow and stop request contracts',async()=>{
+  const identities=['collab/PresenceAvatars','collab/LiveIndicator','collab/FollowMode','collab/RemoteSelection','collab/RemoteCursor'];
+  const steps=['presence-follow-ada','presence-stop-button','presence-follow-ada-again','presence-stop-escape'];
+  for(const identity of identities){
+    const contract=requestedStateContract(identity);assert.equal(contract?.identity,identity);assert.equal(contract.kind,'PresenceAvatars');assert.equal(contract.family,'workspace');assert.equal(contract.behaviorKey,'collab/PresenceAvatars');assert.equal(contract.requestedStateOnly,true);assert.deepEqual(contract.mappingGaps,[]);assert.deepEqual(contract.steps.map(step=>step.id),steps);assert(contract.steps.every(step=>step.source.siteId===`presence-state:${identity}:${step.id}`&&step.source.sourceAnchor.includes('ws-presence')&&step.source.provenance.includes(identity)));
+  }
+  const [driver,template,handler,emitter]=await Promise.all([read('ui/gohtmx/tests/browser/visual-state-audit-drivers.mjs'),read('ui/gohtmx/templates/ely-api-workspace.html'),read('ui/gohtmx/assets/ely-api-workspace.js'),read('ui/gohtmx/assets/ely-api.js')]);
+  assert.match(template,/data-ws-presence data-following="\{\{\.Following\}\}"/);assert.match(template,/data-ws-follow data-ely-action="follow-user" value="\{\{\.ID\}\}"/);assert.match(template,/data-ws-follow-stop/);
+  assert.match(handler,/follow\(following\); emit\(root, 'follow-user', \{value: button\.value, following\}\)/);assert.match(handler,/follow\(''\); emit\(root, 'stop-following', \{\}\)/);assert.match(handler,/if \(presence\?\.dataset\.following\) \{ follow\(''\); emit\(root, 'stop-following', \{\}\); \}/);
+  assert.match(emitter,/detail: \{ \.\.\.detail, id: root\.id, component: root\.dataset\.elyComponent, action \}/);
+  const start=driver.indexOf("if(contract.focusedSequence==='workspace-native-presence-follow')"),end=driver.indexOf("if(contract.focusedSequence==='native-embed-open-host')",start),branch=driver.slice(start,end);
+  assert(start>=0&&end>start);for(const source of [...steps,"ada.click()","stop.click()","ada.press('Escape')","trusted:true","event.isTrusted","assert.deepEqual(newActions,[expectedPayload]","fixtureSource","document.addEventListener('click'","document.addEventListener('keydown'"])assert(branch.includes(source),source);
+  assert.doesNotMatch(branch,/dispatchEvent\(/,'Presence controls use native Playwright activation, not synthetic dispatch');
+});
+
 test('each declared focused sequence has a matching asserted driver path',()=>{
   const driver=runRequestedStateActions.toString();
   for(const id of ['record-shortcut','clear-shortcut','restore-shortcut','fill-name','fill-email','fill-password','accept-terms-label','select-tab','keyboard-select-tab','play-animation','pause-animation','seek-visible-frame','reset-visible-frame'])
