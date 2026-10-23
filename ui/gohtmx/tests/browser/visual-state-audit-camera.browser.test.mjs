@@ -7,7 +7,40 @@ import {createHash} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
 import {chromium} from 'playwright';
 import {captureTargetPNG,screenshotWithoutCaretMutation,ownedOverlayInventory} from './visual-state-audit-drivers.mjs';
+import {captureBounds} from './visual-state-audit-bounds.mjs';
 import {basicOwnedModal,basicModalCaptureTarget} from './visual-state-audit-basic-actions.mjs';
+
+test('camera bounds clip an absolutely positioned map SVG at its canvas but retain visible SVG paint',{
+  skip:process.env.RUN_ACTION_CAMERA_BROWSER!=='1',
+  timeout:30000,
+},async()=>{
+  const browser=await chromium.launch({executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH||undefined});
+  try{
+    const page=await browser.newPage({viewport:{width:900,height:700}});
+    await page.setContent(`<style>
+      body{margin:0}.case{position:relative;width:100px;height:80px;margin:12px}
+      .canvas{position:relative;width:100px;height:80px;overflow:hidden}
+      .canvas svg{position:absolute;inset:0;width:100%;height:100%}
+      .visible-canvas{position:relative;width:100px;height:80px;overflow:visible}
+      .visible-canvas svg{position:absolute;inset:0;width:100%;height:100%;overflow:visible}
+      .fixed-clip{position:relative;width:100px;height:80px;overflow:hidden}
+      .fixed-clip svg{position:fixed;left:150px;top:120px;width:100px;height:80px;overflow:visible}
+      .paint{fill:rgb(220,40,40)}
+    </style>
+    <section class="case" id="map"><div class="canvas"><svg viewBox="0 0 100 80" preserveAspectRatio="none"><rect class="paint" x="-200" y="-20" width="600" height="120"/></svg></div></section>
+    <section class="case" id="visible"><div class="visible-canvas"><svg viewBox="0 0 100 80" preserveAspectRatio="none"><rect class="paint" x="150" y="10" width="250" height="50"/></svg></div></section>
+    <section class="case" id="fixed"><div class="fixed-clip"><svg viewBox="0 0 100 80"><rect class="paint" x="0" y="0" width="100" height="80"/></svg></div></section>`);
+    const clipped=await page.locator('#map').evaluate(captureBounds);
+    assert.deepEqual(clipped.clip,{x:12,y:12,width:100,height:80},'Map-like off-viewBox geometry must not enlarge the target camera beyond the hidden canvas');
+    assert(clipped.clippedCount>0);
+    const visible=await page.locator('#visible').evaluate(captureBounds);
+    assert(visible.clip.width>100,'Visible SVG overflow remains in the painted union instead of being blanket-capped');
+    assert(visible.extendsRoot);
+    const fixed=await page.locator('#fixed').evaluate(captureBounds);
+    assert(fixed.clip.width>100,'Fixed SVG paint escapes a relative overflow-hidden ancestor');
+    assert(fixed.extendsRoot);
+  }finally{await browser.close();}
+});
 
 // Separate explicit grant only: RUN_ACTION_CAMERA_BROWSER=1 node --test <this file>.
 test('action camera tall-page, outline and centered native-modal causal pixels',{

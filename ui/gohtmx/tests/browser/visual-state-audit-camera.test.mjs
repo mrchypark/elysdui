@@ -3,6 +3,7 @@ import {test} from 'node:test';
 import {readFile} from 'node:fs/promises';
 import {runInNewContext} from 'node:vm';
 import {captureTargetPNG,captureForeignPaint,screenshotWithoutCaretMutation,activeOutlineBounds} from './visual-state-audit-drivers.mjs';
+import {captureBounds} from './visual-state-audit-bounds.mjs';
 
 // No Playwright import or browser launch: exercise the real capture function
 // with explicit geometry and a synthetic PNG header, not pixel evidence.
@@ -46,6 +47,43 @@ test('action camera retains document fallback for every partially offscreen pain
     [clip,{x:0,y:63000}],
   ])assert.deepEqual(await capture(candidate,scroll,viewport),{fullPage:true,clip:candidate});
   assert.deepEqual(await capture({x:0,y:64072,width:1440,height:1000},{x:0,y:64072},viewport),{fullPage:false,clip:{x:0,y:0,width:1440,height:1000}});
+});
+
+test('SVG canvas clips only when its absolute viewport parent proves containment',async()=>{
+  const rect=(left,top,right,bottom)=>({left,top,right,bottom});
+  const make=(name,box,parent,style={},options={})=>({localName:name,namespaceURI:options.svg?'http://www.w3.org/2000/svg':'http://www.w3.org/1999/xhtml',parentElement:parent,childNodes:[],offsetParent:options.offsetParent||null,style:{display:'block',visibility:'visible',opacity:'1',contentVisibility:'visible',overflowX:'visible',overflowY:'visible',overflowClipMargin:'0px',position:'static',...style},getBoundingClientRect:()=>box,contains(candidate){for(let node=candidate;node;node=node.parentElement)if(node===this)return true;return false;},querySelectorAll(){return options.descendants||[];}});
+  const evaluate=root=>{
+    return JSON.parse(JSON.stringify(runInNewContext(`(${captureBounds.toString()})(element)`,{element:root,getComputedStyle:node=>node.style,Node:{TEXT_NODE:3},document:{},scrollX:0,scrollY:0,innerWidth:1440,innerHeight:1000})));
+  };
+  const rootBox=rect(0,0,100,80),canvasBox=rect(0,0,100,80),svgBox=rect(0,0,100,80),shapeBox=rect(-200,-20,400,100);
+  const clippedRoot=make('section',rootBox,null,{},{}),canvas=make('div',canvasBox,clippedRoot,{position:'relative',overflowX:'hidden',overflowY:'hidden'}),svg=make('svg',svgBox,canvas,{position:'absolute'}, {svg:true}),shape=make('rect',shapeBox,svg,{},{svg:true});
+  clippedRoot.querySelectorAll=()=>[canvas,svg,shape];
+  const clipped=evaluate(clippedRoot);
+  assert.deepEqual(clipped.clip,{x:0,y:0,width:100,height:80},'Map-like SVG geometry is clipped by its direct positioned canvas, even when SVG offsetParent is absent');
+  assert(clipped.clippedCount>0);
+  svg.offsetParent=clippedRoot;
+  assert.deepEqual(evaluate(clippedRoot).clip,clipped.clip,'A misleading SVG offsetParent cannot override its direct positioned CSS containing block');
+
+  const visibleRoot=make('section',rootBox,null),visibleCanvas=make('div',canvasBox,visibleRoot,{position:'relative'}),visibleSVG=make('svg',svgBox,visibleCanvas,{position:'absolute',overflowX:'visible',overflowY:'visible'},{svg:true}),visibleShape=make('rect',rect(150,10,400,60),visibleSVG,{}, {svg:true});
+  visibleRoot.querySelectorAll=()=>[visibleCanvas,visibleSVG,visibleShape];
+  const visible=evaluate(visibleRoot);
+  assert.equal(visible.clip.width,400,'Visible SVG overflow remains part of the camera union');
+  assert.equal(visible.extendsRoot,true);
+
+  const htmlRoot=make('section',rootBox,null),htmlOverflow=make('div',rect(0,0,100,80),htmlRoot),htmlChild=make('div',rect(150,10,220,60),htmlOverflow);
+  htmlRoot.querySelectorAll=()=>[htmlOverflow,htmlChild];
+  assert.equal(evaluate(htmlRoot).clip.width,220,'Visible normal-flow HTML overflow remains part of the camera union');
+
+  const escapeRoot=make('section',rootBox,null,{position:'relative'}),clip=make('div',rect(0,0,80,80),escapeRoot,{overflowX:'hidden',overflowY:'hidden'}),escapedSVG=make('svg',rect(0,0,100,80),clip,{position:'absolute'},{svg:true,offsetParent:escapeRoot}),escapedShape=make('rect',rect(150,10,220,60),escapedSVG,{}, {svg:true});
+  escapeRoot.querySelectorAll=()=>[clip,escapedSVG,escapedShape];
+  const escaped=evaluate(escapeRoot);
+  assert.equal(escaped.clip.width,220,'An SVG positioned from outside the overflow ancestor retains legitimate escaped paint');
+
+  const fixedRoot=make('section',rootBox,null,{position:'relative'}),fixedClip=make('div',rect(0,0,80,80),fixedRoot,{position:'relative',overflowX:'hidden',overflowY:'hidden'}),fixedSVG=make('svg',rect(150,120,250,200),fixedClip,{position:'fixed',overflowX:'visible',overflowY:'visible'},{svg:true}),fixedShape=make('rect',rect(150,120,250,200),fixedSVG,{}, {svg:true});
+  fixedRoot.querySelectorAll=()=>[fixedClip,fixedSVG,fixedShape];
+  const fixedEscape=evaluate(fixedRoot);
+  assert.equal(fixedEscape.clip.width,250,'Fixed SVG outside a relative overflow clip retains viewport-positioned paint');
+  assert.equal(fixedEscape.extendsRoot,true);
 });
 
 test('action camera matches the frozen baseline rule without importing its executable runner',async()=>{

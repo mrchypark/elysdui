@@ -14,7 +14,11 @@ export function captureBounds(element) {
         let unproven = false;
         for (let positioned = node; positioned && positioned !== ancestor; positioned = positioned.parentElement) {
           if (!['absolute', 'fixed'].includes(getComputedStyle(positioned).position)) continue;
-          const containingBlock = positioned.offsetParent;
+          let containingBlock = positioned.offsetParent;
+          // Some engines do not expose offsetParent for an absolutely positioned
+          // SVG viewport. Its direct positioned HTML parent still proves this
+          // clip relationship; SVG and HTML client rects share viewport coords.
+          if (getComputedStyle(positioned).position === 'absolute' && positioned.namespaceURI === 'http://www.w3.org/2000/svg' && positioned.localName === 'svg' && positioned.parentElement === ancestor && getComputedStyle(ancestor).position !== 'static') containingBlock = ancestor;
           if (!containingBlock || !ancestor.contains(containingBlock)) { unproven = true; break; }
         }
         if (unproven) continue;
