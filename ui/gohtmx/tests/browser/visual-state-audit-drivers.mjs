@@ -283,6 +283,12 @@ export async function runRegisteredCanvasActions(contract,root,runStep){
 
 const settingsTargets={KeyboardShortcutsList:[1,'Keyboard'],ProxySettings:[2,'Network'],PrivacySettings:[3,'Privacy','telemetry'],NotificationSettings:[4,'Notifications','quiet'],StartupSettings:[5,'Startup','login'],StorageSettings:[6,'Storage'],ResetToDefault:[6,'Storage'],AdvancedSettings:[7,'Advanced','developer'],'DeveloperMode Toggle':[7,'Advanced','developer']};
 export function requestedStateContract(identity,trashFixture){
+  if(identity==='misc/LicenseViewer'){
+    const labels=['inspect-license','pick-inter','next-jetbrains','wrap-first','wrap-last','home-first','next-lucide','end-last','scroll-license-horizontal','scroll-license-text'];
+    return {identity,kind:'LicenseViewer',requestedStateOnly:true,focusedSequence:'license-native-selection-scroll',mappingGaps:[],fixtureGuards:{component:identity,kind:'LicenseViewer'},
+      steps:labels.map(id=>({id,control:'[data-misc-licenses]',event:id==='inspect-license'?'passive exact fixture inspection':id.startsWith('scroll-')?'bounded native wheel, at most six attempts':'trusted native click or keyboard',expectedState:'Exact source-pinned package text/events, independent twin, measured local accessibility',source:{siteId:`license-state:${id}`,sourceAnchor:'ely-api-native-misc.js:32; ely-api-native.html:106',provenance:'Only misc/LicenseViewer requested states; no aliases or registered-site approval'}})),
+      captureLimits:{stepsPerRow:10,primaryPerRow:20,viewportContextsPerRow:20,totalRows:5,totalPNGs:200,wheelAttemptsPerAxis:6},scope:'Five independently verified rows only; initial baseline35 separate; no OS, persistence or production CSS approval'};
+  }
   if(identity==='documents/TrashBin'){
     if(!trashFixture)return null;
     assert(['default','empty','longpath'].includes(trashFixture),'Unknown explicit Trash fixture');
@@ -525,6 +531,86 @@ export function assertTrashLayout(observed){
 }
 
 export async function runRequestedStateActions(contract,root,runStep){
+  if(contract.focusedSequence==='license-native-selection-scroll'){
+    assert.equal(contract.identity,'misc/LicenseViewer');
+    assert.equal(await root.getAttribute('data-ely-component'),contract.identity);
+    assert.equal(await root.getAttribute('data-ely-kind'),'LicenseViewer');
+    // Same repository root as the existing actions runner; never an external fallback.
+    const fixtureURL=new URL('../../../../internal/gallery/assets/native-misc-fixtures.json',import.meta.url);
+    const fixture=await inventoryReceipt(fixtureURL),items=fixture.data.LicenseViewer.Items;
+    assert.deepEqual(items.map(item=>[item.Label,item.Version,item.License]),[['Ely GPUI Component','0.1.0','MIT'],['Lucide','1.48.0','ISC'],['Inter','4.1','OFL-1.1'],['JetBrains Mono','2.304','OFL-1.1']]);
+    contract.fixtureReceipt={path:fixtureURL.pathname,sha256:fixture.sha256,contentSource:'independently source-pinned JSON, not matrix or DOM',endingSHA256:null};
+    const id=await root.getAttribute('id'),page=root.page();
+    const snapshot=()=>root.evaluate(node=>{
+      const section=node.querySelector('[data-misc-licenses]'),buttons=[...section.querySelectorAll('[data-misc-license]')],twin=node.closest('[data-audit-name]').querySelector('[data-audit-twin]>[data-ely-family]');
+      if(!twin)throw Error('Independent LicenseViewer twin required');
+      return {buttons:buttons.map(button=>({label:button.dataset.title,version:button.dataset.version,license:button.dataset.license,content:button.dataset.content,pressed:button.getAttribute('aria-pressed')})),title:section.querySelector('[data-license-title]').textContent,license:section.querySelector('[data-license-name]').textContent,content:section.querySelector('pre').textContent,focus:buttons.indexOf(document.activeElement),twin:twin.outerHTML,events:node.__licenseEvents||[],native:node.__licenseNative||[],twinEvents:node.__licenseTwinEvents||[],documentX:scrollX};
+    });
+    const initial=await snapshot();
+    const verifyLicenseSelection = (state,index) => {
+      assert.equal(state.buttons.length,items.length);
+      assert.deepEqual(state.buttons.map(button=>[button.label,button.version,button.license,button.content]),items.map(item=>[item.Label,item.Version,item.License,item.Content]));
+      assert.deepEqual(state.buttons.map(button=>button.pressed),items.map((_item,i)=>String(i===index)));
+      assert.equal(state.title,`${items[index].Label} ${items[index].Version}`);assert.equal(state.license,items[index].License);assert.equal(state.content,items[index].Content);
+      assert.equal(state.twin,initial.twin);assert.deepEqual(state.twinEvents,[]);
+    };
+    verifyLicenseSelection(initial,0);
+    await root.evaluate(node=>{
+      node.__licenseEvents=[];node.__licenseNative=[];node.__licenseTwinEvents=[];
+      const twin=node.closest('[data-audit-name]').querySelector('[data-audit-twin]>[data-ely-family]');node.__licenseTwin=twin;
+      node.__licenseObserver=event=>{
+        if(event.type.startsWith('ely:')){if(event.target===node)node.__licenseEvents.push({type:event.type,detail:{...event.detail}});}
+        else if(event.target.closest?.('[data-misc-license]'))node.__licenseNative.push({type:event.type,key:event.key||null,trusted:event.isTrusted});
+      };
+      node.__licenseTwinObserver=event=>node.__licenseTwinEvents.push(event.type);
+      for(const type of ['ely:change','ely:action','click','keydown']){node.addEventListener(type,node.__licenseObserver,true);twin.addEventListener(type,node.__licenseTwinObserver,true);}
+    });
+    const layout=()=>root.evaluate(node=>{
+      const rect=element=>{const r=element.getBoundingClientRect();return {left:r.left,right:r.right,top:r.top,bottom:r.bottom,width:r.width,height:r.height};};
+      const section=node.querySelector('[data-misc-licenses]'),article=section.querySelector('article'),pre=section.querySelector('pre');
+      const chain=[];for(let current=section;current;current=current.parentElement){const style=getComputedStyle(current);chain.push({tag:current.localName,rect:rect(current),clientWidth:current.clientWidth,scrollWidth:current.scrollWidth,scrollLeft:current.scrollLeft,overflowX:style.overflowX});}
+      const overlays=[...document.querySelectorAll('dialog[open],[role=dialog],[role=menu],[role=listbox]')].filter(element=>{const r=element.getBoundingClientRect(),s=getComputedStyle(element);return r.width>0&&r.height>0&&s.display!=='none'&&s.visibility!=='hidden';});
+      return {section:rect(section),article:rect(article),pre:rect(pre),host:{clientWidth:section.parentElement.clientWidth,paddingLeft:getComputedStyle(section.parentElement).paddingLeft,paddingRight:getComputedStyle(section.parentElement).paddingRight},chain,documentX:scrollX,overlays:overlays.length};
+    });
+    let selected=0;
+    assert.equal((await layout()).overlays,0,'Unexpected overlays block before any capture expansion');
+    try{
+      await runStep('inspect-license',async()=>{const metrics=await layout();assert.equal(metrics.overlays,0,'Unexpected overlay exceeds bounded License capture scope');return metrics;},async()=>{verifyLicenseSelection(await snapshot(),0);return {fixture:contract.fixtureReceipt,layout:await layout()};});
+      const picks=[['pick-inter',2,null],['next-jetbrains',3,'ArrowDown'],['wrap-first',0,'ArrowDown'],['wrap-last',3,'ArrowUp'],['home-first',0,'Home'],['next-lucide',1,'ArrowDown'],['end-last',3,'End']];
+      for(const [label,index,key]of picks){let before;
+        await runStep(label,async()=>{before=await snapshot();assert.equal((await layout()).overlays,0);
+          if(key){assert.equal(before.focus,selected,'Receiving button must retain real native focus');await page.keyboard.press(key);}
+          else await root.locator('[data-misc-license]').nth(index).click();
+          return {method:key?'native keyboard':'non-forced native pointer',key};
+        },async()=>{const state=await snapshot();verifyLicenseSelection(state,index);assert.equal(state.focus,index,'Native activation must focus selected package before next key');assert.equal(state.documentX,before.documentX,'Whole-page horizontal scrolling is not local accessibility proof');
+          assert.deepEqual(state.events.slice(before.events.length),[{type:'ely:change',detail:{id,component:contract.identity,package:items[index].Label}}]);
+          const trace=state.native.slice(before.native.length);assert(trace.some(event=>event.type===(key?'keydown':'click')&&event.trusted&&(!key||event.key===key)));assert(trace.every(event=>event.trusted));assert.equal((await layout()).overlays,0);selected=index;return {selected:index,layout:await layout()};});
+      }
+      for(const axis of ['horizontal','text']){let before,after;
+        await runStep(`scroll-license-${axis}`,async()=>{
+          before=await snapshot();assert.equal((await layout()).overlays,0);
+          const target=await root.evaluate((node,axis)=>{
+            const section=node.querySelector('[data-misc-licenses]');let target=axis==='text'?section.querySelector('pre'):section;
+            if(axis==='horizontal'){while(target&&target!==document.body&&target!==document.documentElement){const s=getComputedStyle(target);if(/^(auto|scroll)$/.test(s.overflowX)&&target.scrollWidth>target.clientWidth)break;target=target.parentElement;}if(target===document.body||target===document.documentElement)target=null;}
+            if(!target)return null;const r=target.getBoundingClientRect();let left=Math.max(0,r.left),right=Math.min(document.documentElement.clientWidth,r.right),top=Math.max(0,r.top),bottom=Math.min(innerHeight,r.bottom);
+            for(let a=target.parentElement;a;a=a.parentElement){const s=getComputedStyle(a),b=a.getBoundingClientRect();if(s.overflowX!=='visible'){left=Math.max(left,b.left+a.clientLeft);right=Math.min(right,b.left+a.clientLeft+a.clientWidth);}if(s.overflowY!=='visible'){top=Math.max(top,b.top+a.clientTop);bottom=Math.min(bottom,b.top+a.clientTop+a.clientHeight);}}
+            if(right<=left||bottom<=top)throw Error('Local scroll target has no visible wheel surface');node.__licenseScrollTarget=target;return {x:(left+right)/2,y:(top+bottom)/2};
+          },axis);
+          const metrics=()=>root.evaluate((node,axis)=>{const target=node.__licenseScrollTarget;if(!target)return null;return {offset:axis==='text'?target.scrollTop:target.scrollLeft,client:axis==='text'?target.clientHeight:target.clientWidth,extent:axis==='text'?target.scrollHeight:target.scrollWidth};},axis);
+          const start=target?await metrics():null;let ending=start,attempts=0;
+          if(target){await page.mouse.move(target.x,target.y);while(ending.offset+ending.client<ending.extent-1&&attempts<6){await page.mouse.wheel(axis==='horizontal'?Math.max(ending.extent,800):0,axis==='text'?Math.max(ending.extent,800):0);attempts++;await page.waitForFunction(({node,axis,offset})=>{const target=node.__licenseScrollTarget;return (axis==='text'?target.scrollTop:target.scrollLeft)>offset;},{node:await root.elementHandle(),axis,offset:ending.offset},{timeout:2000});ending=await metrics();}assert(ending.offset+ending.client>=ending.extent-1,'Bounded native wheel did not reach local endpoint');}
+          after={axis,start,ending,attempts,noLocalScroller:!target};return after;
+        },async()=>{const state=await snapshot();verifyLicenseSelection(state,selected);assert.deepEqual(state.events,before.events);assert.equal(state.documentX,before.documentX);assert.equal((await layout()).overlays,0);
+          const visible=await root.evaluate((node,axis)=>{const element=node.querySelector(axis==='text'?'pre':'[data-license-title]'),range=document.createRange();range.selectNodeContents(element);const rects=[...range.getClientRects()];const r=axis==='text'?rects.at(-1):element.getBoundingClientRect();if(!r)return false;let left=Math.max(0,r.left),right=Math.min(document.documentElement.clientWidth,r.right),top=Math.max(0,r.top),bottom=Math.min(innerHeight,r.bottom);for(let a=element.parentElement;a;a=a.parentElement){const s=getComputedStyle(a),b=a.getBoundingClientRect();if(s.overflowX!=='visible'){left=Math.max(left,b.left+a.clientLeft);right=Math.min(right,b.left+a.clientLeft+a.clientWidth);}if(s.overflowY!=='visible'){top=Math.max(top,b.top+a.clientTop);bottom=Math.min(bottom,b.top+a.clientTop+a.clientHeight);}}return right>left&&bottom>top&&r.left>=left-1&&r.right<=right+1&&r.top>=top-1&&r.bottom<=bottom+1;},axis);
+          assert(visible,'Required detail/last license line not visible through actual clip chain');return {...after,layout:await layout()};});
+      }
+    }finally{
+      const ending=await inventoryReceipt(fixtureURL);contract.fixtureReceipt.endingSHA256=ending.sha256;
+      await root.evaluate(node=>{for(const type of ['ely:change','ely:action','click','keydown']){node.removeEventListener(type,node.__licenseObserver,true);node.__licenseTwin.removeEventListener(type,node.__licenseTwinObserver,true);}delete node.__licenseScrollTarget;});
+      assert.equal(ending.sha256,fixture.sha256,'Independent license fixture drifted during direct proof');
+    }
+    return;
+  }
   if(contract.trashFixture){
     const fixture=contract.trashFixture,empty=fixture==='empty',id=fixture==='longpath'?'deleted-long':'deleted-8';
     const path=fixture==='longpath'?'docs/'+'long-unbroken-path'.repeat(12)+'/caller-notes.md':'docs/retired.md';

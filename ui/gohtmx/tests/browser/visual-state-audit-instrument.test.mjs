@@ -1130,6 +1130,38 @@ test('connected native mask and forms checklist loop sites remain checkpointable
 });
 
 const fixtureSource=family=>readFile(new URL(`../../../../internal/gallery/assets/advanced-${family}-checks.js`,import.meta.url),'utf8');
+test('license direct pure: exact identity ten bounded steps and capture cap',()=>{
+  const contract=requestedStateContract('misc/LicenseViewer');
+  assert.equal(contract.requestedStateOnly,true);assert.equal(contract.kind,'LicenseViewer');
+  assert.deepEqual(contract.steps.map(step=>step.id),['inspect-license','pick-inter','next-jetbrains','wrap-first','wrap-last','home-first','next-lucide','end-last','scroll-license-horizontal','scroll-license-text']);
+  assert.equal(contract.steps.length*2*contract.captureLimits.totalRows,100);assert.equal(contract.captureLimits.totalPNGs,200);assert.equal(contract.captureLimits.wheelAttemptsPerAxis,6);
+  for(const identity of ['misc/LicenseViewerExtra','misc/Licenses','misc/Changelog'])assert.equal(requestedStateContract(identity),null);
+});
+test('license direct pure: independent complete fixture and event-shaped state negatives',async()=>{
+  const items=JSON.parse(await readFile(new URL('../../../../internal/gallery/assets/native-misc-fixtures.json',import.meta.url),'utf8')).LicenseViewer.Items;
+  const initial={twin:'independent twin'},source=runRequestedStateActions.toString();
+  const block=source.match(/const verifyLicenseSelection = \(state,index\) => \{[\s\S]*?\n    \};/)[0];
+  const verify=compileFunction(`${block}\nreturn verifyLicenseSelection`,['assert','items','initial'])(assert,items,initial);
+  const state={buttons:items.map((item,i)=>({label:item.Label,version:item.Version,license:item.License,content:item.Content,pressed:String(i===2)})),title:'Inter 4.1',license:'OFL-1.1',content:items[2].Content,twin:initial.twin,twinEvents:[]};
+  verify(state,2);
+  for(const mutate of [s=>s.content+='x',s=>s.title='Inter',s=>s.buttons[0].pressed='true',s=>s.buttons[2].content='DOM-derived fake',s=>s.twin='changed',s=>s.twinEvents.push('ely:change')]){const broken=structuredClone(state);mutate(broken);assert.throws(()=>verify(broken,2));}
+  assert(source.includes("state.events.slice(before.events.length),[{type:'ely:change',detail:{id,component:contract.identity,package:items[index].Label}}]"));
+  assert(source.includes("assert.deepEqual(state.events,before.events)"));
+  assert(source.includes("assert.equal(ending.sha256,fixture.sha256"));
+  assert(!source.includes('scrollTo('));
+});
+test('license direct pure: actual production key receiver index wrap focus and disabled guard',async()=>{
+  const source=await readFile(new URL('../../assets/ely-api-native-misc.js',import.meta.url),'utf8');
+  const branch=source.slice(source.indexOf("const licenses=q('[data-misc-licenses]');"),source.indexOf("all('[data-native-dialog]')"));
+  const events=[],handlers=new Map();let disabledValue=false,focused=-1;
+  const buttons=Array.from({length:4},(_,i)=>({dataset:{title:String(i),version:'v',license:'l',content:'plain'+i},setAttribute(_name,value){this.pressed=value;},focus(){focused=i;}}));
+  const title={},name={},pre={},section={querySelectorAll:()=>buttons,querySelector:selector=>selector==='pre'?pre:selector==='[data-license-title]'?title:name};
+  compileFunction(branch,['q','root','change','disabled','on'])(()=>section,{},(_root,detail)=>events.push(detail.package),()=>disabledValue,(button,type,fn)=>{handlers.set(`${buttons.indexOf(button)}:${type}`,fn);});
+  assert.deepEqual(events,['0'],'Initializer selection emits before action baseline');
+  for(const [receiver,key,want]of [[2,'ArrowDown',3],[3,'ArrowDown',0],[0,'ArrowUp',3],[3,'Home',0],[0,'ArrowDown',1],[1,'End',3]]){let prevented=false;handlers.get(`${receiver}:keydown`)({key,preventDefault(){prevented=true;}});assert(prevented);assert.equal(focused,want);assert.equal(events.at(-1),String(want));assert.equal(pre.textContent,'plain'+want);}
+  const count=events.length;handlers.get('0:keydown')({key:'ArrowRight',preventDefault(){throw Error('Unsupported key prevented');}});assert.equal(events.length,count);
+  disabledValue=true;handlers.get('2:click')();handlers.get('2:keydown')({key:'Home',preventDefault(){throw Error('Disabled key prevented');}});assert.equal(events.length,count);assert.equal(focused,3);
+});
 test('websocket direct pure: only canonical source-backed identity has twelve separate direct steps',()=>{
   const contract=requestedStateContract('devtools/WebSocketConsole');
   assert.equal(contract.identity,'devtools/WebSocketConsole');assert.equal(contract.kind,'WebSocketConsole');assert.equal(contract.requestedStateOnly,true);
