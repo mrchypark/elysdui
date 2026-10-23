@@ -2,3 +2,5 @@
 .advanced-grid>*{min-inline-size:0;max-inline-size:100%}
 /* Fixed-width audit specimens must not overlap their independent twin. */
 [data-audit-case]>.advanced-grid{grid-template-columns:minmax(0,1fr)}
+/* Calendar details are absolute overlays, so they do not increase the audit row's normal-flow height. */
+[data-audit-case][data-audit-name="calendar/EventPopover"]>.advanced-grid,[data-audit-case][data-audit-name="calendar/AttendeeList"]>.advanced-grid{row-gap:180px}
