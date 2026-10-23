@@ -1,12 +1,60 @@
 import assert from 'node:assert/strict';
 import {spawn,spawnSync} from 'node:child_process';
 import {createServer} from 'node:http';
-import {mkdtemp,mkdir,readFile,writeFile,rm,access} from 'node:fs/promises';
+import {mkdtemp,mkdir,readFile,writeFile,rm,access,realpath,statfs} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
-import {join,resolve} from 'node:path';
+import {join,resolve,dirname,isAbsolute,sep} from 'node:path';
 import {createHash} from 'node:crypto';
 import {chromium} from 'playwright';
 
+// Fixed task approval: human async reply "3GiB로 확대"; not an atomic quota on external writers.
+const resourceLimits={aggregateSoftKiB:3080192,aggregateHardKiB:3145728,windowKiB:49152,profileKiB:65536,reportBytes:8*1024**2,errorReserveBytes:65536,diskKiB:4194304,memoryPercent:25};
+const approvedEvidenceParent='/Users/cypark/.codex/visualizations/2026/10/19/01a1545f-a780-77f1-9190-f9461a0206fb';
+const approvedRoots={evidenceRoot:join(approvedEvidenceParent,'visual-action-audit-20261021'),actionRoot:join(approvedEvidenceParent,'action-capture-completion-20261022')};
+class ResourceBudgetError extends Error{constructor(code,fields={}){super(`Resource budget: ${code}`);this.name='ResourceBudgetError';this.code=code;this.fields=fields;}}
+function parseResourcePlan(raw){
+  if(raw===undefined)return null;let plan;try{if(raw.length>16384)throw Error();plan=JSON.parse(raw);}catch{throw new ResourceBudgetError('invalid-plan');}
+  const keys=['mode','evidenceRoot','actionRoot','windowRoot'];
+  if(!plan||Object.keys(plan).length!==keys.length||keys.some(key=>typeof plan[key]!=='string')||plan.mode!=='strict-task')throw new ResourceBudgetError('invalid-plan');
+  for(const key of keys.slice(1))if(plan[key].length>4096||!isAbsolute(plan[key])||resolve(plan[key])!==plan[key])throw new ResourceBudgetError('invalid-plan');
+  if(plan.evidenceRoot!==approvedRoots.evidenceRoot||plan.actionRoot!==approvedRoots.actionRoot)throw new ResourceBudgetError('invalid-plan-roots');
+  const inside=(child,parent)=>child.startsWith(parent+sep);
+  if(plan.evidenceRoot===plan.actionRoot||inside(plan.evidenceRoot,plan.actionRoot)||inside(plan.actionRoot,plan.evidenceRoot)||!inside(plan.windowRoot,plan.actionRoot))throw new ResourceBudgetError('invalid-plan');return plan;
+}
+function requireResourceBudget(sample,incomingBytes=0,reportBytes=0,ledgerGrowth=0,reserveReport=true){
+  if(![...Object.values(sample),incomingBytes,reportBytes,ledgerGrowth].every(value=>Number.isSafeInteger(value)&&value>=0))throw new ResourceBudgetError('invalid-resource-reading');
+  const incomingKiB=incomingBytes?Math.ceil(incomingBytes/4096)*4+4:0,reserveKiB=reserveReport?8192:0,projected=incomingKiB+reserveKiB;
+  const fields={...sample,incomingBytes,reportBytes,ledgerGrowth,projectedKiB:projected};
+  if(reportBytes+ledgerGrowth>resourceLimits.reportBytes-(reserveReport?resourceLimits.errorReserveBytes:0))throw new ResourceBudgetError('report-reserve',fields);
+  if(sample.windowKiB+projected>resourceLimits.windowKiB)throw new ResourceBudgetError('window-cap',fields);
+  if(sample.aggregateKiB+projected>=resourceLimits.aggregateSoftKiB)throw new ResourceBudgetError('aggregate-soft-stop',fields);
+  if(sample.profileKiB+projected>resourceLimits.profileKiB)throw new ResourceBudgetError('profile-cap',fields);
+  if(sample.freeDiskKiB-projected<resourceLimits.diskKiB)throw new ResourceBudgetError('disk-floor',fields);
+  if(sample.freeMemoryPercent<resourceLimits.memoryPercent)throw new ResourceBudgetError('memory-floor',fields);
+}
+if(process.env.WORKSPACE_REPAIR_BUDGET_SELF_TEST==='1'){
+  const good={aggregateKiB:1000,windowKiB:0,profileKiB:0,freeDiskKiB:5000000,freeMemoryPercent:25};let writes=0;
+  for(const [code,sample]of [['window-cap',{...good,windowKiB:40960}],['aggregate-soft-stop',{...good,aggregateKiB:resourceLimits.aggregateSoftKiB-8192-1}],['disk-floor',{...good,freeDiskKiB:resourceLimits.diskKiB+8192}],['memory-floor',{...good,freeMemoryPercent:24}],['profile-cap',{...good,profileKiB:57344}]])assert.throws(()=>{requireResourceBudget(sample,1,1024,1024);writes++;},error=>error instanceof ResourceBudgetError&&error.code===code);
+  for(const raw of ['', '{}', JSON.stringify({mode:'strict-task',evidenceRoot:'/e',actionRoot:'/e/a',windowRoot:'/e/a/w'}),JSON.stringify({mode:'strict-task',...approvedRoots,windowRoot:approvedRoots.actionRoot})])assert.throws(()=>{parseResourcePlan(raw);writes++;},ResourceBudgetError);
+  assert.throws(()=>{requireResourceBudget(good,1,resourceLimits.reportBytes);writes++;},error=>error.code==='report-reserve');
+  assert.equal(writes,0);assert.doesNotThrow(()=>requireResourceBudget({...good,windowKiB:40960},0,1024,1024));assert.doesNotThrow(()=>requireResourceBudget(good,4096,1024,1024));
+  assert(parseResourcePlan(JSON.stringify({mode:'strict-task',...approvedRoots,windowRoot:join(approvedRoots.actionRoot,'info-test-window')})));assert.equal(parseResourcePlan(undefined),null);console.log('Resource guard self-check passed: window/aggregate/disk/memory/report/invalid-plan rejection, zero PNG writes, inclusive window boundary and positives; no resource commands or side effects.');process.exit(0);
+}
+async function resourceSample(plan,profileDirectory){
+  for(const path of [plan.evidenceRoot,plan.actionRoot])if(await realpath(path)!==path)throw new ResourceBudgetError('resource-root-identity');
+  try{if(await realpath(plan.windowRoot)!==plan.windowRoot)throw new ResourceBudgetError('resource-root-identity');}catch(error){if(error.code!=='ENOENT')throw error;}
+  const command=(name,args)=>{const result=spawnSync(name,args,{encoding:'utf8',maxBuffer:16384});if(result.status!==0)throw new ResourceBudgetError('resource-command-failed',{status:result.status??-1});return result.stdout;};
+  const size=async(path,optional=false)=>{try{await access(path);}catch(error){if(optional&&error.code==='ENOENT')return 0;throw new ResourceBudgetError('resource-root-unreadable');}const match=command('du',['-sk',path]).match(/^\s*(\d+)\s/);if(!match)throw new ResourceBudgetError('invalid-resource-reading');return Number(match[1]);};
+  const aggregateKiB=await size(plan.evidenceRoot)+await size(plan.actionRoot),windowKiB=await size(plan.windowRoot,true),profileKiB=profileDirectory?await size(profileDirectory,true):0;
+  const disk=await statfs(plan.actionRoot,{bigint:true}),memory=command('memory_pressure',['-Q']).match(/free percentage:\s*(\d+)%/);
+  if(!memory)throw new ResourceBudgetError('invalid-resource-reading');return {aggregateKiB,windowKiB,profileKiB,freeDiskKiB:Number(disk.bavail*disk.bsize/1024n),freeMemoryPercent:Number(memory[1])};
+}
+const resourcePlan=parseResourcePlan(process.env.WORKSPACE_REPAIR_RESOURCE_PLAN);
+if(resourcePlan){
+  if(process.platform!=='darwin'||!process.env.WORKSPACE_REPAIR_OUTPUT||resolve(process.env.WORKSPACE_REPAIR_OUTPUT)!==resourcePlan.windowRoot)throw new ResourceBudgetError('invalid-plan');
+  try{for(const path of [resourcePlan.evidenceRoot,resourcePlan.actionRoot,dirname(resourcePlan.windowRoot)])if(await realpath(path)!==path)throw Error();try{if(await realpath(resourcePlan.windowRoot)!==resourcePlan.windowRoot)throw Error();}catch(error){if(error.code!=='ENOENT')throw error;}}
+  catch{throw new ResourceBudgetError('invalid-plan-real-roots');}requireResourceBudget(await resourceSample(resourcePlan));
+}
 const phase=process.env.WORKSPACE_REPAIR_PHASE||'after';
 assert(['before','after'].includes(phase));
 const control=process.env.WORKSPACE_REPAIR_CONTROL||'original-head';
@@ -28,13 +76,34 @@ const groups={
 const sourcePaths=['ui/gohtmx/assets/ely-api-workspace.css','ui/gohtmx/assets/ely-api-workspace.js','ui/gohtmx/assets/ely-api-communication.css','ui/gohtmx/assets/ely-api-calendar-parity.css','ui/gohtmx/assets/ely-api-foundation.css','ui/gohtmx/assets/ely-controls.css','ui/gohtmx/templates/ely-api-workspace.html','ui/gohtmx/templates/ely-api-communication.html','internal/gallery/advanced_communication_fixtures.go','ui/gohtmx/tests/browser/workspace-communication-repair-browser-test.mjs'];
 sourcePaths.push('ui/gohtmx/assets/ely-api.css','ui/gohtmx/assets/ely-api-native.css','ui/gohtmx/assets/ely-api-interaction.css','ui/gohtmx/assets/ely-api-native-tooling.js','ui/gohtmx/assets/ely-api-native.js','ui/gohtmx/assets/theme.js','ui/gohtmx/assets/app.css','internal/gallery/advanced_native_tooling_fixtures.go','internal/gallery/advanced_native_generative_fixtures.go','internal/gallery/advanced_interaction_fixtures.go','ui/gohtmx/templates/ely-api-native.html','ui/gohtmx/templates/ely-api-native-tooling.html','ui/gohtmx/templates/ely-api-interaction.html');
 sourcePaths.push('ui/gohtmx/assets/ely-api.js','ui/gohtmx/assets/ely-api-native-entry.js','ui/gohtmx/assets/ely-api-native-generative-tools.js','ui/gohtmx/assets/ely-api-interaction.js','internal/gallery/advanced_native_fixtures.go','ui/gohtmx/templates/ely-api.html');
-const report={phase,control,profile,viewport,colorScheme,node:process.version,nodeExecutable:process.execPath,checks:[],actions:[],console:[],invalidDateInputs:[],sourceHashes:{},cleanup:false};let child,browser,serverPort;
+const report={phase,control,profile,viewport,colorScheme,node:process.version,nodeExecutable:process.execPath,checks:[],actions:[],console:[],invalidDateInputs:[],sourceHashes:{},cleanup:false,
+  resourceGuard:{mode:resourcePlan?'strict-task':'ordinary-ci',aggregateEnforced:Boolean(resourcePlan),plan:resourcePlan,limits:resourcePlan?resourceLimits:null,approval:resourcePlan?'Human async reply: 3GiB로 확대':null,preventiveNotAtomic:true},resourceLedger:[]};let child,browser,serverPort;
+const reportText=()=>JSON.stringify(report,null,2)+'\n';
 const run=(cmd,args)=>{const r=spawnSync(cmd,args,{cwd:repo,env,encoding:'utf8'});assert.equal(r.status,0,r.stderr);return r.stdout.trim();};
 const serverIdentity=()=>{
   if(!child?.pid)return null;
   const read=field=>{const result=spawnSync('ps',['-ww','-p',String(child.pid),'-o',field+'='],{encoding:'utf8'});return result.status===0?result.stdout.trim():'';};
   const birth=read('lstart'),command=read('command');return birth&&command?{pid:child.pid,birth,command}:null;
 };
+async function guardedScreenshot(page,target,options,file){
+  let entry;
+  if(resourcePlan){
+    const identity=serverIdentity(),expected=report.serverIdentityAtSpawn,context=page.context();
+    if(!identity||!expected||identity.birth!==expected.birth||identity.command!==expected.command||identity.command!==report.serverExpectedCommand||!browser?.isConnected()||!browser.contexts().includes(context)||!context.pages().includes(page))throw new ResourceBudgetError('capture-owner-identity');
+    entry={file,utc:new Date().toISOString(),server:identity,contextIndex:browser.contexts().indexOf(context),pageIndex:context.pages().indexOf(page),viewport:page.viewportSize(),preimage:await resourceSample(resourcePlan,output)};
+    // Project one bounded prewrite sample plus hash/byte fields, not the PNG contents.
+    const ledgerGrowth=Buffer.byteLength(JSON.stringify(entry,null,2))+2048;
+    requireResourceBudget(entry.preimage,0,Buffer.byteLength(reportText()),ledgerGrowth);
+    report.resourceLedger.push(entry);
+  }
+  const png=await target.screenshot(options);
+  if(resourcePlan){
+    entry.bytes=png.length;entry.sha256=digest(png);entry.prewrite=await resourceSample(resourcePlan,output);
+    requireResourceBudget(entry.prewrite,png.length,Buffer.byteLength(reportText()),2048);
+  }
+  await writeFile(join(output,file),png,{flag:'wx'});
+  if(resourcePlan){entry.written=true;entry.postwrite=await resourceSample(resourcePlan,output);requireResourceBudget(entry.postwrite,0,Buffer.byteLength(reportText()),2048);}
+}
 async function stop(){
   report.serverPID=child?.pid??null;
   if(child?.pid&&child.exitCode===null&&child.signalCode===null){
@@ -115,7 +184,7 @@ try{
         return {ok,metrics};
       },kind);
       if(kind==='print'&&process.env.WORKSPACE_CLASSIC_SCROLLBAR==='1')assert(result.metrics.innerWidth-result.metrics.rootWidth>=14,'classic print regression must reserve a real scrollbar gutter');
-      const screenshot=`${name.replaceAll('/','-')}.png`;await card.screenshot({path:join(output,screenshot)});report.checks.push({name,kind,...result,screenshot,sha256:digest(await readFile(join(output,screenshot)))});
+      const screenshot=`${name.replaceAll('/','-')}.png`;await guardedScreenshot(page,card,{},screenshot);report.checks.push({name,kind,...result,screenshot,sha256:digest(await readFile(join(output,screenshot)))});
     }
     if(phase==='after'){
       await page.evaluate(()=>{window.repairActions=[];document.addEventListener('ely:action',event=>{window.repairActions.push({action:event.detail.action,values:event.detail.values,hue:event.detail.hue});event.preventDefault();});});
@@ -143,7 +212,7 @@ try{
           }else assert.deepEqual(actions,[],'Arming confirmation must not dispatch a host action');
           assert.equal(await trash.locator('[data-ws-trash-item="deleted-8"]').count(),1,'Restore is only a host request, not local deletion');
           assert.equal(await trashTwin.evaluate(node=>node.outerHTML),twinBefore,'Trash pointer sequence must not mutate the twin');
-          const screenshot=`trash-confirm-${stage}.png`;await trash.screenshot({path:join(output,screenshot)});trashImages.push({stage,screenshot,sha256:digest(await readFile(join(output,screenshot))),restore:await stableRestore()});
+          const screenshot=`trash-confirm-${stage}.png`;await guardedScreenshot(page,trash,{},screenshot);trashImages.push({stage,screenshot,sha256:digest(await readFile(join(output,screenshot))),restore:await stableRestore()});
         }
         report.trashPointerRegression={images:trashImages,events:await trash.evaluate(node=>node.__trashPointerEvents)};
         report.actions.push('Trash confirmation blur preserves native Restore target and exact once request');
@@ -230,7 +299,7 @@ try{
             }catch(error){result.unsupported=String(error);}return result;});
           },{items,scenario});
           const captureItems=items.filter(item=>scenario==='old-alias-negative'?['badge','checker'].includes(item.role):['layered-nested','inline-low'].includes(scenario)?item.role!=='dataset':true);
-          for(const item of captureItems){const target=page.locator(`[data-audit-name="${item.key}"] [data-audit-main] ${item.selector}`).first(),file=`info-${scenario}-${item.key.replaceAll('/','-')}.png`;await target.screenshot({path:join(output,file),animations:'disabled'});receipt.images.push({caseId:item.key,screenshot:file,sha256:digest(await readFile(join(output,file)))});}
+          for(const item of captureItems){const target=page.locator(`[data-audit-name="${item.key}"] [data-audit-main] ${item.selector}`).first(),file=`info-${scenario}-${item.key.replaceAll('/','-')}.png`;await guardedScreenshot(page,target,{animations:'disabled'},file);receipt.images.push({caseId:item.key,screenshot:file,sha256:digest(await readFile(join(output,file)))});}
           assert(receipt.setup.support,'Actual browser must support light-dark, not skip');assert.deepEqual(receipt.setup.branchSamples,[[1,2,3,255],[254,253,252,255]],'Actual used color-scheme must select both branches');assert.deepEqual(receipt.setup.after,receipt.setup.before,'Focus and excluded color-info aliases unchanged');
           if(scenario==='scheme\x2donly\x2ddark'){assert(receipt.setup.schemes.every(mode=>mode==='dark'));assert(receipt.setup.modeAncestors.every(list=>list.length===0),'Scheme-only host must have no mode attributes/classes');}
           if(scenario==='layered-nested')assert(receipt.setup.rootLayer.every(row=>row.info==='#234567'&&row.subtle==='#ffffff'),'Layered root overrides survive library roots before nested host overrides');
@@ -252,7 +321,7 @@ try{
   else{assert.equal(failures.length,0,failures.map(c=>c.name).join(', '));assert.equal(report.invalidDateInputs.length,0,'invalid native date/time fixture values');assert.equal(report.console.filter(e=>e.type==='pageerror').length,0,'browser page errors');}
   report.finalSourceHashes={};for(const path of sourcePaths)report.finalSourceHashes[path]=digest(await readFile(path));assert.deepEqual(report.finalSourceHashes,report.sourceHashes,'source freeze during verification');
   report.status='passed';
-}catch(error){report.status='failed';report.error=String(error);process.exitCode=1;}
+}catch(error){report.status='failed';report.error=String(error);if(error instanceof ResourceBudgetError)report.resourceFailure={code:error.code,fields:error.fields};process.exitCode=1;}
 finally{
   const cleanupErrors=[];
   try{await stop();}catch(error){cleanupErrors.push(String(error));}
@@ -267,5 +336,14 @@ finally{
   report.cleanup=Boolean(report.serverStopped&&report.serverPortClosed&&report.browserClosed&&report.tempRemoved&&!cleanupErrors.length);
   report.cleanupStatus=report.cleanup?'VERIFIED':'CLEANUP_PENDING';
   if(!report.cleanup){report.status='failed';report.cleanupError=cleanupErrors.join('; ');process.exitCode=1;}
-  await writeFile(join(output,'report.json'),JSON.stringify(report,null,2)+'\n');console.log(JSON.stringify({status:report.status,failures:report.failureCount,error:report.error,output,cleanup:report.cleanup,cleanupStatus:report.cleanupStatus}));
+  let serialized=reportText(),fullReportRetained=false,retentionFailure;
+  try{
+    if(resourcePlan){const bytes=Buffer.byteLength(serialized);requireResourceBudget(await resourceSample(resourcePlan,output),bytes,bytes,0,false);}
+    await writeFile(join(output,'report.json'),serialized,{flag:'wx'});fullReportRetained=true;
+  }catch(error){
+    process.exitCode=1;retentionFailure={code:error instanceof ResourceBudgetError?error.code:'report-write-failed',fullReportBytes:Buffer.byteLength(serialized),fullReportSha256:digest(serialized),fullReportRetained:false,neededUserAction:'Preserve existing evidence; obtain space/budget approval and review the missing full report before any rerun.'};
+    const marker={status:'failed',retentionFailure,originalStatus:report.status,originalError:report.error?{bytes:Buffer.byteLength(report.error),sha256:digest(report.error)}:null,sourceHashes:report.sourceHashes,cleanupSourceHashes:report.cleanupSourceHashes,sourceFreezeError:report.sourceFreezeError,resourceFailure:report.resourceFailure,cleanup:report.cleanup,cleanupStatus:report.cleanupStatus,serverStopped:report.serverStopped,serverPortClosed:report.serverPortClosed,browserClosed:report.browserClosed,tempRemoved:report.tempRemoved};
+    try{const text=JSON.stringify(marker,null,2)+'\n',bytes=Buffer.byteLength(text);if(resourcePlan)requireResourceBudget(await resourceSample(resourcePlan,output),bytes,bytes,0,false);await writeFile(join(output,'report-retention-failure.json'),text,{flag:'wx'});retentionFailure.markerRetained=true;}catch{retentionFailure.markerRetained=false;}
+  }
+  console.log(JSON.stringify({status:retentionFailure?'failed':report.status,failures:report.failureCount,error:report.error,output,cleanup:report.cleanup,cleanupStatus:report.cleanupStatus,fullReportRetained,retentionFailure}));
 }
