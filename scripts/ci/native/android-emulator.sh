@@ -68,8 +68,9 @@ collect_emulator_diagnostics() {
 }
 trap cleanup EXIT
 
-# The workflow builds both APKs before this script; keep the guard test pre-emulator too.
+# The workflow builds both APKs before this script; keep shell guards pre-emulator too.
 bash "$ROOT/scripts/ci/native/test-android-readiness.sh"
+bash "$ROOT/scripts/ci/native/test-android-avd-config.sh"
 
 # The app has no Google Play dependency. Use the lighter Android 10 / API 29
 # AOSP runtime: the API 35 guest saturated its single virtual CPU and produced
@@ -97,18 +98,15 @@ if ! android_kvm_accel_check_usable < "$RESULTS/kvm-accel-check.txt"; then
 	exit 1
 fi
 echo 'Accessible /dev/kvm and usable emulator acceleration confirmed without changing permissions.'
+AVD_NAME=ely-profile
+android_set_avd_home "$HOME/.android/avd"
+printf 'Android AVD home: %s\n' "$ANDROID_AVD_HOME"
 "$SDKMANAGER" "$SYSTEM_IMAGE" < /dev/null
-printf 'no\n' | "$AVDMANAGER" create avd --force --name ely-profile --device pixel_2 --package "$SYSTEM_IMAGE"
+android_create_avd "$AVDMANAGER" "$AVD_NAME" "$SYSTEM_IMAGE"
 # Reduce software-rendering work while keeping a useful phone-sized dp viewport.
-python3 - <<'PY'
-from pathlib import Path
-path = Path.home() / '.android/avd/ely-profile.avd/config.ini'
-values = dict(line.split('=', 1) for line in path.read_text().splitlines() if '=' in line)
-values.update({'hw.lcd.width': '720', 'hw.lcd.height': '1280', 'hw.lcd.density': '240',
-               'skin.name': '720x1280', 'skin.path': '720x1280', 'skin.dynamic': 'yes'})
-path.write_text(''.join(f'{key}={value}\n' for key, value in values.items()))
-PY
-"$EMULATOR_BINARY" -avd ely-profile -port 5554 -cores 2 -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect -accel on > "$RESULTS/emulator.log" 2>&1 &
+AVD_CONFIG="$ANDROID_AVD_HOME/$AVD_NAME.avd/config.ini"
+android_configure_avd_display "$AVD_CONFIG"
+"$EMULATOR_BINARY" -avd "$AVD_NAME" -port 5554 -cores 2 -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect -accel on > "$RESULTS/emulator.log" 2>&1 &
 EMULATOR_PID=$!
 ANR_LOG="$RESULTS/system-anr-watch.log"
 : > "$ANR_LOG"

@@ -59,6 +59,73 @@ android_ensure_emulator() {
 	printf '%s\n' "$emulator"
 }
 
+android_set_avd_home() {
+	local avd_home=$1
+	mkdir -p "$avd_home" || return 1
+	ANDROID_AVD_HOME=$(CDPATH='' cd -- "$avd_home" && pwd -P) || return 1
+	export ANDROID_AVD_HOME
+}
+
+android_create_avd() {
+	local avdmanager=$1 avd_name=$2 system_image=$3 expected_dir actual_dirs config
+	[ -n "${ANDROID_AVD_HOME:-}" ] || {
+		echo 'ANDROID_AVD_HOME must be set before creating an Android AVD.' >&2
+		return 1
+	}
+	if ! printf 'no\n' | "$avdmanager" create avd --force --name "$avd_name" --device pixel_2 --package "$system_image"; then
+		echo "avdmanager failed to create AVD $avd_name." >&2
+		return 1
+	fi
+	if ! actual_dirs=$("$avdmanager" list avd -c); then
+		echo "avdmanager could not report created AVD directories for $avd_name." >&2
+		return 1
+	fi
+	expected_dir=${ANDROID_AVD_HOME%/}/$avd_name.avd
+	config=$expected_dir/config.ini
+	if ! printf '%s\n' "$actual_dirs" | grep -Fxq "$expected_dir"; then
+		printf 'avdmanager did not resolve %s at the selected AVD home. Expected: %s\nActual AVD directories:\n%s\n' \
+			"$avd_name" "$expected_dir" "${actual_dirs:-<none>}" >&2
+		return 1
+	fi
+	[ -f "$config" ] || {
+		printf 'avdmanager listed %s but its config is missing: %s\n' "$expected_dir" "$config" >&2
+		return 1
+	}
+	printf 'Resolved Android AVD directory: %s\n' "$expected_dir"
+}
+
+android_configure_avd_display() {
+	local config=$1 temp
+	[ -f "$config" ] || {
+		printf 'Android AVD config is missing: %s\n' "$config" >&2
+		return 1
+	}
+	temp=$(mktemp "${config}.tmp.XXXXXX") || return 1
+	if ! cp -p "$config" "$temp" || ! awk -F= '
+		BEGIN {
+			values["hw.lcd.width"] = "720"
+			values["hw.lcd.height"] = "1280"
+			values["hw.lcd.density"] = "240"
+			values["skin.name"] = "720x1280"
+			values["skin.path"] = "720x1280"
+			values["skin.dynamic"] = "yes"
+		}
+		$1 in values {
+			key = $1
+			if (!seen[key]++) print key "=" values[key]
+			next
+		}
+		{ print }
+		END {
+			for (key in values) if (!seen[key]) print key "=" values[key]
+		}
+	' "$config" > "$temp" || ! mv "$temp" "$config"; then
+		rm -f "$temp"
+		printf 'Could not set Android AVD display config: %s\n' "$config" >&2
+		return 1
+	fi
+}
+
 android_verify_emulator_path() {
 	local sdk_root=$1 expected resolved
 	expected=$(android_emulator_binary "$sdk_root")
