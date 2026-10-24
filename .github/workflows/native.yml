@@ -179,13 +179,32 @@ jobs:
           android_verify_emulator_path "$sdk_root"
           echo "Resolved Android SDK root: $sdk_root"
           echo "Android emulator binary: $emulator_binary"
-          for host_binary in "$emulator_binary" "$sdk_root/emulator/qemu/linux-x86_64/qemu-system-x86_64"; do
+          emulator_lib64="$sdk_root/emulator/lib64"
+          emulator_qt_lib="$emulator_lib64/qt/lib"
+          for bundled_lib_dir in "$emulator_lib64" "$emulator_qt_lib"; do
+            if [ ! -d "$bundled_lib_dir" ]; then
+              echo "Expected Android emulator bundled library directory is missing: $bundled_lib_dir" >&2
+              exit 1
+            fi
+            echo "Android emulator bundled libraries in $bundled_lib_dir (first 24 names):"
+            find "$bundled_lib_dir" -maxdepth 1 -type f -name '*.so*' -printf '%f\n' | sort | awk 'NR <= 24 { print "  " $0 } END { if (NR > 24) print "  ... (truncated)" }'
+          done
+          qemu_binary="$sdk_root/emulator/qemu/linux-x86_64/qemu-system-x86_64"
+          for host_binary in "$emulator_binary" "$qemu_binary"; do
             if [ ! -x "$host_binary" ]; then
               echo "Android emulator host binary is missing or not executable: $host_binary" >&2
               exit 1
             fi
             echo "Checking shared-library dependencies: $host_binary"
-            if ! ldd_output=$(ldd "$host_binary" 2>&1); then
+            ldd_status=0
+            if [ "$host_binary" = "$qemu_binary" ]; then
+              ldd_search_path="$emulator_lib64:$emulator_qt_lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+              echo 'Using SDK-bundled library paths only for this nested QEMU dependency check.'
+              ldd_output=$(LD_LIBRARY_PATH="$ldd_search_path" ldd "$host_binary" 2>&1) || ldd_status=$?
+            else
+              ldd_output=$(ldd "$host_binary" 2>&1) || ldd_status=$?
+            fi
+            if [ "$ldd_status" -ne 0 ]; then
               printf '%s\n' "$ldd_output" >&2
               echo "ldd failed for Android emulator host binary: $host_binary" >&2
               exit 1
