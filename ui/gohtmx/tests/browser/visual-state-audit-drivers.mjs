@@ -12,6 +12,12 @@ export async function inventoryDrift(initial){
   const ending=await inventoryReceipt(initial.path);
   return {path:initial.path,initialSHA256:initial.sha256,endingSHA256:ending.sha256,stable:initial.sha256===ending.sha256};
 }
+export async function persistDirectCaseFailure({caseId,error,receipts,currentState,nativePayload,diagnosticError},writeReceipt){
+  const receipt={caseId,error:{name:error?.name??'Error',message:error?.message??String(error),stack:error?.stack??null},receipts,
+    currentState:currentState??null,nativePayload:nativePayload??null,...(diagnosticError?{diagnosticError}: {})};
+  await writeReceipt(receipt);
+  return receipt;
+}
 // No unhandled page error has a verified exception in this audit.
 export const unhandledBrowserErrors=errors=>errors.filter(error=>error.type==='pageerror');
 

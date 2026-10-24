@@ -9,7 +9,7 @@ import {setTimeout as delay} from 'node:timers/promises';
 import {isDeepStrictEqual} from 'node:util';
 import {chromium} from 'playwright';
 import {actionModuleNames,prepareActionModule,synchronousTraceInit,registeredOutcomesEqual,registeredOutcomeDifferences,firstDifference,compareActionTrace,traceContractStatus} from './visual-state-audit-instrument.mjs';
-import {caseActionContract, requestedStateContract, runRequestedStateActions, runRegisteredCanvasActions, ownedOverlayInventory, captureTargetPNG, screenshotWithoutCaretMutation, inventoryReceipt, inventoryDrift, unhandledBrowserErrors, visualCaptureGap} from './visual-state-audit-drivers.mjs';
+import {caseActionContract, requestedStateContract, runRequestedStateActions, runRegisteredCanvasActions, ownedOverlayInventory, captureTargetPNG, screenshotWithoutCaretMutation, inventoryReceipt, inventoryDrift, unhandledBrowserErrors, visualCaptureGap, persistDirectCaseFailure} from './visual-state-audit-drivers.mjs';
 import {basicFixturePackage,basicRootSelector} from './visual-state-audit-basic.mjs';
 import {basicActionContract,validateBasicActionMatrix,runBasicActions,basicActionSurface,selectBasicActionCases,fulfillBasicActionAsset,assertBasicActionAssets,retainBasicFailureEvidence,basicOwnedModal,basicModalCaptureTarget} from './visual-state-audit-basic-actions.mjs';
 
@@ -323,10 +323,11 @@ async function executeCheck(page, item, onCheckpoint) {
 
 // Execute exact guarded contracts on unmodified modules; never make a
 // return-valued helper or a DOM handler async to obtain screenshots.
-async function directCaseDriver({item, familyURL, captures, reference, semanticSnapshotInit, contract, browserErrors}) {
+async function directCaseDriver({item, familyURL, captures, reference, semanticSnapshotInit, contract, browserErrors,failureReceiptPath}) {
   const context = await browser.newContext({viewport: profile.viewport, colorScheme: profile.colorScheme});
   const page = await context.newPage(), receipts = [];
   const failureDiagnostics={threewayCleanupFailures:[]};
+  let root,failureProbe=async()=>({});
   page.on('pageerror',error=>browserErrors.push({family:item.family,driver:'direct-playwright',caseId:item.caseId,type:'pageerror',text:String(error)}));
   try {
     await page.addInitScript(semanticSnapshotInit);
@@ -353,7 +354,7 @@ async function directCaseDriver({item, familyURL, captures, reference, semanticS
       for(const path of ['/assets/app.css','/assets/ely-api.js','/assets/ely-api-workspace.js','/assets/ely-api-workspace.css'])assert(fixtureProof.assets.some(asset=>asset.path===path),'Required actual Trash runtime asset missing: '+path);
     }
     const record = page.locator(`[data-audit-name=${JSON.stringify(item.componentIdentity)}]`);
-    const root = record.locator('[data-audit-main] > [data-ely-family]');
+    root = record.locator('[data-audit-main] > [data-ely-family]');
     const twin = record.locator('[data-audit-twin] > [data-ely-family]');
     await page.waitForFunction(node => node.dataset.elyReady === 'true', await root.elementHandle());
     const initialTwin=await snapshot(twin);
@@ -383,6 +384,7 @@ async function directCaseDriver({item, familyURL, captures, reference, semanticS
         password:password?{value:password.value,type:password.type,valid:password.checkValidity()}:null,
         editor:editor?{name:editor.dataset.name,value:node.querySelector('input[data-ws-content-value]')?.value,invalid:editor.getAttribute('aria-invalid'),error:node.querySelector('[data-ws-edit-error]')?.textContent,cursor:node.querySelector('[data-workspace-cursor]')?.textContent}:null};
     });
+    failureProbe=async()=>({currentState:await observe(),nativePayload:await root.evaluate(node=>node.__presenceNativeEvents??null)});
     const step = async (label, action, verify) => {
       const index = receipts.length + 1, siteId = `direct-playwright:${label}`;
       const expected=contract.steps[index-1];assert.equal(expected?.id,label,'Driver order must equal the exact contract');
@@ -466,7 +468,14 @@ async function directCaseDriver({item, familyURL, captures, reference, semanticS
       visualActionabilityGaps:receipts.filter(receipt=>receipt.actionActivation?.pointerActionabilityGap||receipt.visualEvidenceGap).map(receipt=>({action:receipt.action,control:receipt.control,reason:receipt.actionActivation?.pointerActionabilityGap||receipt.visualEvidenceGap})),
       comparisonScope:contract.requestedStateOnly?'Explicit target state assertions; registered ending state is different and not compared':'Exact registered-check actions, host events, final semantic state and unchanged twin',
       limitation: 'Independent action sequence; does not replace or inflate registered-check assertion counts or prove unreached variant branches.'};
-  } catch (error) { return {status: 'failed', error: String(error), receipts,...(failureDiagnostics.threewayCleanupFailures.length?{threewayCleanupFailures:failureDiagnostics.threewayCleanupFailures}:{})}; }
+  } catch (error) {
+    let currentState=null,nativePayload=null,diagnosticError=null;
+    try{({currentState,nativePayload}=await failureProbe());}catch(probeError){diagnosticError={name:probeError?.name??'Error',message:probeError?.message??String(probeError),stack:probeError?.stack??null};}
+    let failureReceipt=null,failureReceiptWriteError=null;
+    try{failureReceipt=await persistDirectCaseFailure({caseId:item.caseId,error,receipts,currentState,nativePayload,diagnosticError},receipt=>writeFile(failureReceiptPath,JSON.stringify(receipt,null,2)+'\n',{flag:'wx'}));}
+    catch(writeError){failureReceiptWriteError={name:writeError?.name??'Error',message:writeError?.message??String(writeError),stack:writeError?.stack??null};}
+    return {status: 'failed', error: String(error), errorStack:error?.stack??null, receipts,failureReceiptPath,failureReceiptWriteError,...(failureReceipt?{failureReceipt}:{}),...(failureDiagnostics.threewayCleanupFailures.length?{threewayCleanupFailures:failureDiagnostics.threewayCleanupFailures}:{})};
+  }
   finally { await context.close(); }
 }
 
@@ -683,7 +692,7 @@ try {
       checkpointIndex = 0;
       if(options.statesOnly){
         const contract=requestedStateContract(item.componentIdentity,options.trashFixture);
-        const proof=await directCaseDriver({item,familyURL,captures,reference:null,semanticSnapshotInit,contract,browserErrors});
+        const proof=await directCaseDriver({item,familyURL,captures,reference:null,semanticSnapshotInit,contract,browserErrors,failureReceiptPath:resolve(options.output,`${slug(item.caseId)}.failure.json`)});
         reports.push({caseId:item.caseId,componentIdentity:item.componentIdentity,comparison:{classification:proof.status==='passed'?'target-state-contract-passed':'harness-error-target-state-driver',equivalent:null,semanticDifferences:[]},
           actionSites:[],directFallback:null,requestedStateEvidence:proof,originalError:null,instrumentedError:proof.error||null,namedUnsupportedActionSites:[],
           actionCoverage:{incompleteCoverage:proof.status!=='passed',runtimeCheckpointCountForCase:proof.receipts.length,coverageStatus:proof.status==='passed'?'requested-state-captured-and-asserted':'requested-state-failed',staticallyNamedUnsupportedSiteIds:[],unsupportedActionsReachedAtRuntime:[],staticSafeSitesNotReachedForCase:[],captureFailureSiteIds:[],unknownReachedSiteIds:[],missingRuntimeOccurrences:[],exactContract:contract}});
@@ -746,9 +755,9 @@ try {
       const expectedIds=contract?new Set(contract.steps.map(step=>step.source?.siteId).filter(Boolean)):null;
       const namedUnsupported=contract?candidateUnsupported.filter(site=>expectedIds.has(site.siteId)):candidateUnsupported;
       const namedSafeNotHit=contract?candidateSafeNotHit.filter(site=>expectedIds.has(site.siteId)):candidateSafeNotHit;
-      const directFallback=contract&&originalPass?await directCaseDriver({item,familyURL,captures,reference:originalOutcome,semanticSnapshotInit,contract,browserErrors}):null;
+      const directFallback=contract&&originalPass?await directCaseDriver({item,familyURL,captures,reference:originalOutcome,semanticSnapshotInit,contract,browserErrors,failureReceiptPath:resolve(options.output,`${slug(item.caseId)}.failure.json`)}):null;
       const targetContract=requestedStateContract(item.componentIdentity);
-      const requestedStateEvidence=targetContract&&originalPass?await directCaseDriver({item,familyURL,captures,reference:originalOutcome,semanticSnapshotInit,contract:targetContract,browserErrors}):null;
+      const requestedStateEvidence=targetContract&&originalPass?await directCaseDriver({item,familyURL,captures,reference:originalOutcome,semanticSnapshotInit,contract:targetContract,browserErrors,failureReceiptPath:resolve(options.output,`${slug(item.caseId)}.failure.json`)}):null;
       // Keep observing sealed late events through capture/direct-driver work,
       // then discard the document before moving to another fixture.
       try{originalTrace=await originalPage.evaluate(()=>{const {events,lateEvents,errors}=globalThis.__visualSyncTraceState;return {events,lateEvents,errors};});}

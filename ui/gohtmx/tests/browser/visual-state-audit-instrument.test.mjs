@@ -8,7 +8,7 @@ import {join} from 'node:path';
 import {chromium} from 'playwright';
 import {compileFunction,runInNewContext} from 'node:vm';
 import {parse} from 'acorn';
-import {caseActionContract,requestedStateContract,runRequestedStateActions,runRegisteredCanvasActions,assertRegisteredCanvasTransition,assertVerticalRangeSnapshot,clickVisibleControl,ownedOverlayInventory,captureTargetPNG,inventoryReceipt,inventoryDrift,unhandledBrowserErrors,assertThreewayState,threewaySourcePins,threewayCleanup,activeOutlineBounds,lastPaintedLicenseFragment} from './visual-state-audit-drivers.mjs';
+import {caseActionContract,requestedStateContract,runRequestedStateActions,runRegisteredCanvasActions,assertRegisteredCanvasTransition,assertVerticalRangeSnapshot,clickVisibleControl,ownedOverlayInventory,captureTargetPNG,inventoryReceipt,inventoryDrift,unhandledBrowserErrors,assertThreewayState,threewaySourcePins,threewayCleanup,activeOutlineBounds,lastPaintedLicenseFragment,persistDirectCaseFailure} from './visual-state-audit-drivers.mjs';
 
 test('hidden action shim style exits before outline color parsing',()=>{
   const bounds={clip:{x:0,y:0,width:10,height:10}},active={},node={contains:candidate=>candidate===active};
@@ -218,18 +218,22 @@ test('threeway direct pure: cleanup-only failure remains exact failure and clean
   await assert.rejects(threewayCleanup(async()=>{throw cleanup;},false,new Proxy({}, {get(){throw Error('attachment failed');}})),error=>error===cleanup);
   const clean={threewayCleanupFailures:[]};await threewayCleanup(async()=>{},false,clean);assert.deepEqual(clean.threewayCleanupFailures,[]);
 });
-test('threeway direct pure: runner persists cleanup facts before first receipt without broad error serialization',async()=>{
+test('direct-case failure receipt pure: persists original stack and available state/payload before aggregate report',async()=>{
   const source=await readFile(new URL('./visual-state-audit-actions.mjs',import.meta.url),'utf8');
   const start=source.indexOf('async function directCaseDriver('),end=source.indexOf('\ntry {',start),branch=source.slice(start,end);
   assert(branch.indexOf('const failureDiagnostics={threewayCleanupFailures:[]};')<branch.indexOf('await page.addInitScript'));
   assert(branch.includes('runRequestedStateActions(contract,root,step,failureDiagnostics)'));
-  const catchStart=branch.indexOf("} catch (error) { return {status: 'failed'"),catchEnd=branch.indexOf('\n  finally',catchStart),catchBody=branch.slice(catchStart,catchEnd);
-  const serialize=new Function('error','receipts','failureDiagnostics',catchBody.slice(catchBody.indexOf('return '),catchBody.lastIndexOf('}')));
-  const primary=new Error('native action failed'),diagnostics={threewayCleanupFailures:[]};
-  await threewayCleanup(async()=>{throw Error('cleanup before receipt');},true,diagnostics);
-  assert.deepEqual(serialize(primary,[],diagnostics),{status:'failed',error:'Error: native action failed',receipts:[],threewayCleanupFailures:[{phase:'threeway-listener-cleanup',error:'Error: cleanup before receipt',primaryFailed:true}]});
-  assert.deepEqual(serialize(primary,[],{threewayCleanupFailures:[]}),{status:'failed',error:'Error: native action failed',receipts:[]});
-  assert.equal(serialize(primary,[],diagnostics).threewayCleanupFailures,diagnostics.threewayCleanupFailures);
+  assert(branch.includes('await persistDirectCaseFailure('));assert(branch.includes('errorStack:error?.stack??null'));
+  assert(branch.includes('failureReceiptWriteError'));
+  const primary=new Error('native action failed'),receipts=[{action:'presence-follow-ada'}],currentState={following:'ada'},nativePayload=[{type:'click',trusted:true,control:'ada'}];
+  let written;
+  const result=await persistDirectCaseFailure({caseId:'presence-ada',error:primary,receipts,currentState,nativePayload},async receipt=>{written=receipt;});
+  assert.equal(written,result,'The per-case receipt is handed to persistence immediately');
+  assert.deepEqual(result,{caseId:'presence-ada',error:{name:'Error',message:'native action failed',stack:primary.stack},receipts,currentState,nativePayload});
+  assert.equal(result.error.stack,primary.stack);assert.equal(result.nativePayload[0].control,'ada');
+  assert(!('expected' in result)&&!('observed' in result),'Failure evidence must not be rewritten as an expected/observed assertion');
+  const writeFailure=new Error('receipt disk failure');
+  await assert.rejects(persistDirectCaseFailure({caseId:'presence-ada',error:primary,receipts,currentState,nativePayload},async()=>{throw writeFailure;}),error=>error===writeFailure);
 });
 
 test('threeway direct pure: canonical three steps preserve registered unsupported boundary',()=>{
