@@ -362,6 +362,7 @@
 [data-ely-family='communication'] :is(.ely-communication-file,.ely-communication-audio){display:flex;flex-wrap:wrap;align-items:center;gap:.5rem}
 [data-ely-family='communication'] :is(.ely-communication-link>a,.ely-chat-suggestion-chips button,.ely-agent-tool-group summary,.ely-communication-tool-registry [data-ely-tool]>div)>small{display:block;margin-top:.25rem}
 [data-ely-family='communication'] .ely-agent-checkpoints li>div{display:flex;flex-wrap:wrap;align-items:baseline;gap:.4rem}
-[data-ely-family='communication'] .ely-agent-tree summary button{flex:1 1 auto;min-width:0}
+[data-ely-family='communication'] .ely-agent-tree summary{flex-wrap:wrap}
+[data-ely-family='communication'] .ely-agent-tree summary button{flex:1 1 auto;min-width:0;overflow-wrap:anywhere}
 [data-ely-family='communication'] .ely-agent-tree summary small{flex:0 1 auto;min-width:0;white-space:normal;overflow-wrap:anywhere}
-[data-ely-family='communication'] .ely-agent-tree summary progress{flex:0 1 4rem;min-width:0}
+[data-ely-family='communication'] .ely-agent-tree summary progress{flex:0 0 4rem;min-width:4rem}
