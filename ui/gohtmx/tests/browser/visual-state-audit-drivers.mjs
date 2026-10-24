@@ -365,6 +365,44 @@ export function assertRegisteredCanvasTransition(label,before,after,detail){
   return expected;
 }
 
+export function assertCanvasRulerPan(before,after,detail,{inputs,beforePaint,afterPaint}){
+  assert.deepEqual(after.stage,before.stage,'Native ruler pan must not change the stage');
+  assert.deepEqual(after.artboards,before.artboards,'Native ruler pan must preserve the artboards');
+  assert.equal(after.shapes,before.shapes,'Native ruler pan must preserve shapes');
+  assert.equal(after.guides,before.guides,'Native ruler pan must preserve guides');
+  assert.equal(after.grid,before.grid,'Native ruler pan must preserve the grid');
+  assert.equal(after.rulers,before.rulers,'Native ruler pan must preserve ruler content');
+  assert.equal(inputs.length,1,'Ruler pan must observe exactly one native wheel');
+  const input=inputs[0];
+  assert.equal(input.type,'wheel','Ruler pan must be a native wheel event');
+  assert.equal(input.trusted,true,'Ruler pan must be a trusted native wheel');
+  assert.equal(input.targetStage,true,'Ruler pan must target an owned point in the exact SVG stage');
+  assert.equal(input.deltaX,48,'Ruler pan must use the one bounded horizontal delta');
+  assert.equal(input.deltaY,0,'Ruler pan must not request vertical movement');
+  assert.equal(input.defaultPrevented,true,'The stage must consume the wheel rather than scroll an ancestor');
+  assert.equal(detail.action,'change-viewport');
+  const expected={x:before.view.x+input.deltaX/before.view.zoom,y:before.view.y,zoom:before.view.zoom};
+  for(const key of ['x','y','zoom']){
+    assert(Number.isFinite(detail.view?.[key])&&Math.abs(detail.view[key]-expected[key])<=1e-6,`Public canvas ${key} differs from the native ruler pan`);
+    assert(Number.isFinite(after.view[key])&&Math.abs(after.view[key]-expected[key])<=1e-6,`Rendered canvas ${key} differs from the native ruler pan`);
+  }
+  const partial=(paint,label)=>{
+    assert.equal(paint.text,'1100',`${label} must measure the exact ruler tick`);
+    const {rect,clip}=paint;
+    for(const value of [rect.left,rect.top,rect.right,rect.bottom,clip.left,clip.top,clip.right,clip.bottom])assert(Number.isFinite(value),`${label} must contain finite paint and clip geometry`);
+    const width=Math.max(0,Math.min(rect.right,clip.right)-Math.max(rect.left,clip.left));
+    const height=Math.max(0,Math.min(rect.bottom,clip.bottom)-Math.max(rect.top,clip.top));
+    const area=width*height,fullArea=Math.max(0,rect.right-rect.left)*Math.max(0,rect.bottom-rect.top);
+    assert(fullArea>0&&area>0,`${label} must have nonzero visible painted area`);
+    return {area,fullArea};
+  };
+  const initial=partial(beforePaint,'Initial ruler tick');
+  assert(initial.area<initial.fullArea,'Initial 1100 tick must be genuinely partially clipped');
+  const final=partial(afterPaint,'Final ruler tick');
+  assert.equal(final.area,final.fullArea,'Final 1100 tick must be fully inside the SVG stage clip');
+  return {expected,initialVisibleArea:initial.area,initialFullArea:initial.fullArea,finalVisibleArea:final.area,finalFullArea:final.fullArea};
+}
+
 // Separate fresh two-action replay; the three supplemental fit/pointer actions stay distinct.
 export async function runRegisteredCanvasActions(contract,root,runStep){
   assert(registeredCanvasIDs.includes(contract.identity)&&contract.registeredCanvas===true);
@@ -697,9 +735,11 @@ export function requestedStateContract(identity,trashFixture){
       'motion/Lottie Player':'Explicit deterministic player contract from internal/gallery/advanced_interaction_fixtures.go, ui/gohtmx/templates/ely-api-interaction.html and ui/gohtmx/assets/ely-api-interaction.js',
       'canvas/InfiniteCanvas':'Eight explicit canvas inventory IDs resolve the canonical InfiniteCanvas fixture via internal/gallery/advanced.go with no canvas aliasFixtureProps overrides; ui/gohtmx/component.go preserves actual alias identity and canonical Kind; action behavior from ui/gohtmx/assets/ely-api-workspace-canvas.js; action geometry is read from rendered SVG, not a presumed fit percentage; each alias and profile requires its own runtime evidence',
     }[canvasIdentity?'canvas/InfiniteCanvas':identity];
-    const steps=focused.steps.map(([id,control,expectedState])=>({id,control,expectedState,event:identity==='devtools/WebSocketConsole'&&id.startsWith('host-ack-')?'synthetic controlled host acknowledgement, not trusted user input':identity==='tooling/EventLogger'?'synthetic public DOM event via Playwright':id.startsWith('disabled-')?'native HTMLButtonElement.click (disabled negative; not trusted pointer input)':'native Playwright action',source:{siteId:`focused-state:${identity}:${id}`,sourceAnchor:null,provenance}}));
+    const canvasPan=canvasIdentity&&['canvas/CanvasGrid','canvas/Guides'].includes(identity);
+    const focusedSteps=canvasPan?[['pan-ruler-1100','[data-cs-stage]','One trusted horizontal wheel (deltaX=48, deltaY=0) over an owned stage point fully reveals the initially partial 1100 ruler tick; x advances by 48/zoom, y/zoom and scene content stay unchanged'],...focused.steps]:focused.steps;
+    const steps=focusedSteps.map(([id,control,expectedState])=>({id,control,expectedState,event:id==='pan-ruler-1100'?'one trusted native horizontal wheel over the exact owned SVG stage; no programmatic scroll or viewport mutation':identity==='devtools/WebSocketConsole'&&id.startsWith('host-ack-')?'synthetic controlled host acknowledgement, not trusted user input':identity==='tooling/EventLogger'?'synthetic public DOM event via Playwright':id.startsWith('disabled-')?'native HTMLButtonElement.click (disabled negative; not trusted pointer input)':'native Playwright action',source:{siteId:`focused-state:${identity}:${id}`,sourceAnchor:null,provenance}}));
     return {identity,kind:focused.kind,target:null,variant:identity.split('/')[1],focusedSequence:focused.sequence,steps,mappingGaps:[],requestedStateOnly:true,
-      fixtureGuards:{component:identity,kind:focused.kind},...(identity==='project/StatusSelect'?{inputSupport:{submit:'real Tab reveal followed by native Enter',unfocusedPointer:'unsupported: Update is 1px and clipped until focus-visible'}}:{}),scope:canvasIdentity?`Only the separate gallery:${identity} three-action focused sequence; source-defined contract is not runtime approval; all eight IDs across four profiles require 32 separate case/profile runs`: 'Explicit finite focused sequence from the case fixture; separate from registered-check coverage, aliases, and all-catalog approval'+(identity==='tooling/EventLogger'?'; four grouped scenario checkpoints, not per-event pixel coverage or trusted physical input; exact trace calibration remains separate':identity==='project/StatusSelect'?'; keyboard-only submit; no unfocused pointer activation approval':'')};
+      fixtureGuards:{component:identity,kind:focused.kind},...(identity==='project/StatusSelect'?{inputSupport:{submit:'real Tab reveal followed by native Enter',unfocusedPointer:'unsupported: Update is 1px and clipped until focus-visible'}}:{}),scope:canvasIdentity?`Only the separate gallery:${identity} ${steps.length}-action focused sequence; CanvasGrid and Guides include a native ruler pan; source-defined contract is not runtime approval; all eight IDs across four profiles require 32 separate case/profile runs`: 'Explicit finite focused sequence from the case fixture; separate from registered-check coverage, aliases, and all-catalog approval'+(identity==='tooling/EventLogger'?'; four grouped scenario checkpoints, not per-event pixel coverage or trusted physical input; exact trace calibration remains separate':identity==='project/StatusSelect'?'; keyboard-only submit; no unfocused pointer activation approval':'')};
   }
   const variant=identity.split('/')[1],target=identity.startsWith('settings/')?settingsTargets[variant]:null;
   if(identity!=='maps/MapPopup'&&!target)return null;
@@ -1603,8 +1643,29 @@ export async function runRequestedStateActions(contract,root,runStep,failureDiag
       await mapTarget.evaluate(node=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
       const mapHit=await mapTarget.evaluate(node=>{const rect=node.getBoundingClientRect(),x=rect.left+rect.width/2,y=rect.top+rect.height/2,element=document.elementFromPoint(x,y);return !!element&&(element===node||node.contains(element));});
       assert.equal(mapHit,true,'Minimap center must be an owned hit target');
-      await root.evaluate(node=>{node.__visualCanvasClicks=[];node.__visualCanvasClickObserver=event=>{if(event.target.closest?.('[data-cs-minimap]'))node.__visualCanvasClicks.push({trusted:event.isTrusted,x:event.clientX,y:event.clientY});};node.addEventListener('click',node.__visualCanvasClickObserver,true);});
+      await root.evaluate(node=>{node.__visualCanvasClicks=[];node.__visualCanvasClickObserver=event=>{if(event.target.closest?.('[data-cs-minimap]'))node.__visualCanvasClicks.push({trusted:event.isTrusted,x:event.clientX,y:event.clientY});};node.addEventListener('click',node.__visualCanvasClickObserver,true);node.__visualCanvasWheels=[];node.__visualCanvasWheelObserver=event=>{const stage=node.querySelector('[data-ws-canvas-scene] [data-cs-stage]');node.__visualCanvasWheels.push({type:event.type,trusted:event.isTrusted,deltaX:event.deltaX,deltaY:event.deltaY,targetStage:!!stage&&(event.target===stage||stage.contains(event.target)),defaultPrevented:event.defaultPrevented});};node.addEventListener('wheel',node.__visualCanvasWheelObserver);});
       try{
+        if(['canvas/CanvasGrid','canvas/Guides'].includes(identity)){
+          let beforePan,beforePaint,pageScroll;
+          await runStep('pan-ruler-1100',async()=>{
+            await begin();beforePan=await scene();
+            const stage=root.locator('[data-cs-stage]');assert.equal(await stage.count(),1,'The exact SVG stage is required for native ruler panning');
+            const point=await stage.evaluate(node=>{const rect=node.getBoundingClientRect(),x=rect.left+rect.width/2,y=rect.top+rect.height/2,hit=document.elementFromPoint(x,y);return {x,y,owned:!!hit&&(hit===node||node.contains(hit))};});
+            assert.equal(point.owned,true,'The chosen stage point must already be visible and owned; this action does not scroll it into view');
+            beforePaint=await root.evaluate(node=>{const stage=node.querySelector('[data-ws-canvas-scene] [data-cs-stage]'),ticks=[...stage.querySelectorAll('[data-cs-rulers] text')].filter(tick=>tick.textContent==='1100');if(ticks.length!==1)throw new Error(`Expected exactly one painted 1100 ruler tick, got ${ticks.length}`);const rect=ticks[0].getBoundingClientRect(),clip=stage.getBoundingClientRect();return {text:ticks[0].textContent,rect:{left:rect.left,top:rect.top,right:rect.right,bottom:rect.bottom},clip:{left:clip.left,top:clip.top,right:clip.right,bottom:clip.bottom}};});
+            pageScroll=await root.page().evaluate(()=>({x:window.scrollX,y:window.scrollY}));
+            await root.page().mouse.move(point.x,point.y);await root.page().mouse.wheel(48,0);
+            await stage.evaluate(node=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+          },async()=>{
+            const observed=await fresh();assert.deepEqual(observed.map(event=>event.type),['ely:action'],'The native wheel must produce exactly one public viewport action');
+            const detail=observed[0].detail;assert.equal(detail.id,id);assert.equal(detail.component,identity);assert.equal(detail.action,'change-viewport');assert(detail.view,'Ruler pan must carry the public viewport');
+            const after=await scene(),afterPaint=await root.evaluate(node=>{const stage=node.querySelector('[data-ws-canvas-scene] [data-cs-stage]'),ticks=[...stage.querySelectorAll('[data-cs-rulers] text')].filter(tick=>tick.textContent==='1100');if(ticks.length!==1)throw new Error(`Expected exactly one painted 1100 ruler tick, got ${ticks.length}`);const rect=ticks[0].getBoundingClientRect(),clip=stage.getBoundingClientRect();return {text:ticks[0].textContent,rect:{left:rect.left,top:rect.top,right:rect.right,bottom:rect.bottom},clip:{left:clip.left,top:clip.top,right:clip.right,bottom:clip.bottom}};});
+            const inputs=await root.evaluate(node=>node.__visualCanvasWheels),scrollAfter=await root.page().evaluate(()=>({x:window.scrollX,y:window.scrollY}));
+            assert.deepEqual(scrollAfter,pageScroll,'The wheel must not scroll the page');
+            const proof=assertCanvasRulerPan(beforePan,after,detail,{inputs,beforePaint,afterPaint});
+            await assertWorld(detail.view);return {action:detail.action,view:detail.view,expected:proof.expected,input:inputs[0],ruler:{before:beforePaint,after:afterPaint,visibleArea:[proof.initialVisibleArea,proof.finalVisibleArea]}};
+          });
+        }
         let beforeZoom;
         await runStep('zoom-in',async()=>{await begin();beforeZoom=await scene();return clickVisibleControl(root.locator('[data-cs-zoom-in]'));},async()=>{
           const observed=await fresh();assert.deepEqual(observed.map(event=>event.type),['ely:action']);
@@ -1633,7 +1694,7 @@ export async function runRequestedStateActions(contract,root,runStep,failureDiag
           const expected=assertMinimapViewport(beforeMinimap,detail.view,{bounds:beforeMinimap.mapBounds.bounds,ratio:beforeMinimap.mapBounds.ratio,point});
           await assertWorld(detail.view);return {action:detail.action,view:detail.view,expected,pointer:click};
         });
-      }finally{await root.evaluate(node=>{node.removeEventListener('click',node.__visualCanvasClickObserver,true);delete node.__visualCanvasClickObserver;delete node.__visualCanvasClicks;});}
+      }finally{await root.evaluate(node=>{node.removeEventListener('click',node.__visualCanvasClickObserver,true);node.removeEventListener('wheel',node.__visualCanvasWheelObserver);delete node.__visualCanvasClickObserver;delete node.__visualCanvasClicks;delete node.__visualCanvasWheelObserver;delete node.__visualCanvasWheels;});}
       return;
     }
     if(['button-public-boundary','textarea-public-multiline'].includes(contract.focusedSequence)){

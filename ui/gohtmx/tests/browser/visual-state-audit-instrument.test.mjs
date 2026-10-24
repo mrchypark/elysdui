@@ -1594,9 +1594,11 @@ test('registered canvas pure: exact eight identities map only two ordered scene 
     ]);
     assert(contract.steps.every(step=>step.source.sourceAnchor.text&&step.source.unknownGuards.length===0));
     assert.equal(new Set(contract.steps.map(step=>step.source.siteId)).size,2);
-    assert.deepEqual(requestedStateContract(identity).steps.map(step=>step.id),['zoom-in','fit-canvas','navigate-minimap']);
+    const steps=requestedStateContract(identity).steps.map(step=>step.id);
+    assert.deepEqual(steps,['canvas/CanvasGrid','canvas/Guides'].includes(identity)?['pan-ruler-1100','zoom-in','fit-canvas','navigate-minimap']:['zoom-in','fit-canvas','navigate-minimap']);
     assert.equal(requestedStateContract(identity).requestedStateOnly,true);
   }
+  assert.equal(identities.reduce((count,identity)=>count+requestedStateContract(identity).steps.length,0),26,'The eight aliases declare 26 focused actions per profile: three for six IDs and four for CanvasGrid/Guides');
   for(const identity of ['canvas/Unknown','editor/MiniMap','canvas/InfiniteCanvasExtra','canvas/FlowChart'])assert.equal(caseActionContract(identity,source,'workspace.js'),null);
 });
 test('registered canvas pure: extra missing reordered and unknown actions remain blocked',async()=>{

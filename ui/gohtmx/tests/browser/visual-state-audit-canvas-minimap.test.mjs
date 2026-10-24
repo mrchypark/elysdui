@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import test from 'node:test';
-import {assertMinimapViewport,requestedStateContract,runRequestedStateActions} from './visual-state-audit-drivers.mjs';
+import {assertCanvasRulerPan,assertMinimapViewport,requestedStateContract,runRequestedStateActions} from './visual-state-audit-drivers.mjs';
 
 const read=path=>readFile(new URL(`../../../../${path}`,import.meta.url),'utf8');
 
@@ -17,13 +17,36 @@ test('minimap viewport oracle rejects zoom changes against the pre-click state',
   );
 });
 
-test('source-only: eight separate canvas minimap contracts; 32 case/profile runtime runs remain mandatory',async()=>{
+test('ruler pan oracle requires exact native x transition and partial-to-full tick geometry',()=>{
+  const before={stage:{width:820,height:460},view:{x:-60,y:-60,zoom:.7},artboards:[{id:'home',x:0,y:0,w:390,h:640},{id:'detail',x:470,y:0,w:390,h:640}],shapes:8,guides:2,grid:100,rulers:19};
+  const after={...before,view:{x:before.view.x+48/before.view.zoom,y:before.view.y,zoom:before.view.zoom}};
+  const rect=(left,right)=>({left,top:20,right,bottom:31}),clip={left:0,top:0,right:820,bottom:460};
+  const input={type:'wheel',trusted:true,targetStage:true,deltaX:48,deltaY:0,defaultPrevented:true},detail={action:'change-viewport',view:after.view};
+  const paint=(left,right)=>({text:'1100',rect:rect(left,right),clip});
+  const proof=assertCanvasRulerPan(before,after,detail,{inputs:[input],beforePaint:paint(814,844),afterPaint:paint(766,796)});
+  assert.deepEqual(proof.expected,{x:before.view.x+48/.7,y:-60,zoom:.7});
+  assert(proof.initialVisibleArea>0&&proof.initialVisibleArea<proof.initialFullArea);
+  assert.equal(proof.finalVisibleArea,proof.finalFullArea);
+  for(const defect of [
+    {input:{...input,deltaY:1}},
+    {input:{...input,targetStage:false}},
+    {after:{...after,view:{...after.view,y:after.view.y+1}}},
+    {beforePaint:paint(830,860)},
+    {afterPaint:paint(810,840)},
+    {after:{...after,shapes:7}},
+    {inputs:[input,input]},
+    {input:{...input,defaultPrevented:false}},
+    {input:{...input,type:'click'}},
+  ])assert.throws(()=>assertCanvasRulerPan(defect.before||before,defect.after||after,detail,{inputs:defect.inputs||[defect.input||input],beforePaint:defect.beforePaint||paint(814,844),afterPaint:defect.afterPaint||paint(766,796)}));
+});
+
+test('source-only: six three-step and two four-step canvas contracts; 32 case/profile runtime runs remain mandatory',async()=>{
   const contract=requestedStateContract('canvas/InfiniteCanvas');
   assert.equal(contract?.kind,'InfiniteCanvas');
   assert.equal(contract.focusedSequence,'canvas-minimap-zoom-fit-hit-test');
   assert.equal(contract.requestedStateOnly,true);
   assert.deepEqual(contract.mappingGaps,[]);
-  assert.match(contract.scope,/Only the separate gallery:canvas\/InfiniteCanvas three-action focused sequence/);
+  assert.match(contract.scope,/Only the separate gallery:canvas\/InfiniteCanvas 3-action focused sequence/);
   assert.deepEqual(contract.steps.map(({id})=>id),['zoom-in','fit-canvas','navigate-minimap']);
   assert(contract.steps.every(step=>step.source.siteId.startsWith('focused-state:canvas/InfiniteCanvas:')&&step.source.provenance.includes('each alias and profile requires its own runtime evidence')));
 
@@ -46,9 +69,11 @@ test('source-only: eight separate canvas minimap contracts; 32 case/profile runt
     assert.equal(actual.requestedStateOnly,true);
     assert.deepEqual(actual.fixtureGuards,{component:identity,kind:'InfiniteCanvas'});
     assert.deepEqual(actual.mappingGaps,[]);
-    assert.deepEqual(actual.steps.map(({id,control,expectedState,event})=>({id,control,expectedState,event})),contract.steps.map(({id,control,expectedState,event})=>({id,control,expectedState,event})));
+    const pan=['canvas/CanvasGrid','canvas/Guides'].includes(identity),expectedSteps=pan?['pan-ruler-1100','zoom-in','fit-canvas','navigate-minimap']:['zoom-in','fit-canvas','navigate-minimap'];
+    assert.deepEqual(actual.steps.map(({id})=>id),expectedSteps,`${identity} must receive only its declared finite actions`);
+    assert.deepEqual(actual.steps.filter(step=>step.id!=='pan-ruler-1100').map(({id,control,expectedState,event})=>({id,control,expectedState,event})),contract.steps.map(({id,control,expectedState,event})=>({id,control,expectedState,event})));
     assert(actual.steps.every(step=>step.source.siteId===`focused-state:${identity}:${step.id}`));
-    assert(actual.scope.includes(`Only the separate gallery:${identity} three-action focused sequence`));
+    assert(actual.scope.includes(`Only the separate gallery:${identity} ${expectedSteps.length}-action focused sequence`));
     assert.match(actual.scope,/not runtime approval; all eight IDs across four profiles require 32 separate case\/profile runs/);
   }
   for(const identity of ['editor/MiniMap','canvas/Unknown','canvas/InfiniteCanvasExtra','editor/Guides'])assert.equal(requestedStateContract(identity),null,`${identity} must not inherit the canvas contract`);
@@ -76,11 +101,16 @@ test('source-only: eight separate canvas minimap contracts; 32 case/profile runt
   assert.match(driver,/initialTwin=await twinState\(\),id=await root\.getAttribute\('id'\)/);
   assert.match(driver,/assert\.deepEqual\(await twinState\(\),initialTwin,'Public actions must preserve the independent twin'\)/);
   const canvasDriver=driver.slice(driver.indexOf("if(contract.focusedSequence==='canvas-minimap-zoom-fit-hit-test')"),driver.indexOf("if(['button-public-boundary','textarea-public-multiline'].includes(contract.focusedSequence))"));
+  assert.match(canvasDriver,/if\(\['canvas\/CanvasGrid','canvas\/Guides'\]\.includes\(identity\)\)\{[\s\S]*?runStep\('pan-ruler-1100'/,'Only CanvasGrid and Guides run the extra ruler pan before zoom-in');
+  assert.match(canvasDriver,/root\.page\(\)\.mouse\.wheel\(48,0\)/,'Ruler panning must use exactly one native horizontal wheel');
+  assert.doesNotMatch(canvasDriver.slice(canvasDriver.indexOf("runStep('pan-ruler-1100'"),canvasDriver.indexOf("runStep('zoom-in'")),/scrollIntoViewIfNeeded|scrollTo\(|scrollIntoView\(|setView\(|dispatchEvent\(/,'The pan action cannot programmatically scroll, mutate view state, or synthesize input');
+  assert.match(canvasDriver,/requestAnimationFrame\(\(\)=>requestAnimationFrame\(resolve\)\)/,'Ruler geometry is measured after two animation frames');
+  assert.match(canvasDriver,/assertCanvasRulerPan\(beforePan,after,detail/,'The actual event, viewport and before/after ruler geometry share a behavioral assertion');
   const centerChecks=canvasDriver.slice(canvasDriver.indexOf('for(const selector of controls)'),canvasDriver.indexOf('await root.evaluate(node=>{node.__visualCanvasClicks=[]'));
   assert.match(centerChecks,/await target\.scrollIntoViewIfNeeded\(\);\s*await target\.evaluate\(node=>new Promise\(resolve=>requestAnimationFrame\(\(\)=>requestAnimationFrame\(resolve\)\)\)\);\s*const hit=await target\.evaluate/,'Each zoom control must scroll natively and settle before its center ownership check');
   assert.match(centerChecks,/assert\.equal\(hit\.reachable,true,`\$\{selector\} center must be an owned hit target`\)/,'A visible foreign hit target must still fail the exact center assertion');
   assert.match(centerChecks,/await mapTarget\.scrollIntoViewIfNeeded\(\);\s*await mapTarget\.evaluate\(node=>new Promise\(resolve=>requestAnimationFrame\(\(\)=>requestAnimationFrame\(resolve\)\)\)\);\s*const mapHit=await mapTarget\.evaluate/,'Minimap ownership must also be checked after native scrolling and settling');
   assert.match(centerChecks,/assert\.equal\(mapHit,true,'Minimap center must be an owned hit target'\)/,'A visible foreign minimap hit target must still fail');
-  assert.equal((canvasDriver.match(/assert\.equal\(detail\.id,id\);assert\.equal\(detail\.component,identity\)/g)||[]).length,3,'Every canvas action must assert the actual instance ID and alias payload');
+  assert.equal((canvasDriver.match(/assert\.equal\(detail\.id,id\);assert\.equal\(detail\.component,identity\)/g)||[]).length,4,'All four declared transition paths (including the alias-bounded pan) assert instance ID and alias payload');
   assert.match(driver,/overlap\(initial\.zoomRect,initial\.mapRect\)/,'Initial zoom and minimap targets must not overlap');
 });
