@@ -5,6 +5,24 @@ import {requestedStateContract,assertFoundationPublicEvents,runRequestedStateAct
 
 const source=path=>readFile(new URL(`../../../../${path}`,import.meta.url),'utf8');
 
+test('TextArea shared root bounds its grid track without discarding caller width preference',async()=>{
+  const [css,template,wrapper,fixtures,catalogue]=await Promise.all([source('ui/gohtmx/assets/ely-api-forms.css'),source('ui/gohtmx/templates/ely-api-forms.html'),source('ui/gohtmx/templates/ely-api.html'),source('internal/gallery/advanced_forms_fixtures.go'),source('ui/gohtmx/components.json')]);
+  const selector="[data-ely-family='forms'][data-ely-kind='TextArea']";
+  const bounded=styles=>{
+    const rule=styles.split(selector+'{')[1]?.split('}')[0];assert(rule,'Shared TextArea root rule required, not a gallery/identity override');
+    assert.match(rule,/^grid-template-columns:minmax\(0,1fr\);?$/,'Bound the implicit420px track to the real308px host; no clipping or field-sizing workaround');
+  };
+  bounded(css);
+  for(const replacement of ['',selector+'{grid-template-columns:1fr}',selector+'{grid-template-columns:auto}',selector+'{grid-template-columns:420px}'])assert.throws(()=>bounded(css.replace(selector+'{grid-template-columns:minmax(0,1fr)}',replacement)));
+  assert.match(css,/\.is-width-420\{inline-size:26\.25rem;max-inline-size:100%\}/,'Keep preferred420px width on wide hosts, capped to the containing track');
+  assert.match(css,/\.is-width-420 \.ely-api-field\{max-inline-size:26\.25rem\}/);
+  assert.match(template,/eq \.Kind "TextArea"[\s\S]*?if \.Width[\s\S]*?else if \.MaxWidth[\s\S]*?"data-ely-autoresize" "true"/,'Actual caller Width/MaxWidth and native autoresize remain unchanged');
+  assert.match(wrapper,/data-ely-kind="{{\.Kind}}"/,'Rule follows resolved shared Kind, not the gallery fixture name');
+  assert.match(fixtures,/"Notes grow from three lines to six, then scroll\.", 3, "420"/,'Keep the measured default fixture, not a narrower test-only width');
+  const forms=JSON.parse(catalogue).pages.flatMap(chapter=>chapter.stories||[]);
+  assert(forms.some(story=>story.name==='TextArea'&&story.components.includes('AutoResizeInput')),'AutoResizeInput shares this rendering kind, not its native-action proof');
+});
+
 test('finite Button and TextArea contracts preserve actual fixture states and event provenance',async()=>{
   const button=requestedStateContract('buttons/Button'),textarea=requestedStateContract('forms/TextArea');
   assert.equal(button.kind,'Button');assert.equal(button.steps.length,15);
