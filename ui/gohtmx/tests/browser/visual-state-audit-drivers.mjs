@@ -713,6 +713,12 @@ export function requestedStateContract(identity,trashFixture){
       ['clear-text','textarea[data-ely-autoresize]','Native input clears caller text without fabricating required validation or host action'],
       ['commit-empty','textarea[data-ely-autoresize]','Native blur commits the exact empty value; optional field remains valid'],
     ]},
+    ...Object.fromEntries(['forms/Input','forms/TextField','forms/ClearableInput'].map(identity=>[identity,{kind:'Input',sequence:'input-public-edit-clear',steps:[
+      ['fill-text','input[name="caller_value"]','Trusted native input retains the exact caller value without premature public change'],
+      ['commit-text','input[name="caller_value"]','Native Tab blur commits one exact alias-preserving public change'],
+      ['clear-text',identity==='forms/ClearableInput'?'button[data-ui-action="clear"]':'input[name="caller_value"]',identity==='forms/ClearableInput'?'Trusted Clear click empties the field; production-generated input/change remain explicitly synthetic':'Native keyboard select-all and Backspace clear the field without premature public change'],
+      ['commit-empty','input[name="caller_value"]',identity==='forms/ClearableInput'?'Native blur preserves the already committed empty value without duplicate public change':'Native Tab blur commits one exact empty public change'],
+    ]}])),
     'tooling/EventLogger':{kind:'EventLogger',sequence:'eventlogger-public-timestamps',steps:[
       ['coalesce-pointer','[data-tool-event-target]','Two public pointer moves coalesce; exact observed-event elapsed display'],
       ['capture-consumed-key','[data-tool-event-target] input','Capture-phase Ctrl+K survives child stopPropagation'],
@@ -778,6 +784,7 @@ export function requestedStateContract(identity,trashFixture){
       'layout/AccordionItem':'Explicit separate layout/AccordionItem inventory row resolves Accordion fixture; public identity remains layout/AccordionItem; no other alias promotion; ely-api-foundation.js native captured toggle contract',
       'buttons/Button':'internal/gallery/advanced_interaction_fixtures.go Button Groups; ui/gohtmx/templates/ely-api-interaction.html ely-api-buttons; ui/gohtmx/assets/ely-api.js click/emit; public cancelable event boundary only, not application onClick execution',
       'forms/TextArea':'internal/gallery/advanced_forms_fixtures.go TextArea; ui/gohtmx/templates/ely-api-forms.html TextArea; ui/gohtmx/assets/ely-api-forms.js input autoresize; ui/gohtmx/assets/ely-api.js change; no disabled/readOnly/required fixture is claimed',
+      ...Object.fromEntries(['forms/Input','forms/TextField','forms/ClearableInput'].map(identity=>[identity,'internal/gallery/advanced_forms_fixtures.go Input; internal/gallery/advanced.go aliasFixtureProps; ui/gohtmx/templates/ely-api-forms.html Input; ely-controls.html clearable-input; ely-controls.js clear handler; ely-api.js public change. Exact '+identity+' only; native Clear click triggers explicitly synthetic production input/change; no host fulfillment.'])),
       'tooling/EventLogger':'internal/gallery/advanced_native_tooling_fixtures.go EventLogger; ui/gohtmx/templates/ely-api-native-tooling.html EventLogger; ui/gohtmx/assets/ely-api-native-tooling.js receive/recordInput; exact global trace calibration remains separate',
       'project/StatusSelect':'ui/gohtmx/templates/ely-api-communication.html:108,115; ui/gohtmx/assets/ely-api-communication.css:296-297 focus-visible-only Update; ui/gohtmx/assets/ely-api-communication.js:258; ui/gohtmx/assets/ely-api.js submit handler',
       'data/Tag':'internal/gallery/advanced_data_fixtures.go Tag; ui/gohtmx/templates/ely-api-data.html ely-api-tag; ui/gohtmx/assets/ely-api-data.js tag-remove handler',
@@ -848,8 +855,18 @@ export function assertFoundationPublicEvents(identity,id,observed,{value}){
   assert.equal(typeof id,'string');assert(id.length>0);
   if(identity==='buttons/Button')assert.deepEqual(observed.map(event=>[event.type,event.detail]),[['ely:action',{id,component:identity,action:value,value,formData:null,values:[]}]]);
   else if(identity==='forms/TextArea')assert.deepEqual(observed.map(event=>[event.type,event.detail]),[['ely:change',{id,component:identity,name:'caller_value',value,checked:undefined,type:'textarea'}]]);
+  else if(['forms/Input','forms/TextField','forms/ClearableInput'].includes(identity))assert.deepEqual(observed.map(event=>[event.type,event.detail]),[['ely:change',{id,component:identity,name:'caller_value',value,checked:false,type:'text'}]]);
   else assert.fail('No finite foundation public event contract for '+identity);
   return observed;
+}
+
+export function assertPlainInputNativeEvents(stage,observed,{clearButton=false,value}){
+  const event=(type,isTrusted)=>({type,value,isTrusted,defaultPrevented:false});
+  const expected=stage==='fill-text'?[event('input',true)]:stage==='commit-text'?[event('change',true)]
+    :stage==='clear-text'?(clearButton?[{type:'click',value:'',isTrusted:true,defaultPrevented:false},event('input',false),event('change',false)]:[event('input',true)])
+    :stage==='commit-empty'?(clearButton?[]:[event('change',true)]):null;
+  assert(expected,'Unknown finite input checkpoint');
+  assert.deepEqual(observed,expected,'Exact native input or explicitly production-generated clear events required');
 }
 
 export function assertStatusSelectDueEvents(observed,{id,identity,entries,nativeChangeCount}){
@@ -1530,7 +1547,7 @@ export async function runRequestedStateActions(contract,root,runStep,failureDiag
     await press('empty-confirm',clear,'empty-trash','');
     return;
   }
-  if(['task-due-submit','remove-four-tags','radio-groups-reselection','eventlogger-public-timestamps','button-public-boundary','textarea-public-multiline','canvas-minimap-zoom-fit-hit-test','websocket-public-host-boundary','sheet-native-actions','bulk-canonical-zero','native-disclosure'].includes(contract.focusedSequence)){
+  if(['task-due-submit','remove-four-tags','radio-groups-reselection','eventlogger-public-timestamps','button-public-boundary','textarea-public-multiline','input-public-edit-clear','canvas-minimap-zoom-fit-hit-test','websocket-public-host-boundary','sheet-native-actions','bulk-canonical-zero','native-disclosure'].includes(contract.focusedSequence)){
     const identity=await root.getAttribute('data-ely-component');
     assert.equal(identity,contract.identity,'Exact alias identity is required');
     assert.equal(await root.getAttribute('data-ely-kind'),contract.kind);
@@ -1794,6 +1811,47 @@ export async function runRequestedStateActions(contract,root,runStep,failureDiag
           await assertWorld(detail.view);return {action:detail.action,view:detail.view,expected,pointer:click};
         });
       }finally{await root.evaluate(node=>{node.removeEventListener('click',node.__visualCanvasClickObserver,true);node.removeEventListener('wheel',node.__visualCanvasWheelObserver);delete node.__visualCanvasClickObserver;delete node.__visualCanvasClicks;delete node.__visualCanvasWheelObserver;delete node.__visualCanvasWheels;});}
+      return;
+    }
+    if(contract.focusedSequence==='input-public-edit-clear'){
+      const clearButton=identity==='forms/ClearableInput';
+      const field=root.locator('.ely-api-input-primary input[name="caller_value"], :scope > .ely-api-width input[name="caller_value"]');
+      assert.equal(await field.count(),1,'Exact primary caller input must be unique; no first-input fallback');
+      const initial=await field.evaluate(node=>({name:node.name,type:node.type,value:node.value,disabled:node.disabled,readOnly:node.readOnly,required:node.required}));
+      assert.deepEqual(initial,{name:'caller_value',type:'text',value:await field.getAttribute('value'),disabled:false,readOnly:false,required:false});
+      const peers=()=>root.evaluate((node,fieldId)=>[...node.querySelectorAll('input,textarea,select')].filter(field=>field.id!==fieldId).map(field=>[field.id,field.value,field.checked,field.disabled]),fieldId);
+      const fieldId=await field.getAttribute('id');assert(fieldId,'Primary input requires an exact rendered ID');
+      const initialPeers=await peers();
+      const clear=root.locator('[data-ui-component="clearable-input"] button[data-ui-action="clear"]');
+      assert.equal(await clear.count(),clearButton?1:0,'Clear control must match the exact alias fixture');
+      await root.evaluate((node,fieldId)=>{
+        node.__visualPlainInputEvents=[];
+        node.__visualPlainInputObserver=event=>{const control=event.type==='click'?event.target.closest?.('button[data-ui-action="clear"]'):event.target;if(control&&(control.id===fieldId||node.contains(control)&&control.matches('button[data-ui-action="clear"]')))node.__visualPlainInputEvents.push({type:event.type,value:control.value,isTrusted:event.isTrusted,defaultPrevented:event.defaultPrevented});};
+        for(const type of ['click','input','change'])node.addEventListener(type,node.__visualPlainInputObserver);
+      },fieldId);
+      const native=()=>root.evaluate(node=>node.__visualPlainInputEvents);
+      try{
+        for(const stage of contract.steps.map(step=>step.id)){
+          const value=stage==='fill-text'||stage==='commit-text'?'Changed caller value':'';
+          let nativeCursor;
+          await runStep(stage,async()=>{
+            await begin();nativeCursor=(await native()).length;
+            if(stage==='fill-text')await field.fill(value);
+            else if(stage==='clear-text'){
+              if(clearButton)await clear.click();
+              else{await field.focus();await field.press('ControlOrMeta+a');await field.press('Backspace');}
+            }else await field.press('Tab');
+          },async()=>{
+            assert.equal(await field.inputValue(),value);assert.equal(await field.evaluate(node=>node.checkValidity()),true);
+            const observed=await fresh();
+            if(stage==='commit-text'||(stage==='clear-text'&&clearButton)||(stage==='commit-empty'&&!clearButton))assertFoundationPublicEvents(identity,id,observed,{value});
+            else assert.deepEqual(observed,[],'No premature or duplicate public change or host action');
+            const inputs=(await native()).slice(nativeCursor);assertPlainInputNativeEvents(stage,inputs,{clearButton,value});
+            assert.deepEqual(await peers(),initialPeers,'Input actions must preserve sibling specimens');
+            return {value,events:observed,nativeEvents:inputs,twinUnchanged:true,peersUnchanged:true,scope:clearButton?'Trusted click; generated clear input/change are synthetic production events; no host fulfillment':'Native input and blur only; no host fulfillment'};
+          });
+        }
+      }finally{await root.evaluate(node=>{for(const type of ['click','input','change'])node.removeEventListener(type,node.__visualPlainInputObserver);delete node.__visualPlainInputObserver;delete node.__visualPlainInputEvents;});}
       return;
     }
     if(['button-public-boundary','textarea-public-multiline'].includes(contract.focusedSequence)){

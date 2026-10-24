@@ -1,9 +1,51 @@
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import test from 'node:test';
-import {assertCommunicationCallerRequest,assertDockCallerAction,assertDockNativeEvents,assertEvalLastColumnGeometry,assertNativeEmbedOpen,activatePresenceStep,assertPresenceNativeRequest,calendarDraftWheelDecision,requestedStateContract,runRequestedStateActions} from './visual-state-audit-drivers.mjs';
+import {assertCommunicationCallerRequest,assertDockCallerAction,assertDockNativeEvents,assertEvalLastColumnGeometry,assertNativeEmbedOpen,activatePresenceStep,assertPresenceNativeRequest,assertFoundationPublicEvents,assertPlainInputNativeEvents,calendarDraftWheelDecision,requestedStateContract,runRequestedStateActions} from './visual-state-audit-drivers.mjs';
 
 const read=path=>readFile(new URL(`../../../../${path}`,import.meta.url),'utf8');
+
+test('Input TextField ClearableInput finite native contracts preserve aliases and distinguish production clear events',async()=>{
+  const identities=['forms/Input','forms/TextField','forms/ClearableInput'];
+  for(const identity of identities){
+    const contract=requestedStateContract(identity);
+    assert.equal(contract.identity,identity);assert.equal(contract.kind,'Input');assert.equal(contract.requestedStateOnly,true);assert.equal(contract.focusedSequence,'input-public-edit-clear');assert.deepEqual(contract.mappingGaps,[]);
+    assert.deepEqual(contract.steps.map(step=>step.id),['fill-text','commit-text','clear-text','commit-empty']);
+    assert(contract.steps.every(step=>step.source.provenance.includes(identity)&&step.source.provenance.includes('no host fulfillment')));
+    assert.equal(contract.steps[2].control,identity==='forms/ClearableInput'?'button[data-ui-action="clear"]':'input[name="caller_value"]');
+    const id='audit-exact',value='Changed caller value',detail={id,component:identity,name:'caller_value',value,checked:false,type:'text'},events=[{type:'ely:change',detail}];
+    assertFoundationPublicEvents(identity,id,events,{value});
+    for(const bad of [{...detail,component:'forms/Other'},{...detail,id:'twin'},{...detail,name:'other'},{...detail,value:'wrong'}])assert.throws(()=>assertFoundationPublicEvents(identity,id,[{type:'ely:change',detail:bad}],{value}));
+    assert.throws(()=>assertFoundationPublicEvents(identity,id,[...events,...events],{value}));
+    assert.throws(()=>assertFoundationPublicEvents(identity,id,[{type:'ely:action',detail}],{value}));
+  }
+  assert.equal(identities.length*4*4,48,'Three identities, four live profiles, four checkpoints; no alias receipt promotion');
+  assert.equal(requestedStateContract('forms/EmailInput'),null,'No generic input-family expansion');
+  const event=(type,value,isTrusted)=>({type,value,isTrusted,defaultPrevented:false});
+  for(const stage of ['fill-text','commit-text','clear-text','commit-empty']){
+    const value=stage==='fill-text'||stage==='commit-text'?'Changed caller value':'',type=stage.startsWith('commit')?'change':'input',events=[event(type,value,true)];
+    assertPlainInputNativeEvents(stage,events,{value});
+    assert.throws(()=>assertPlainInputNativeEvents(stage,[event(type,value,false)],{value}),/Exact native/);
+    assert.throws(()=>assertPlainInputNativeEvents(stage,[...events,...events],{value}),/Exact native/);
+  }
+  const clearEvents=[event('click','',true),event('input','',false),event('change','',false)];
+  assertPlainInputNativeEvents('clear-text',clearEvents,{clearButton:true,value:''});
+  assertPlainInputNativeEvents('commit-empty',[],{clearButton:true,value:''});
+  assert.throws(()=>assertPlainInputNativeEvents('clear-text',clearEvents.map(e=>({...e,isTrusted:true})),{clearButton:true,value:''}),/Exact native/,'Generated clear events must not be mislabeled trusted');
+  assert.throws(()=>assertPlainInputNativeEvents('clear-text',clearEvents.map(e=>({...e,isTrusted:false})),{clearButton:true,value:''}),/Exact native/,'A synthetic initiating click cannot pass');
+  assert.throws(()=>assertPlainInputNativeEvents('commit-empty',[event('change','',false)],{clearButton:true,value:''}),/Exact native/,'Duplicate clear commit cannot pass');
+  const [fixtures,template,controls,api,actions]=await Promise.all([read('internal/gallery/advanced_forms_fixtures.go'),read('ui/gohtmx/templates/ely-api-forms.html'),read('ui/gohtmx/assets/ely-controls.js'),read('ui/gohtmx/assets/ely-api.js'),read('ui/gohtmx/tests/browser/visual-state-audit-actions.mjs')]);
+  assert.match(fixtures,/"Name": "caller_value", "Value": "alpha"/);
+  assert.match(template,/eq \.Variant "ClearableInput"[\s\S]*?template "clearable-input"/);
+  assert.match(controls,/action === 'clear'[\s\S]*?input\.value = ''[\s\S]*?new Event\('input'[\s\S]*?new Event\('change'[\s\S]*?input\.focus\(\)/);
+  assert.match(api,/component: root\.dataset\.elyComponent, name: event\.target\.name/);
+  assert.match(actions,/if\(contract\.requestedStateOnly\)\{\s*await runRequestedStateActions\(contract,root,step,failureDiagnostics\);/);
+  const driver=runRequestedStateActions.toString(),branch=driver.slice(driver.indexOf("if(contract.focusedSequence==='input-public-edit-clear')"),driver.indexOf("if(['button-public-boundary','textarea-public-multiline']"));
+  assert.match(branch,/Exact primary caller input must be unique/);assert.doesNotMatch(branch,/\.first\(|\.nth\(/);
+  assert.match(branch,/initialPeers/);assert.match(branch,/await fresh\(\)/);assert.match(branch,/field\.fill\(value\)/);assert.match(branch,/clear\.click\(\)/);assert.match(branch,/field\.press\('Backspace'\)/);assert.match(branch,/field\.press\('Tab'\)/);
+  assert.doesNotMatch(branch,/dispatchEvent|requestSubmit|new Event|\.value\s*=/,'Driver must not synthesize input, mutate fixture values, or submit host work');
+  assert.match(branch,/finally\{await root\.evaluate/);
+});
 
 test('forced scroll source guard rejects assignments without mistaking equality comparisons',()=>{
   const forcedScrollAssignment=/scrollTop\s*=(?!=)/;
