@@ -17,8 +17,12 @@ assert.throws(() => assertDefinedSemanticColors('var(--info \t )'), /Undefined s
 assertDefinedSemanticColors(styles);
 
 const communicationCSS = readFileSync('ui/gohtmx/assets/ely-api-communication.css', 'utf8');
-const agentTreeStatusRules = [...communicationCSS.matchAll(/\.ely-agent-tree summary small\{([^}]*)\}/g)];
-assert(agentTreeStatusRules.some(([, declarations]) => /(?:^|;)white-space:nowrap(?:;|$)/.test(declarations) && /(?:^|;)overflow-wrap:normal(?:;|$)/.test(declarations)), 'SubAgentTree status must stay on one line without arbitrary word breaks');
+const agentTreeButtonRule = communicationCSS.match(/\[data-ely-family='communication'\] \.ely-agent-tree summary button\{([^}]*)\}/);
+const agentTreeStatusRule = communicationCSS.match(/\[data-ely-family='communication'\] \.ely-agent-tree summary small\{([^}]*)\}/);
+const agentTreeProgressRule = communicationCSS.match(/\[data-ely-family='communication'\] \.ely-agent-tree summary progress\{([^}]*)\}/);
+assert(agentTreeButtonRule?.[1].includes('flex:1 1 auto') && agentTreeButtonRule[1].includes('min-width:0'), 'SubAgentTree labels must shrink within narrow summaries');
+assert(agentTreeStatusRule?.[1].includes('flex:0 1 auto') && agentTreeStatusRule[1].includes('min-width:0') && agentTreeStatusRule[1].includes('white-space:normal') && agentTreeStatusRule[1].includes('overflow-wrap:anywhere'), 'SubAgentTree status must wrap normally and break long tokens only as needed');
+assert(agentTreeProgressRule?.[1].includes('flex:0 1 4rem') && agentTreeProgressRule[1].includes('min-width:0'), 'SubAgentTree progress must shrink within narrow summaries');
 
 
 for (const directory of ['ui/gohtmx/assets', 'internal/gallery/assets']) {
