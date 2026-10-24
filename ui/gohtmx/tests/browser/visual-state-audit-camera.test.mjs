@@ -153,7 +153,8 @@ test('fragmented native inline anchor outline measures every fragment and retain
   assert.equal(run().focusOutline.reason,'inline outline fragment fully clipped','One visible fragment cannot approve a missing second fragment');
   parent.style={...base};
   for(const bad of [[...fragments,rect(0,0,0,0)],[...fragments,rect(NaN,0,10,10)]]){const old=fragments;fragments=bad;assert.equal(run().focusOutline.reason,'invalid inline outline fragment');fragments=old;}
-  for(const change of [{display:'inline-block'},{position:'absolute'},{outlineStyle:'auto'},{transform:'matrix(2,0,0,1,0,0)'},{clipPath:'inset(1px)'},{maskImage:'url(mask)'},{rotate:'1deg'}]){const old=active.style;active.style={...old,...change};assert.equal(run().focusOutline.status,'unsupported');active.style=old;}
+  // Keep this computed-style negative out of Tailwind's automatic utility scan.
+  for(const change of [{display:'inline'+'-block'},{position:'absolute'},{outlineStyle:'auto'},{transform:'matrix(2,0,0,1,0,0)'},{clipPath:'inset(1px)'},{maskImage:'url(mask)'},{rotate:'1deg'}]){const old=active.style;active.style={...old,...change};assert.equal(run().focusOutline.status,'unsupported');active.style=old;}
   active.closest=()=>({});assert.equal(run().focusOutline.reason,'nested component focus ownership');active.closest=()=>family;
   active.hasAttribute=()=>false;assert.equal(run().focusOutline.reason,'fragmented focus outline');active.hasAttribute=name=>name==='href';
   active.style.boxShadow='0px 0px 4px blue';assert.equal(run().focusOutline.reason,'unbounded inline focus shadow');active.style.boxShadow='none';
