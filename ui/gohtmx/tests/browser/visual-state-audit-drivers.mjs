@@ -1082,6 +1082,12 @@ export function assertEvalLastColumnGeometry({scrollLeft,previousScrollLeft,scro
   return {overflow:scrollWidth>clientWidth,scrollLeft,columns};
 }
 
+export async function assertActivityLogScopedAuditPage(root){
+  const page=root.page();
+  assert.equal(await page.locator('[data-audit-case]').count(),1,'Exact-case audit route must keep the native tab order bounded to one component pair');
+  assert.equal(await page.locator('[data-audit-name="collab/ActivityLog"]').count(),1,'Exact public ActivityLog fixture wrapper required');
+}
+
 export async function runRequestedStateActions(contract,root,runStep,failureDiagnostics){
   if(contract.focusedSequence==='native-cookie-owner-boundary'){
     const identity='misc/CookieBanner',cookies=root.locator('[data-misc-cookies]'),all=cookies.locator('[data-cookies="all"]'),none=cookies.locator('[data-cookies="none"]'),choose=cookies.locator('[data-cookies="choose"]'),analytics=cookies.locator('input[value="Analytics"]'),options=cookies.locator('[data-cookie-options]');
@@ -1120,8 +1126,7 @@ export async function runRequestedStateActions(contract,root,runStep,failureDiag
   if(contract.focusedSequence==='workspace-activity-native-link-focus'){
     const identity='collab/ActivityLog',links=root.locator('[data-ws-activity-entry] a[href]'),hrefs=contract.fixtureGuards.entryHrefs;
     assert.equal(contract.identity,identity);assert.equal(await root.getAttribute('data-ely-component'),identity);assert.equal(await root.getAttribute('data-ely-kind'),'ActivityLog');
-    assert.equal(await page.locator('[data-audit-case]').count(),1,'Exact-case audit route must keep the native tab order bounded to one component pair');
-    assert.equal(await page.locator('[data-audit-name="collab/ActivityLog"]').count(),1,'Exact public ActivityLog fixture wrapper required');
+    await assertActivityLogScopedAuditPage(root);
     assert.equal(await links.count(),4,'Exact four-entry ActivityLog fixture required');assert.deepEqual(await links.evaluateAll(nodes=>nodes.map(node=>node.getAttribute('href'))),hrefs,'Default target links and order are pinned');
     const twin=()=>root.evaluate(node=>node.closest('[data-audit-name]')?.querySelector('[data-audit-twin] > [data-ely-family]')?.innerHTML);
     const initialTwin=await twin();assert.equal(typeof initialTwin,'string','Independent ActivityLog twin required');

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import test from 'node:test';
-import {assertCommunicationCallerRequest,assertDockCallerAction,assertDockNativeEvents,assertEvalLastColumnGeometry,assertNativeEmbedOpen,activatePresenceStep,assertPresenceNativeRequest,assertFoundationPublicEvents,assertPlainInputNativeEvents,assertFormattedInputState,calendarDraftWheelDecision,requestedStateContract,runRequestedStateActions} from './visual-state-audit-drivers.mjs';
+import {assertActivityLogScopedAuditPage,assertCommunicationCallerRequest,assertDockCallerAction,assertDockNativeEvents,assertEvalLastColumnGeometry,assertNativeEmbedOpen,activatePresenceStep,assertPresenceNativeRequest,assertFoundationPublicEvents,assertPlainInputNativeEvents,assertFormattedInputState,calendarDraftWheelDecision,requestedStateContract,runRequestedStateActions} from './visual-state-audit-drivers.mjs';
 
 const read=path=>readFile(new URL(`../../../../${path}`,import.meta.url),'utf8');
 
@@ -99,7 +99,7 @@ test('ActivityLog contract traverses all four native target links by trusted key
   const [driver,actions,fixture,template]=await Promise.all([read('ui/gohtmx/tests/browser/visual-state-audit-drivers.mjs'),read('ui/gohtmx/tests/browser/visual-state-audit-actions.mjs'),read('internal/gallery/advanced_workspace_fixtures.go'),read('ui/gohtmx/templates/ely-api-workspace.html')]);
   const start=driver.indexOf("if(contract.focusedSequence==='workspace-activity-native-link-focus')"),end=driver.indexOf("if(contract.focusedSequence==='workspace-native-presence-follow')",start),branch=driver.slice(start,end);
   assert(start>=0&&end>start);assert.match(branch,/const identity='collab\/ActivityLog'/);assert.match(branch,/links\.count\(\),4/);assert.match(branch,/ownerDocument\.activeElement===node\.ownerDocument\.body/);
-  assert.match(branch,/locator\('\[data-audit-case\]'\)\.count\(\),1/);assert.match(branch,/data-audit-name="collab\/ActivityLog"/,'The isolated page must retain the exact public ActivityLog wrapper');
+  assert.match(branch,/await assertActivityLogScopedAuditPage\(root\)/,'The scoped audit guard must run through the supplied root');
   assert.match(branch,/for\(let count=0;count<32;count\+\+\)[\s\S]*?keyboard\.press\('Tab'\)/,'The first link must be reached through a short bounded native Tab traversal on the exact-case page');
   assert.match(branch,/else await root\.page\(\)\.keyboard\.press\('Tab'\)/,'The remaining three links advance one native Tab at a time');
   assert.match(branch,/tabs\.every\(event=>event\.trusted&&event\.key==='Tab'\)/);assert.match(branch,/focusin/);assert.match(branch,/state\.actions\.slice\(before\.actions\.length\),\[\]/);
@@ -108,6 +108,13 @@ test('ActivityLog contract traverses all four native target links by trusted key
   const activity=fixture.slice(fixture.indexOf('case "collab/ActivityLog":'),fixture.indexOf('case "devtools/QueryEditor"'));
   for(const href of hrefs)assert(activity.includes(`"URL": "${href}"`),`Default ActivityLog fixture link ${href}`);
   assert.match(template,/define "ws-activity"[\s\S]*?<a href="\{\{\.URL\}\}">\{\{\.Target\}\}<\/a>[\s\S]*?<time datetime=/);
+});
+
+test('ActivityLog scoped-page guard executes against the supplied runner page',async()=>{
+  const selectors=[],page={locator(selector){selectors.push(selector);return {async count(){return selector==='[data-audit-case]'||selector==='[data-audit-name="collab/ActivityLog"]'?1:0;}};}},root={page(){return page;}};
+  await assertActivityLogScopedAuditPage(root);
+  assert.deepEqual(selectors,['[data-audit-case]','[data-audit-name="collab/ActivityLog"]']);
+  await assert.rejects(assertActivityLogScopedAuditPage({page(){return {locator(){return {async count(){return 0;}};}};}}),/Exact-case audit route must keep the native tab order bounded to one component pair/);
 });
 
 test('forced scroll source guard rejects assignments without mistaking equality comparisons',()=>{
