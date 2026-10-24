@@ -13,7 +13,8 @@ test('finite Button and TextArea contracts preserve actual fixture states and ev
   assert(button.steps.slice(8).every(step=>step.event.includes('disabled negative; not trusted pointer input')));
   assert.equal(textarea.kind,'TextArea');assert.deepEqual(textarea.steps.map(step=>step.id),['fill-multiline','commit-multiline','clear-text','commit-empty']);
   for(const contract of [button,textarea]){assert.equal(contract.requestedStateOnly,true);assert.deepEqual(contract.mappingGaps,[]);assert.match(contract.scope,/separate from registered-check coverage/);assert(contract.steps.every(step=>step.source.provenance.includes('ely-api.js')));}
-  for(const identity of ['buttons/Sizes','buttons/With icons','forms/Input','forms/CurrencyInput'])assert.equal(requestedStateContract(identity),null,'No generic alias promotion');
+  assert.equal(requestedStateContract('forms/Input')?.focusedSequence,'input-public-edit-clear','Input has an explicit focused contract');
+  for(const identity of ['buttons/Sizes','buttons/With icons','forms/CurrencyInput'])assert.equal(requestedStateContract(identity),null,'No generic alias promotion');
   const [buttons,forms,template]=await Promise.all([source('internal/gallery/advanced_interaction_fixtures.go'),source('internal/gallery/advanced_forms_fixtures.go'),source('ui/gohtmx/templates/ely-api-interaction.html')]);
   const fixture=buttons.slice(buttons.indexOf('if name == "Button" {'),buttons.indexOf('if name == "ShortcutHint"'));
   for(const value of ['primary','secondary','outline','ghost','subtle','danger','link']){assert(fixture.includes(`"Value": "${value}", "Action": "${value}"`));assert(fixture.includes(`"Value": "${value}-disabled"`));}
