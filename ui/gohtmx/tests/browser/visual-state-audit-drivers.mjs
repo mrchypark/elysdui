@@ -370,8 +370,10 @@ export function assertCanvasRulerPan(before,after,detail,{inputs,beforePaint,aft
   assert.deepEqual(after.artboards,before.artboards,'Native ruler pan must preserve the artboards');
   assert.equal(after.shapes,before.shapes,'Native ruler pan must preserve shapes');
   assert.equal(after.guides,before.guides,'Native ruler pan must preserve guides');
-  assert.equal(after.grid,before.grid,'Native ruler pan must preserve the grid');
-  assert.equal(after.rulers,before.rulers,'Native ruler pan must preserve ruler content');
+  assert(before.grid.count>0&&after.grid.count>0,'Native ruler pan must retain painted grid points');
+  assert.deepEqual(after.grid.configuration,before.grid.configuration,'Native ruler pan must preserve grid spacing and appearance');
+  assert(before.rulers.count>0&&after.rulers.count>0,'Native ruler pan must retain painted ruler ticks');
+  assert.deepEqual(after.rulers.configuration,before.rulers.configuration,'Native ruler pan must preserve ruler spacing and appearance');
   assert.equal(inputs.length,1,'Ruler pan must observe exactly one native wheel');
   const input=inputs[0];
   assert.equal(input.type,'wheel','Ruler pan must be a native wheel event');
@@ -387,7 +389,9 @@ export function assertCanvasRulerPan(before,after,detail,{inputs,beforePaint,aft
     assert(Number.isFinite(after.view[key])&&Math.abs(after.view[key]-expected[key])<=1e-6,`Rendered canvas ${key} differs from the native ruler pan`);
   }
   const partial=(paint,label)=>{
+    assert.equal(paint.count,1,`${label} must measure exactly one painted ruler tick`);
     assert.equal(paint.text,'1100',`${label} must measure the exact ruler tick`);
+    assert(paint.rect&&paint.clip,`${label} must retain the ruler tick and stage clip rectangles`);
     const {rect,clip}=paint;
     for(const value of [rect.left,rect.top,rect.right,rect.bottom,clip.left,clip.top,clip.right,clip.bottom])assert(Number.isFinite(value),`${label} must contain finite paint and clip geometry`);
     const width=Math.max(0,Math.min(rect.right,clip.right)-Math.max(rect.left,clip.left));
@@ -400,7 +404,7 @@ export function assertCanvasRulerPan(before,after,detail,{inputs,beforePaint,aft
   assert(initial.area<initial.fullArea,'Initial 1100 tick must be genuinely partially clipped');
   const final=partial(afterPaint,'Final ruler tick');
   assert.equal(final.area,final.fullArea,'Final 1100 tick must be fully inside the SVG stage clip');
-  return {expected,initialVisibleArea:initial.area,initialFullArea:initial.fullArea,finalVisibleArea:final.area,finalFullArea:final.fullArea};
+  return {expected,primitiveCounts:{grid:[before.grid.count,after.grid.count],rulers:[before.rulers.count,after.rulers.count]},initialVisibleArea:initial.area,initialFullArea:initial.fullArea,finalVisibleArea:final.area,finalFullArea:final.fullArea};
 }
 
 // Separate fresh two-action replay; the three supplemental fit/pointer actions stay distinct.
@@ -1604,7 +1608,16 @@ export async function runRequestedStateActions(contract,root,runStep,failureDiag
         if(!match)throw new Error('Rendered canvas world transform is not the public scale/translate form');
         const artboards=[...world.querySelectorAll('[data-cs-artboard]')].map(element=>({id:element.getAttribute('data-cs-artboard'),x:Number(element.getAttribute('x')),y:Number(element.getAttribute('y')),w:Number(element.getAttribute('width')),h:Number(element.getAttribute('height'))}));
         const rect=element=>{const value=element.getBoundingClientRect();return {left:value.left,top:value.top,right:value.right,bottom:value.bottom,width:value.width,height:value.height};};
-        return {kind:host.dataset.sceneKind,stage:{width:stage.viewBox.baseVal.width,height:stage.viewBox.baseVal.height},view:{zoom:Number(match[1]),x:-Number(match[2]),y:-Number(match[3])},artboards,shapes:world.querySelectorAll('[data-cs-shape]').length,guides:world.querySelectorAll('[data-cs-guide]').length,grid:host.querySelectorAll('[data-cs-grid] circle').length,rulers:host.querySelectorAll('[data-cs-rulers] text').length,mapBounds:JSON.parse(map.dataset.bounds),mapRect:rect(map),viewRect:rect(host.querySelector('[data-cs-view]')),zoomRect:rect(host.querySelector('[data-cs-zoom]')),zoomTargets:[...host.querySelectorAll('[data-cs-zoom] button')].map(rect)};
+        const spacing=values=>{const sorted=[...new Set(values.filter(Number.isFinite).map(value=>Number(value.toFixed(6))))].sort((a,b)=>a-b);return [...new Set(sorted.slice(1).map((value,index)=>Number((value-sorted[index]).toFixed(6))))].sort((a,b)=>a-b);};
+        const gridPoints=[...host.querySelectorAll('[data-cs-grid] circle')].map(point=>({x:Number(point.getAttribute('cx')),y:Number(point.getAttribute('cy')),radius:Number(point.getAttribute('r')),fill:point.getAttribute('fill')}));
+        const rulerGroup=host.querySelector('[data-cs-rulers]'),rulerTicks=[...rulerGroup.querySelectorAll('text')].map(tick=>({x:Number(tick.getAttribute('x')),y:Number(tick.getAttribute('y')),fontSize:Number(tick.getAttribute('font-size'))}));
+        const horizontalTicks=rulerTicks.filter(tick=>tick.x!==2),verticalTicks=rulerTicks.filter(tick=>tick.x===2);
+        const rulerRects=[...rulerGroup.querySelectorAll('rect')].map(item=>({width:Number(item.getAttribute('width')),height:Number(item.getAttribute('height')),fill:item.getAttribute('fill')}));
+        const unique=values=>[...new Set(values)].sort();
+        return {kind:host.dataset.sceneKind,stage:{width:stage.viewBox.baseVal.width,height:stage.viewBox.baseVal.height},view:{zoom:Number(match[1]),x:-Number(match[2]),y:-Number(match[3])},artboards,shapes:world.querySelectorAll('[data-cs-shape]').length,guides:world.querySelectorAll('[data-cs-guide]').length,
+          grid:{count:gridPoints.length,configuration:{xSpacing:spacing(gridPoints.map(point=>point.x)),ySpacing:spacing(gridPoints.map(point=>point.y)),radii:unique(gridPoints.map(point=>point.radius)),fills:unique(gridPoints.map(point=>point.fill))}},
+          rulers:{count:rulerTicks.length,configuration:{horizontalSpacing:spacing(horizontalTicks.map(tick=>tick.x)),verticalSpacing:spacing(verticalTicks.map(tick=>tick.y)),fontSizes:unique(rulerTicks.map(tick=>tick.fontSize)),rects:rulerRects}},
+          mapBounds:JSON.parse(map.dataset.bounds),mapRect:rect(map),viewRect:rect(host.querySelector('[data-cs-view]')),zoomRect:rect(host.querySelector('[data-cs-zoom]')),zoomTargets:[...host.querySelectorAll('[data-cs-zoom] button')].map(rect)};
       });
       const initial=await scene();
       assert.equal(initial.kind,'InfiniteCanvas','Exact canonical fixture kind is required');
@@ -1613,7 +1626,7 @@ export async function runRequestedStateActions(contract,root,runStep,failureDiag
       assert.deepEqual(initial.artboards.map(({id})=>id),['home','detail'],'The rendered fixture must contain its two canonical artboards');
       assert.equal(initial.shapes,8,'The combined fixture must retain its eight rendered shapes');
       assert.equal(initial.guides,2,'Both canonical guides must be painted');
-      assert(initial.grid>0&&initial.rulers>0,'The grid and ruler aliases must both render content');
+      assert(initial.grid.count>0&&initial.rulers.count>0,'The grid and ruler aliases must both render content');
       const union=rects=>{const x=Math.min(...rects.map(rect=>rect.x)),y=Math.min(...rects.map(rect=>rect.y));return {x,y,w:Math.max(...rects.map(rect=>rect.x+rect.w))-x,h:Math.max(...rects.map(rect=>rect.y+rect.h))-y};};
       const close=(actual,expected,message)=>assert(Math.abs(actual-expected)<=1e-6,message+`: expected ${expected}, got ${actual}`);
       const initialBounds=union(initial.artboards);
@@ -1647,23 +1660,25 @@ export async function runRequestedStateActions(contract,root,runStep,failureDiag
       try{
         if(['canvas/CanvasGrid','canvas/Guides'].includes(identity)){
           let beforePan,beforePaint,pageScroll;
+          const measureRulerTick=()=>root.evaluate(node=>{const stage=node.querySelector('[data-ws-canvas-scene] [data-cs-stage]'),ticks=[...stage.querySelectorAll('[data-cs-rulers] text')].filter(tick=>tick.textContent==='1100'),tick=ticks.length===1?ticks[0]:null,rect=tick?.getBoundingClientRect(),clip=stage.getBoundingClientRect();return {count:ticks.length,text:tick?.textContent??null,rect:rect?{left:rect.left,top:rect.top,right:rect.right,bottom:rect.bottom}:null,clip:{left:clip.left,top:clip.top,right:clip.right,bottom:clip.bottom}};});
           await runStep('pan-ruler-1100',async()=>{
             await begin();beforePan=await scene();
             const stage=root.locator('[data-cs-stage]');assert.equal(await stage.count(),1,'The exact SVG stage is required for native ruler panning');
             const point=await stage.evaluate(node=>{const rect=node.getBoundingClientRect(),x=rect.left+rect.width/2,y=rect.top+rect.height/2,hit=document.elementFromPoint(x,y);return {x,y,owned:!!hit&&(hit===node||node.contains(hit))};});
             assert.equal(point.owned,true,'The chosen stage point must already be visible and owned; this action does not scroll it into view');
-            beforePaint=await root.evaluate(node=>{const stage=node.querySelector('[data-ws-canvas-scene] [data-cs-stage]'),ticks=[...stage.querySelectorAll('[data-cs-rulers] text')].filter(tick=>tick.textContent==='1100');if(ticks.length!==1)throw new Error(`Expected exactly one painted 1100 ruler tick, got ${ticks.length}`);const rect=ticks[0].getBoundingClientRect(),clip=stage.getBoundingClientRect();return {text:ticks[0].textContent,rect:{left:rect.left,top:rect.top,right:rect.right,bottom:rect.bottom},clip:{left:clip.left,top:clip.top,right:clip.right,bottom:clip.bottom}};});
+            beforePaint=await measureRulerTick();
             pageScroll=await root.page().evaluate(()=>({x:window.scrollX,y:window.scrollY}));
             await root.page().mouse.move(point.x,point.y);await root.page().mouse.wheel(48,0);
             await stage.evaluate(node=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
           },async()=>{
-            const observed=await fresh();assert.deepEqual(observed.map(event=>event.type),['ely:action'],'The native wheel must produce exactly one public viewport action');
-            const detail=observed[0].detail;assert.equal(detail.id,id);assert.equal(detail.component,identity);assert.equal(detail.action,'change-viewport');assert(detail.view,'Ruler pan must carry the public viewport');
-            const after=await scene(),afterPaint=await root.evaluate(node=>{const stage=node.querySelector('[data-ws-canvas-scene] [data-cs-stage]'),ticks=[...stage.querySelectorAll('[data-cs-rulers] text')].filter(tick=>tick.textContent==='1100');if(ticks.length!==1)throw new Error(`Expected exactly one painted 1100 ruler tick, got ${ticks.length}`);const rect=ticks[0].getBoundingClientRect(),clip=stage.getBoundingClientRect();return {text:ticks[0].textContent,rect:{left:rect.left,top:rect.top,right:rect.right,bottom:rect.bottom},clip:{left:clip.left,top:clip.top,right:clip.right,bottom:clip.bottom}};});
-            const inputs=await root.evaluate(node=>node.__visualCanvasWheels),scrollAfter=await root.page().evaluate(()=>({x:window.scrollX,y:window.scrollY}));
+            const observed=await fresh(),after=await scene(),afterPaint=await measureRulerTick();
+            const inputs=await root.evaluate(node=>node.__visualCanvasWheels),scrollAfter=await root.page().evaluate(()=>({x:window.scrollX,y:window.scrollY})),detail=observed[0]?.detail??null;
+            receipts.at(-1).canvasRulerPanEvidence={before:beforePan,after,detail,nativeEvents:observed,nativeInputs:inputs,beforeTick:beforePaint,afterTick:afterPaint,pageScroll:{before:pageScroll,after:scrollAfter}};
+            assert.deepEqual(observed.map(event=>event.type),['ely:action'],'The native wheel must produce exactly one public viewport action');
+            assert.equal(detail.id,id);assert.equal(detail.component,identity);assert.equal(detail.action,'change-viewport');assert(detail.view,'Ruler pan must carry the public viewport');
             assert.deepEqual(scrollAfter,pageScroll,'The wheel must not scroll the page');
             const proof=assertCanvasRulerPan(beforePan,after,detail,{inputs,beforePaint,afterPaint});
-            await assertWorld(detail.view);return {action:detail.action,view:detail.view,expected:proof.expected,input:inputs[0],ruler:{before:beforePaint,after:afterPaint,visibleArea:[proof.initialVisibleArea,proof.finalVisibleArea]}};
+            await assertWorld(detail.view);return {action:detail.action,view:detail.view,expected:proof.expected,input:inputs[0],primitiveCounts:proof.primitiveCounts,ruler:{before:beforePaint,after:afterPaint,visibleArea:[proof.initialVisibleArea,proof.finalVisibleArea]}};
           });
         }
         let beforeZoom;

@@ -18,15 +18,18 @@ test('minimap viewport oracle rejects zoom changes against the pre-click state',
 });
 
 test('ruler pan oracle requires exact native x transition and partial-to-full tick geometry',()=>{
-  const before={stage:{width:820,height:460},view:{x:-60,y:-60,zoom:.7},artboards:[{id:'home',x:0,y:0,w:390,h:640},{id:'detail',x:470,y:0,w:390,h:640}],shapes:8,guides:2,grid:100,rulers:19};
+  const gridConfiguration={xSpacing:[35],ySpacing:[35],radii:[.75],fills:['var(--color-line)']},rulerConfiguration={horizontalSpacing:[70],verticalSpacing:[70],fontSizes:[11],rects:[{width:820,height:20,fill:'var(--surface)'},{width:32,height:460,fill:'var(--surface)'}]};
+  const before={stage:{width:820,height:460},view:{x:-60,y:-60,zoom:.7},artboards:[{id:'home',x:0,y:0,w:390,h:640},{id:'detail',x:470,y:0,w:390,h:640}],shapes:8,guides:2,grid:{count:312,configuration:gridConfiguration},rulers:{count:19,configuration:rulerConfiguration}};
   const after={...before,view:{x:before.view.x+48/before.view.zoom,y:before.view.y,zoom:before.view.zoom}};
   const rect=(left,right)=>({left,top:20,right,bottom:31}),clip={left:0,top:0,right:820,bottom:460};
   const input={type:'wheel',trusted:true,targetStage:true,deltaX:48,deltaY:0,defaultPrevented:true},detail={action:'change-viewport',view:after.view};
-  const paint=(left,right)=>({text:'1100',rect:rect(left,right),clip});
+  const paint=(left,right)=>({count:1,text:'1100',rect:rect(left,right),clip});
   const proof=assertCanvasRulerPan(before,after,detail,{inputs:[input],beforePaint:paint(814,844),afterPaint:paint(766,796)});
   assert.deepEqual(proof.expected,{x:before.view.x+48/.7,y:-60,zoom:.7});
   assert(proof.initialVisibleArea>0&&proof.initialVisibleArea<proof.initialFullArea);
   assert.equal(proof.finalVisibleArea,proof.finalFullArea);
+  assert.deepEqual(proof.primitiveCounts,{grid:[312,312],rulers:[19,19]});
+  assert.doesNotThrow(()=>assertCanvasRulerPan(before,{...after,grid:{...after.grid,count:299},rulers:{...after.rulers,count:17}},detail,{inputs:[input],beforePaint:paint(814,844),afterPaint:paint(766,796)}),'Viewport-derived grid and ruler primitive counts may change while their measured configuration remains stable');
   for(const defect of [
     {input:{...input,deltaY:1}},
     {input:{...input,targetStage:false}},
@@ -34,6 +37,10 @@ test('ruler pan oracle requires exact native x transition and partial-to-full ti
     {beforePaint:paint(830,860)},
     {afterPaint:paint(810,840)},
     {after:{...after,shapes:7}},
+    {after:{...after,grid:{...after.grid,configuration:{...gridConfiguration,xSpacing:[70]}}}},
+    {after:{...after,rulers:{...after.rulers,configuration:{...rulerConfiguration,fontSizes:[12]}}}},
+    {after:{...after,grid:{...after.grid,count:0}}},
+    {after:{...after,rulers:{...after.rulers,count:0}}},
     {inputs:[input,input]},
     {input:{...input,defaultPrevented:false}},
     {input:{...input,type:'click'}},
@@ -106,6 +113,11 @@ test('source-only: six three-step and two four-step canvas contracts; 32 case/pr
   assert.doesNotMatch(canvasDriver.slice(canvasDriver.indexOf("runStep('pan-ruler-1100'"),canvasDriver.indexOf("runStep('zoom-in'")),/scrollIntoViewIfNeeded|scrollTo\(|scrollIntoView\(|setView\(|dispatchEvent\(/,'The pan action cannot programmatically scroll, mutate view state, or synthesize input');
   assert.match(canvasDriver,/requestAnimationFrame\(\(\)=>requestAnimationFrame\(resolve\)\)/,'Ruler geometry is measured after two animation frames');
   assert.match(canvasDriver,/assertCanvasRulerPan\(beforePan,after,detail/,'The actual event, viewport and before/after ruler geometry share a behavioral assertion');
+  const panStep=canvasDriver.slice(canvasDriver.indexOf("runStep('pan-ruler-1100'"),canvasDriver.indexOf("runStep('zoom-in'"));
+  assert(panStep.indexOf('canvasRulerPanEvidence=')<panStep.indexOf('assertCanvasRulerPan('),'Full scene, tick/clip, native event and page-scroll evidence must be retained on the per-case receipt before a pan assertion can fail');
+  assert.match(canvasDriver,/count:ticks\.length/,'A failed tick lookup must retain its measured count instead of throwing before the failure receipt');
+  assert.match(driver,/configuration:\{xSpacing:spacing\(gridPoints\.map\(point=>point\.x\)\),ySpacing:spacing\(gridPoints\.map\(point=>point\.y\)\)/,'Grid comparison must use measured lattice spacing rather than viewport-dependent circle count');
+  assert.match(driver,/horizontalSpacing:spacing\(horizontalTicks\.map\(tick=>tick\.x\)\),verticalSpacing:spacing\(verticalTicks\.map\(tick=>tick\.y\)\)/,'Ruler comparison must use measured tick spacing rather than viewport-dependent text count');
   const centerChecks=canvasDriver.slice(canvasDriver.indexOf('for(const selector of controls)'),canvasDriver.indexOf('await root.evaluate(node=>{node.__visualCanvasClicks=[]'));
   assert.match(centerChecks,/await target\.scrollIntoViewIfNeeded\(\);\s*await target\.evaluate\(node=>new Promise\(resolve=>requestAnimationFrame\(\(\)=>requestAnimationFrame\(resolve\)\)\)\);\s*const hit=await target\.evaluate/,'Each zoom control must scroll natively and settle before its center ownership check');
   assert.match(centerChecks,/assert\.equal\(hit\.reachable,true,`\$\{selector\} center must be an owned hit target`\)/,'A visible foreign hit target must still fail the exact center assertion');
