@@ -98,10 +98,11 @@ test('Search Password Phone Masked explicit native contracts retain canonical ma
     const contract=requestedStateContract(identity);assert.equal(contract.kind,kind);assert.equal(contract.focusedSequence,'input-public-special');assert.equal(contract.requestedStateOnly,true);assert.deepEqual(contract.steps.map(step=>step.id),stages);assert.deepEqual(contract.mappingGaps,[]);
     assert(contract.steps.every(step=>step.source.provenance.includes(identity)&&step.source.provenance.includes('not PreviewExamples')));
     const masked=identity==='forms/PhoneInput'||identity==='forms/MaskedInput';
-    assert.equal(contract.inputFixture.initial,masked?'01012345678':'alpha');
-    if(masked)assert.equal(contract.inputFixture.mask,'###-####-####');
+    const aliasMask=identity==='forms/MaskedInput';
+    assert.equal(contract.inputFixture.initial,aliasMask?'ab-1234':masked?'01012345678':'alpha');
+    if(masked)assert.equal(contract.inputFixture.mask,aliasMask?'aa-9999':'###-####-####');
     for(const stage of stages){
-      const toggle=stage.endsWith('-password'),value=masked?(stage==='fill-partial'?'010':'010-9876-5432'):stage==='clear-text'?'':'Changed caller value';
+      const toggle=stage.endsWith('-password'),value=masked?(aliasMask?(stage==='fill-partial'?'a':'ab-9876'):(stage==='fill-partial'?'010':'010-9876-5432')):stage==='clear-text'?'':'Changed caller value';
       const state={name:'caller_value',type:stage==='show-password'?'text':type,value,valid:true,...(toggle?{label:stage==='show-password'?'Hide':'Show',ariaLabel:stage==='show-password'?'Hide password':'Show password'}:{})};
       assertSpecialInputState(identity,stage,state);
       for(const key of Object.keys(state))assert.throws(()=>assertSpecialInputState(identity,stage,{...state,[key]:key==='valid'?false:'wrong'}));
@@ -120,8 +121,15 @@ test('Search Password Phone Masked explicit native contracts retain canonical ma
   assert.match(template,/eq \.Variant "MaskedInput"[\s\S]*?\$type = "text"/);assert.match(template,/"Type" "search"/);
   assert.match(controls,/action === 'password-toggle'[\s\S]*?input\.type = shown \? 'password' : 'text'[\s\S]*?'Show password' : 'Hide password'/);
   assert.match(forms,/field\.value=fitFormMask\(field\.dataset\.elyMask,field\.value\)/);
+  const aliases=await read('internal/gallery/advanced.go');
+  const override=aliases.match(/case "forms\/MaskedInput":\s*props\["Mask"\], props\["Value"\], props\["Placeholder"\] = "([^"]+)", "([^"]+)", "([^"]+)"/);
+  assert(override,'Qualified MaskedInput alias override must be read, not inferred from PhoneInput');
+  const maskedFixture=requestedStateContract('forms/MaskedInput').inputFixture;
+  assert.equal(maskedFixture.mask,override[1]);assert.equal(maskedFixture.initial,override[2]);assert.equal(override[3],'__-____');
+  assert.throws(()=>assertSpecialInputState('forms/MaskedInput','fill-masked',{name:'caller_value',type:'text',value:'010-9876-5432',valid:true}),'Phone cooked value must not approve the qualified alias');
+  assert.equal(maskedFixture.raw,'1ab!987654z');
   const driver=runRequestedStateActions.toString(),branch=driver.slice(driver.indexOf("if(contract.focusedSequence==='input-public-edit-clear'"),driver.indexOf("if(['button-public-boundary','textarea-public-multiline']"));
-  assert.match(branch,/a01098765432999b/);assert.match(branch,/toggle\.click\(\)/);assert.match(branch,/assertSpecialInputState/);assert.match(branch,/Last recent search: nothing yet/);assert.match(branch,/Canonical mask fixture has no country selector/);
+  assert.match(branch,/special\.raw/);assert.match(branch,/toggle\.click\(\)/);assert.match(branch,/assertSpecialInputState/);assert.match(branch,/Last recent search: nothing yet/);assert.match(branch,/Canonical mask fixture has no country selector/);
   assert.doesNotMatch(branch,/dispatchEvent|new Event|requestSubmit|\.value\s*=|\.first\(|\.nth\(/);
 });
 

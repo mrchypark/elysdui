@@ -818,7 +818,7 @@ export function requestedStateContract(identity,trashFixture){
       'buttons/Button':'internal/gallery/advanced_interaction_fixtures.go Button Groups; ui/gohtmx/templates/ely-api-interaction.html ely-api-buttons; ui/gohtmx/assets/ely-api.js click/emit; public cancelable event boundary only, not application onClick execution',
       'forms/TextArea':'internal/gallery/advanced_forms_fixtures.go TextArea; ui/gohtmx/templates/ely-api-forms.html TextArea; ui/gohtmx/assets/ely-api-forms.js input autoresize; ui/gohtmx/assets/ely-api.js change; no disabled/readOnly/required fixture is claimed',
       ...Object.fromEntries(['forms/Input','forms/TextField','forms/ClearableInput'].map(identity=>[identity,'internal/gallery/advanced_forms_fixtures.go Input; internal/gallery/advanced.go aliasFixtureProps; ui/gohtmx/templates/ely-api-forms.html Input; ely-controls.html clearable-input; ely-controls.js clear handler; ely-api.js public change. Exact '+identity+' only; native Clear click triggers explicitly synthetic production input/change; no host fulfillment.'])),
-      ...Object.fromEntries(Object.keys(nextInputCases).map(identity=>[identity,'internal/gallery/advanced_forms_fixtures.go canonical SearchInput/PasswordInput/PhoneInput (not PreviewExamples); ely-api-forms.html exact alias/type/mask; ely-controls.js clear/password-toggle; ely-api-forms.js input mask; ely-api.js public change. Exact '+identity+' only; no host fulfillment, recent-search persistence or country selection.'])),
+      ...Object.fromEntries(Object.keys(nextInputCases).map(identity=>[identity,'internal/gallery/advanced_forms_fixtures.go canonical SearchInput/PasswordInput/PhoneInput (not PreviewExamples); internal/gallery/advanced.go qualified forms/MaskedInput aliasFixtureProps mask/value override; ely-api-forms.html exact alias/type/mask; ely-controls.js clear/password-toggle; ely-api-forms.js input mask; ely-api.js public change. Exact '+identity+' only; no host fulfillment, recent-search persistence or country selection.'])),
       'tooling/EventLogger':'internal/gallery/advanced_native_tooling_fixtures.go EventLogger; ui/gohtmx/templates/ely-api-native-tooling.html EventLogger; ui/gohtmx/assets/ely-api-native-tooling.js receive/recordInput; exact global trace calibration remains separate',
       ...Object.fromEntries(Object.keys(formattedInputCases).map(identity=>[identity,'internal/gallery/advanced_forms_fixtures.go EmailInput/CurrencyInput canonical root (not PreviewExamples); internal/gallery/advanced.go UrlInput exact alias value/type; ely-api-forms.html typed format field; ely-api.js public change. Exact '+identity+' caller bounds and native validity only; no unit switching, popup, submission or host fulfillment.'])),
       'project/StatusSelect':'ui/gohtmx/templates/ely-api-communication.html:108,115; ui/gohtmx/assets/ely-api-communication.css:296-297 focus-visible-only Update; ui/gohtmx/assets/ely-api-communication.js:258; ui/gohtmx/assets/ely-api.js submit handler',
@@ -889,14 +889,14 @@ export function assertEventLoggerPublicState(stage,observation){
 const nextInputCases={
   'forms/SearchInput':{kind:'SearchInput',type:'search',initial:'alpha',selector:':scope > .ely-api-search input[name="caller_value"][type="search"]',stages:['fill-text','commit-text','clear-text']},
   'forms/PasswordInput':{kind:'PasswordInput',type:'password',initial:'alpha',selector:':scope > .ely-api-password input[name="caller_value"]',stages:['fill-text','commit-text','show-password','hide-password']},
-  'forms/PhoneInput':{kind:'PhoneInput',type:'tel',initial:'01012345678',mask:'###-####-####',selector:':scope > .ely-api-format-field .ely-api-phone input[name="caller_value"][data-ely-mask]',stages:['fill-partial','fill-masked','commit-text']},
-  'forms/MaskedInput':{kind:'PhoneInput',type:'text',initial:'01012345678',mask:'###-####-####',selector:':scope > .ely-api-format-field .ely-api-phone input[name="caller_value"][data-ely-mask]',stages:['fill-partial','fill-masked','commit-text']},
+  'forms/PhoneInput':{kind:'PhoneInput',type:'tel',initial:'01012345678',mask:'###-####-####',partial:'010',raw:'a01098765432999b',cooked:'010-9876-5432',selector:':scope > .ely-api-format-field .ely-api-phone input[name="caller_value"][data-ely-mask]',stages:['fill-partial','fill-masked','commit-text']},
+  'forms/MaskedInput':{kind:'PhoneInput',type:'text',initial:'ab-1234',mask:'aa-9999',partial:'a',raw:'1ab!987654z',cooked:'ab-9876',selector:':scope > .ely-api-format-field .ely-api-phone input[name="caller_value"][data-ely-mask]',stages:['fill-partial','fill-masked','commit-text']},
 };
 
 export function assertSpecialInputState(identity,stage,state){
   const fixture=nextInputCases[identity];assert(fixture,'No generic special-input contract');assert(fixture.stages.includes(stage));
   const toggle=stage==='show-password'||stage==='hide-password';
-  const value=fixture.mask?(stage==='fill-partial'?'010':'010-9876-5432'):stage==='clear-text'?'':'Changed caller value';
+  const value=fixture.mask?(stage==='fill-partial'?fixture.partial:fixture.cooked):stage==='clear-text'?'':'Changed caller value';
   assert.deepEqual(state,{name:'caller_value',type:stage==='show-password'?'text':fixture.type,value,valid:true,...(toggle?{label:stage==='show-password'?'Hide':'Show',ariaLabel:stage==='show-password'?'Hide password':'Show password'}:{})},'Exact native special-input value/type/validity and toggle labels');
   return state;
 }
@@ -1966,12 +1966,12 @@ export async function runRequestedStateActions(contract,root,runStep,failureDiag
       try{
         for(const stage of contract.steps.map(step=>step.id)){
           const invalid=stage.endsWith('invalid');
-          const value=special?.mask?(stage==='fill-partial'?'010':'010-9876-5432'):formatted?(invalid?formatted.invalid:formatted.valid):((special&&stage!=='clear-text')||stage==='fill-text'||stage==='commit-text')?'Changed caller value':'';
+          const value=special?.mask?(stage==='fill-partial'?special.partial:special.cooked):formatted?(invalid?formatted.invalid:formatted.valid):((special&&stage!=='clear-text')||stage==='fill-text'||stage==='commit-text')?'Changed caller value':'';
           let nativeCursor;
           await runStep(stage,async()=>{
             await begin();nativeCursor=(await native()).length;
             if(stage==='show-password'||stage==='hide-password')await toggle.click();
-            else if(stage.startsWith('fill-'))await field.fill(stage==='fill-masked'?'a01098765432999b':value);
+            else if(stage.startsWith('fill-'))await field.fill(stage==='fill-masked'?special.raw:value);
             else if(stage==='clear-text'){
               if(clearButton)await clear.click();
               else{await field.focus();await field.press('ControlOrMeta+a');await field.press('Backspace');}
@@ -1986,7 +1986,7 @@ export async function runRequestedStateActions(contract,root,runStep,failureDiag
             else assert.deepEqual(observed,[],'No premature or duplicate public change or host action');
             const inputs=(await native()).slice(nativeCursor);assertPlainInputNativeEvents(stage.startsWith('fill-')?'fill-text':formatted?'commit-text':stage,inputs,{clearButton,value});
             assert.deepEqual(await peers(),initialPeers,'Input actions must preserve sibling specimens');
-            return {value,...(formatted||special?{validity}:{}),events:observed,nativeEvents:inputs,twinUnchanged:true,peersUnchanged:true,scope:clearButton?'Trusted click; generated clear input/change are synthetic production events; no host fulfillment':identity==='forms/PasswordInput'?'Native input/blur and trusted visibility toggles only; no fabricated public toggle events or host fulfillment':special?.mask?'Canonical ###-####-#### mask only; native input/blur, no country switching or host fulfillment':'Native input and blur only; no host fulfillment'};
+            return {value,...(formatted||special?{validity}:{}),events:observed,nativeEvents:inputs,twinUnchanged:true,peersUnchanged:true,scope:clearButton?'Trusted click; generated clear input/change are synthetic production events; no host fulfillment':identity==='forms/PasswordInput'?'Native input/blur and trusted visibility toggles only; no fabricated public toggle events or host fulfillment':special?.mask?`Exact ${identity} ${special.mask} mask only; native input/blur, no country switching or host fulfillment`:'Native input and blur only; no host fulfillment'};
           });
         }
       }finally{await root.evaluate(node=>{for(const type of ['click','input','change'])node.removeEventListener(type,node.__visualPlainInputObserver);delete node.__visualPlainInputObserver;delete node.__visualPlainInputEvents;});}
