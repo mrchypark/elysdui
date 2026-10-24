@@ -31,26 +31,78 @@ func hasRootMinInlineSizeZero(css []byte, rootClass string) bool {
 	return false
 }
 
-func TestFormProfileCanShrinkWithinMobileGrid(t *testing.T) {
-	css, err := Files.ReadFile("assets/ely-api-forms.css")
+func hasRuleDeclaration(css []byte, selector, property, value string) bool {
+	for _, rule := range strings.Split(string(css), "}") {
+		selectors, declarations, ok := strings.Cut(rule, "{")
+		if !ok {
+			continue
+		}
+		matches := false
+		for _, candidate := range strings.Split(selectors, ",") {
+			if strings.TrimSpace(candidate) == selector {
+				matches = true
+				break
+			}
+		}
+		if !matches {
+			continue
+		}
+		for _, declaration := range strings.Split(declarations, ";") {
+			name, current, ok := strings.Cut(declaration, ":")
+			if ok && strings.TrimSpace(name) == property && strings.TrimSpace(current) == value {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func TestFormProfileAndNestedControlsCanShrinkWithinMobileGrid(t *testing.T) {
+	formsCSS, err := Files.ReadFile("assets/ely-api-forms.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	baseCSS, err := Files.ReadFile("assets/ely-api.css")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	preferredWidth := "[data-ely-family='forms'] .ely-api-profile-form,[data-ely-family='forms'] .ely-api-inline-form{inline-size:30rem;max-inline-size:100%}"
-	if !strings.Contains(string(css), preferredWidth) {
-		t.Fatal("profile and inline forms must retain their 30rem preferred width and container maximum")
+	const profileForm = "[data-ely-family='forms'] .ely-api-profile-form"
+	const inlineForm = "[data-ely-family='forms'] .ely-api-inline-form"
+	if !hasRuleDeclaration(formsCSS, profileForm, "max-inline-size", "30rem") {
+		t.Fatal("profile form must retain its 30rem maximum width")
+	}
+	if hasRuleDeclaration(formsCSS, profileForm, "inline-size", "30rem") {
+		t.Fatal("profile form must fill a narrow containing track instead of fixing itself at 30rem")
+	}
+	if !hasRootMinInlineSizeZero(formsCSS, ".ely-api-profile-form") {
+		t.Fatal("the profile-form root must still permit shrinking below min-content width")
+	}
+	if !hasRuleDeclaration(formsCSS, inlineForm, "inline-size", "30rem") || !hasRuleDeclaration(formsCSS, inlineForm, "max-inline-size", "100%") {
+		t.Fatal("InlineForm must retain its independent 30rem preferred-width contract")
+	}
+	if hasRootMinInlineSizeZero(formsCSS, ".ely-api-inline-form") {
+		t.Fatal("InlineForm must not receive the profile-form root shrink rule")
 	}
 
-	const profileSelector = "[data-ely-family='forms'] .ely-api-profile-form"
-	if !hasRootMinInlineSizeZero(css, ".ely-api-profile-form") {
-		t.Fatal("the actual profile-form root rule must permit shrinking below min-content width")
+	if !hasRuleDeclaration(baseCSS, "[data-ely-family]", "display", "grid") || !hasRuleDeclaration(baseCSS, "[data-ely-family]", "min-inline-size", "0") {
+		t.Fatal("the measured component wrapper must remain a shrinkable grid root")
 	}
-	if hasRootMinInlineSizeZero(css, ".ely-api-inline-form") {
-		t.Fatal("the actual InlineForm root must not receive the profile-form shrink rule")
+	if !hasRuleDeclaration(formsCSS, "[data-ely-family='forms'] fieldset", "min-inline-size", "0") ||
+		!hasRuleDeclaration(formsCSS, "[data-ely-family='forms'] .ely-api-form-field", "min-inline-size", "0") ||
+		!hasRuleDeclaration(formsCSS, "[data-ely-family='forms'] .ely-api-profile-form .ely-api-field", "max-inline-size", "100%") {
+		t.Fatal("fieldset, field grid and label chain must not reintroduce a min-content width")
+	}
+	if !hasRuleDeclaration(baseCSS, "[data-ely-family] input", "min-inline-size", "0") ||
+		!hasRuleDeclaration(baseCSS, "[data-ely-family] input", "max-inline-size", "100%") ||
+		!hasRuleDeclaration(formsCSS, "[data-ely-family='forms'] [data-ely-array-row]>input", "min-inline-size", "0") {
+		t.Fatal("form controls and flexible array inputs must remain constrained by their inner track")
+	}
+	if !hasRuleDeclaration(formsCSS, "[data-ely-family='forms'] .ely-api-form-actions", "display", "flex") {
+		t.Fatal("the profile form action row must remain in the tested inner layout chain")
 	}
 
-	groupedRootMutation := []byte(profileSelector + ",[data-ely-family='forms'] .ely-api-inline-form{min-inline-size:0}")
+	groupedRootMutation := []byte(profileForm + ",[data-ely-family='forms'] .ely-api-inline-form{min-inline-size:0}")
 	if !hasRootMinInlineSizeZero(groupedRootMutation, ".ely-api-inline-form") {
 		t.Fatal("grouped selector mutation should detect min-inline-size:0 leaking to the InlineForm root")
 	}
