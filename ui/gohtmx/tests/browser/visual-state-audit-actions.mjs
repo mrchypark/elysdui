@@ -5,6 +5,7 @@ import {createServer} from 'node:http';
 import {mkdir, mkdtemp, readFile, rm, stat, unlink, writeFile} from 'node:fs/promises';
 import {extname, resolve, sep} from 'node:path';
 import {fileURLToPath} from 'node:url';
+import {tmpdir} from 'node:os';
 import {setTimeout as delay} from 'node:timers/promises';
 import {isDeepStrictEqual} from 'node:util';
 import {chromium} from 'playwright';
@@ -515,7 +516,7 @@ try {
   await mkdir(options.output, {recursive: false});
   const captures = resolve(options.output, 'captures');
   await mkdir(captures);
-  runDir = await mkdtemp(resolve(options.output, '.run-'));
+  runDir = await mkdtemp(resolve(tmpdir(), 'elysdui-visual-action-'));
   await writeFile(resolve(options.output, 'resources.json'), JSON.stringify({runnerPID: process.pid, runDir, state: 'running'}) + '\n', {flag: 'wx'});
   const goEnv = {...process.env, GOTOOLCHAIN: process.env.GOTOOLCHAIN || 'go1.26.9'};
   let origin = options.baseURL;

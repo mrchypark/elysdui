@@ -4,7 +4,7 @@ import {transform,staticCoverageManifest,registrationInventory,resolveCaseAction
 import {readFile,mkdtemp,mkdir,writeFile,rm} from 'node:fs/promises';
 import {createHash} from 'node:crypto';
 import {tmpdir} from 'node:os';
-import {join} from 'node:path';
+import {join,resolve,sep} from 'node:path';
 import {chromium} from 'playwright';
 import {compileFunction,runInNewContext} from 'node:vm';
 import {parse} from 'acorn';
@@ -795,6 +795,20 @@ test('native tooling route and source/AST hash guards fail closed before browser
   assert.throws(()=>prepareActionModule('native',source,tampered,'static-audit'),/AST\/hash mismatch/);
   const wrongRegistration=structuredClone(manifest);wrongRegistration.modules.native.registeredChecks=[];
   assert.throws(()=>prepareActionModule('native',source,wrongRegistration,'live-audit'),/registration mismatch/);
+});
+
+test('direct action runner keeps private scratch under OS temp while evidence stays in output',async()=>{
+  const source=await readFile(new URL('./visual-state-audit-actions.mjs',import.meta.url),'utf8');
+  assert.match(source,/import \{[^}]*\btmpdir\b[^}]*\} from 'node:os'/);
+  assert.match(source,/runDir = await mkdtemp\(resolve\(tmpdir\(\), 'elysdui-visual-action-'\)\)/);
+  assert.doesNotMatch(source,/mkdtemp\(resolve\(options\.output/,'Private scratch must not consume the evidence-output filesystem');
+  assert.match(source,/const captures = resolve\(options\.output, 'captures'\)/,'Captures remain in the requested evidence directory');
+  assert.match(source,/resolve\(options\.output, 'resources\.json'\)/,'Resource receipts remain in the requested evidence directory');
+  assert.match(source,/await rm\(runDir, \{recursive: true, force: true\}\)/,'The exact owned scratch directory is still removed in finally');
+  assert.match(source,/temporaryDirectoryRemoved: true/,'Cleanup continues to be recorded in the resource receipt');
+  const output=await mkdtemp(join(tmpdir(),'elysdui-audit-output-')),runDir=await mkdtemp(resolve(tmpdir(),'elysdui-visual-action-'));
+  try{assert(!runDir.startsWith(output+sep),'The private run directory is not nested in this evidence output directory');}
+  finally{await rm(runDir,{recursive:true,force:true});await rm(output,{recursive:true,force:true});}
 });
 
 test('existing sync telemetry is not an independent complete original-action denominator',async()=>{
