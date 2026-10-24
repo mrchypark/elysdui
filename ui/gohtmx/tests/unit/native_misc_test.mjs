@@ -45,7 +45,9 @@ const resolve=(value,tokens,depth=0)=>{assert.ok(depth<12,'token cycle');const k
 const cookieSelector="[data-ely-family='native'] button[data-cookies='all']";
 const cookieRule=miscCSS.slice(miscCSS.indexOf(cookieSelector)).match(/^[^{]+\{([^}]+)\}/)?.[1];
 assert.ok(cookieRule,'cookie primary rule must include button to beat the native base background');
-assert.ok(miscCSS.indexOf(cookieSelector)>miscCSS.lastIndexOf("[data-ely-family='native'] button:not([data-slot='button']){"),'cookie primary paint must follow the equally specific base rule');
+const nativeBaseIndex=miscCSS.lastIndexOf("[data-ely-family='native'] button:not([data-slot='button']){");
+assert.ok(nativeBaseIndex>=0,'native base button rule must exist for the specificity regression');
+assert.ok(miscCSS.indexOf(cookieSelector)>nativeBaseIndex,'cookie primary paint must follow the equally specific base rule');
 assert.match(cookieRule,/(?:^|;)background:var\(--color-primary\);/);
 assert.match(cookieRule,/(?:^|;)color:var\(--color-primary-foreground,var\(--on-accent\)\);/);
 assert.match(cookieRule,/(?:^|;)border-color:var\(--color-primary\)/);
