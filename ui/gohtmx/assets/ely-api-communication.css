@@ -366,3 +366,4 @@
 [data-ely-family='communication'] .ely-agent-tree summary button{flex:1 1 auto;min-width:0;overflow-wrap:anywhere}
 [data-ely-family='communication'] .ely-agent-tree summary small{flex:0 1 auto;min-width:0;white-space:normal;overflow-wrap:anywhere}
 [data-ely-family='communication'] .ely-agent-tree summary progress{flex:0 0 4rem;min-width:4rem}
+[data-ely-family='communication'] .ely-agent-tree details:not([open])>ul{display:none}

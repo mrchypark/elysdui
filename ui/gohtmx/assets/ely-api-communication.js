@@ -4,7 +4,7 @@ import {mountMathML} from './ely-math.js';
 
 const status=(root,message)=>{const out=root.querySelector('[data-ely-status]');if(out)out.textContent=message};
 const changed=(root,name,value,extra={})=>root.dispatchEvent(new CustomEvent('ely:change',{bubbles:true,detail:{id:root.id,component:root.dataset.elyComponent,name,value,...extra}}));
-const detail=(root,element={})=>({value:element.value||element.dataset.value||'',itemId:element.dataset.cardId||element.dataset.messageId||element.dataset.attachmentId||'',laneId:element.closest('[data-lane-id]')?.dataset.laneId||'',date:element.closest('[data-ely-date]')?.dataset.elyDate||''});
+const detail=(root,element={})=>({value:element.value||element.dataset.value||element.dataset.elyValue||'',itemId:element.dataset.cardId||element.dataset.messageId||element.dataset.attachmentId||'',laneId:element.closest('[data-lane-id]')?.dataset.laneId||'',date:element.closest('[data-ely-date]')?.dataset.elyDate||''});
 
 const messagingMatches=(label,pack,selected,query)=>{const words=query.trim().toLocaleLowerCase();return (!words&&!selected||!!words||pack===selected)&&label.toLocaleLowerCase().includes(words);};
 const messagingColumns=(count,width)=>Math.max(1,Math.min(Math.ceil(Math.sqrt(count)),Math.floor(width/168)||1));

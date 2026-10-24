@@ -807,4 +807,4 @@
 /* Let native web embeds shrink inside narrow family roots instead of widening their grid track. */
 [data-ely-family='native'] .ely-native-card:is([data-native-kind='WebView'],[data-native-kind='IframeEmbed']) .ely-native-controls{grid-template-columns:minmax(0,1fr)}
 [data-ely-family='native'] .ely-misc-cookies{max-width:100%}
-@media(max-width:34rem){[data-ely-family='native'] .ely-native-prompt-workbench{grid-template-columns:minmax(0,1fr);min-width:0}[data-ely-family='native'] .ely-native-prompt-workbench form{min-width:0}[data-ely-family='native'] .ely-native-prompt-workbench textarea{box-sizing:border-box;min-width:0;width:100%}}
+@media(max-width:34rem){[data-ely-family='native'] .ely-native-prompt-workbench{width:100%;max-width:100%;box-sizing:border-box;grid-template-columns:minmax(0,1fr);min-width:0}[data-ely-family='native'] .ely-native-prompt-workbench form{min-width:0}[data-ely-family='native'] .ely-native-prompt-workbench textarea{box-sizing:border-box;min-width:0;width:100%}}

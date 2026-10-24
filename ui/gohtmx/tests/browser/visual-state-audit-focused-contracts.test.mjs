@@ -26,8 +26,8 @@ test('CookieBanner, PromptPlayground, and SubAgentTree add only exact source-bac
   assert.equal(contracts.reduce((sum,contract)=>sum+contract.steps.length,0),11);
   for(const identity of ['misc/Terms','misc/Consent Dialog','generative/PromptDiff','agent/AgentStepList','agent/SubAgentTreeExtra'])assert.equal(requestedStateContract(identity),null,`${identity} must not inherit one of these exact-case contracts`);
 
-  const [driver,nativeTemplate,nativeMisc,nativeMiscJS,promptFixture,promptJS,communicationTemplate,communicationFixture,communicationJS,docs]=await Promise.all([
-    read('ui/gohtmx/tests/browser/visual-state-audit-drivers.mjs'),read('ui/gohtmx/templates/ely-api-native.html'),read('internal/gallery/assets/native-misc-fixtures.json'),read('ui/gohtmx/assets/ely-api-native-misc.js'),read('internal/gallery/advanced_native_generative_fixtures.go'),read('ui/gohtmx/assets/ely-api-native-generative-tools.js'),read('ui/gohtmx/templates/ely-api-communication.html'),read('internal/gallery/advanced_communication_fixtures.go'),read('ui/gohtmx/assets/ely-api-communication.js'),read('docs/gohtmx/advanced-communication.md'),
+  const [driver,nativeTemplate,nativeMisc,nativeMiscJS,promptFixture,promptDefaults,promptJS,communicationTemplate,communicationFixture,communicationJS,docs]=await Promise.all([
+    read('ui/gohtmx/tests/browser/visual-state-audit-drivers.mjs'),read('ui/gohtmx/templates/ely-api-native.html'),read('internal/gallery/assets/native-misc-fixtures.json'),read('ui/gohtmx/assets/ely-api-native-misc.js'),read('internal/gallery/advanced_native_generative_fixtures.go'),read('internal/gallery/advanced_native_fixtures.go'),read('ui/gohtmx/assets/ely-api-native-generative-tools.js'),read('ui/gohtmx/templates/ely-api-communication.html'),read('internal/gallery/advanced_communication_fixtures.go'),read('ui/gohtmx/assets/ely-api-communication.js'),read('docs/gohtmx/advanced-communication.md'),
   ]);
   assert.match(nativeTemplate,/eq \.Kind "Terms"[\s\S]*?ne \.Variant "CookieBanner"[\s\S]*?data-cookies="all"[\s\S]*?data-cookies="none"[\s\S]*?data-cookies="choose"/);
   assert.match(nativeMisc,/"Terms":\s*\{[\s\S]*?"CookieKinds"[\s\S]*?"Analytics"[\s\S]*?"Video"/);
@@ -35,6 +35,7 @@ test('CookieBanner, PromptPlayground, and SubAgentTree add only exact source-bac
   assert.match(contracts[0].scope,/no local dismissal or persistence|Host requests do not prove storage/);
 
   assert.match(promptFixture,/case "PromptPlayground":[\s\S]*?"Write three short notes on \{topic\} in a \{tone\} voice\.",[\s\S]*?"\{\}"/);
+  assert.match(promptDefaults,/"Name":\s*"native_value"/,'The shared gallery fixture supplies native_value as the actual PromptPlayground form field');
   assert.match(promptJS,/listen\(template,'input',rebuild\)/);assert.match(promptJS,/listen\(fields,'input'/);assert.match(promptJS,/preview\.replaceChildren\(\)[\s\S]*?mark\.textContent=filled\.text\.slice\(start,end\)/);assert.match(promptJS,/running=true[\s\S]*?emit\(root,form\.dataset\.action/);
   assert.match(promptJS,/listen\(root,'ely:prompt-output'/,'Output is supplied only by the host response boundary');
   assert.match(driver,/topic\.fill\('observability'\)[\s\S]*?tone\.fill\('concise'\)[\s\S]*?clickVisibleControl\(run\)[\s\S]*?answer:'none; host response not supplied'/);
@@ -43,6 +44,7 @@ test('CookieBanner, PromptPlayground, and SubAgentTree add only exact source-bac
   assert.match(communicationFixture,/case "SubAgentTree":[\s\S]*?"Status": "working", "Progress": 62, "Open": true[\s\S]*?"Value": "code", "Label": "Code: change the lift", "Status": "working", "Progress": 45, "Open": true/);
   assert.match(communicationTemplate,/define "ely-api-agent-tree-node"[\s\S]*?<details[\s\S]*?<summary[\s\S]*?<progress value="\{\{\.Item\.Progress\}\}" max="100"/);
   assert.match(communicationJS,/if\(element\.matches\('\[data-ely-select\]'\)\)[\s\S]*?setAttribute\('aria-selected','true'\)[\s\S]*?emit\(root,'select',detail\(root,element\)\)/);
+  assert.match(communicationJS,/const detail=\(root,element=\{\}\)=>\(\{value:element\.value\|\|element\.dataset\.value\|\|element\.dataset\.elyValue\|\|''/,'Selection host details must honor the template public data-ely-value contract');
   assert.match(driver,/node\.addEventListener\('toggle',event=>node\.__visualDisclosureEvents\.push\([\s\S]*?statusProgress\(current\)[\s\S]*?clickVisibleControl\(marker\)[\s\S]*?clickVisibleControl\(code\)/);
   assert.match(docs,/SubAgentTree uses nested `Items`[\s\S]*?maintains local disclosure and selection/);
   assert.match(contracts[2].scope,/status\/progress|status\/progress/);
