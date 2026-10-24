@@ -194,6 +194,11 @@ func aliasFixtureProps(source map[string]any, name string) map[string]any {
 	}
 	// Qualified fixture consumers opt into target-state examples, not public defaults.
 	switch key {
+	case "forms/YearPicker", "forms/DurationPicker":
+		// The common gallery Max=5 is not a year or total-duration bound.
+		if props["Max"] == 5 {
+			delete(props, "Max")
+		}
 	case "misc/Signature", "misc/Rating Widget":
 		if props["SourceNote"] == "BarcodeDisplay, Signature, and Rating Widget are source-only in this native demo; their platform controls are not implemented here." {
 			control := "signature"

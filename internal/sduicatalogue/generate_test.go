@@ -8,6 +8,40 @@ import (
 	"testing"
 )
 
+func TestGeneratedYearDurationKeepIntegerCallerBoundsWithoutFixtureMax(t *testing.T) {
+	manifest, fixtures, err := Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]bool{}
+	for _, contract := range manifest.Contracts {
+		if contract.Name != "forms/YearPicker" && contract.Name != "forms/DurationPicker" {
+			continue
+		}
+		bound := contract.Properties["max"]
+		if bound.Type != "integer" || bound.Target != "Max" || bound.Format != "" {
+			t.Fatalf("caller max contract drifted for %s: %+v", contract.Name, bound)
+		}
+		seen[contract.Name] = true
+	}
+	if len(seen) != 2 {
+		t.Fatal("missing reviewed numeric alias contracts")
+	}
+	seenFixtures := map[string]bool{}
+	for _, fixture := range fixtures {
+		if !seen[fixture.Name] {
+			continue
+		}
+		if _, exists := fixture.Props["max"]; exists {
+			t.Fatalf("invalid inherited max remains in %s", fixture.Name)
+		}
+		seenFixtures[fixture.Name] = true
+	}
+	if len(seenFixtures) != 2 {
+		t.Fatal("missing canonical alias fixture")
+	}
+}
+
 func TestGeneratedStepperAndStateFixtureValues(t *testing.T) {
 	manifest, fixtures, err := Build()
 	if err != nil {

@@ -137,6 +137,68 @@ func TestStepperFixturePreservesValidNumericCallerProps(t *testing.T) {
 	}
 }
 
+func TestYearDurationFixturesRemoveOnlyQualifiedInheritedMax(t *testing.T) {
+	server, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct{ base, alias, value string }{{"MonthPicker", "YearPicker", "2026"}, {"RelativeDatePicker", "DurationPicker", "30"}} {
+		t.Run(tc.alias, func(t *testing.T) {
+			var original map[string]any
+			for _, fixture := range advancedFormsCases() {
+				if fixture.Component.Chapter == "forms" && fixture.Component.Name == tc.base {
+					original = fixture.Component.Props
+				}
+			}
+			if original == nil || original["Max"] != 5 {
+				t.Fatal("expected actual common gallery Max5 fixture")
+			}
+			beforeValue := original["Value"]
+			props := aliasFixtureProps(original, "forms/"+tc.alias)
+			if _, exists := props["Max"]; exists || props["Value"] != tc.value {
+				t.Fatalf("qualified fixture retains invalid inherited max or changed value: %v", props)
+			}
+			if original["Max"] != 5 || original["Value"] != beforeValue {
+				t.Fatal("alias correction mutated canonical source props")
+			}
+			if aliasFixtureProps(original, tc.alias)["Max"] != 5 || aliasFixtureProps(original, "other/"+tc.alias)["Max"] != 5 {
+				t.Fatal("qualified correction leaked to an unqualified or other-chapter fixture")
+			}
+			render := func(p map[string]any) *html.Node {
+				t.Helper()
+				var markup bytes.Buffer
+				if err := ui.RenderComponent(server.templates, &markup, ui.Component{Chapter: "forms", Name: tc.alias, ID: "bounded-fixture", Props: p}); err != nil {
+					t.Fatal(err)
+				}
+				doc, err := html.Parse(strings.NewReader(markup.String()))
+				if err != nil {
+					t.Fatal(err)
+				}
+				return paletteAuditUnique(t, doc, "name", "caller_value")
+			}
+			input := render(props)
+			if value, _ := nativeAttr(input, "value"); value != tc.value || nativeHasAttr(input, "max") {
+				t.Fatal("actual canonical alias input still has inherited bound or wrong value")
+			}
+			if tc.alias == "YearPicker" {
+				if step, _ := nativeAttr(input, "step"); step != "1" {
+					t.Fatal("year step changed")
+				}
+			} else if min, _ := nativeAttr(input, "min"); min != "0" {
+				t.Fatal("duration must remain nonnegative")
+			}
+			caller := map[string]any{"Name": "caller_value", "Value": "4", "Min": "0", "Max": 5}
+			if max, _ := nativeAttr(render(caller), "max"); max != "5" {
+				t.Fatal("public renderer discarded explicit caller bound")
+			}
+			caller["Max"] = 99
+			if aliasFixtureProps(caller, "forms/"+tc.alias)["Max"] != 99 || caller["Max"] != 99 {
+				t.Fatal("non-default explicit fixture bound changed")
+			}
+		})
+	}
+}
+
 func TestGalleryEmojiCataloguePreservesUpstreamData(t *testing.T) {
 	if len(galleryEmojiOptions) != 1914 {
 		t.Fatalf("emoji count: %d", len(galleryEmojiOptions))

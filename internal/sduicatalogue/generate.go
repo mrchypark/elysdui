@@ -107,6 +107,12 @@ func Build() (Manifest, []TestFixture, error) {
 			return manifest, nil, fmt.Errorf("%s: %w", key, err)
 		}
 		applyContextRequestContract(&c)
+		if c.Name == "forms/YearPicker" || c.Name == "forms/DurationPicker" {
+			// Preserve the reviewed caller-bound type without an invalid fixture Max5.
+			bound := c.Properties["max"]
+			bound.Type, bound.Format = "integer", ""
+			c.Properties["max"] = bound
+		}
 		manifest.Contracts = append(manifest.Contracts, c)
 		seen := map[string]int{}
 		for i, f := range inputs[key] {
