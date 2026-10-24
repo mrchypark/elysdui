@@ -45,6 +45,15 @@ vendor_id : GenuineIntel
 CPUINFO
 )" == 1 ]]
 
+diagnostics_called=false
+test_emulator_diagnostics() {
+	diagnostics_called=true
+}
+android_run_if_emulator_started '' test_emulator_diagnostics
+[[ "$diagnostics_called" == false ]]
+android_run_if_emulator_started 123 test_emulator_diagnostics
+[[ "$diagnostics_called" == true ]]
+
 anr_log=$(mktemp)
 child_pid=
 cleanup() {

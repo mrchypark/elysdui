@@ -30,18 +30,23 @@ cleanup() {
 			wait "$ANR_WATCH_PID" 2>/dev/null
 		fi
 	fi
-  adb -s "$SERIAL" logcat -d > "$RESULTS/logcat.txt" 2>&1
-  adb -s "$SERIAL" shell dumpsys activity lastanr > "$RESULTS/last-anr.txt" 2>&1
-  adb -s "$SERIAL" shell cat /proc/meminfo > "$RESULTS/meminfo.txt" 2>&1
-  adb -s "$SERIAL" shell cat /proc/pressure/cpu > "$RESULTS/cpu-pressure.txt" 2>&1
-  adb -s "$SERIAL" pull /sdcard/Android/data/dev.ely.nativeprofile/files/screenshots "$RESULTS/"
-  python3 "$ROOT/scripts/ci/native/export-focus-diagnostics.py" \
-    "$ROOT/adapters/android/app/build/outputs/connected_android_test_additional_output" \
-    "$RESULTS/focus-counterexamples"
-  if [ -n "$EMULATOR_PID" ]; then kill "$EMULATOR_PID" 2>/dev/null; fi
+  if [ -n "$EMULATOR_PID" ]; then
+	android_run_if_emulator_started "$EMULATOR_PID" collect_emulator_diagnostics
+	kill "$EMULATOR_PID" 2>/dev/null
+  fi
   if [ -n "$CONTROLS_PID" ]; then kill "$CONTROLS_PID" 2>/dev/null; fi
   if [ -n "$SERVER_PID" ]; then kill "$SERVER_PID" 2>/dev/null; fi
   exit "$result"
+}
+collect_emulator_diagnostics() {
+	timeout 5s adb -s "$SERIAL" logcat -d > "$RESULTS/logcat.txt" 2>&1
+	timeout 5s adb -s "$SERIAL" shell dumpsys activity lastanr > "$RESULTS/last-anr.txt" 2>&1
+	timeout 5s adb -s "$SERIAL" shell cat /proc/meminfo > "$RESULTS/meminfo.txt" 2>&1
+	timeout 5s adb -s "$SERIAL" shell cat /proc/pressure/cpu > "$RESULTS/cpu-pressure.txt" 2>&1
+	timeout 5s adb -s "$SERIAL" pull /sdcard/Android/data/dev.ely.nativeprofile/files/screenshots "$RESULTS/"
+	python3 "$ROOT/scripts/ci/native/export-focus-diagnostics.py" \
+		"$ROOT/adapters/android/app/build/outputs/connected_android_test_additional_output" \
+		"$RESULTS/focus-counterexamples"
 }
 trap cleanup EXIT
 

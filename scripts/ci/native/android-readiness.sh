@@ -92,3 +92,10 @@ android_is_owned_child_matching() {
 		*) return 1 ;;
 	esac
 }
+
+android_run_if_emulator_started() {
+	local emulator_pid=$1
+	shift
+	[ -n "$emulator_pid" ] || return 0
+	"$@"
+}
