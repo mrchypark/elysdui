@@ -362,3 +362,4 @@
 [data-ely-family='communication'] :is(.ely-communication-file,.ely-communication-audio){display:flex;flex-wrap:wrap;align-items:center;gap:.5rem}
 [data-ely-family='communication'] :is(.ely-communication-link>a,.ely-chat-suggestion-chips button,.ely-agent-tool-group summary,.ely-communication-tool-registry [data-ely-tool]>div)>small{display:block;margin-top:.25rem}
 [data-ely-family='communication'] .ely-agent-checkpoints li>div{display:flex;flex-wrap:wrap;align-items:baseline;gap:.4rem}
+[data-ely-family='communication'] .ely-agent-tree summary small{white-space:nowrap;overflow-wrap:normal}

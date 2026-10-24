@@ -16,6 +16,10 @@ assert.throws(() => assertDefinedSemanticColors('var(--color-info, var(--info))'
 assert.throws(() => assertDefinedSemanticColors('var(--info \t )'), /Undefined semantic color token: --info/);
 assertDefinedSemanticColors(styles);
 
+const communicationCSS = readFileSync('ui/gohtmx/assets/ely-api-communication.css', 'utf8');
+const agentTreeStatusRules = [...communicationCSS.matchAll(/\.ely-agent-tree summary small\{([^}]*)\}/g)];
+assert(agentTreeStatusRules.some(([, declarations]) => /(?:^|;)white-space:nowrap(?:;|$)/.test(declarations) && /(?:^|;)overflow-wrap:normal(?:;|$)/.test(declarations)), 'SubAgentTree status must stay on one line without arbitrary word breaks');
+
 
 for (const directory of ['ui/gohtmx/assets', 'internal/gallery/assets']) {
   for (const file of readdirSync(directory).filter(name => name.endsWith('.css'))) {
