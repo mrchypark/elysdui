@@ -57,8 +57,8 @@ test('source-only: six three-step and two four-step canvas contracts; 32 case/pr
   assert.deepEqual(contract.steps.map(({id})=>id),['zoom-in','fit-canvas','navigate-minimap']);
   assert(contract.steps.every(step=>step.source.siteId.startsWith('focused-state:canvas/InfiniteCanvas:')&&step.source.provenance.includes('each alias and profile requires its own runtime evidence')));
 
-  const [components,fixture,runtime,instrument]=await Promise.all([
-    read('ui/gohtmx/components.json'),read('internal/gallery/advanced_workspace_canvas.go'),read('ui/gohtmx/assets/ely-api-workspace-canvas.js'),read('ui/gohtmx/tests/browser/visual-state-audit-instrument.mjs'),
+  const [components,fixture,runtime,instrument,actions]=await Promise.all([
+    read('ui/gohtmx/components.json'),read('internal/gallery/advanced_workspace_canvas.go'),read('ui/gohtmx/assets/ely-api-workspace-canvas.js'),read('ui/gohtmx/tests/browser/visual-state-audit-instrument.mjs'),read('ui/gohtmx/tests/browser/visual-state-audit-actions.mjs'),
   ]);
   const story=JSON.parse(components).pages.flatMap(page=>page.stories).find(item=>item.name==='InfiniteCanvas');
   assert(story,'Canonical InfiniteCanvas story must exist');
@@ -108,12 +108,16 @@ test('source-only: six three-step and two four-step canvas contracts; 32 case/pr
   assert.match(driver,/initialTwin=await twinState\(\),id=await root\.getAttribute\('id'\)/);
   assert.match(driver,/assert\.deepEqual\(await twinState\(\),initialTwin,'Public actions must preserve the independent twin'\)/);
   const canvasDriver=driver.slice(driver.indexOf("if(contract.focusedSequence==='canvas-minimap-zoom-fit-hit-test')"),driver.indexOf("if(['button-public-boundary','textarea-public-multiline'].includes(contract.focusedSequence))"));
+  assert.match(actions,/await deliverDirectActionVerification\(receipt,verify\)/,'The shared direct runner must deliver the owned action receipt to its verifier');
   assert.match(canvasDriver,/if\(\['canvas\/CanvasGrid','canvas\/Guides'\]\.includes\(identity\)\)\{[\s\S]*?runStep\('pan-ruler-1100'/,'Only CanvasGrid and Guides run the extra ruler pan before zoom-in');
   assert.match(canvasDriver,/root\.page\(\)\.mouse\.wheel\(48,0\)/,'Ruler panning must use exactly one native horizontal wheel');
   assert.doesNotMatch(canvasDriver.slice(canvasDriver.indexOf("runStep('pan-ruler-1100'"),canvasDriver.indexOf("runStep('zoom-in'")),/scrollIntoViewIfNeeded|scrollTo\(|scrollIntoView\(|setView\(|dispatchEvent\(/,'The pan action cannot programmatically scroll, mutate view state, or synthesize input');
   assert.match(canvasDriver,/requestAnimationFrame\(\(\)=>requestAnimationFrame\(resolve\)\)/,'Ruler geometry is measured after two animation frames');
   assert.match(canvasDriver,/assertCanvasRulerPan\(beforePan,after,detail/,'The actual event, viewport and before/after ruler geometry share a behavioral assertion');
   const panStep=canvasDriver.slice(canvasDriver.indexOf("runStep('pan-ruler-1100'"),canvasDriver.indexOf("runStep('zoom-in'"));
+  assert.match(panStep,/async\(_state,_before,receipt\)/,'The ruler-pan verifier must receive the runner-owned receipt');
+  assert.match(panStep,/receipt\.canvasRulerPanEvidence=/,'Pan geometry must be written to that delivered receipt before the oracle');
+  assert.doesNotMatch(panStep,/receipts\.at\(-1\)/,'The pan verifier must not guess at an outer receipts array');
   assert(panStep.indexOf('canvasRulerPanEvidence=')<panStep.indexOf('assertCanvasRulerPan('),'Full scene, tick/clip, native event and page-scroll evidence must be retained on the per-case receipt before a pan assertion can fail');
   assert.match(canvasDriver,/count:ticks\.length/,'A failed tick lookup must retain its measured count instead of throwing before the failure receipt');
   assert.match(driver,/configuration:\{xSpacing:spacing\(gridPoints\.map\(point=>point\.x\)\),ySpacing:spacing\(gridPoints\.map\(point=>point\.y\)\)/,'Grid comparison must use measured lattice spacing rather than viewport-dependent circle count');
