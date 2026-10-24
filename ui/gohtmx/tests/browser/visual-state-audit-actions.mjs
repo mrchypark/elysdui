@@ -384,7 +384,7 @@ async function directCaseDriver({item, familyURL, captures, reference, semanticS
         password:password?{value:password.value,type:password.type,valid:password.checkValidity()}:null,
         editor:editor?{name:editor.dataset.name,value:node.querySelector('input[data-ws-content-value]')?.value,invalid:editor.getAttribute('aria-invalid'),error:node.querySelector('[data-ws-edit-error]')?.textContent,cursor:node.querySelector('[data-workspace-cursor]')?.textContent}:null};
     });
-    failureProbe=async()=>({currentState:await observe(),nativePayload:await root.evaluate(node=>node.__presenceNativeEvents??null)});
+    failureProbe=async()=>({currentState:await observe(),nativePayload:failureDiagnostics.presenceNativeEvents??await root.evaluate(node=>node.__presenceNativeEvents??null),...(failureDiagnostics.presenceNativeEventsError?{diagnosticError:failureDiagnostics.presenceNativeEventsError}:{})});
     const step = async (label, action, verify) => {
       const index = receipts.length + 1, siteId = `direct-playwright:${label}`;
       const expected=contract.steps[index-1];assert.equal(expected?.id,label,'Driver order must equal the exact contract');
@@ -470,7 +470,7 @@ async function directCaseDriver({item, familyURL, captures, reference, semanticS
       limitation: 'Independent action sequence; does not replace or inflate registered-check assertion counts or prove unreached variant branches.'};
   } catch (error) {
     let currentState=null,nativePayload=null,diagnosticError=null;
-    try{({currentState,nativePayload}=await failureProbe());}catch(probeError){diagnosticError={name:probeError?.name??'Error',message:probeError?.message??String(probeError),stack:probeError?.stack??null};}
+    try{({currentState,nativePayload,diagnosticError}=await failureProbe());}catch(probeError){diagnosticError={name:probeError?.name??'Error',message:probeError?.message??String(probeError),stack:probeError?.stack??null};}
     let failureReceipt=null,failureReceiptWriteError=null;
     try{failureReceipt=await persistDirectCaseFailure({caseId:item.caseId,error,receipts,currentState,nativePayload,diagnosticError},receipt=>writeFile(failureReceiptPath,JSON.stringify(receipt,null,2)+'\n',{flag:'wx'}));}
     catch(writeError){failureReceiptWriteError={name:writeError?.name??'Error',message:writeError?.message??String(writeError),stack:writeError?.stack??null};}

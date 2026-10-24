@@ -8,7 +8,7 @@ import {join} from 'node:path';
 import {chromium} from 'playwright';
 import {compileFunction,runInNewContext} from 'node:vm';
 import {parse} from 'acorn';
-import {caseActionContract,requestedStateContract,runRequestedStateActions,runRegisteredCanvasActions,assertRegisteredCanvasTransition,assertVerticalRangeSnapshot,clickVisibleControl,ownedOverlayInventory,captureTargetPNG,inventoryReceipt,inventoryDrift,unhandledBrowserErrors,assertThreewayState,threewaySourcePins,threewayCleanup,activeOutlineBounds,lastPaintedLicenseFragment,persistDirectCaseFailure} from './visual-state-audit-drivers.mjs';
+import {caseActionContract,requestedStateContract,runRequestedStateActions,runRegisteredCanvasActions,assertRegisteredCanvasTransition,assertVerticalRangeSnapshot,clickVisibleControl,ownedOverlayInventory,captureTargetPNG,inventoryReceipt,inventoryDrift,unhandledBrowserErrors,assertThreewayState,threewaySourcePins,threewayCleanup,activeOutlineBounds,lastPaintedLicenseFragment,persistDirectCaseFailure,retainFailurePayload} from './visual-state-audit-drivers.mjs';
 
 test('hidden action shim style exits before outline color parsing',()=>{
   const bounds={clip:{x:0,y:0,width:10,height:10}},active={},node={contains:candidate=>candidate===active};
@@ -220,11 +220,14 @@ test('threeway direct pure: cleanup-only failure remains exact failure and clean
 });
 test('direct-case failure receipt pure: persists original stack and available state/payload before aggregate report',async()=>{
   const source=await readFile(new URL('./visual-state-audit-actions.mjs',import.meta.url),'utf8');
+  const drivers=await readFile(new URL('./visual-state-audit-drivers.mjs',import.meta.url),'utf8');
   const start=source.indexOf('async function directCaseDriver('),end=source.indexOf('\ntry {',start),branch=source.slice(start,end);
   assert(branch.indexOf('const failureDiagnostics={threewayCleanupFailures:[]};')<branch.indexOf('await page.addInitScript'));
   assert(branch.includes('runRequestedStateActions(contract,root,step,failureDiagnostics)'));
   assert(branch.includes('await persistDirectCaseFailure('));assert(branch.includes('errorStack:error?.stack??null'));
   assert(branch.includes('failureReceiptWriteError'));
+  const presenceStart=drivers.indexOf("if(contract.focusedSequence==='workspace-native-presence-follow')"),presenceEnd=drivers.indexOf("if(contract.focusedSequence==='native-embed-open-host')",presenceStart),presence=drivers.slice(presenceStart,presenceEnd);
+  assert(presence.indexOf("catch(error){await retainFailurePayload(failureDiagnostics,'presenceNativeEvents',native);throw error;}")<presence.indexOf('finally{await root.evaluate'));
   const primary=new Error('native action failed'),receipts=[{action:'presence-follow-ada'}],currentState={following:'ada'},nativePayload=[{type:'click',trusted:true,control:'ada'}];
   let written;
   const result=await persistDirectCaseFailure({caseId:'presence-ada',error:primary,receipts,currentState,nativePayload},async receipt=>{written=receipt;});
@@ -232,6 +235,11 @@ test('direct-case failure receipt pure: persists original stack and available st
   assert.deepEqual(result,{caseId:'presence-ada',error:{name:'Error',message:'native action failed',stack:primary.stack},receipts,currentState,nativePayload});
   assert.equal(result.error.stack,primary.stack);assert.equal(result.nativePayload[0].control,'ada');
   assert(!('expected' in result)&&!('observed' in result),'Failure evidence must not be rewritten as an expected/observed assertion');
+  const diagnostics={};let liveEvents=[...nativePayload];
+  const failBeforeCleanup=async()=>{try{throw primary;}catch(error){await retainFailurePayload(diagnostics,'presenceNativeEvents',async()=>liveEvents.slice());throw error;}finally{liveEvents=null;}};
+  await assert.rejects(failBeforeCleanup(),error=>error===primary,'Cleanup must not replace the exact original assertion error');
+  assert.deepEqual(diagnostics.presenceNativeEvents,nativePayload,'Native events are retained before cleanup removes them');
+  assert.equal(liveEvents,null);
   const writeFailure=new Error('receipt disk failure');
   await assert.rejects(persistDirectCaseFailure({caseId:'presence-ada',error:primary,receipts,currentState,nativePayload},async()=>{throw writeFailure;}),error=>error===writeFailure);
 });

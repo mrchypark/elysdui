@@ -18,6 +18,10 @@ export async function persistDirectCaseFailure({caseId,error,receipts,currentSta
   await writeReceipt(receipt);
   return receipt;
 }
+export async function retainFailurePayload(failureDiagnostics,key,readPayload){
+  try{failureDiagnostics[key]=await readPayload();}
+  catch(error){failureDiagnostics[`${key}Error`]={name:error?.name??'Error',message:error?.message??String(error),stack:error?.stack??null};}
+}
 // No unhandled page error has a verified exception in this audit.
 export const unhandledBrowserErrors=errors=>errors.filter(error=>error.type==='pageerror');
 
@@ -928,7 +932,8 @@ export async function runRequestedStateActions(contract,root,runStep,failureDiag
           return {identity,following:after.following,pressed:after.peers.filter(peer=>peer.pressed==='true').map(peer=>peer.value),bannerHidden:after.bannerHidden,label:after.label,...proof,fixtureSourceUnchanged:true};
         });
       }
-    }finally{await root.evaluate(node=>{if(node.__presenceNativeListener){document.removeEventListener('click',node.__presenceNativeListener,true);document.removeEventListener('keydown',node.__presenceNativeListener,true);}delete node.__presenceNativeListener;delete node.__presenceNativeEvents;});}
+    }catch(error){await retainFailurePayload(failureDiagnostics,'presenceNativeEvents',native);throw error;}
+    finally{await root.evaluate(node=>{if(node.__presenceNativeListener){document.removeEventListener('click',node.__presenceNativeListener,true);document.removeEventListener('keydown',node.__presenceNativeListener,true);}delete node.__presenceNativeListener;delete node.__presenceNativeEvents;});}
     return;
   }
   if(contract.focusedSequence==='native-embed-open-host'){
