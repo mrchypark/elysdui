@@ -8,7 +8,7 @@ import {join} from 'node:path';
 import {chromium} from 'playwright';
 import {compileFunction,runInNewContext} from 'node:vm';
 import {parse} from 'acorn';
-import {caseActionContract,requestedStateContract,runRequestedStateActions,runRegisteredCanvasActions,assertRegisteredCanvasTransition,assertVerticalRangeSnapshot,clickVisibleControl,ownedOverlayInventory,captureTargetPNG,inventoryReceipt,inventoryDrift,unhandledBrowserErrors,assertThreewayState,threewaySourcePins,threewayCleanup,activeOutlineBounds,lastPaintedLicenseFragment,persistDirectCaseFailure,retainFailurePayload,cleanupPreservingPrimary,probeFailureStateAndPayload} from './visual-state-audit-drivers.mjs';
+import {caseActionContract,requestedStateContract,runRequestedStateActions,runRegisteredCanvasActions,assertRegisteredCanvasTransition,assertCanvasRulerPan,deliverDirectActionVerification,assertVerticalRangeSnapshot,clickVisibleControl,ownedOverlayInventory,captureTargetPNG,inventoryReceipt,inventoryDrift,unhandledBrowserErrors,assertThreewayState,threewaySourcePins,threewayCleanup,activeOutlineBounds,lastPaintedLicenseFragment,persistDirectCaseFailure,retainFailurePayload,cleanupPreservingPrimary,probeFailureStateAndPayload} from './visual-state-audit-drivers.mjs';
 
 test('hidden action shim style exits before outline color parsing',()=>{
   const bounds={clip:{x:0,y:0,width:10,height:10}},active={},node={contains:candidate=>candidate===active};
@@ -1582,6 +1582,26 @@ test('websocket direct pure: actual sequence preserves drafts messages native or
   await run(null);
   for(const defect of ['wrong-url','wrong-id','wrong-component','wrong-text','wrong-state','duplicate','reordered','untrusted','uncleared','fabricated','reordered-messages','altered-message','model-drift','enabled-closed','optimistic','foreign-host-root','ignored-host','cleared-closed','twin-event','twin-html','wrong-change','missing-change','duplicate-change','reordered-change','unexpected-change'])await assert.rejects(()=>run(defect),defect);
 });
+test('direct action verification: delivers the owned receipt before a failing canvas oracle',async()=>{
+  const before={stage:{width:308,height:461},view:{x:-20,y:-30,zoom:.75},grid:{count:312,configuration:{spacing:100}},rulers:{count:12,configuration:{spacing:100}}};
+  const after={stage:{width:308,height:460},view:{x:44,y:-30,zoom:.75},grid:{count:299,configuration:{spacing:100}},rulers:{count:12,configuration:{spacing:100}}};
+  const detail={action:'change-viewport',view:after.view},inputs=[{type:'wheel',trusted:true,targetStage:true,deltaX:48,deltaY:0,defaultPrevented:true}];
+  const beforePaint={count:1,text:'1100',rect:{left:300,top:20,right:320,bottom:30},clip:{left:0,top:0,right:308,bottom:461}};
+  const afterPaint={count:1,text:'1100',rect:{left:250,top:20,right:270,bottom:30},clip:{left:0,top:0,right:308,bottom:461}};
+  const receipt={beforeState:{geometry:before},afterState:{geometry:after}},evidence={before,after,detail,nativeEvents:[{type:'ely:action',detail}],nativeInputs:inputs,beforeTick:beforePaint,afterTick:afterPaint,pageScroll:{before:{x:0,y:0},after:{x:0,y:0}}};
+  let oracleFailure;
+  await assert.rejects(deliverDirectActionVerification(receipt,async(afterState,beforeState,delivered)=>{
+    assert.strictEqual(delivered,receipt,'The shared action-step verifier must deliver its exact receipt');
+    assert.strictEqual(afterState,receipt.afterState);assert.strictEqual(beforeState,receipt.beforeState);
+    delivered.canvasRulerPanEvidence=evidence;
+    try{assertCanvasRulerPan(before,after,detail,{inputs,beforePaint,afterPaint});}catch(error){oracleFailure=error;throw error;}
+  }),error=>error===oracleFailure);
+  assert(oracleFailure instanceof assert.AssertionError);
+  assert.match(oracleFailure.message,/must not change the stage/);
+  assert.deepEqual(receipt.canvasRulerPanEvidence,evidence,'Captured before/after geometry remains on the receipt even when the oracle throws');
+  assert.equal(receipt.assertionsPassed,undefined,'A failed oracle cannot mark the action passed');
+});
+
 test('registered canvas pure: exact eight identities map only two ordered scene sites',async()=>{
   const source=await fixtureSource('workspace');
   const identities=['InfiniteCanvas','CanvasGrid','Guides','Ruler','ArtboardFrame','ZoomControls','ZoomIndicator','MiniMap'].map(name=>`canvas/${name}`);

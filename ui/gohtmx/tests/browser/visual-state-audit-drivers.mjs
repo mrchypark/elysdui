@@ -407,6 +407,11 @@ export function assertCanvasRulerPan(before,after,detail,{inputs,beforePaint,aft
   return {expected,primitiveCounts:{grid:[before.grid.count,after.grid.count],rulers:[before.rulers.count,after.rulers.count]},initialVisibleArea:initial.area,initialFullArea:initial.fullArea,finalVisibleArea:final.area,finalFullArea:final.fullArea};
 }
 
+export async function deliverDirectActionVerification(receipt,verify){
+  receipt.assertedTarget=await verify(receipt.afterState,receipt.beforeState,receipt);
+  receipt.assertionsPassed=true;
+}
+
 // Separate fresh two-action replay; the three supplemental fit/pointer actions stay distinct.
 export async function runRegisteredCanvasActions(contract,root,runStep){
   assert(registeredCanvasIDs.includes(contract.identity)&&contract.registeredCanvas===true);
@@ -1670,10 +1675,10 @@ export async function runRequestedStateActions(contract,root,runStep,failureDiag
             pageScroll=await root.page().evaluate(()=>({x:window.scrollX,y:window.scrollY}));
             await root.page().mouse.move(point.x,point.y);await root.page().mouse.wheel(48,0);
             await stage.evaluate(node=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
-          },async()=>{
+          },async(_state,_before,receipt)=>{
             const observed=await fresh(),after=await scene(),afterPaint=await measureRulerTick();
             const inputs=await root.evaluate(node=>node.__visualCanvasWheels),scrollAfter=await root.page().evaluate(()=>({x:window.scrollX,y:window.scrollY})),detail=observed[0]?.detail??null;
-            receipts.at(-1).canvasRulerPanEvidence={before:beforePan,after,detail,nativeEvents:observed,nativeInputs:inputs,beforeTick:beforePaint,afterTick:afterPaint,pageScroll:{before:pageScroll,after:scrollAfter}};
+            receipt.canvasRulerPanEvidence={before:beforePan,after,detail,nativeEvents:observed,nativeInputs:inputs,beforeTick:beforePaint,afterTick:afterPaint,pageScroll:{before:pageScroll,after:scrollAfter}};
             assert.deepEqual(observed.map(event=>event.type),['ely:action'],'The native wheel must produce exactly one public viewport action');
             assert.equal(detail.id,id);assert.equal(detail.component,identity);assert.equal(detail.action,'change-viewport');assert(detail.view,'Ruler pan must carry the public viewport');
             assert.deepEqual(scrollAfter,pageScroll,'The wheel must not scroll the page');
