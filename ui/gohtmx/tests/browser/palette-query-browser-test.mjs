@@ -7,7 +7,7 @@ import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {chromium} from 'playwright';
 import {loadPaletteInputs, paletteSHA as sha} from './palette-query-inputs.mjs';
-import {paletteCases, paletteSurfaces, paletteErrors, paletteOracles, paletteDiagnostics, paletteSourcePins, paletteBaseline, paletteReportName} from './palette-query-evidence.mjs';
+import {paletteCases, paletteSurfaces, paletteErrors, paletteOracles, paletteDiagnostics, paletteSourcePins, paletteBaseline, paletteReportName, recordPaletteBrowserOutcome} from './palette-query-evidence.mjs';
 
 // Real browser execution is CI-only. This file is not an expected-red wrapper:
 // every unmet desired contract keeps exit 1 and all later cases still execute.
@@ -123,23 +123,7 @@ try {
   page.on('request', request => {
     const check = current?.name ?? null;
     requestChecks.set(request, check);
-    const responseURL = request.url(), requestMethod = request.method(), responsePath = new URL(responseURL).pathname;
-    responses.push((async () => {
-      try {
-        assert.equal(new URL(responseURL).origin, origin, 'no remote browser assets');
-        const response = await request.response();
-        if (!response) {
-          report.transportErrors.push({check, responseURL, path: responsePath, method: requestMethod, status: null, message: request.failure()?.errorText || 'browser request ended without a response'});
-          return;
-        }
-        const path = responsePath, responseFixture = path === '/sdui-action' ? '/sdui-response-primary' : path;
-        const wanted = report.assets[path] || report.fixtures[responseFixture]; assert(wanted, 'unexpected browser response');
-        const bytes = await response.body();
-        const proof = {check, path, ...(path === '/sdui-action' ? {responseFixture} : {}), status: response.status(), expectedSHA256: wanted.servedSHA256, receivedSHA256: sha(bytes), bytes: bytes.length};
-        report.browserResponses.push(proof);
-        if (proof.status !== 200 || proof.expectedSHA256 !== proof.receivedSHA256 || proof.bytes !== wanted.bytes) report.transportErrors.push(proof);
-      } catch (error) { report.transportErrors.push({check, responseURL, path: responsePath, method: requestMethod, status: null, message: String(error)}); }
-    })());
+    responses.push(recordPaletteBrowserOutcome(request, check, origin, report));
   });
   page.on('pageerror', error => report.pageErrors.push({check: current?.name, message: error.message}));
   page.on('console', message => { if (message.type() === 'error') report.consoleErrors.push({check: current?.name, message: message.text()}); });
