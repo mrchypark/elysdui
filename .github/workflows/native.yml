@@ -164,6 +164,10 @@ jobs:
           python3 scripts/ci/native/test-focus-diagnostics.py
           (cd scripts/ci/native/focus-budget-controls-src && go test ./...)
           scripts/ci/native/focus-budget-controls
+      - name: Install Android emulator host dependency
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends --yes libpulse0
       - name: Provision Android emulator SDK package
         run: |
           set -euo pipefail
@@ -175,6 +179,23 @@ jobs:
           android_verify_emulator_path "$sdk_root"
           echo "Resolved Android SDK root: $sdk_root"
           echo "Android emulator binary: $emulator_binary"
+          for host_binary in "$emulator_binary" "$sdk_root/emulator/qemu/linux-x86_64/qemu-system-x86_64"; do
+            if [ ! -x "$host_binary" ]; then
+              echo "Android emulator host binary is missing or not executable: $host_binary" >&2
+              exit 1
+            fi
+            echo "Checking shared-library dependencies: $host_binary"
+            if ! ldd_output=$(ldd "$host_binary" 2>&1); then
+              printf '%s\n' "$ldd_output" >&2
+              echo "ldd failed for Android emulator host binary: $host_binary" >&2
+              exit 1
+            fi
+            printf '%s\n' "$ldd_output"
+            if grep -Fq 'not found' <<< "$ldd_output"; then
+              echo "Unresolved shared-library dependencies for Android emulator host binary: $host_binary" >&2
+              exit 1
+            fi
+          done
           "$emulator_binary" -version
       - name: Grant this job user access to KVM
         run: |
