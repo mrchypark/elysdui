@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import test from 'node:test';
-import {assertCommunicationCallerRequest,assertDockCallerAction,assertDockNativeEvents,assertEvalLastColumnGeometry,assertNativeEmbedOpen,activatePresenceStep,assertPresenceNativeRequest,assertFoundationPublicEvents,assertPlainInputNativeEvents,calendarDraftWheelDecision,requestedStateContract,runRequestedStateActions} from './visual-state-audit-drivers.mjs';
+import {assertCommunicationCallerRequest,assertDockCallerAction,assertDockNativeEvents,assertEvalLastColumnGeometry,assertNativeEmbedOpen,activatePresenceStep,assertPresenceNativeRequest,assertFoundationPublicEvents,assertPlainInputNativeEvents,assertFormattedInputState,calendarDraftWheelDecision,requestedStateContract,runRequestedStateActions} from './visual-state-audit-drivers.mjs';
 
 const read=path=>readFile(new URL(`../../../../${path}`,import.meta.url),'utf8');
 
@@ -20,7 +20,7 @@ test('Input TextField ClearableInput finite native contracts preserve aliases an
     assert.throws(()=>assertFoundationPublicEvents(identity,id,[{type:'ely:action',detail}],{value}));
   }
   assert.equal(identities.length*4*4,48,'Three identities, four live profiles, four checkpoints; no alias receipt promotion');
-  assert.equal(requestedStateContract('forms/EmailInput'),null,'No generic input-family expansion');
+  assert.equal(requestedStateContract('forms/NumberInput'),null,'No generic input-family expansion');
   const event=(type,value,isTrusted)=>({type,value,isTrusted,defaultPrevented:false});
   for(const stage of ['fill-text','commit-text','clear-text','commit-empty']){
     const value=stage==='fill-text'||stage==='commit-text'?'Changed caller value':'',type=stage.startsWith('commit')?'change':'input',events=[event(type,value,true)];
@@ -40,11 +40,50 @@ test('Input TextField ClearableInput finite native contracts preserve aliases an
   assert.match(controls,/action === 'clear'[\s\S]*?input\.value = ''[\s\S]*?new Event\('input'[\s\S]*?new Event\('change'[\s\S]*?input\.focus\(\)/);
   assert.match(api,/component: root\.dataset\.elyComponent, name: event\.target\.name/);
   assert.match(actions,/if\(contract\.requestedStateOnly\)\{\s*await runRequestedStateActions\(contract,root,step,failureDiagnostics\);/);
-  const driver=runRequestedStateActions.toString(),branch=driver.slice(driver.indexOf("if(contract.focusedSequence==='input-public-edit-clear')"),driver.indexOf("if(['button-public-boundary','textarea-public-multiline']"));
+  const driver=runRequestedStateActions.toString(),branch=driver.slice(driver.indexOf("if(contract.focusedSequence==='input-public-edit-clear'"),driver.indexOf("if(['button-public-boundary','textarea-public-multiline']"));
   assert.match(branch,/Exact primary caller input must be unique/);assert.doesNotMatch(branch,/\.first\(|\.nth\(/);
   assert.match(branch,/initialPeers/);assert.match(branch,/await fresh\(\)/);assert.match(branch,/field\.fill\(value\)/);assert.match(branch,/clear\.click\(\)/);assert.match(branch,/field\.press\('Backspace'\)/);assert.match(branch,/field\.press\('Tab'\)/);
   assert.doesNotMatch(branch,/dispatchEvent|requestSubmit|new Event|\.value\s*=/,'Driver must not synthesize input, mutate fixture values, or submit host work');
   assert.match(branch,/finally\{await root\.evaluate/);
+});
+
+test('five formatted input contracts retain exact fixture types bounds native validity and alias events',async()=>{
+  const expected=[
+    ['forms/EmailInput','EmailInput','email','caller@example.test','changed@example.test','not-an-email','typeMismatch'],
+    ['forms/UrlInput','EmailInput','url','https://example.test/source','https://example.test/changed','not-a-url','typeMismatch'],
+    ...['CurrencyInput','PercentInput','UnitInput'].map(name=>['forms/'+name,'CurrencyInput','number','3','4','11','rangeOverflow']),
+  ];
+  for(const [identity,kind,type,initial,valid,invalid,invalidFlag]of expected){
+    const contract=requestedStateContract(identity),fixture=contract.inputFixture;
+    assert.equal(contract.identity,identity);assert.equal(contract.kind,kind);assert.equal(contract.focusedSequence,'input-public-validity');assert.equal(contract.requestedStateOnly,true);assert.deepEqual(contract.mappingGaps,[]);
+    assert.deepEqual(fixture,{kind,type,initial,...(type==='number'?{min:'0',max:'10',step:'1'}:{}),valid,invalid,invalidFlag});
+    assert.deepEqual(contract.steps.map(step=>step.id),['fill-valid','commit-valid','fill-invalid','commit-invalid']);
+    assert.equal(contract.steps[0].control,`:scope > .ely-api-format-field input[name="caller_value"][type="${type}"]`);
+    assert(contract.steps.every(step=>step.source.provenance.includes(identity)&&step.source.provenance.includes('no unit switching')));
+    for(const bad of [false,true]){
+      const value=bad?invalid:valid,state={name:'caller_value',type,value,...(type==='number'?{min:'0',max:'10',step:'1'}:{}),validity:Object.fromEntries(['badInput','customError','patternMismatch','rangeOverflow','rangeUnderflow','stepMismatch','tooLong','tooShort','typeMismatch','valueMissing','valid'].map(key=>[key,key==='valid'?!bad:bad&&key===invalidFlag]))};
+      assert.deepEqual(assertFormattedInputState(identity,state,{invalid:bad}),state);
+      for(const key of Object.keys(state.validity)){const changed=structuredClone(state);changed.validity[key]=!changed.validity[key];assert.throws(()=>assertFormattedInputState(identity,changed,{invalid:bad}),/Exact native validity/,'Every extra or missing validity reason fails closed: '+key);}
+      for(const key of ['name','type','value',...(type==='number'?['min','max','step']:[])])assert.throws(()=>assertFormattedInputState(identity,{...state,[key]:'wrong'},{invalid:bad}));
+      const id='exact-main',events=[{type:'ely:change',detail:{id,component:identity,name:'caller_value',value,checked:false,type}}];
+      assertFoundationPublicEvents(identity,id,events,{value});
+      for(const change of [{id:'twin'},{component:'forms/Other'},{name:'preview_field'},{type:'text'},{value:'stale'}])assert.throws(()=>assertFoundationPublicEvents(identity,id,[{type:'ely:change',detail:{...events[0].detail,...change}}],{value}));
+      assert.throws(()=>assertFoundationPublicEvents(identity,id,[...events,...events],{value}));assert.throws(()=>assertFoundationPublicEvents(identity,id,[{type:'ely:action',detail:events[0].detail}],{value}));
+      for(const [stage,eventType]of [['fill-text','input'],['commit-text','change']]){const native={type:eventType,value,isTrusted:true,defaultPrevented:false};assertPlainInputNativeEvents(stage,[native],{value});assert.throws(()=>assertPlainInputNativeEvents(stage,[{...native,isTrusted:false}],{value}));}
+    }
+  }
+  assert.equal(expected.length*4*4,80,'Five exact IDs by four checkpoints by four live profiles; no shared alias receipts');
+  for(const identity of ['forms/NumberInput','forms/ScrubInput','forms/DurationPicker'])assert.equal(requestedStateContract(identity),null);
+  assert.throws(()=>assertFormattedInputState('forms/Other',{},{}),/No generic/);
+  const [fixtures,aliases,template]=await Promise.all([read('internal/gallery/advanced_forms_fixtures.go'),read('internal/gallery/advanced.go'),read('ui/gohtmx/templates/ely-api-forms.html')]);
+  assert.match(fixtures,/case "NumberInput", "ScrubInput", "CurrencyInput":\s*props\["Value"\], props\["Min"\], props\["Max"\], props\["Step"\] = "3", "0", 10, "1"/);
+  assert.match(fixtures,/case "EmailInput":\s*props\["Value"\] = "caller@example.test"/);
+  assert.match(aliases,/case "UrlInput":\s*props\["Value"\], props\["Type"\] = "https:\/\/example.test\/source", "url"/);
+  assert.match(template,/eq \.Kind "CurrencyInput"[\s\S]*?"Type" "number"/);
+  assert.match(template,/eq \.Variant "UrlInput"[\s\S]*?\$type = "url"/);
+  const driver=runRequestedStateActions.toString(),branch=driver.slice(driver.indexOf("if(contract.focusedSequence==='input-public-edit-clear'"),driver.indexOf("if(['button-public-boundary','textarea-public-multiline']"));
+  assert.match(branch,/assertFormattedInputState/);assert.match(branch,/node\.validity\[key\]/);assert.match(branch,/formatted\?\.initial/);assert.match(branch,/getAttribute\(key\),formatted\[key\]/);assert.match(branch,/initialPeers/);assert.match(branch,/await fresh\(\)/);
+  assert.doesNotMatch(branch,/\.first\(|\.nth\(|reportValidity|requestSubmit|dispatchEvent|new Event|\.value\s*=/);
 });
 
 test('ActivityLog contract traverses all four native target links by trusted keyboard focus',async()=>{

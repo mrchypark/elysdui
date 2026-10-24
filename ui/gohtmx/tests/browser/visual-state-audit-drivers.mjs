@@ -730,6 +730,12 @@ export function requestedStateContract(identity,trashFixture){
       ['clear-text',identity==='forms/ClearableInput'?'button[data-ui-action="clear"]':'input[name="caller_value"]',identity==='forms/ClearableInput'?'Trusted Clear click empties the field; production-generated input/change remain explicitly synthetic':'Native keyboard select-all and Backspace clear the field without premature public change'],
       ['commit-empty','input[name="caller_value"]',identity==='forms/ClearableInput'?'Native blur preserves the already committed empty value without duplicate public change':'Native Tab blur commits one exact empty public change'],
     ]}])),
+    ...Object.fromEntries(Object.entries(formattedInputCases).map(([identity,fixture])=>[identity,{kind:fixture.kind,sequence:'input-public-validity',inputFixture:fixture,steps:[
+      ['fill-valid',`:scope > .ely-api-format-field input[name="caller_value"][type="${fixture.type}"]`,'Trusted native input retains exact valid caller value; no premature public change'],
+      ['commit-valid','input[name="caller_value"]','Native Tab commits one exact alias-preserving typed public change'],
+      ['fill-invalid','input[name="caller_value"]',`Native input retains exact invalid value with only ${fixture.invalidFlag}; no host action or validity popup`],
+      ['commit-invalid','input[name="caller_value"]',`Native Tab commits the invalid value; ${fixture.invalidFlag} remains true without submission`],
+    ]}])),
     'tooling/EventLogger':{kind:'EventLogger',sequence:'eventlogger-public-timestamps',steps:[
       ['coalesce-pointer','[data-tool-event-target]','Two public pointer moves coalesce; exact observed-event elapsed display'],
       ['capture-consumed-key','[data-tool-event-target] input','Capture-phase Ctrl+K survives child stopPropagation'],
@@ -797,6 +803,7 @@ export function requestedStateContract(identity,trashFixture){
       'forms/TextArea':'internal/gallery/advanced_forms_fixtures.go TextArea; ui/gohtmx/templates/ely-api-forms.html TextArea; ui/gohtmx/assets/ely-api-forms.js input autoresize; ui/gohtmx/assets/ely-api.js change; no disabled/readOnly/required fixture is claimed',
       ...Object.fromEntries(['forms/Input','forms/TextField','forms/ClearableInput'].map(identity=>[identity,'internal/gallery/advanced_forms_fixtures.go Input; internal/gallery/advanced.go aliasFixtureProps; ui/gohtmx/templates/ely-api-forms.html Input; ely-controls.html clearable-input; ely-controls.js clear handler; ely-api.js public change. Exact '+identity+' only; native Clear click triggers explicitly synthetic production input/change; no host fulfillment.'])),
       'tooling/EventLogger':'internal/gallery/advanced_native_tooling_fixtures.go EventLogger; ui/gohtmx/templates/ely-api-native-tooling.html EventLogger; ui/gohtmx/assets/ely-api-native-tooling.js receive/recordInput; exact global trace calibration remains separate',
+      ...Object.fromEntries(Object.keys(formattedInputCases).map(identity=>[identity,'internal/gallery/advanced_forms_fixtures.go EmailInput/CurrencyInput canonical root (not PreviewExamples); internal/gallery/advanced.go UrlInput exact alias value/type; ely-api-forms.html typed format field; ely-api.js public change. Exact '+identity+' caller bounds and native validity only; no unit switching, popup, submission or host fulfillment.'])),
       'project/StatusSelect':'ui/gohtmx/templates/ely-api-communication.html:108,115; ui/gohtmx/assets/ely-api-communication.css:296-297 focus-visible-only Update; ui/gohtmx/assets/ely-api-communication.js:258; ui/gohtmx/assets/ely-api.js submit handler',
       'data/Tag':'internal/gallery/advanced_data_fixtures.go Tag; ui/gohtmx/templates/ely-api-data.html ely-api-tag; ui/gohtmx/assets/ely-api-data.js tag-remove handler',
       'menus/RadioMenuItem':'docs/gohtmx/menu-alias-contracts.md; internal/gallery/assets/advanced-interaction-checks.js radioMenuItemCheck; ui/gohtmx/assets/ely-api-interaction.js radio handler',
@@ -810,7 +817,7 @@ export function requestedStateContract(identity,trashFixture){
     const canvasPan=canvasIdentity&&['canvas/CanvasGrid','canvas/Guides'].includes(identity);
     const focusedSteps=canvasPan?[['pan-ruler-1100','[data-cs-stage]','One trusted horizontal wheel (deltaX=48, deltaY=0) over an owned stage point fully reveals the initially partial 1100 ruler tick; x advances by 48/zoom, y/zoom and scene content stay unchanged'],...focused.steps]:focused.steps;
     const steps=focusedSteps.map(([id,control,expectedState])=>({id,control,expectedState,event:id==='pan-ruler-1100'?'one trusted native horizontal wheel over the exact owned SVG stage; no programmatic scroll or viewport mutation':identity==='devtools/WebSocketConsole'&&id.startsWith('host-ack-')?'synthetic controlled host acknowledgement, not trusted user input':identity==='tooling/EventLogger'?'synthetic public DOM event via Playwright':id.startsWith('disabled-')?'native HTMLButtonElement.click (disabled negative; not trusted pointer input)':'native Playwright action',source:{siteId:`focused-state:${identity}:${id}`,sourceAnchor:null,provenance}}));
-    return {identity,kind:focused.kind,target:null,variant:identity.split('/')[1],focusedSequence:focused.sequence,steps,mappingGaps:[],requestedStateOnly:true,
+    return {identity,kind:focused.kind,target:null,variant:identity.split('/')[1],focusedSequence:focused.sequence,steps,mappingGaps:[],requestedStateOnly:true,...(focused.inputFixture?{inputFixture:focused.inputFixture}:{}),
       fixtureGuards:{component:identity,kind:focused.kind},...(identity==='project/StatusSelect'?{inputSupport:{submit:'real Tab reveal followed by native Enter',unfocusedPointer:'unsupported: Update is 1px and clipped until focus-visible'}}:{}),scope:canvasIdentity?`Only the separate gallery:${identity} ${steps.length}-action focused sequence; CanvasGrid and Guides include a native ruler pan; source-defined contract is not runtime approval; all eight IDs across four profiles require 32 separate case/profile runs`: 'Explicit finite focused sequence from the case fixture; separate from registered-check coverage, aliases, and all-catalog approval'+(identity==='tooling/EventLogger'?'; four grouped scenario checkpoints, not per-event pixel coverage or trusted physical input; exact trace calibration remains separate':identity==='project/StatusSelect'?'; keyboard-only submit; no unfocused pointer activation approval':'')};
   }
   const variant=identity.split('/')[1],target=identity.startsWith('settings/')?settingsTargets[variant]:null;
@@ -862,11 +869,29 @@ export function assertEventLoggerPublicState(stage,observation){
   return {...observation,timestampOrigin:rawEvents[0].timeStamp,timestampRule:'first accepted public event.timeStamp; exact two-decimal elapsed seconds',eventProvenance:'Synthetic public DOM events through actual component listeners; trusted physical input is not established'};
 }
 
+const formattedInputCases={
+  'forms/EmailInput':{kind:'EmailInput',type:'email',initial:'caller@example.test',valid:'changed@example.test',invalid:'not-an-email',invalidFlag:'typeMismatch'},
+  'forms/UrlInput':{kind:'EmailInput',type:'url',initial:'https://example.test/source',valid:'https://example.test/changed',invalid:'not-a-url',invalidFlag:'typeMismatch'},
+  'forms/CurrencyInput':{kind:'CurrencyInput',type:'number',initial:'3',min:'0',max:'10',step:'1',valid:'4',invalid:'11',invalidFlag:'rangeOverflow'},
+  'forms/PercentInput':{kind:'CurrencyInput',type:'number',initial:'3',min:'0',max:'10',step:'1',valid:'4',invalid:'11',invalidFlag:'rangeOverflow'},
+  'forms/UnitInput':{kind:'CurrencyInput',type:'number',initial:'3',min:'0',max:'10',step:'1',valid:'4',invalid:'11',invalidFlag:'rangeOverflow'},
+};
+
+export function assertFormattedInputState(identity,state,{invalid}){
+  const fixture=formattedInputCases[identity];assert(fixture,'No generic formatted-input contract');
+  assert.equal(state.name,'caller_value');assert.equal(state.type,fixture.type);
+  assert.equal(state.value,invalid?fixture.invalid:fixture.valid);
+  if(fixture.type==='number')for(const key of ['min','max','step'])assert.equal(state[key],fixture[key],'Exact caller numeric bound: '+key);
+  assert.deepEqual(state.validity,Object.fromEntries(['badInput','customError','patternMismatch','rangeOverflow','rangeUnderflow','stepMismatch','tooLong','tooShort','typeMismatch','valueMissing','valid'].map(key=>[key,key==='valid'?!invalid:invalid&&key===fixture.invalidFlag])),'Exact native validity reason, not just valid/invalid');
+  return state;
+}
+
 export function assertFoundationPublicEvents(identity,id,observed,{value}){
   assert.equal(typeof id,'string');assert(id.length>0);
   if(identity==='buttons/Button')assert.deepEqual(observed.map(event=>[event.type,event.detail]),[['ely:action',{id,component:identity,action:value,value,formData:null,values:[]}]]);
   else if(identity==='forms/TextArea')assert.deepEqual(observed.map(event=>[event.type,event.detail]),[['ely:change',{id,component:identity,name:'caller_value',value,checked:undefined,type:'textarea'}]]);
   else if(['forms/Input','forms/TextField','forms/ClearableInput'].includes(identity))assert.deepEqual(observed.map(event=>[event.type,event.detail]),[['ely:change',{id,component:identity,name:'caller_value',value,checked:false,type:'text'}]]);
+  else if(formattedInputCases[identity])assert.deepEqual(observed.map(event=>[event.type,event.detail]),[['ely:change',{id,component:identity,name:'caller_value',value,checked:false,type:formattedInputCases[identity].type}]]);
   else assert.fail('No finite foundation public event contract for '+identity);
   return observed;
 }
@@ -1607,7 +1632,7 @@ export async function runRequestedStateActions(contract,root,runStep,failureDiag
     await press('empty-confirm',clear,'empty-trash','');
     return;
   }
-  if(['task-due-submit','remove-four-tags','radio-groups-reselection','eventlogger-public-timestamps','button-public-boundary','textarea-public-multiline','input-public-edit-clear','canvas-minimap-zoom-fit-hit-test','websocket-public-host-boundary','sheet-native-actions','bulk-canonical-zero','native-disclosure'].includes(contract.focusedSequence)){
+  if(['task-due-submit','remove-four-tags','radio-groups-reselection','eventlogger-public-timestamps','button-public-boundary','textarea-public-multiline','input-public-edit-clear','input-public-validity','canvas-minimap-zoom-fit-hit-test','websocket-public-host-boundary','sheet-native-actions','bulk-canonical-zero','native-disclosure'].includes(contract.focusedSequence)){
     const identity=await root.getAttribute('data-ely-component');
     assert.equal(identity,contract.identity,'Exact alias identity is required');
     assert.equal(await root.getAttribute('data-ely-kind'),contract.kind);
@@ -1873,12 +1898,14 @@ export async function runRequestedStateActions(contract,root,runStep,failureDiag
       }finally{await root.evaluate(node=>{node.removeEventListener('click',node.__visualCanvasClickObserver,true);node.removeEventListener('wheel',node.__visualCanvasWheelObserver);delete node.__visualCanvasClickObserver;delete node.__visualCanvasClicks;delete node.__visualCanvasWheelObserver;delete node.__visualCanvasWheels;});}
       return;
     }
-    if(contract.focusedSequence==='input-public-edit-clear'){
+    if(contract.focusedSequence==='input-public-edit-clear'||contract.focusedSequence==='input-public-validity'){
+      const formatted=contract.focusedSequence==='input-public-validity'?formattedInputCases[identity]:null;
       const clearButton=identity==='forms/ClearableInput';
-      const field=root.locator('.ely-api-input-primary input[name="caller_value"], :scope > .ely-api-width input[name="caller_value"]');
+      const field=root.locator(formatted?`:scope > .ely-api-format-field input[name="caller_value"][type="${formatted.type}"]`:'.ely-api-input-primary input[name="caller_value"], :scope > .ely-api-width input[name="caller_value"]');
       assert.equal(await field.count(),1,'Exact primary caller input must be unique; no first-input fallback');
       const initial=await field.evaluate(node=>({name:node.name,type:node.type,value:node.value,disabled:node.disabled,readOnly:node.readOnly,required:node.required}));
-      assert.deepEqual(initial,{name:'caller_value',type:'text',value:await field.getAttribute('value'),disabled:false,readOnly:false,required:false});
+      assert.deepEqual(initial,{name:'caller_value',type:formatted?.type??'text',value:formatted?.initial??await field.getAttribute('value'),disabled:false,readOnly:false,required:false});
+      if(formatted?.type==='number')for(const key of ['min','max','step'])assert.equal(await field.getAttribute(key),formatted[key],'Exact source fixture numeric bound: '+key);
       const peers=()=>root.evaluate((node,fieldId)=>[...node.querySelectorAll('input,textarea,select')].filter(field=>field.id!==fieldId).map(field=>[field.id,field.value,field.checked,field.disabled]),fieldId);
       const fieldId=await field.getAttribute('id');assert(fieldId,'Primary input requires an exact rendered ID');
       const initialPeers=await peers();
@@ -1892,23 +1919,26 @@ export async function runRequestedStateActions(contract,root,runStep,failureDiag
       const native=()=>root.evaluate(node=>node.__visualPlainInputEvents);
       try{
         for(const stage of contract.steps.map(step=>step.id)){
-          const value=stage==='fill-text'||stage==='commit-text'?'Changed caller value':'';
+          const invalid=stage.endsWith('invalid');
+          const value=formatted?(invalid?formatted.invalid:formatted.valid):stage==='fill-text'||stage==='commit-text'?'Changed caller value':'';
           let nativeCursor;
           await runStep(stage,async()=>{
             await begin();nativeCursor=(await native()).length;
-            if(stage==='fill-text')await field.fill(value);
+            if(stage==='fill-text'||formatted&&stage.startsWith('fill-'))await field.fill(value);
             else if(stage==='clear-text'){
               if(clearButton)await clear.click();
               else{await field.focus();await field.press('ControlOrMeta+a');await field.press('Backspace');}
             }else await field.press('Tab');
           },async()=>{
-            assert.equal(await field.inputValue(),value);assert.equal(await field.evaluate(node=>node.checkValidity()),true);
+            let validity;
+            if(formatted)validity=assertFormattedInputState(identity,await field.evaluate(node=>({name:node.name,type:node.type,value:node.value,min:node.min,max:node.max,step:node.step,validity:Object.fromEntries(['badInput','customError','patternMismatch','rangeOverflow','rangeUnderflow','stepMismatch','tooLong','tooShort','typeMismatch','valueMissing','valid'].map(key=>[key,node.validity[key]]))})),{invalid});
+            else{assert.equal(await field.inputValue(),value);assert.equal(await field.evaluate(node=>node.checkValidity()),true);}
             const observed=await fresh();
-            if(stage==='commit-text'||(stage==='clear-text'&&clearButton)||(stage==='commit-empty'&&!clearButton))assertFoundationPublicEvents(identity,id,observed,{value});
+            if(formatted?stage.startsWith('commit-'):stage==='commit-text'||(stage==='clear-text'&&clearButton)||(stage==='commit-empty'&&!clearButton))assertFoundationPublicEvents(identity,id,observed,{value});
             else assert.deepEqual(observed,[],'No premature or duplicate public change or host action');
-            const inputs=(await native()).slice(nativeCursor);assertPlainInputNativeEvents(stage,inputs,{clearButton,value});
+            const inputs=(await native()).slice(nativeCursor);assertPlainInputNativeEvents(formatted?(stage.startsWith('fill-')?'fill-text':'commit-text'):stage,inputs,{clearButton,value});
             assert.deepEqual(await peers(),initialPeers,'Input actions must preserve sibling specimens');
-            return {value,events:observed,nativeEvents:inputs,twinUnchanged:true,peersUnchanged:true,scope:clearButton?'Trusted click; generated clear input/change are synthetic production events; no host fulfillment':'Native input and blur only; no host fulfillment'};
+            return {value,...(formatted?{validity}:{}),events:observed,nativeEvents:inputs,twinUnchanged:true,peersUnchanged:true,scope:clearButton?'Trusted click; generated clear input/change are synthetic production events; no host fulfillment':'Native input and blur only; no host fulfillment'};
           });
         }
       }finally{await root.evaluate(node=>{for(const type of ['click','input','change'])node.removeEventListener(type,node.__visualPlainInputObserver);delete node.__visualPlainInputObserver;delete node.__visualPlainInputEvents;});}
