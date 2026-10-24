@@ -3,6 +3,7 @@ import {readFile} from 'node:fs/promises';
 import test from 'node:test';
 import {assertSpecialInputState} from './visual-state-audit-drivers.mjs';
 import {assertCronNativePreview} from './visual-state-audit-drivers.mjs';
+import {assertJsonHighlight} from './visual-state-audit-drivers.mjs';
 import {assertActivityLogScopedAuditPage,assertCommunicationCallerRequest,assertDockCallerAction,assertDockNativeEvents,assertEvalLastColumnGeometry,assertNativeEmbedOpen,activatePresenceStep,assertPresenceNativeRequest,assertFoundationPublicEvents,assertPlainInputNativeEvents,assertFormattedInputState,calendarDraftWheelDecision,requestedStateContract,runRequestedStateActions} from './visual-state-audit-drivers.mjs';
 
 const read=path=>readFile(new URL(`../../../../${path}`,import.meta.url),'utf8');
@@ -618,4 +619,17 @@ test('Six exact qualified form aliases keep bounded local native contracts and e
   const execution=runRequestedStateActions.toString(),branch=execution.slice(execution.indexOf("if(contract.focusedSequence==='forms-six-qualified-native-local')"),execution.indexOf("if(contract.focusedSequence==='native-cookie-owner-boundary')"));
   assert.match(branch,/Only the six exact qualified forms identities/);assert.match(branch,/event\.isTrusted/);assert.match(branch,/field\.press\('Tab'\)/);assert.match(branch,/node===document\.activeElement/);assert.match(branch,/await assertTrusted\(field,'change'\)/);assert.match(branch,/await assertTrusted\(field,'blur'\)/);assert.match(branch,/checkValidity/);assert.match(branch,/assertDeepEqual|assert\.deepEqual/);assert.match(branch,/no host request/);assert.doesNotMatch(branch,/dispatchEvent|new Event|new KeyboardEvent|requestSubmit|\.click\(/,'The contracts use native input/focus and make no host request');
   assert.match(actions,/if\(contract\.requestedStateOnly\)\{\s*await runRequestedStateActions\(contract,root,step,failureDiagnostics\);/,'The existing requested-state path executes exact alias contracts without a new runner');
+});
+
+test('JsonInput invalid and repaired previews require exact source-highlighter tokens and reject stale highlight',()=>{
+  const invalid='{broken',repaired='{"caller":"changed"}';
+  const invalidTokens=[{kind:'punctuation',text:'{'},{kind:'variable',text:'broken'}];
+  const repairedTokens=[{kind:'punctuation',text:'{'},{kind:'property',text:'"caller"'},{kind:'punctuation',text:':'},{kind:'string',text:'"changed"'},{kind:'punctuation',text:'}'}];
+  const invalidPreview={text:`${invalid}\n`,tokens:invalidTokens,elementCount:invalidTokens.length};
+  const repairedPreview={text:`${repaired}\n`,tokens:repairedTokens,elementCount:repairedTokens.length};
+  assert.deepEqual(assertJsonHighlight(invalid,invalidPreview),invalidTokens);
+  assert.deepEqual(assertJsonHighlight(repaired,repairedPreview),repairedTokens);
+  assert.throws(()=>assertJsonHighlight(repaired,invalidPreview),/JSON preview text must exactly follow the edited source/,'A preview left at the invalid value must fail after repair');
+  assert.throws(()=>assertJsonHighlight(repaired,{...repairedPreview,tokens:invalidTokens}),/token classes and text must match/,'Repaired source with stale invalid token spans must fail');
+  assert.throws(()=>assertJsonHighlight(repaired,{...repairedPreview,elementCount:repairedTokens.length+1}),/only the expected direct token spans/,'Unexpected preview markup must fail');
 });

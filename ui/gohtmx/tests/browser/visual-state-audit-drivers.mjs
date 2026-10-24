@@ -5,6 +5,15 @@ import {createHash} from 'node:crypto';
 import {captureBounds} from './visual-state-audit-bounds.mjs';
 import {createRequire} from 'node:module';
 import {dirname,resolve} from 'node:path';
+import {codeSpans} from '../../assets/ely-code.js';
+
+export function assertJsonHighlight(source,highlight){
+  const expected=codeSpans(source,true).map(({kind,text})=>({kind,text}));
+  assert.equal(highlight.text,`${source}\n`,'JSON preview text must exactly follow the edited source');
+  assert.deepEqual(highlight.tokens,expected,'JSON preview token classes and text must match the source highlighter');
+  assert.equal(highlight.elementCount,expected.length,'JSON preview must contain only the expected direct token spans');
+  return expected;
+}
 
 export async function inventoryReceipt(path){
   const bytes=await readFile(path);
@@ -1299,9 +1308,10 @@ export async function runRequestedStateActions(contract,root,runStep,failureDiag
       await local('autoresize-commit',()=>leaveField(field),async()=>{await assertTrusted(field,'change');await assertTrusted(field,'blur');assert.equal(await field.inputValue(),value);return {value,focusLeft:true,hostRequests:0};});return;
     }
     if(identity==='forms/JsonInput'){
-      const field=root.locator('textarea[data-ely-code-input]'),status=root.locator('[data-ely-code-status]');assert.equal(await field.count(),1);assert.equal(await field.evaluate(node=>node.tagName),'TEXTAREA');assert.equal(await field.inputValue(),contract.fixtureGuards.initial);await observeNative(field);
-      await local('json-invalid',()=>field.fill(contract.fixtureGuards.invalid),async()=>{assert.equal(await field.inputValue(),contract.fixtureGuards.invalid);assert.equal(await field.evaluate(node=>node.checkValidity()),false);assert.match(await status.textContent(),/Invalid JSON\./);await assertTrusted(field,'input');return {value:await field.inputValue(),valid:false,markupInserted:false};});
-      await local('json-repair',()=>field.fill(contract.fixtureGuards.changed),async()=>{assert.equal(await field.inputValue(),contract.fixtureGuards.changed);assert.equal(await field.evaluate(node=>node.checkValidity()),true);assert.equal(await status.textContent(),'');await assertTrusted(field,'input');return {value:await field.inputValue(),valid:true,status:''};});
+      const field=root.locator('textarea[data-ely-code-input]'),status=root.locator('[data-ely-code-status]'),preview=root.locator('[data-ely-code-highlight]');assert.equal(await field.count(),1);assert.equal(await preview.count(),1,'JsonInput must render its source-highlighter preview');assert.equal(await field.evaluate(node=>node.tagName),'TEXTAREA');assert.equal(await field.inputValue(),contract.fixtureGuards.initial);await observeNative(field);
+      const readHighlight=()=>preview.evaluate(node=>({text:node.textContent,tokens:[...node.children].map(token=>({kind:[...token.classList].find(name=>name.startsWith('ely-code-'))?.slice('ely-code-'.length),text:token.textContent})),elementCount:node.querySelectorAll('*').length}));
+      await local('json-invalid',()=>field.fill(contract.fixtureGuards.invalid),async()=>{assert.equal(await field.inputValue(),contract.fixtureGuards.invalid);assert.equal(await field.evaluate(node=>node.checkValidity()),false);assert.match(await status.textContent(),/Invalid JSON\./);const highlight=assertJsonHighlight(contract.fixtureGuards.invalid,await readHighlight());await assertTrusted(field,'input');return {value:await field.inputValue(),valid:false,highlight,markupInserted:false};});
+      await local('json-repair',()=>field.fill(contract.fixtureGuards.changed),async()=>{assert.equal(await field.inputValue(),contract.fixtureGuards.changed);assert.equal(await field.evaluate(node=>node.checkValidity()),true);assert.equal(await status.textContent(),'');const highlight=assertJsonHighlight(contract.fixtureGuards.changed,await readHighlight());await assertTrusted(field,'input');return {value:await field.inputValue(),valid:true,status:'',highlight};});
       await local('json-commit',()=>leaveField(field),async()=>{await assertTrusted(field,'change');await assertTrusted(field,'blur');assert.equal(await field.inputValue(),contract.fixtureGuards.changed);return {value:await field.inputValue(),focusLeft:true,hostRequests:0};});return;
     }
     const field=root.locator(contract.steps[0].control);assert.equal(await field.count(),1);assert.equal(await field.getAttribute('type'),contract.fixtureGuards.type);assert.equal(await field.inputValue(),contract.fixtureGuards.initial);
