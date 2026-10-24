@@ -10,6 +10,29 @@ import {compileFunction,runInNewContext} from 'node:vm';
 import {parse} from 'acorn';
 import {caseActionContract,requestedStateContract,runRequestedStateActions,runRegisteredCanvasActions,assertRegisteredCanvasTransition,assertCanvasRulerPan,deliverDirectActionVerification,assertVerticalRangeSnapshot,clickVisibleControl,ownedOverlayInventory,captureTargetPNG,inventoryReceipt,inventoryDrift,unhandledBrowserErrors,assertThreewayState,threewaySourcePins,threewayCleanup,activeOutlineBounds,lastPaintedLicenseFragment,persistDirectCaseFailure,retainFailurePayload,cleanupPreservingPrimary,probeFailureStateAndPayload} from './visual-state-audit-drivers.mjs';
 
+test('initial viewport framing pure: one scroll, recomputed complete union, oversized and movement fail closed',async()=>{
+  const source=await readFile(new URL('./visual-state-audit-baseline.mjs',import.meta.url),'utf8'),ast=parse(source,{ecmaVersion:'latest',sourceType:'module'});
+  const body=name=>{const fn=ast.body.find(n=>n.type==='FunctionDeclaration'&&n.id.name===name);assert.ok(fn);return source.slice(fn.start,fn.end);};
+  const camera=compileFunction(`return (${body('captureCamera')});`)();
+  const exercise=async({width=308,height=826,y=289911,scrollY=289886,clamp=false,shiftAfter=false}={})=>{
+    let scroll={x:0,y:scrollY},measures=0,scrolls=0,frames=0;
+    const root={async evaluate(){measures++;return {clip:{x:41,y:y+(shiftAfter&&measures>1?100:0),width,height}};}};
+    const page={async evaluate(_fn,arg){if(arg){scrolls++;if(!clamp)scroll={...arg};return;}return {scroll:{...scroll},viewport:{width:390,height:844}};}};
+    const frame=compileFunction(`return (${body('frameInitialViewport')});`,['captureBounds','captureCamera','sleepFrame','assert'])(()=>{},camera,async()=>{frames++;},assert);
+    const receipt={};let error;try{await frame(root,page,receipt);}catch(e){error=e;}
+    return {receipt,error,scrolls,frames,measures};
+  };
+  const actual=await exercise();assert.ifError(actual.error);assert.equal(actual.scrolls,1);assert.equal(actual.frames,1);assert.equal(actual.measures,2);
+  assert.equal(actual.receipt.requestedScroll.y,289902);assert.deepEqual(camera(actual.receipt.after.bounds.clip,actual.receipt.after.scroll,actual.receipt.after.viewport),{fullPage:false,clip:{x:41,y:9,width:308,height:826}});
+  const fits=await exercise({scrollY:289902});assert.ifError(fits.error);assert.equal(fits.scrolls,0);
+  const exact=await exercise({width:390,height:844});assert.ifError(exact.error);assert.equal(camera(exact.receipt.after.bounds.clip,exact.receipt.after.scroll,exact.receipt.after.viewport).fullPage,false);
+  for(const size of [{width:391},{height:845}]){const large=await exercise(size);assert.ifError(large.error);assert.equal(large.receipt.eligible,false);assert.equal(large.scrolls,0);assert.equal(large.measures,1);}
+  for(const scenario of [{clamp:true},{shiftAfter:true}]){const blocked=await exercise(scenario);assert.match(blocked.error.message,/without truncation/);assert.equal(blocked.scrolls,1,'no framing retries');assert.ok(blocked.receipt.after);}
+  const failures=compileFunction(`return (${body('initialPaintFailures')});`)();
+  assert.ok(failures({root:{top:1},required:[]},{root:{top:2},required:[]},{x:0,y:0,width:10,height:10}).some(x=>x.includes('movement')),'framing does not waive post-capture movement');
+  assert.match(source,/if\(result.viewportFraming.eligible\)assert\(!camera.fullPage/,'late camera recomputation must still require viewport containment');
+});
+
 test('initial paint camera diagnostic pure: exact scope, clipping, movement and failure persistence',async()=>{
   const source=await readFile(new URL('./visual-state-audit-baseline.mjs',import.meta.url),'utf8');
   const ast=parse(source,{ecmaVersion:'latest',sourceType:'module'});

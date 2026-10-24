@@ -25,6 +25,20 @@ function captureCamera(clip, scroll, viewport) {
   const fits = viewportClip.x >= 0 && viewportClip.y >= 0 && viewportClip.x + clip.width <= viewport.width && viewportClip.y + clip.height <= viewport.height;
   return {fullPage: !fits, clip: fits ? viewportClip : clip};
 }
+async function frameInitialViewport(root, page, receipt) {
+  const measure=async()=>({bounds:await root.evaluate(captureBounds),...await page.evaluate(()=>({scroll:{x:scrollX,y:scrollY},viewport:{width:innerWidth,height:innerHeight}}))});
+  const before=await measure();receipt.before=before;
+  receipt.eligible=before.bounds.clip.width<=before.viewport.width&&before.bounds.clip.height<=before.viewport.height;
+  if(!receipt.eligible)return;
+  if(captureCamera(before.bounds.clip,before.scroll,before.viewport).fullPage){
+    receipt.requestedScroll={x:Math.max(0,before.bounds.clip.x-(before.viewport.width-before.bounds.clip.width)/2),y:Math.max(0,before.bounds.clip.y-(before.viewport.height-before.bounds.clip.height)/2)};
+    // Camera framing only: one instant document scroll, never a fixture/state mutation or retry.
+    await page.evaluate(({x,y})=>window.scrollTo({left:x,top:y,behavior:'instant'}),receipt.requestedScroll);
+    await sleepFrame(page);
+  }
+  receipt.after=await measure();
+  assert(!captureCamera(receipt.after.bounds.clip,receipt.after.scroll,receipt.after.viewport).fullPage,'viewport-sized initial union could not be framed without truncation');
+}
 function initialPaintSnapshot(element, caseId) {
   const regex = ['gallery:devtools/ColorContrastChecker','gallery:devtools/Encoder','gallery:devtools/Base64'].includes(caseId);
   if (!regex && caseId !== 'gallery:collab/ActivityLog') return null;
@@ -560,6 +574,8 @@ try {
       assert.deepEqual(requiredAssetFailures(readyAssets,{missing:[]}),[],'required current-document modules must finish before component capture');
       await sleepFrame(page);
       await root.scrollIntoViewIfNeeded();
+      result.viewportFraming={};
+      await frameInitialViewport(root,page,result.viewportFraming);
       const metadata = await page.evaluate(({element, caseId}) => {
         const box = node => { const rect = node.getBoundingClientRect(); return {x: rect.x, y: rect.y, width: rect.width, height: rect.height, top: rect.top, right: rect.right, bottom: rect.bottom, left: rect.left}; };
         const visible = node => { const style = getComputedStyle(node), rect = node.getBoundingClientRect(); return style.display !== 'none' && style.visibility !== 'hidden' && Number(style.opacity) !== 0 && rect.width > 0 && rect.height > 0; };
@@ -689,6 +705,7 @@ try {
       // Keep in-memory screenshot bytes only until this bounded batch is sealed.
       // Playwright's non-fullPage clip is viewport-relative; avoid deferred offscreen paint.
       const camera = captureCamera(bounds.clip, metadata.scroll, metadata.viewport);
+      if(result.viewportFraming.eligible)assert(!camera.fullPage,'framed initial union moved outside viewport before capture');
       const diagnosePaint = ['gallery:devtools/ColorContrastChecker','gallery:devtools/Encoder','gallery:devtools/Base64','gallery:collab/ActivityLog'].includes(item.caseId);
       const paintBefore = diagnosePaint ? await root.evaluate(initialPaintSnapshot, item.caseId) : null;
       if (paintBefore) result.actual.initialPaintDiagnostic = {before:paintBefore,camera,clip:bounds.clip};
