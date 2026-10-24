@@ -40,18 +40,18 @@ export function activeOutlineBounds(node,bounds){
   const width=parseFloat(style.outlineWidth),offset=parseFloat(style.outlineOffset);
   const alpha=style.outlineColor.match(/\/\s*([\d.]+%?)\s*\)$/)?.[1]??style.outlineColor.match(/^rgba\([^,]+,[^,]+,[^,]+,\s*([\d.]+%?)\s*\)$/)?.[1];
   if(style.outlineStyle==='none'||style.outlineStyle==='hidden'||width===0||style.outlineColor==='transparent'||(alpha!==undefined&&parseFloat(alpha)===0))return bounds;
-  const diagnostic=()=>{
-    const rectJSON=rect=>rect?{left:rect.left,top:rect.top,right:rect.right,bottom:rect.bottom,width:rect.width,height:rect.height}:null;
-    const identity=element=>element?{tag:element.localName,namespace:element.namespaceURI,id:element.id||null,dataCsMinimap:element.hasAttribute?.('data-cs-minimap')??false,rect:rectJSON(element.getBoundingClientRect?.())}:null;
+  const rectJSON=rect=>rect?{left:rect.left,top:rect.top,right:rect.right,bottom:rect.bottom,width:rect.width,height:rect.height}:null;
+  const identity=element=>element?{tag:element.localName,namespace:element.namespaceURI,id:element.id||null,dataCsMinimap:element.hasAttribute?.('data-cs-minimap')??false,rect:rectJSON(element.getBoundingClientRect?.())}:null;
+  const diagnostic=(extra={})=>{
     const ancestors=[];
     for(let element=active;element;element=element.parentElement){
       const s=getComputedStyle(element);
       ancestors.push({...identity(element),position:s.position,overflowX:s.overflowX,overflowY:s.overflowY,overflowClipMargin:s.overflowClipMargin,clip:s.clip,clipPath:s.clipPath,transform:s.transform,translate:s.translate,rotate:s.rotate,scale:s.scale,perspective:s.perspective,filter:s.filter,contain:s.contain});
     }
     const offsetParent=identity(active.offsetParent);
-    return {active:{...identity(active),matchesFocusVisible:active.matches?.(':focus-visible')??false,outlineStyle:style.outlineStyle,outlineWidth:style.outlineWidth,outlineOffset:style.outlineOffset,outlineColor:style.outlineColor,clientRects:[...(active.getClientRects?.()??[])].map(rectJSON)},offsetParent,ancestors};
+    return {active:{...identity(active),matchesFocusVisible:active.matches?.(':focus-visible')??false,outlineStyle:style.outlineStyle,outlineWidth:style.outlineWidth,outlineOffset:style.outlineOffset,outlineColor:style.outlineColor,clientRects:[...(active.getClientRects?.()??[])].map(rectJSON)},offsetParent,ancestors,...extra};
   };
-  const gap=reason=>({...bounds,focusOutline:{status:'unsupported',reason,diagnostic:diagnostic()}});
+  const gap=(reason,extra)=>({...bounds,focusOutline:{status:'unsupported',reason,diagnostic:diagnostic(extra)}});
   const positioned=[];
   if(active.closest('[data-ely-family]')!==node.closest('[data-ely-family]'))return gap('nested component focus ownership');
   if(style.outlineStyle==='auto'||!Number.isFinite(width)||!Number.isFinite(offset))return gap('unbounded outline style');
@@ -67,7 +67,16 @@ export function activeOutlineBounds(node,bounds){
     if(ancestor===active)continue;
     const clipX=s.overflowX!=='visible',clipY=s.overflowY!=='visible';
     if(!clipX&&!clipY)continue;
-    if(positioned.some(item=>item.node!==ancestor&&(!item.containingBlock||!ancestor.contains(item.containingBlock))&&!(item.containingBlock===null&&getComputedStyle(item.node).position==='absolute'&&item.node.namespaceURI==='http://www.w3.org/2000/svg'&&item.node.localName==='svg'&&item.node.parentElement===ancestor&&getComputedStyle(ancestor).position!=='static')))return gap('unproven positioned outline overflow clip relationship');
+    const clipRelationships=positioned.map(item=>{
+      const itemStyle=getComputedStyle(item.node),parent=item.node.parentElement,parentStyle=parent&&getComputedStyle(parent),containingBlockContained=!!item.containingBlock&&ancestor.contains(item.containingBlock);
+      const directSVGChild=item.node.namespaceURI==='http://www.w3.org/2000/svg'&&item.node.localName==='svg'&&parent===ancestor;
+      const directSVGParentNonStatic=!!parentStyle&&parentStyle.position!=='static';
+      const directSVGParentFallback=item.containingBlock===null&&itemStyle.position==='absolute'&&directSVGChild&&directSVGParentNonStatic;
+      const sameAsClipAncestor=item.node===ancestor;
+      return {node:identity(item.node),position:itemStyle.position,namespace:item.node.namespaceURI,offsetParent:identity(item.containingBlock),directParent:identity(parent),clippingAncestor:identity(ancestor),clippingAncestorPosition:s.position,overflowX:s.overflowX,overflowY:s.overflowY,sameAsClipAncestor,containingBlockContained,directSVGChild,directSVGParentNonStatic,directSVGParentFallback,proven:sameAsClipAncestor||containingBlockContained||directSVGParentFallback};
+    });
+    const rejectedClipRelationships=clipRelationships.filter(item=>!item.proven);
+    if(rejectedClipRelationships.length)return gap('unproven positioned outline overflow clip relationship',{clipRelationships,rejectedClipRelationships});
     if((s.overflowX==='clip'||s.overflowY==='clip')&&s.overflowClipMargin!=='0px')return gap('nonzero overflow clip margin');
     // The border box over-approximates the padding and rounded overflow clip.
     const box=ancestor.getBoundingClientRect();
@@ -82,6 +91,20 @@ export function activeOutlineBounds(node,bounds){
     extendsRoot:bounds.extendsRoot||paint.left<bounds.root.left||paint.right>bounds.root.right||paint.top<bounds.root.top||paint.bottom>bounds.root.bottom,
     viewportTruncated:bounds.viewportTruncated||paint.left<0||paint.top<0||paint.right>innerWidth||paint.bottom>innerHeight,
     focusOutline:{status:'bounded',width,offset,paint}};
+}
+
+export function visualCaptureGap(before,after){
+  if(before?.ownedStateEvidence&&after?.ownedStateEvidence)return null;
+  const gaps=[];
+  for(const [phase,state]of [['before',before],['after',after]]){
+    const entries=[['component',state?.component],...(state?.ownedOverlays||[]).map((overlay,index)=>[`overlay ${index+1}`,overlay])];
+    for(const [label,capture]of entries){
+      const witnesses=capture?.foreignDOMIntersections||[];
+      if(witnesses.length)gaps.push(`${phase} ${label} has foreign-painted witness${witnesses.length===1?'':'es'}: ${witnesses.map(item=>item.id||item.component||'unidentified peer').join(', ')}`);
+      if(capture?.focusOutlineGap)gaps.push(`${phase} ${label} focus-outline ownership is unproven: ${capture.focusOutlineGap}`);
+    }
+  }
+  return gaps.length?`Visual evidence withheld: ${gaps.join('; ')}`:'Visual evidence withheld: ownership gate failed without a recorded foreign-paint witness or focus-outline gap';
 }
 
 export function lastPaintedLicenseFragment(rects,clip,hasContent=true){

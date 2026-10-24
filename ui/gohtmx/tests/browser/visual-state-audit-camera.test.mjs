@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {readFile} from 'node:fs/promises';
 import {runInNewContext} from 'node:vm';
-import {captureTargetPNG,captureForeignPaint,screenshotWithoutCaretMutation,activeOutlineBounds} from './visual-state-audit-drivers.mjs';
+import {captureTargetPNG,captureForeignPaint,screenshotWithoutCaretMutation,activeOutlineBounds,visualCaptureGap} from './visual-state-audit-drivers.mjs';
 import {captureBounds} from './visual-state-audit-bounds.mjs';
 
 // No Playwright import or browser launch: exercise the real capture function
@@ -133,23 +133,40 @@ test('source-only active owned outline union respects axis clips and fails close
   assert.match(driver,/captureForeignPaint,\{clip:bounds\.clip,checkedRootID\}/,'Foreign ownership must use the expanded clip');
 });
 
-test('absolute SVG focus outline uses only its direct non-static clipping parent when offsetParent is null',async()=>{
+test('focused minimap SVG outline reproduces sealed geometry and reports rejected clip relations',async()=>{
   const rect={left:20,top:30,right:220,bottom:170,width:200,height:140},family={},base={display:'block',visibility:'visible',opacity:'1',contentVisibility:'visible',outlineStyle:'solid',outlineWidth:'2px',outlineOffset:'-2px',outlineColor:'rgb(0, 95, 204)',transform:'none',translate:'none',rotate:'none',scale:'none',perspective:'none',filter:'none',clipPath:'none',clip:'auto',maskImage:'none',contain:'none',zoom:'1',overflowX:'visible',overflowY:'visible',overflowClipMargin:'0px',position:'static'};
-  const make=(tag,parent,style)=>({localName:tag,namespaceURI:tag==='svg'?'http://www.w3.org/2000/svg':'http://www.w3.org/1999/xhtml',parentElement:parent,style:{...base,...style},offsetParent:null,closest:()=>family,getBoundingClientRect:()=>rect,getClientRects:()=>[rect],hasAttribute:()=>false,matches:()=>false,contains(candidate){for(let current=candidate;current;current=current.parentElement)if(current===this)return true;return false;}});
+  const make=(tag,parent,style,box=rect)=>({localName:tag,namespaceURI:tag==='svg'?'http://www.w3.org/2000/svg':'http://www.w3.org/1999/xhtml',parentElement:parent,style:{...base,...style},offsetParent:null,closest:()=>family,getBoundingClientRect:()=>box,getClientRects:()=>[box],hasAttribute:name=>name==='data-cs-minimap'&&tag==='svg',matches:()=>false,contains(candidate){for(let current=candidate;current;current=current.parentElement)if(current===this)return true;return false;}});
   const evaluate=svg=>{
-    const node={contains:candidate=>candidate===svg,closest:()=>family},bounds={clip:{x:20,y:30,width:200,height:140},root:rect,extendsRoot:false,viewportTruncated:false};
-    return JSON.parse(JSON.stringify(runInNewContext(`(${activeOutlineBounds.toString()})(node,bounds)`,{document:{activeElement:svg},getComputedStyle:element=>element.style,node,bounds,scrollX:0,scrollY:0,innerWidth:500,innerHeight:400})));
+    const node={contains:candidate=>svg.contains(candidate),closest:()=>family},bounds={clip:{x:85,y:153168,width:1270,height:461},root:{left:85,top:88.140625,right:1355,bottom:548.140625,width:1270,height:460},extendsRoot:false,viewportTruncated:false};
+    return JSON.parse(JSON.stringify(runInNewContext(`(${activeOutlineBounds.toString()})(node,bounds)`,{document:{activeElement:svg},getComputedStyle:element=>element.style,node,bounds,scrollX:0,scrollY:153080,innerWidth:1440,innerHeight:1000})));
   };
-  const positioned=make('div',null,{position:'relative'}),directView=make('div',positioned,{position:'relative',overflowX:'hidden',overflowY:'hidden'}),directSVG=make('svg',directView,{position:'absolute'});
-  assert.equal(evaluate(directSVG).focusOutline.status,'bounded','A direct absolute SVG child of its non-static clip has a proven relationship despite null offsetParent');
+  const positioned=make('div',null,{position:'relative'}),directView=make('div',positioned,{position:'relative',overflowX:'hidden',overflowY:'hidden'},{left:85,top:88.140625,right:905,bottom:548.140625,width:820,height:460}),minimapRect={left:692,top:395.140625,right:892,bottom:535.140625,width:200,height:140},directSVG=make('svg',directView,{position:'absolute',overflowX:'hidden',overflowY:'hidden'},minimapRect);
+  const sealedGeometry=evaluate(directSVG);
+  assert.equal(sealedGeometry.focusOutline.status,'bounded','The pinned direct-SVG fallback accepts the exact sealed relative-clipping-parent geometry');
+  assert.deepEqual(sealedGeometry.clip,{x:85,y:153168,width:1270,height:461},'The -2px inset outline adds no pixels outside the minimap box');
   const staticView=make('div',positioned,{position:'static',overflowX:'hidden',overflowY:'hidden'}),staticSVG=make('svg',staticView,{position:'absolute'}),staticResult=evaluate(staticSVG);
   assert.equal(staticResult.focusOutline.status,'unsupported','A static parent cannot establish the SVG containing block');
   assert.equal(staticResult.focusOutline.reason,'unproven positioned outline overflow clip relationship');
+  const staticRelation=staticResult.focusOutline.diagnostic.rejectedClipRelationships[0];
+  assert.equal(staticRelation.directSVGChild,true);assert.equal(staticRelation.directSVGParentNonStatic,false);assert.equal(staticRelation.proven,false,'The diagnostic names the exact failed containing-block predicate');
   const interveningView=make('div',positioned,{position:'relative',overflowX:'hidden',overflowY:'hidden'}),wrapper=make('div',interveningView,{}),nestedSVG=make('svg',wrapper,{position:'absolute'}),nestedResult=evaluate(nestedSVG);
   assert.equal(nestedResult.focusOutline.status,'unsupported','An intervening wrapper cannot use the direct-parent fallback');
   assert.equal(nestedResult.focusOutline.reason,'unproven positioned outline overflow clip relationship');
+  const nestedRelation=nestedResult.focusOutline.diagnostic.rejectedClipRelationships[0];
+  assert.equal(nestedRelation.clippingAncestor.tag,'div');assert.equal(nestedRelation.directParent.tag,'div');assert.equal(nestedRelation.directSVGChild,false);assert.equal(nestedRelation.proven,false,'The diagnostic records both sides of the failed direct-parent relationship');
   const css=await readFile(new URL('../../assets/ely-api-workspace.css',import.meta.url),'utf8');
   assert.match(css,/\[data-ely-family='workspace'\] \[data-cs-minimap\]:focus\{outline:2px solid var\(--focus\);outline-offset:-2px\}/,'The minimap keeps a visible theme-color focus ring inset within its clip');
+});
+
+test('visual capture gap names only recorded foreign witnesses or focus-outline uncertainty',()=>{
+  const clean={ownedStateEvidence:true,component:{foreignDOMIntersections:[],focusOutlineGap:null},ownedOverlays:[]};
+  const outline={ownedStateEvidence:false,component:{foreignDOMIntersections:[],focusOutlineGap:'unproven positioned outline overflow clip relationship'},ownedOverlays:[]};
+  const outlineMessage=visualCaptureGap(clean,outline);
+  assert.match(outlineMessage,/after component focus-outline ownership is unproven/);
+  assert.doesNotMatch(outlineMessage,/foreign-painted witness|intersects another audit instance/);
+  const foreign={ownedStateEvidence:false,component:{foreignDOMIntersections:[{id:'audit-twin'}],focusOutlineGap:null},ownedOverlays:[]};
+  assert.match(visualCaptureGap(clean,foreign),/after component has foreign-painted witness: audit-twin/);
+  assert.match(visualCaptureGap(clean,{...outline,component:{foreignDOMIntersections:[],focusOutlineGap:null}}),/without a recorded foreign-paint witness or focus-outline gap/);
 });
 
 test('caret preparation preserves exact style presence and bytes on all controls and twins, even on throw',async()=>{

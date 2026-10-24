@@ -9,7 +9,7 @@ import {setTimeout as delay} from 'node:timers/promises';
 import {isDeepStrictEqual} from 'node:util';
 import {chromium} from 'playwright';
 import {actionModuleNames,prepareActionModule,synchronousTraceInit,registeredOutcomesEqual,registeredOutcomeDifferences,firstDifference,compareActionTrace,traceContractStatus} from './visual-state-audit-instrument.mjs';
-import {caseActionContract, requestedStateContract, runRequestedStateActions, runRegisteredCanvasActions, ownedOverlayInventory, captureTargetPNG, screenshotWithoutCaretMutation, inventoryReceipt, inventoryDrift, unhandledBrowserErrors} from './visual-state-audit-drivers.mjs';
+import {caseActionContract, requestedStateContract, runRequestedStateActions, runRegisteredCanvasActions, ownedOverlayInventory, captureTargetPNG, screenshotWithoutCaretMutation, inventoryReceipt, inventoryDrift, unhandledBrowserErrors, visualCaptureGap} from './visual-state-audit-drivers.mjs';
 import {basicFixturePackage,basicRootSelector} from './visual-state-audit-basic.mjs';
 import {basicActionContract,validateBasicActionMatrix,runBasicActions,basicActionSurface,selectBasicActionCases,fulfillBasicActionAsset,assertBasicActionAssets,retainBasicFailureEvidence,basicOwnedModal,basicModalCaptureTarget} from './visual-state-audit-basic-actions.mjs';
 
@@ -402,7 +402,7 @@ async function directCaseDriver({item, familyURL, captures, reference, semanticS
       }
       receipt.assertedTarget=await verify(receipt.afterState,receipt.beforeState);
       receipt.assertionsPassed=true;
-      receipt.visualEvidenceGap=!receipt.beforeCaptureOwnership.ownedStateEvidence||!receipt.afterCaptureOwnership.ownedStateEvidence?'Target painted union intersects another audit instance; PNG is context evidence, not owned visual proof':null;
+      receipt.visualEvidenceGap=visualCaptureGap(receipt.beforeCaptureOwnership,receipt.afterCaptureOwnership);
       receipt.captureStatus = receipt.visualEvidenceGap?'captured-context-only':'captured';
     };
     if(contract.requestedStateOnly){
