@@ -133,6 +133,31 @@ test('source-only active owned outline union respects axis clips and fails close
   assert.match(driver,/captureForeignPaint,\{clip:bounds\.clip,checkedRootID\}/,'Foreign ownership must use the expanded clip');
 });
 
+test('ClearableInput self-only pure translation retains measured outline bounds and strict ownership guards',()=>{
+  const family={},rect={left:1329,top:545.609375,right:1353,bottom:569.609375,width:24,height:24},rowRect={left:85,top:543.609375,right:1355,bottom:571.609375,width:1270,height:28};
+  const base={display:'block',visibility:'visible',opacity:'1',contentVisibility:'visible',outlineStyle:'solid',outlineWidth:'2px',outlineOffset:'4px',outlineColor:'rgb(55, 114, 187)',transform:'none',translate:'none',rotate:'none',scale:'none',perspective:'none',filter:'none',clipPath:'none',clip:'auto',maskImage:'none',contain:'none',zoom:'1',overflowX:'visible',overflowY:'visible',overflowClipMargin:'0px',position:'static'};
+  const parent={style:{...base,position:'relative'},parentElement:null,getBoundingClientRect:()=>rowRect,contains:node=>node===parent||node===active};
+  const active={style:{...base,position:'absolute',transform:'matrix(1, 0, 0, 1, 0, -12)'},localName:'button',namespaceURI:'http://www.w3.org/1999/xhtml',parentElement:parent,offsetParent:parent,closest:()=>family,getBoundingClientRect:()=>rect,getClientRects:()=>[rect]};
+  const node={contains:value=>value===active,closest:()=>family},bounds={clip:{x:85,y:1262,width:1270,height:112},root:{left:85,top:460.609375,right:1355,bottom:571.609375},extendsRoot:false,viewportTruncated:false};
+  const run=()=>JSON.parse(JSON.stringify(runInNewContext(`(${activeOutlineBounds.toString()})(node,bounds)`,{document:{activeElement:active},getComputedStyle:element=>element.style,node,bounds,scrollX:0,scrollY:802,innerWidth:1440,innerHeight:1000})));
+  assert.deepEqual(run().focusOutline.paint,{left:1323,top:539.609375,right:1359,bottom:575.609375},'Use the already-translated browser rect exactly once, expanded by six CSS pixels');
+  assert.deepEqual(run().clip,{x:85,y:1262,width:1274,height:116});
+  for(const transform of ['matrix(1,0,0,1,0,0)','matrix(1,0,0,1,10.5,-12)']){active.style.transform=transform;assert.equal(run().focusOutline.status,'bounded');assert.deepEqual(run().clip,{x:85,y:1262,width:1274,height:116});}
+  active.style.transform='matrix(1, 0, 0, 1, 0, -12)';
+  parent.style.overflowX='hidden';parent.style.overflowY='hidden';
+  assert.deepEqual(run().focusOutline.paint,{left:1323,top:543.609375,right:1355,bottom:571.609375},'Proven containing-block overflow clipping is still applied');assert.deepEqual(run().clip,bounds.clip);
+  active.offsetParent=null;assert.equal(run().focusOutline.status,'unsupported','Unknown positioned clip relationship must not be waived');active.offsetParent=parent;
+  parent.style={...base,position:'relative'};
+  for(const transform of ['matrix(2,0,0,1,0,-12)','matrix(0,1,-1,0,0,-12)','matrix(1,.1,0,1,0,-12)','matrix(1,0,.1,1,0,-12)','matrix(1,0,0,-1,0,-12)','matrix3d(1,0,0,0,0,1,0,0,0,0,1,0,0,-12,0,1)','matrix(1,0,0,1,NaN,-12)','matrix(1,0,0,1,Infinity,0)','matrix(1,0,0,1,,0)']){
+    active.style.transform=transform;assert.equal(run().focusOutline.status,'unsupported',transform);assert.deepEqual(run().clip,bounds.clip);
+  }
+  active.style.transform='matrix(1,0,0,1,0,-12)';
+  for(const change of [{rotate:'10deg'},{scale:'2'},{translate:'0px -12px'},{perspective:'200px'},{clipPath:'inset(1px)'},{maskImage:'url(mask)'},{filter:'blur(1px)'}]){active.style={...base,position:'absolute',transform:'matrix(1,0,0,1,0,-12)',...change};assert.equal(run().focusOutline.status,'unsupported');}
+  active.style={...base,position:'absolute',transform:'matrix(1,0,0,1,0,-12)'};parent.style.transform='matrix(1,0,0,1,0,-12)';assert.equal(run().focusOutline.status,'unsupported','Ancestor transforms remain unsupported');parent.style={...base,position:'relative'};
+  active.closest=()=>({});assert.equal(run().focusOutline.status,'unsupported','Foreign component focus remains unsupported');active.closest=()=>family;
+  active.getClientRects=()=>[rect,rect];assert.equal(run().focusOutline.status,'unsupported','Fragmented outline remains unsupported');
+});
+
 test('focused minimap SVG outline reproduces sealed geometry and reports rejected clip relations',async()=>{
   const rect={left:20,top:30,right:220,bottom:170,width:200,height:140},family={},base={display:'block',visibility:'visible',opacity:'1',contentVisibility:'visible',outlineStyle:'solid',outlineWidth:'2px',outlineOffset:'-2px',outlineColor:'rgb(0, 95, 204)',transform:'none',translate:'none',rotate:'none',scale:'none',perspective:'none',filter:'none',clipPath:'none',clip:'auto',maskImage:'none',contain:'none',zoom:'1',overflowX:'visible',overflowY:'visible',overflowClipMargin:'0px',position:'static'};
   const make=(tag,parent,style,box=rect)=>({localName:tag,namespaceURI:tag==='svg'?'http://www.w3.org/2000/svg':'http://www.w3.org/1999/xhtml',parentElement:parent,style:{...base,...style},offsetParent:null,closest:()=>family,getBoundingClientRect:()=>box,getClientRects:()=>[box],hasAttribute:name=>name==='data-cs-minimap'&&tag==='svg',matches:()=>false,contains(candidate){for(let current=candidate;current;current=current.parentElement)if(current===this)return true;return false;}});

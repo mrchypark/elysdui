@@ -87,7 +87,10 @@ export function activeOutlineBounds(node,bounds){
     if(['absolute','fixed'].includes(s.position))positioned.push({node:ancestor,containingBlock:s.position==='absolute'?ancestor.offsetParent:null});
     if(s.display==='none'||Number(s.opacity)===0||s.contentVisibility==='hidden'||(ancestor===active&&s.visibility!=='visible'))return bounds;
     if(ancestor!==active&&s.visibility!=='visible')return gap('ancestor visibility overridden by visible focused child');
-    if(s.transform!=='none'||s.translate !== 'none'||s.rotate !== 'none'||s.scale !== 'none'||s.perspective!=='none'||s.filter !== 'none'||s.clipPath!=='none'||s.clip!=='auto'||s.maskImage!=='none'||s.contain.split(/\s+/).some(value=>['paint','strict','content'].includes(value))||(s.zoom!=='normal'&&Number(s.zoom)!==1))return gap('complex outline geometry or clipping');
+    // A self-only 2D translation is already included in the measured rectangle; outline width is unchanged.
+    const matrix=ancestor===active&&s.transform.match(/^matrix\(([^()]+)\)$/)?.[1].split(',').map(value=>value.trim());
+    const translated=matrix&&matrix.length===6&&matrix.every(value=>value!==''&&Number.isFinite(Number(value)))&&matrix.slice(0,4).every((value,index)=>Number(value)===[1,0,0,1][index]);
+    if(s.transform!=='none'&&!translated||s.translate !== 'none'||s.rotate !== 'none'||s.scale !== 'none'||s.perspective!=='none'||s.filter !== 'none'||s.clipPath!=='none'||s.clip!=='auto'||s.maskImage!=='none'||s.contain.split(/\s+/).some(value=>['paint','strict','content'].includes(value))||(s.zoom!=='normal'&&Number(s.zoom)!==1))return gap('complex outline geometry or clipping');
     if(ancestor===active)continue;
     const clipX=s.overflowX!=='visible',clipY=s.overflowY!=='visible';
     if(!clipX&&!clipY)continue;
