@@ -17,6 +17,31 @@ function shadowRasterFixture(){
   return {png:{width,height,data},sample,pixel};
 }
 
+test('MultiSelect shadow sampler validates intervening main and grid clips and backdrop paint',()=>{
+  const style={opacity:'1',transform:'none',translate:'none',rotate:'none',scale:'none',perspective:'none',filter:'none',backdropFilter:'none',clipPath:'none',clip:'auto',contain:'none',maskImage:'none',mixBlendMode:'normal',overflowX:'visible',overflowY:'visible',backgroundColor:'rgba(0, 0, 0, 0)',backgroundImage:'none',boxShadow:'none',outlineStyle:'none',outlineWidth:'0px',position:'static',borderTopWidth:'0px',borderRightWidth:'0px',borderBottomWidth:'0px',borderLeftWidth:'0px'};
+  const rect=(left,top,right,bottom)=>({left,top,right,bottom,width:right-left,height:bottom-top});
+  const make=(id,parent,box)=>({id,parentElement:parent,style:{...style},pseudos:{},clientLeft:0,dataset:{},getBoundingClientRect:()=>box,checkVisibility:()=>true,matches:()=>false});
+  const record=make('record',null,rect(0,0,100,120));record.style.backgroundColor='rgb(255, 255, 255)';
+  const grid=make('grid',record,rect(0,0,100,120)),host=make('host',grid,rect(0,10,100,90)),root=make('root',host,rect(10,10,70,40));root.dataset.elyComponent='forms/MultiSelect';
+  const twin=make('twin',grid,rect(0,100,100,120)),panel=make('panel',root,rect(10,40,70,60)),entry=make('entry',root,rect(10,10,70,30)),focused=make('checkbox',panel,rect(20,45,30,55));
+  panel.style.boxShadow='rgba(0, 0, 0, 0.133) 0px 8px 16px 0px';
+  root.closest=selector=>selector==='[data-audit-main]'?host:selector==='[data-audit-case]'?record:root;
+  root.querySelector=()=>panel;root.querySelectorAll=selector=>selector==='*'?[panel,entry,focused]:[entry];root.contains=node=>node===focused;
+  entry.getAttribute=name=>name==='aria-expanded'?'true':panel.id;
+  record.querySelector=()=>twin;
+  const document={activeElement:focused,querySelectorAll:selector=>selector==='[data-audit-case]'?[record]:[panel]};
+  const sample=()=>JSON.parse(JSON.stringify(runInNewContext(`(${multiSelectShadowFrame.toString()})(node)`,{node:root,document,URL,location:{href:'http://127.0.0.1/components/audit?family=forms&case=forms%2FMultiSelect'},getComputedStyle:(node,pseudo)=>pseudo?{content:node.pseudos[pseudo]??'none'}:node.style,innerWidth:100,innerHeight:100,scrollX:0,scrollY:0})));
+  assert.equal(sample().eligible,true,'Transparent untransformed wrappers permit the finite sampler');
+  for(const wrapper of [host,grid]){
+    for(const change of [{overflowX:'hidden'},{overflowY:'auto'},{transform:'matrix(1, 0, 0, 1, 1, 0)'},{clipPath:'inset(1px)'},{contain:'paint'},{backgroundColor:'rgb(255, 255, 255)'},{backgroundColor:'rgba(0, 0, 0, 0.5)'},{backgroundImage:'linear-gradient(white, black)'},{boxShadow:'rgb(0, 0, 0) 0px 1px 2px 0px'},{borderLeftWidth:'1px'}]){
+      wrapper.style={...style,...change};const result=sample();assert.equal(result.eligible,false,`${wrapper.id}: ${JSON.stringify(change)}`);assert.match(result.reason,/backdrop\/clip|backdrop paint/);
+    }
+    wrapper.style={...style};
+    for(const pseudo of ['::before','::after']){wrapper.pseudos[pseudo]='""';assert.equal(sample().eligible,false,`${wrapper.id} ${pseudo}`);assert.match(sample().reason,/generated audit backdrop paint/);delete wrapper.pseudos[pseudo];}
+    assert.equal(sample().eligible,true,'Removing the ambiguity restores the valid neighboring case');
+  }
+});
+
 test('MultiSelect shadow raster retains actual halo only inside a clear uniform boundary',()=>{
   const {png,sample}=shadowRasterFixture(),proof=proveMultiSelectShadowRaster(png,sample);
   assert.equal(proof.shadowPixels,1);assert.equal(proof.inkPixels,2);assert.equal(proof.status,'bounded-native-raster');

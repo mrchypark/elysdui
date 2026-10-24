@@ -301,7 +301,16 @@ export function multiSelectShadowFrame(node){
   const frame={x:Math.ceil(box.left+record.clientLeft),y:Math.floor(r.top),width:Math.floor(box.right-record.clientLeft)-Math.ceil(box.left+record.clientLeft),height:Math.floor(Math.min(h.bottom,innerHeight))-Math.floor(r.top)};
   const color=s.backgroundColor.match(/^rgb\((\d+),\s*(\d+),\s*(\d+)\)$/);
   if(!color||s.backgroundImage!=='none'||frame.x<0||frame.y<0||frame.x+frame.width>innerWidth||frame.width<=0||frame.height<=0||twin.getBoundingClientRect().top<frame.y+frame.height)return fail('no isolated uniform viewport shadow frame');
-  for(let a=record;a;a=a.parentElement){const st=getComputedStyle(a);if(st.opacity!=='1'||st.transform!=='none'||st.translate!=='none'||st.rotate!=='none'||st.scale!=='none'||st.perspective!=='none'||st.filter!=='none'||st.backdropFilter!=='none'||st.clipPath!=='none'||st.maskImage!=='none'||st.mixBlendMode!=='normal'||st.overflowX!=='visible'||st.overflowY!=='visible')return fail('unproven shadow frame backdrop/clip');for(const pseudo of ['::before','::after'])if(!['none','normal'].includes(getComputedStyle(a,pseudo).content))return fail('generated audit backdrop paint');}
+  let reachedRecord=false;
+  for(let a=root;a;a=a.parentElement){
+    const st=getComputedStyle(a);
+    if(st.opacity!=='1'||st.transform!=='none'||st.translate!=='none'||st.rotate!=='none'||st.scale!=='none'||st.perspective!=='none'||st.filter!=='none'||st.backdropFilter!=='none'||st.clipPath!=='none'||st.clip!=='auto'||st.contain!=='none'||st.maskImage!=='none'||st.mixBlendMode!=='normal'||st.overflowX!=='visible'||st.overflowY!=='visible')return fail('unproven shadow frame backdrop/clip');
+    if(a===record)reachedRecord=true;
+    // The record supplies the opaque backdrop; intervening wrappers must add no paint.
+    if(a!==root&&!reachedRecord&&(st.backgroundColor!=='rgba(0, 0, 0, 0)'||st.backgroundImage!=='none'||st.boxShadow!=='none'||!['none','hidden'].includes(st.outlineStyle)&&parseFloat(st.outlineWidth)!==0||['Top','Right','Bottom','Left'].some(side=>parseFloat(st[`border${side}Width`])!==0)))return fail('ambiguous intervening audit backdrop paint');
+    for(const pseudo of ['::before','::after'])if(!['none','normal'].includes(getComputedStyle(a,pseudo).content))return fail('generated audit backdrop paint');
+  }
+  if(!reachedRecord)return fail('shadow frame record is not an ancestor');
   const rects=[],shadows=[];
   for(const element of [root,...root.querySelectorAll('*')]){
     if(!element.checkVisibility({checkOpacity:true,checkVisibilityCSS:true}))continue;
