@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+trap 'status=$?; printf "AVD config regression failed at %s:%s: %s (status %s)\n" "${BASH_SOURCE[0]}" "$LINENO" "$BASH_COMMAND" "$status" >&2; exit "$status"' ERR
 ROOT=$(cd "$(dirname "$0")/../../.." && pwd)
 source "$ROOT/scripts/ci/native/android-readiness.sh"
 
@@ -62,6 +63,7 @@ grep -Fxq 'skin.dynamic=yes' "$config"
 
 # A manager that lists the expected AVD but leaves its config absent still fails.
 export FAKE_AVD_MODE=missing
+export FAKE_EXPECTED_AVD_HOME="$tmp/listed-but-missing-home"
 android_set_avd_home "$tmp/listed-but-missing-home"
 if output=$(android_create_avd "$manager" ely-profile 'system-images;android-29;default;x86_64' 2>&1); then
 	echo 'AVD with a missing config.ini unexpectedly passed' >&2
@@ -73,6 +75,7 @@ fi
 # proof of the requested config path; compact mode reports its name, not its path.
 export FAKE_AVD_MODE=misdirect
 export FAKE_OTHER_AVD_HOME="$tmp/elsewhere"
+export FAKE_EXPECTED_AVD_HOME="$tmp/expected-but-not-created"
 android_set_avd_home "$tmp/expected-but-not-created"
 if output=$(android_create_avd "$manager" ely-profile 'system-images;android-29;default;x86_64' 2>&1); then
 	echo 'AVD manager path mismatch unexpectedly passed' >&2
