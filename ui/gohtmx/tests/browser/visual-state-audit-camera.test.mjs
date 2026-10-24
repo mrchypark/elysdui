@@ -20,7 +20,7 @@ function shadowRasterFixture(){
 test('MultiSelect shadow sampler validates intervening main and grid clips and backdrop paint',()=>{
   const style={opacity:'1',transform:'none',translate:'none',rotate:'none',scale:'none',perspective:'none',filter:'none',backdropFilter:'none',clipPath:'none',clip:'auto',contain:'none',maskImage:'none',mixBlendMode:'normal',overflowX:'visible',overflowY:'visible',backgroundColor:'rgba(0, 0, 0, 0)',backgroundImage:'none',boxShadow:'none',outlineStyle:'none',outlineWidth:'0px',position:'static',borderTopWidth:'0px',borderRightWidth:'0px',borderBottomWidth:'0px',borderLeftWidth:'0px'};
   const rect=(left,top,right,bottom)=>({left,top,right,bottom,width:right-left,height:bottom-top});
-  const make=(id,parent,box)=>({id,parentElement:parent,style:{...style},pseudos:{},clientLeft:0,dataset:{},getBoundingClientRect:()=>box,checkVisibility:()=>true,matches:()=>false});
+  const make=(id,parent,box)=>{const node={id,localName:'div',children:[],parentElement:parent,style:{...style},pseudos:{},clientLeft:0,dataset:{},getBoundingClientRect:()=>box,checkVisibility:()=>true,matches:()=>false};parent?.children.push(node);return node;};
   const record=make('record',null,rect(0,0,100,120));record.style.backgroundColor='rgb(255, 255, 255)';
   const grid=make('grid',record,rect(0,0,100,120)),host=make('host',grid,rect(0,10,100,90)),root=make('root',host,rect(10,10,70,40));root.dataset.elyComponent='forms/MultiSelect';
   const twin=make('twin',grid,rect(0,100,100,120)),panel=make('panel',root,rect(10,40,70,60)),entry=make('entry',root,rect(10,10,70,30)),focused=make('checkbox',panel,rect(20,45,30,55));
@@ -40,6 +40,31 @@ test('MultiSelect shadow sampler validates intervening main and grid clips and b
     for(const pseudo of ['::before','::after']){wrapper.pseudos[pseudo]='""';assert.equal(sample().eligible,false,`${wrapper.id} ${pseudo}`);assert.match(sample().reason,/generated audit backdrop paint/);delete wrapper.pseudos[pseudo];}
     assert.equal(sample().eligible,true,'Removing the ambiguity restores the valid neighboring case');
   }
+  for(const [property,value] of Object.entries({transform:'matrix(2, 0, 0, 2, 0, 0)',translate:'1px',rotate:'1deg',scale:'2',perspective:'10px',filter:'blur(1px)',backdropFilter:'blur(1px)',clipPath:'inset(1px)',maskImage:'linear-gradient(white, black)',mixBlendMode:'multiply',opacity:'0.5',position:'fixed'})){
+    focused.style={...style,[property]:value};const result=sample();
+    assert.equal(result.eligible,false);assert.equal(result.reason,'complex owned shadow-frame paint');
+    assert.equal(result.rejectionWitness.selector,'[id="checkbox"]');
+    assert.equal(result.rejectionWitness.ownerID,'root');assert.equal(result.rejectionWitness.panelID,'panel');
+    assert.deepEqual(result.rejectionWitness.styleRejections,[{property,value}]);
+    assert.deepEqual(result.rejectionWitness.ancestorPath.map(a=>a.id),['checkbox','panel','root','host','grid','record']);
+    assert.equal(result.rejectionWitness.ancestorPath[0].style[property],value);
+  }
+  focused.style={...style,outlineStyle:'solid',outlineWidth:'3px'};focused.id='';
+  const outlined=sample();assert.equal(outlined.eligible,false);
+  assert.equal(outlined.rejectionWitness.selector,'[id="panel"] > div:nth-child(1)');
+  assert.deepEqual(outlined.rejectionWitness.styleRejections,[{property:'outlineStyle',value:'solid'},{property:'outlineWidth',value:'3px'}]);
+  focused.style={...style};focused.id='checkbox';assert.equal(sample().eligible,true,'Diagnostics do not relax or expand eligibility');
+});
+
+test('MultiSelect shadow rejection witness survives capture diagnostic fallback unchanged',async()=>{
+  const rejectionWitness={selector:'[id="option"]',ownerID:'primary',ownerComponent:'forms/MultiSelect',panelID:'panel',styleRejections:[{property:'outlineStyle',value:'solid'},{property:'outlineWidth',value:'3px'}],ancestorPath:[{selector:'[id="option"]',id:'option',style:{outlineStyle:'solid',outlineWidth:'3px'}}]};
+  const sample={eligible:false,reason:'complex owned shadow-frame paint',rejectionWitness};
+  const root={async scrollIntoViewIfNeeded(){},async evaluate(fn){if(fn===multiSelectShadowFrame)return sample;if(fn===captureForeignPaint)return {foreignDOMIntersections:[],occludedForeignPaint:[]};return {clip:{x:0,y:0,width:12,height:12}};}};
+  const page={async evaluate(){return {scroll:{x:0,y:0},viewport:{width:100,height:100}};},async screenshot(){const png=Buffer.alloc(24);png.writeUInt32BE(12,16);png.writeUInt32BE(12,20);return png;}};
+  const result=await captureTargetPNG(page,root);
+  assert.equal(result.bounds.focusOutline.status,'unsupported');
+  assert.deepEqual(result.bounds.focusOutline.diagnostic.shadowSample.rejectionWitness,rejectionWitness);
+  assert.equal(result.bounds.decorativeShadowProof,undefined);
 });
 
 test('MultiSelect shadow raster retains actual halo only inside a clear uniform boundary',()=>{

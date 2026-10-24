@@ -324,7 +324,23 @@ export function multiSelectShadowFrame(node){
   for(const element of [root,...root.querySelectorAll('*')]){
     if(!element.checkVisibility({checkOpacity:true,checkVisibilityCSS:true}))continue;
     const st=getComputedStyle(element),b=element.getBoundingClientRect();
-    if(st.transform!=='none'||st.translate!=='none'||st.rotate!=='none'||st.scale!=='none'||st.perspective!=='none'||st.filter!=='none'||st.backdropFilter!=='none'||st.clipPath!=='none'||st.maskImage!=='none'||st.mixBlendMode!=='normal'||st.opacity!=='1'||st.position==='fixed'||st.position==='sticky'||!['none','hidden'].includes(st.outlineStyle)&&parseFloat(st.outlineWidth)!==0)return fail('complex owned shadow-frame paint');
+    if(st.transform!=='none'||st.translate!=='none'||st.rotate!=='none'||st.scale!=='none'||st.perspective!=='none'||st.filter!=='none'||st.backdropFilter!=='none'||st.clipPath!=='none'||st.maskImage!=='none'||st.mixBlendMode!=='normal'||st.opacity!=='1'||st.position==='fixed'||st.position==='sticky'||!['none','hidden'].includes(st.outlineStyle)&&parseFloat(st.outlineWidth)!==0){
+      // Diagnostic only: preserve the exact rejecting predicate and its DOM provenance.
+      const selectorFor=target=>{
+        if(target.id)return `[id=${JSON.stringify(target.id)}]`;
+        const segments=[];
+        for(let a=target;a;a=a.parentElement){
+          if(a.id){segments.unshift(`[id=${JSON.stringify(a.id)}]`);break;}
+          segments.unshift(`${a.localName}:nth-child(${a.parentElement?[...a.parentElement.children].indexOf(a)+1:1})`);
+        }
+        return segments.join(' > ');
+      };
+      const properties=['transform','translate','rotate','scale','perspective','filter','backdropFilter','clipPath','maskImage','mixBlendMode','opacity','position','outlineStyle','outlineWidth'];
+      const styleRejections=properties.filter(property=>property==='position'?['fixed','sticky'].includes(st[property]):property==='outlineStyle'||property==='outlineWidth'?!['none','hidden'].includes(st.outlineStyle)&&parseFloat(st.outlineWidth)!==0:st[property]!==({mixBlendMode:'normal',opacity:'1'}[property]??'none')).map(property=>({property,value:st[property]}));
+      const ancestorPath=[];
+      for(let a=element;a;a=a.parentElement){const computed=getComputedStyle(a);ancestorPath.push({selector:selectorFor(a),id:a.id||null,tag:a.localName,style:Object.fromEntries(properties.map(property=>[property,computed[property]]))});if(a===record)break;}
+      return {...fail('complex owned shadow-frame paint'),rejectionWitness:{selector:selectorFor(element),ownerID:root.id,ownerComponent:root.dataset.elyComponent,panelID:panel.id,styleRejections,ancestorPath}};
+    }
     for(const pseudo of ['::before','::after'])if(!['none','normal'].includes(getComputedStyle(element,pseudo).content))return fail('generated owned shadow-frame paint');
     if(b.width>0&&b.height>0)rects.push({left:b.left-frame.x,top:b.top-frame.y,right:b.right-frame.x,bottom:b.bottom-frame.y});
     if(st.boxShadow!=='none')shadows.push({id:element.id,css:st.boxShadow,left:b.left-frame.x,top:b.top-frame.y,right:b.right-frame.x,bottom:b.bottom-frame.y});
