@@ -73,6 +73,14 @@ android_anr_seen() {
 	grep -Eiq 'ANR in ' "$1"
 }
 
+android_kvm_accel_check_usable() {
+	grep -Eiq 'KVM.*installed and usable'
+}
+
+android_cpuinfo_processor_count() {
+	awk '/^processor[[:space:]]*:/ { count++ } END { print count+0 }'
+}
+
 android_is_owned_child_matching() {
 	local pid=$1 command_pattern=$2 child_parent child_command
 	child_parent=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')

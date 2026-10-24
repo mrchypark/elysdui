@@ -119,9 +119,11 @@ jobs:
           path: /tmp/ElyProfile-attachments
           if-no-files-found: ignore
   android:
-    # Intel macOS has native Hypervisor support without changing Linux KVM
-    # permissions. The installed SDK already carries the runner's licenses.
-    runs-on: macos-15-intel
+    # Pilot the same API 29 x86_64 guest on the standard public Linux runner.
+    # The script requires pre-existing accessible KVM and two actual guest
+    # vCPUs; it never mutates Linux device permissions and fails closed otherwise.
+    # Intel macOS avoided KVM setup but its <6-core fallback forced one guest vCPU.
+    runs-on: ubuntu-24.04
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4

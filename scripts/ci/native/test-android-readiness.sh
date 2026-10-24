@@ -13,6 +13,38 @@ WINDOWS
 )
 [[ "$healthy" == 'Window{ab12 u0 com.android.launcher3/.Launcher}' ]]
 
+if ! android_kvm_accel_check_usable <<'ACCEL'
+accel:
+0
+KVM (version 12) is installed and usable.
+ACCEL
+then
+	echo 'usable KVM acceleration report was rejected' >&2
+	exit 1
+fi
+if android_kvm_accel_check_usable <<'ACCEL'
+accel:
+1
+KVM is not installed or usable.
+ACCEL
+then
+	echo 'unusable KVM acceleration report was accepted' >&2
+	exit 1
+fi
+[[ "$(android_cpuinfo_processor_count <<'CPUINFO'
+processor : 0
+vendor_id : GenuineIntel
+
+processor : 1
+vendor_id : GenuineIntel
+CPUINFO
+)" == 2 ]]
+[[ "$(android_cpuinfo_processor_count <<'CPUINFO'
+processor : 0
+vendor_id : GenuineIntel
+CPUINFO
+)" == 1 ]]
+
 anr_log=$(mktemp)
 child_pid=
 cleanup() {

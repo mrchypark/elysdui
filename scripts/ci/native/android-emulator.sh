@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Run on a macOS Intel host with Java 21 and an already licensed Android SDK.
-# This script never accepts SDK licenses or changes host security permissions.
+# Run on an x86_64 Linux host with Java 21, an already licensed Android SDK,
+# and directly accessible KVM. This script never accepts licenses or changes
+# host permissions; unavailable KVM is a hard failure, not a software fallback.
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/../../.." && pwd)
 cd "$ROOT"
@@ -52,7 +53,27 @@ bash "$ROOT/scripts/ci/native/test-android-readiness.sh"
 # system_server ANRs on this hosted runner. App compile/target SDK stays at 35.
 # stdin is closed: fail rather than accepting new/unexpected license terms.
 SYSTEM_IMAGE='system-images;android-29;default;x86_64'
-sysctl hw.ncpu hw.memsize | tee "$RESULTS/host-resources.txt"
+{
+	printf 'host.cpu_count: %s\n' "$(getconf _NPROCESSORS_ONLN)"
+	awk '/^MemTotal:/ { printf "host.memory_bytes: %.0f\n", $2 * 1024 }' /proc/meminfo
+} | tee "$RESULTS/host-resources.txt"
+if [ ! -c /dev/kvm ] || [ ! -r /dev/kvm ] || [ ! -w /dev/kvm ]; then
+	echo 'KVM preflight failed: /dev/kvm is not an accessible read/write character device; refusing permission changes.' >&2
+	ls -l /dev/kvm > "$RESULTS/kvm-device.txt" 2>&1 || true
+	cat "$RESULTS/kvm-device.txt" >&2
+	exit 1
+fi
+if ! emulator -accel-check > "$RESULTS/kvm-accel-check.txt" 2>&1; then
+	echo 'KVM preflight failed: emulator -accel-check returned failure.' >&2
+	cat "$RESULTS/kvm-accel-check.txt" >&2
+	exit 1
+fi
+if ! android_kvm_accel_check_usable < "$RESULTS/kvm-accel-check.txt"; then
+	echo 'KVM preflight failed: emulator did not report usable KVM acceleration.' >&2
+	cat "$RESULTS/kvm-accel-check.txt" >&2
+	exit 1
+fi
+echo 'Accessible /dev/kvm and usable emulator acceleration confirmed without changing permissions.'
 sdkmanager "$SYSTEM_IMAGE" < /dev/null
 printf 'no\n' | avdmanager create avd --force --name ely-profile --device pixel_2 --package "$SYSTEM_IMAGE"
 # Reduce software-rendering work while keeping a useful phone-sized dp viewport.
@@ -64,7 +85,6 @@ values.update({'hw.lcd.width': '720', 'hw.lcd.height': '1280', 'hw.lcd.density':
                'skin.name': '720x1280', 'skin.path': '720x1280', 'skin.dynamic': 'yes'})
 path.write_text(''.join(f'{key}={value}\n' for key, value in values.items()))
 PY
-emulator -accel-check
 emulator -avd ely-profile -port 5554 -cores 2 -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect -accel on > "$RESULTS/emulator.log" 2>&1 &
 EMULATOR_PID=$!
 ANR_LOG="$RESULTS/system-anr-watch.log"
@@ -85,6 +105,17 @@ if [ "$(adb -s "$SERIAL" shell getprop sys.boot_completed | tr -d '\r')" != 1 ];
   echo 'Android did not complete first boot within 10 minutes.' >&2
   cat "$RESULTS/emulator.log"
   exit 1
+fi
+if ! adb -s "$SERIAL" shell cat /proc/cpuinfo > "$RESULTS/guest-cpuinfo.txt" 2>&1; then
+	echo 'Android guest CPU count could not be observed; refusing instrumentation.' >&2
+	cat "$RESULTS/guest-cpuinfo.txt" >&2
+	exit 1
+fi
+GUEST_CPU_COUNT=$(android_cpuinfo_processor_count < "$RESULTS/guest-cpuinfo.txt")
+printf 'guest_cpu_count=%s\n' "$GUEST_CPU_COUNT" | tee "$RESULTS/guest-cpu-count.txt"
+if [ "$GUEST_CPU_COUNT" != 2 ]; then
+	echo "Android guest exposed $GUEST_CPU_COUNT processors, expected exactly 2; refusing instrumentation." >&2
+	exit 1
 fi
 echo 'Android 10 / API 29 emulator boot completed; starting real native UI tests.'
 adb -s "$SERIAL" shell input keyevent 82
