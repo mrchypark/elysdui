@@ -12,7 +12,7 @@ permissions:
   contents: read
 jobs:
   cleanup-remount:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -47,7 +47,7 @@ jobs:
             test-results/contracts/cleanup-remount-fixtures/
           if-no-files-found: error
   repair-causal-controls:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -78,7 +78,7 @@ jobs:
           if-no-files-found: error
   causal-diagnostic:
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.causal }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:

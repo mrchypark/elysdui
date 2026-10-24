@@ -48,6 +48,11 @@ console.log('Account/help root typography contract: 13px/20px passed');
 assert.ok(accountCSS.includes(".ely-account-help input:not([data-ui-pin-slot]):not([type=checkbox])"),'Generic account input dimensions must exclude shared PIN slots');
 assert.ok(!accountCSS.includes('.ely-account-help .ely-pin-slots input{'),'Account styles must not override the shared 40px PIN contract');
 console.log('Account PIN styling: generic input rule excludes shared 40px slots passed');
+assert.match(accountCSS,/\.ely-api-hotkey-control\{position:relative\}/,'Hotkey glyph must be positioned against its input wrapper');
+assert.match(accountCSS,/\.ely-api-hotkey-control \.ely-api-hotkey-glyph\{[^}]*inset-block-start:50%[^}]*transform:translateY\(-50%\)/,'Hotkey glyph must align within the input, not the label row');
+assert.match(accountCSS,/\.ely-api-hotkey-control \[data-ui-hotkey\]\{padding-inline-start:2rem\}/,'Hotkey value must not run underneath its leading glyph');
+assert.match(accountCSS,/\.ely-account-help \.ely-suite-terms\{display:flex;align-items:center;gap:6px\}/,'Signup agreement checkbox and text must remain separated');
+console.log('Hotkey and signup terms visual layout contracts passed');
 // Manual network configuration is a local draft until its explicit host action.
 const settings=element(),proxy=element(),mode=element(),proxyHost=element(),port=element(),bypass=element(),manualFields=element(),applyProxy=element();settings.dataset={elyComponent:'settings/SettingsLayout'};mode.value='system';proxyHost.value='';port.value='';bypass.value=' localhost, *.internal, ';
 const proxyNodes={'[data-suite-proxy-mode]':mode,'[data-suite-proxy-host]':proxyHost,'[data-suite-proxy-port]':port,'[data-suite-proxy-bypass]':bypass,'[data-suite-proxy-fields]':manualFields,'[data-suite-proxy-apply]':applyProxy};proxy.querySelector=selector=>proxyNodes[selector]||null;settings.querySelectorAll=selector=>selector==='[data-suite-proxy]'?[proxy]:[];

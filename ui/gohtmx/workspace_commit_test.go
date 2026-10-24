@@ -8,6 +8,17 @@ import (
 	"golang.org/x/net/html"
 )
 
+func TestWorkspaceCommitFormSpacingBothLayouts(t *testing.T) {
+	css, err := Files.ReadFile("assets/ely-api-workspace.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Default CommitInput and ChangesList with ShowCommit share this form.
+	if !strings.Contains(string(css), "[data-ely-family='workspace'] [data-ws-changes]>form{display:grid;align-content:start;gap:8px}") {
+		t.Fatal("commit form must separate its labels, live count and submit control in both source and default layouts")
+	}
+}
+
 func TestWorkspaceCommitInputMessageOnlyContract(t *testing.T) {
 	tpl, err := NewTemplates()
 	if err != nil {

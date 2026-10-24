@@ -66,7 +66,7 @@ func Build() (Manifest, []TestFixture, error) {
 		}
 		for _, f := range samples {
 			f.Name = key
-			f.Props = gallery.SDUIAliasProps(f.Props, name)
+			f.Props = gallery.SDUIAliasProps(f.Props, key)
 			inputs[key] = append(inputs[key], f)
 		}
 		contracts[key] = Contract{Name: key, Chapter: d.Chapter, Component: name, Primary: d.Name, Family: d.Family, Events: []string{"click", "change", "ely:action", "ely:change"}, SandboxHTML: d.Chapter == "misc" && (d.Name == "WebView" || d.Name == "IframeEmbed")}

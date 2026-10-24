@@ -2,16 +2,24 @@ import assert from 'node:assert/strict';
 import {activationMutationMetadata, activationMutants, activationSHA256} from './palette-activation-mutants.mjs';
 
 // Separate candidate pins; the historical activation-repair definition stays exact.
-const templatePin = {
-  sourceSHA256: '373d8126b8a07864eb8e5a805f6999e4d853e1f7259b54172c663b5deba41c7d', sourceBytes: 97734,
+const candidatePins = {
+  core: {sourceSHA256: 'e13109c6c2555311328544600508c1dc2ac68a7dc3b6324abb83c39062907af3', sourceBytes: 11407},
+  template: {sourceSHA256: '454e758440f84e866aa70acad4b07a97a98526598f5db79ff6bc0022792a3a4f', sourceBytes: 97761},
+};
+const candidateOutputs = {
+  'core-skip-removed': ['adacb2bd458348848bd718f31c5320f8a16aaab00952fe2afe66d6a5798ba32c', 11334],
+  'blanket-palette-submit-prevention': ['aa55110f4075129d48e75dd212acfe65ce227f238375fec168de2a77f0832a3d', 11576],
+  'template-marker-omitted': ['ec55e28c983397fc5b6f5413bc28af0d41ff875ad7efc754c11eaa1785105bec', 97729],
 };
 export function activationAuditCandidateMetadata(mode) {
   const metadata = structuredClone(activationMutationMetadata(mode));
-  const template = metadata.files.template;
-  Object.assign(template, templatePin, {
-    transformedSourceSHA256: template.mutated ? '6e13d8fa99122dc805fdb26a16504b25de51993557266f948954bdcbf94dba55' : templatePin.sourceSHA256,
-    transformedSourceBytes: template.mutated ? 97702 : templatePin.sourceBytes,
-  });
+  for (const [key, pin] of Object.entries(candidatePins)) {
+    const file = metadata.files[key];
+    const [transformedSourceSHA256, transformedSourceBytes] = file.mutated ? candidateOutputs[mode] : [pin.sourceSHA256, pin.sourceBytes];
+    Object.assign(file, pin, {transformedSourceSHA256, transformedSourceBytes,
+      servedSHA256: file.servedPath ? transformedSourceSHA256 : null,
+      servedBytes: file.servedPath ? transformedSourceBytes : null});
+  }
   // Candidate provenance is the independently checked clean tree, not the historical revision.
   metadata.sourceRevision = null;
   metadata.productionPolicy = 'audit-candidate';

@@ -73,6 +73,7 @@ func advancedCommunicationCases() []AdvancedCase {
 			props["PreviewStack"], props["PreviewExamples"] = true, []map[string]any{{"Items": searchSteps, "Results": []map[string]any{{"SourceSite": "example.net", "SourceTitle": "Designing dark themes", "Href": "https://example.net/dark-themes", "Date": "Sep 2026", "Content": "Lift surfaces rather than shade them; depth reads as light."}}, "Chunks": []map[string]any{{"FileName": "lift-notes.pdf", "Location": "Page 1 · Dark is not inverted", "Score": "0.86", "Runs": passage}, {"FileName": "a-long-name-for-the-lift-notes.pdf", "Location": "Page 1 · Dark is not inverted", "Score": "0.86", "Runs": passage, "Narrow": true}}}}
 		case "ImageMessage":
 			props["URL"], props["Alt"], props["Caption"], props["Width"], props["Height"] = "/assets/sample.svg", "Atrium study", "The atrium at noon", 960, 640
+			props["Items"] = []map[string]any{{"Value": "atrium", "URL": "/assets/sample.svg", "Alt": "Atrium study", "Label": "Atrium"}, {"Value": "stair", "URL": "/assets/sample-before.svg", "Alt": "Stair study", "Label": "Stair"}}
 			props["FileName"], props["FileMeta"], props["Duration"], props["Href"] = "lift-notes.pdf", "482 KB · PDF", "00:42", "https://elygpui.com"
 			props["PreviewExamples"] = []map[string]any{{"PreviewName": "ImageMessage", "Width": 960, "Height": 640, "Caption": "The atrium at noon"}, {"PreviewName": "ImageMessage", "Width": 600, "Height": 400, "Caption": "In a narrow column, in its own shape"}, {"PreviewName": "ImageGrid", "Items": []map[string]any{{"URL": "/assets/sample.svg", "Alt": "Atrium study", "Label": "Atrium"}, {"URL": "/assets/sample-before.svg", "Alt": "Stair study", "Label": "Stair"}}}, {"PreviewName": "FileMessage"}, {"PreviewName": "AudioMessage"}, {"PreviewName": "VideoMessage"}, {"PreviewName": "LinkPreviewCard"}}
 		case "QuoteReply":
@@ -394,7 +395,7 @@ func advancedCommunicationCases() []AdvancedCase {
 		case "LabelPicker":
 			props["Items"] = []map[string]any{{"Value": "clients", "Label": "Clients", "Hue": 0, "Selected": true}, {"Value": "studio", "Label": "Studio", "Hue": 5}, {"Value": "press", "Label": "Press", "Hue": 3, "Selected": true}, {"Value": "finance", "Label": "Finance", "Hue": 1}, {"Value": "site", "Label": "Site visits", "Hue": 2}, {"Value": "travel", "Label": "Travel", "Hue": 7}}
 		case "SnoozePicker", "ScheduleSend":
-			props["Until"], props["SendAt"], props["Value"], props["Disabled"] = "", "", "review", false
+			props["Until"], props["SendAt"], props["Value"], props["Disabled"] = "2026-10-14T09:00", "2026-10-14T08:00", "review", false
 		case "CalendarMonthView":
 			props["Title"] = "October 2026"
 			props["Items"] = calendarMonthFixture(id)

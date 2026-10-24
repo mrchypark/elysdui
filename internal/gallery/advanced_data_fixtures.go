@@ -78,6 +78,15 @@ func financeBookLevels(mid float64) ([]map[string]any, []map[string]any) {
 	return bids, asks
 }
 
+func calendarHeatmapCells() []map[string]any {
+	levels := []string{"1", "2", "3", "4", "5", "4", "3", "2", "1", "2", "4", "5", "3", "2", "1", "3", "4", "2", "5", "1", "2"}
+	cells := make([]map[string]any, len(levels))
+	for index, level := range levels {
+		cells[index] = map[string]any{"Label": fmt.Sprintf("Day %d", index+1), "Value": index + 1, "Level": level}
+	}
+	return cells
+}
+
 // advancedDataCases gives the gallery one independent caller-data instance for every data-family primary.
 func advancedDataCases() []AdvancedCase {
 	stories := map[string][]string{
@@ -215,21 +224,23 @@ func advancedDataCases() []AdvancedCase {
 			case "LineChart", "RealtimeChart":
 				props["GridPath"], props["Points"], props["ViewBox"] = "M0 100H320", "0,90 80,60 160,75 240,30 320,45", "0 0 320 120"
 			case "AreaChart":
-				props["AreaPath"], props["Bars"] = "M0 100L0 80 100 50 200 70 320 20V100Z", []map[string]any{{"X": 30, "Y": 65, "Width": 24, "Height": 35}}
+				props["AreaPath"], props["Bars"], props["ViewBox"] = "M0 100L0 80 100 50 200 70 320 20V100Z", []map[string]any{{"X": 30, "Y": 65, "Width": 24, "Height": 35}}, "0 0 320 120"
 			case "PieChart":
-				props["Segments"] = []map[string]any{{"Label": "Alpha", "Path": "M60 60L60 5A55 55 0 0 1 112 76Z"}, {"Label": "Beta", "Path": "M60 60L112 76A55 55 0 0 1 18 88Z"}}
+				props["Segments"], props["ViewBox"] = []map[string]any{{"Label": "Alpha", "Path": "M60 60L60 5A55 55 0 0 1 112 76Z"}, {"Label": "Beta", "Path": "M60 60L112 76A55 55 0 0 1 18 88Z"}}, "0 0 120 120"
 			case "ScatterChart":
-				props["Points"] = []map[string]any{{"X": 30, "Y": 80, "R": 5, "Label": "Alpha"}, {"X": 180, "Y": 35, "R": 8, "Label": "Beta"}}
+				props["Points"], props["ViewBox"] = []map[string]any{{"X": 30, "Y": 80, "R": 5, "Label": "Alpha"}, {"X": 180, "Y": 35, "R": 8, "Label": "Beta"}}, "0 0 200 100"
 			case "RadarChart":
-				props["GridPoints"], props["Points"] = "100,5 190,70 155,145 45,145 10,70", "100,28 165,76 140,120 60,115 35,72"
+				props["GridPoints"], props["Points"], props["ViewBox"] = "100,5 190,70 155,145 45,145 10,70", "100,28 165,76 140,120 60,115 35,72", "0 0 200 150"
+			case "HeatmapChart":
+				props["Cells"] = calendarHeatmapCells()
 			case "Treemap":
-				props["Items"] = []map[string]any{{"Label": "Alpha", "X": 0, "Y": 0, "Width": 180, "Height": 120, "TextX": 8, "TextY": 20}, {"Label": "Beta", "X": 182, "Y": 0, "Width": 138, "Height": 120, "TextX": 190, "TextY": 20}}
+				props["Items"], props["ViewBox"] = []map[string]any{{"Label": "Alpha", "X": 0, "Y": 0, "Width": 180, "Height": 120, "TextX": 8, "TextY": 20}, {"Label": "Beta", "X": 182, "Y": 0, "Width": 138, "Height": 120, "TextX": 190, "TextY": 20}}, "0 0 320 120"
 			case "SankeyChart":
-				props["Links"], props["Nodes"] = []map[string]any{{"Path": "M20 30C100 30 140 45 220 45V75C140 75 100 90 20 90Z"}}, []map[string]any{{"Label": "In", "X": 0, "Y": 25, "Width": 20, "Height": 70, "LabelY": 18}}
+				props["Links"], props["Nodes"], props["ViewBox"] = []map[string]any{{"Path": "M20 30C100 30 140 45 220 45V75C140 75 100 90 20 90Z"}}, []map[string]any{{"Label": "In", "X": 0, "Y": 25, "Width": 20, "Height": 70, "LabelY": 18}}, "0 0 240 120"
 			case "WaterfallChart", "Histogram":
-				props["Bars"] = []map[string]any{{"X": 20, "Y": 50, "Width": 30, "Height": 50}, {"X": 70, "Y": 25, "Width": 30, "Height": 75}}
+				props["Bars"], props["ViewBox"] = []map[string]any{{"X": 20, "Y": 50, "Width": 30, "Height": 50}, {"X": 70, "Y": 25, "Width": 30, "Height": 75}}, "0 0 120 120"
 			case "NetworkGraph":
-				props["Edges"], props["Nodes"] = []map[string]any{{"X1": 30, "Y1": 60, "X2": 180, "Y2": 35}}, []map[string]any{{"X": 30, "Y": 60, "R": 10, "Label": "A", "LabelX": 45, "LabelY": 60}}
+				props["Edges"], props["Nodes"], props["ViewBox"] = []map[string]any{{"X1": 30, "Y1": 60, "X2": 180, "Y2": 35}}, []map[string]any{{"X": 30, "Y": 60, "R": 10, "Label": "A", "LabelX": 45, "LabelY": 60}}, "0 0 220 100"
 			case "CandlestickChart":
 				props["Candles"], props["Types"], props["Ranges"], props["ViewBox"] = []map[string]any{{"X": 40, "High": 20, "Low": 95, "BodyX": 32, "Open": 45, "Width": 16, "BodyHeight": 30, "Direction": "up"}}, []map[string]any{{"Value": "candle", "Label": "Candle"}}, []map[string]any{{"Value": "1d", "Label": "1 day"}}, "0 0 320 120"
 			case "DepthChart":
@@ -244,7 +255,7 @@ func advancedDataCases() []AdvancedCase {
 			case "GanttChart":
 				props["Tasks"] = []map[string]any{{"Label": "Research", "Left": 10, "Width": 45, "Detail": "Review"}}
 			case "IndicatorOverlay":
-				props["Paths"], props["Indicators"] = []map[string]any{{"Path": "M0 80L160 45L320 55"}}, []map[string]any{{"Value": "sma", "Label": "SMA"}}
+				props["Paths"], props["Indicators"], props["ViewBox"] = []map[string]any{{"Path": "M0 80L160 45L320 55"}}, []map[string]any{{"Value": "sma", "Label": "SMA"}}, "0 0 320 120"
 			case "MultiChartLayout":
 				props["Charts"] = []map[string]any{{"Label": "ACME", "ViewBox": "0 0 320 120", "Points": "0,90 160,45 320,60"}}
 			case "Ticker":
@@ -264,6 +275,7 @@ func advancedDataCases() []AdvancedCase {
 				props["Statistics"] = []map[string]any{{"Label": "Worth", "Value": "$136,200", "Trend": ""}, {"Label": "Today", "Value": "+$1,284", "Trend": "+0.95%", "Tone": "success"}, {"Label": "Since bought", "Value": "+$18,402", "Trend": "+15.3%", "Tone": "success"}, {"Label": "Cash", "Value": "$9,864", "Trend": ""}}
 				props["Holdings"] = []map[string]any{{"Label": "ELY", "Value": 48210, "Text": "$48,210"}, {"Label": "SOLACE", "Value": 31050, "Text": "$31,050"}, {"Label": "Bonds", "Value": 26400, "Text": "$26,400"}, {"Label": "NOVA", "Value": 12480, "Text": "$12,480"}, {"Label": "PINE", "Value": 8196, "Text": "$8,196"}, {"Label": "Cash", "Value": 9864, "Text": "$9,864"}}
 				props["Sentiment"] = map[string]any{"Label": "Sentiment", "Value": 64}
+				props["ViewBox"] = "0 0 320 120"
 			case "MarketProfile":
 				props["Items"] = []map[string]any{{"Label": "98.4", "Width": 60}}
 			case "RenkoChart":

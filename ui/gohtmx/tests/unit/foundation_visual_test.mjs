@@ -12,7 +12,35 @@ assert.deepEqual(await foundationClipboard('write','1234567.8900',clipboard),{ok
 assert.equal(stored,'1234567.8900');
 assert.equal((await foundationClipboard('read','',{readText(){throw Error('denied')}})).ok,false);
 assert.equal((await foundationClipboard('write','kept',undefined)).value,'kept');
+// Native details emits non-bubbling toggle, not change; exercise the actual handler.
+const foundationSource=readFileSync('ui/gohtmx/assets/ely-api-foundation.js','utf8');
+assert.match(foundationSource,/root\.addEventListener\('toggle', onToggle, true\)/);
+assert.match(foundationSource,/root\.removeEventListener\('toggle', onToggle, true\)/);
+const toggleBody=foundationSource.slice(foundationSource.indexOf('  const onToggle = event => {'),foundationSource.indexOf('  const onChange = event => {'));
+assert(toggleBody.startsWith('  const onToggle ='));
+const disclosureRoot={},events=[];
+const onToggle=new Function('root','emit',`${toggleBody};return onToggle;`)(disclosureRoot,(_root,action,detail)=>events.push({action,...detail}));
+const disclosure=(open,owner=disclosureRoot)=>({open,matches:selector=>selector==='details',closest:selector=>selector==='[data-ely-family]'?owner:null});
+const plain=disclosure(true);onToggle({target:plain});plain.open=false;onToggle({target:plain});
+assert.deepEqual(events,[{action:'change',open:true},{action:'change',open:false}]);events.length=0;
+const first=disclosure(true),second=disclosure(true),accordion={querySelectorAll:()=>[first,second]};
+second.closest=selector=>selector==='[data-ely-family]'?disclosureRoot:accordion;
+onToggle({target:second});assert.equal(first.open,false);assert.equal(second.open,true);
+assert.deepEqual(events,[{action:'change',open:true}]);events.length=0;
+onToggle({target:disclosure(true,{})});onToggle({target:{matches:()=>false}});
+assert.deepEqual(events,[],'nested family and non-details toggle must be ignored');
+assert.doesNotMatch(foundationSource.slice(foundationSource.indexOf('  const onChange ='),foundationSource.indexOf('  const setSplit =')),/closest\('details'\)/,'native disclosure must not rely on synthetic change');
 const css=readFileSync('ui/gohtmx/assets/ely-api-foundation.css','utf8');
+const foundationTemplate=readFileSync('ui/gohtmx/templates/ely-api-foundation.html','utf8');
+assert.match(foundationTemplate,/eq \.Kind "ResizeHandle"[\s\S]*?ely-foundation__split-divider[^>]*aria-orientation="horizontal"[\s\S]*?ely-foundation__split-divider[^>]*aria-orientation="vertical"/,'ResizeHandle exposes orientation on each separator');
+assert.match(css,/\.ely-foundation__split-divider\[aria-orientation='horizontal'\]::after\{inline-size:auto;block-size:1px;inset-inline:0;inset-block:50%;margin-block:auto\}/,'all explicitly horizontal separators paint a horizontal mark');
+assert.match(css,/\.ely-foundation__split-divider::after\{content:'';position:absolute;inset:0;inline-size:1px;margin-inline:auto;background:var\(--foundation-line\)\}/,'vertical separators retain their centered 1px mark');
+assert.doesNotMatch(css,/\.ely-foundation__split-divider\[aria-orientation='vertical'\]::after/,'horizontal override does not select vertical separators');
+assert.match(css,/\.ely-foundation__scrollbar \[data-foundation-scrollbar\][^}]*inset-inline:\.125rem;inset-block-end:\.125rem;inline-size:calc\(100% - \.25rem\);block-size:\.5rem[^}]*writing-mode:vertical-lr;direction:ltr;/,'native range scrollbar occupies the right edge with top-to-bottom range direction');
+assert.match(css,/\.ely-foundation__scroll-well \[data-foundation-scrollbar\]\{min-inline-size:0;max-block-size:8px;/,'native vertical range caps its physical width on the block axis');
+assert.doesNotMatch(css,/appearance:slider-vertical/,'non-standard vertical slider appearance must not emit browser console warnings');
+assert.match(css,/\[data-ely-family='foundation'\] \.ely-foundation__section-items span,\[data-ely-family='foundation'\] fieldset span\{padding:\.4rem \.5rem;border:1px solid var\(--border,#777\);border-radius:\.25rem\}/);
+assert.doesNotMatch(css,/,fieldset span\{/,'foundation chip styling must not leak into other families');
 // Guard the explicit resets required to beat the older element/nth-child selectors.
 assert.match(css,/\.ely-foundation__layers \[data-foundation-layer\]:nth-child\(n\)\{[^}]*translate:none/);
 assert.match(css,/\.ely-foundation__scroll-well>\.ely-foundation__scroll\{max-block-size:none;padding:0;border:0\}/);

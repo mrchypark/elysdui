@@ -8,13 +8,14 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {fileURLToPath,pathToFileURL} from 'node:url';
 import {buildActivationMutantSchemaFixture,buildActivationPostCloseRejectionFixture,buildActivationShapeRejectionFixture,buildActivationWitnessRejectionFixture,activationWitnessKinds} from './palette-activation-controls-evidence-test.mjs';
-import {buildActivationSchemaFixture} from './palette-activation-evidence-test.mjs';
+import {buildActivationSchemaFixture,drainResponseCaptures} from './palette-activation-evidence-test.mjs';
 import {loadActivationInputs} from '../ui/gohtmx/tests/browser/palette-activation-inputs.mjs';
 import {activationSelection,activationEnvironment,activationPolicy,verifyActivationPolicy,activationRepairSourcePaths} from '../ui/gohtmx/tests/browser/palette-activation-policy.mjs';
-import {activationMutations} from '../ui/gohtmx/tests/browser/palette-activation-mutants.mjs';
+import {activationMutations,activationMutationMetadata,activationMutants,activationSHA256} from '../ui/gohtmx/tests/browser/palette-activation-mutants.mjs';
+import {applyActivationAuditCandidateMutation} from '../ui/gohtmx/tests/browser/palette-activation-audit-candidate.mjs';
 import {verifyActivationEvidence} from '../ui/gohtmx/tests/browser/palette-activation-evidence.mjs';
 import {verifyActivationControl} from './palette-activation-controls.mjs';
-import {paletteProductionPolicy} from '../ui/gohtmx/tests/browser/palette-query-production-policy.mjs';
+import {paletteProductionPolicy,paletteAuditCandidatePins} from '../ui/gohtmx/tests/browser/palette-query-production-policy.mjs';
 export const activationCollectionMatrix=[
  ...['go-qualified','go-chapter','sdui'].map(surface=>({surface,mutation:'control'})),
  ...activationMutations.filter(m=>m!=='control').map(mutation=>({surface:'go-qualified',mutation})),
@@ -37,13 +38,48 @@ export function bindActivationMetadata(fixture,metadata){
 export async function runActivationRepairEvidenceTests(){
  const productionPolicy=paletteProductionPolicy(process.env.PALETTE_QUERY_PRODUCTION_POLICY||'activation-repair');assert.notEqual(productionPolicy,'strict');
  const base=fileURLToPath(new URL('../',import.meta.url));assert.equal(execFileSync('git',['status','--porcelain'],{cwd:base,encoding:'utf8'}).trim(),'','exact committed current-source repair replay');
+ if(productionPolicy==='audit-candidate'){
+  const sources=Object.fromEntries(await Promise.all(Object.entries(activationMutationMetadata('control').files).map(async([key,pin])=>[key,await readFile(join(base,pin.sourcePath),'utf8')])));
+  const historicalMetadata=activationMutations.map(activationMutationMetadata);
+  for(const mode of activationMutations){
+   const {sources:output,metadata}=applyActivationAuditCandidateMutation(sources,mode),rule=activationMutants[mode];
+   for(const [key,pin]of Object.entries(metadata.files)){
+    assert.equal(pin.sourceSHA256,paletteAuditCandidatePins[pin.sourcePath],'candidate policy and transform source pins agree');
+    assert.equal(output[key],rule?.source===key?sources[key].replace(rule.find,rule.replace):sources[key],'only the original causal mutation changes candidate bytes');
+    if(pin.servedPath){assert.equal(pin.servedSHA256,activationSHA256(output[key]));assert.equal(pin.servedBytes,Buffer.byteLength(output[key]));}
+    else{assert.equal(pin.servedSHA256,null);assert.equal(pin.servedBytes,null);}
+    assert.throws(()=>applyActivationAuditCandidateMutation({...sources,[key]:sources[key]+'\n'},mode),/candidate source bytes/,'source drift stays rejected');
+    assert.throws(()=>applyActivationAuditCandidateMutation({...sources,[key]:'!'+sources[key].slice(1)},mode),/candidate source SHA256/,'equal-length source drift stays rejected');
+   }
+  }
+  for(const rule of Object.values(activationMutants)){
+   assert.throws(()=>applyActivationAuditCandidateMutation({...sources,[rule.source]:sources[rule.source].replace(rule.find,'')},'control'),/exactly one original site/);
+   assert.throws(()=>applyActivationAuditCandidateMutation({...sources,[rule.source]:sources[rule.source]+rule.find},'control'),/exactly one original site/);
+  }
+  assert.deepEqual(activationMutations.map(activationMutationMetadata),historicalMetadata,'candidate metadata never mutates historical pins or causal definitions');
+ }
  const historical='ac28651be2869bab709bc617a3f7c50bf68d50f5';
  const history=loadPaletteHistory(base),historicalText=path=>history.source(historical,path).toString('utf8');
  const between=(text,start,end)=>text.slice(text.indexOf(start),text.indexOf(end));
- for(const [path,start,end]of [
-  ['ui/gohtmx/tests/browser/palette-activation-evidence.mjs','export function activationOracles','export const activationBrowserPaths'],
-  ['ui/gohtmx/tests/browser/palette-activation-browser-test.mjs',' for(const name of activationCases){'," report.status=report.checks.every"],
- ])assert.equal(between(await readFile(join(base,path),'utf8'),start,end),between(historicalText(path),start,end),'historical desired/native case bodies unchanged');
+ const oraclePath='ui/gohtmx/tests/browser/palette-activation-evidence.mjs';
+ assert.equal(between(await readFile(join(base,oraclePath),'utf8'),'export function activationOracles','export const activationBrowserPaths'),between(historicalText(oraclePath),'export function activationOracles','export const activationBrowserPaths'),'historical activation oracles unchanged');
+ const browserPath='ui/gohtmx/tests/browser/palette-activation-browser-test.mjs',browserSource=await readFile(join(base,browserPath),'utf8'),historicalBrowser=historicalText(browserPath);
+ const actionBody=text=>between(between(text,' for(const name of activationCases){'," report.status=report.checks.every"),'  try{\n   await page.goto(origin+activationPage(name));','  }catch(error){current.error={message:error.message,stack:error.stack};}');
+ assert.equal(actionBody(browserSource),actionBody(historicalBrowser),'historical navigation, interaction/action sequence and oracle evaluation unchanged');
+ const caseLifecycle=between(browserSource,' for(const name of activationCases){'," report.status=report.checks.every");
+ const boundary="try{await page.waitForLoadState('networkidle');}",unregister="page.off('response',captureResponse);",drain="try{await drainResponseCaptures(pending);}catch(error){report.transportErrors.push({check:name,message:`response capture drain:";
+ const boundaryAt=caseLifecycle.indexOf(boundary),unregisterAt=caseLifecycle.indexOf(unregister),drainAt=caseLifecycle.indexOf(drain);
+ assert.match(caseLifecycle,/page\.on\('response',captureResponse\);/,'each case installs the response listener');
+ assert(boundaryAt>=0&&unregisterAt>boundaryAt&&drainAt>unregisterAt,'network-idle boundary freezes response events before listener removal and complete drain');
+ assert.match(caseLifecycle,/catch\(error\)\{report\.transportErrors\.push\(\{check,message:String\(error\)\}\);\}/,'response-body failures remain transport errors');
+ assert.match(caseLifecycle,/catch\(error\)\{report\.transportErrors\.push\(\{check:name,message:`response capture boundary:/,'boundary failures remain transport errors');
+ assert.match(browserSource,/report\.status=report\.checks\.every\(c=>c\.status==='passed'\)&&paletteErrors\.every\(k=>!report\[k\]\.length\)\?'passed':'failed';/,'transport errors still fail the suite');
+ const responseDrainSource=await readFile(join(base,'scripts/palette-activation-evidence-test.mjs'),'utf8');
+ assert.match(responseDrainSource,/await responseCaptureDrainRegression\(\);/,'late-pending capture regression runs in the pure evidence suite');
+ assert.match(responseDrainSource,/assert\.equal\(lateCaptureSettled,true/,'late-pending capture must be awaited');
+ assert.match(responseDrainSource,/assert\.equal\(pending\.size,0/,'no capture remains pending after drain');
+ const responseDrainError=new Error('synthetic response body read failure');
+ await assert.rejects(drainResponseCaptures(new Set([Promise.reject(responseDrainError)])),error=>error===responseDrainError,'drain propagates body-read failures to transport-error reporting');
  const observer='ui/gohtmx/tests/browser/palette-activation-observer.js';assert.equal(await readFile(join(base,observer),'utf8'),historicalText(observer));
  const workflow=await readFile(join(base,'.github/workflows/palette-activation.yml'),'utf8');
  assert.match(workflow,/PALETTE_QUERY_PRODUCTION_POLICY: audit-candidate/);

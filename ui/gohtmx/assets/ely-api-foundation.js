@@ -276,13 +276,14 @@ register('foundation', root => {
     const update = () => { const demo = toggle.closest('.ely-foundation__measure-demo'); if (!demo) return; const wide = demo.dataset.foundationMeasureWide !== 'true'; demo.dataset.foundationMeasureWide = String(wide); toggle.textContent = wide ? toggle.dataset.foundationMeasureWideLabel : toggle.dataset.foundationMeasureNarrowLabel; emit(root, 'change', {measured: wide ? 'wide' : 'narrow'}); };
     toggle.addEventListener('click', update); cleanups.push(() => toggle.removeEventListener('click', update));
   });
+  const onToggle = event => {
+    const details = event.target;
+    if (!details.matches('details') || details.closest('[data-ely-family]') !== root) return;
+    const accordion = details.closest('[data-foundation-accordion]');
+    if (accordion && details.open) accordion.querySelectorAll('details').forEach(item => { if (item !== details) item.open = false; });
+    emit(root, 'change', {open: details.open});
+  };
   const onChange = event => {
-    const details = event.target.closest('details');
-    if (details) {
-      const accordion = details.closest('[data-foundation-accordion]');
-      if (accordion && details.open) accordion.querySelectorAll('details').forEach(item => { if (item !== details) item.open = false; });
-      emit(root, 'change', {open: details.open});
-    }
     const range = event.target.closest('[data-foundation-split] input[type=range]');
     if (range) setSplit(range.closest('[data-foundation-split]'), range.value);
   };
@@ -446,6 +447,8 @@ register('foundation', root => {
     if (scope?.dataset.foundationScopeReleased === 'true') delete scope.dataset.foundationScopeReleased;
   };
   root.addEventListener('change', onChange);
+  // Native details toggle does not bubble; capture it at this family root.
+  root.addEventListener('toggle', onToggle, true);
   root.addEventListener('click', onClick);
   root.addEventListener('keydown', onKeydown);
   root.addEventListener('dragenter', onDrag);
@@ -470,6 +473,7 @@ register('foundation', root => {
     cleanups.splice(0).forEach(cleanup => cleanup());
     root.removeEventListener('ely:cleanup', stop);
     root.removeEventListener('change', onChange);
+    root.removeEventListener('toggle', onToggle, true);
     root.removeEventListener('dragstart', onDragStart);
     root.removeEventListener('dragend', onDragEnd);
     root.removeEventListener('click', onClick);

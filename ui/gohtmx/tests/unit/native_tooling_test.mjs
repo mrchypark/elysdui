@@ -68,3 +68,51 @@ console.log('native tooling: contrast ordering/theme refresh and inspector hold/
  assert.match(css,/\.ely-tooling-surface\{[^}]*grid-template-columns:minmax\(0,1fr\)/);
  assert.match(css,/\.ely-tooling-surface canvas\{[^}]*min-width:0/);
 }
+
+// Source-derived defaults and real tooling resolution; CSS cascade/rendering is
+// deliberately left to the browser checks, not simulated by this DOM boundary.
+{
+ const {readFile}=await import('node:fs/promises');
+ const read=path=>readFile(new URL(path,import.meta.url),'utf8');
+ const [api,native,interaction,theme,fixture]=await Promise.all([
+  read('../../assets/ely-api.css'),read('../../assets/ely-api-native.css'),read('../../assets/ely-api-interaction.css'),read('../../assets/theme.js'),read('../../../../internal/gallery/advanced_native_tooling_fixtures.go')
+ ]);
+ assert.doesNotMatch(api,/(?:^|[;{])--info(?:-subtle)?:/,'No component or theme-boundary defaults may shadow inherited caller tokens');
+ assert.match(api,/--color-info:var\(--focus\);--color-info-subtle:color-mix\(in srgb,var\(--focus\) 10%,var\(--color-paper\)\)/);
+ assert.match(api,/--ring:var\(--focus\)/);assert.match(api,/--color-focus:var\(--focus\)/);
+ const pairs=[...native.matchAll(/background:var\(--info-subtle,light-dark\((#[\da-f]{6}),(#[\da-f]{6})\)\);color:var\(--info,light-dark\((#[\da-f]{6}),(#[\da-f]{6})\)\)/gi)];
+ assert.equal(pairs.length,2,'Both actual native badge declarations must retain mode-aware caller fallbacks');
+ const info=fixture.match(/"info":\s*\{"(#[\da-f]{6})", "(#[\da-f]{6})"\}/i).slice(1);
+ const subtle=fixture.match(/"info_subtle":\s*\{"(#[\da-f]{6})", "(#[\da-f]{6})"\}/i).slice(1);
+ const feedback=interaction.match(/--feedback-tone:var\(--info,light-dark\((#[\da-f]{6}),(#[\da-f]{6})\)\)/i);
+ assert(feedback);assert.deepEqual(feedback.slice(1),info);
+ for(const pair of pairs){assert.deepEqual(pair.slice(1,3),subtle);assert.deepEqual(pair.slice(3,5),info);}
+ const ratio=(front,back)=>{
+  const luminance=color=>{const channels=rgba(color).slice(0,3).map(v=>{v/=255;return v<=.04045?v/12.92:((v+.055)/1.055)**2.4;});return channels[0]*.2126+channels[1]*.7152+channels[2]*.0722;};
+  const a=luminance(front),b=luminance(back);return (Math.max(a,b)+.05)/(Math.min(a,b)+.05);
+ };
+ // Retained 919 historical negative: focus alias + the old native badge fill.
+ const oldFocus=theme.match(/const elyLight = .*?focus:'(#[\da-f]{6})'/i)[1];
+ assert(Math.abs(ratio(oldFocus,'#e8eef6')-4.196870539976671)<1e-10);
+ assert.equal(contrastResult(oldFocus,'#e8eef6',4.5,ratio).pass,false);
+ assert(Math.abs(ratio(oldFocus,subtle[0])-4.412634491394382)<1e-10);
+ assert.equal(contrastResult(oldFocus,subtle[0],4.5,ratio).pass,false);
+ for(const [index,mode] of ['light','dark'].entries())for(const custom of [false,true]){
+  const h=harness(),summary=h.add(h.root,'output',{'data-tool-a11y-summary':''}),list=h.add(h.root,'div',{'data-tool-a11y-rows':''});
+  const row=h.add(list,'div',{'data-tool-a11y-row':'','data-front':info[0],'data-dark-front':info[1],'data-back':subtle[0],'data-dark-back':subtle[1],'data-front-token':'--info','data-back-token':'--info-subtle','data-need':4.5});
+  for(const key of ['sample','ratio','grade'])h.add(row,'span',{['data-tool-a11y-'+key]:''});
+  const token=h.add(h.root,'div',{'data-tool-token':'','data-token':'--info','data-kind':'color','data-light':info[0],'data-dark':info[1]});h.add(token,'i');const out=h.add(token,'output');
+  const overrides=custom?{'--info':'#777777','--info-subtle':'#ffffff'}:{};
+  h.win.getComputedStyle=()=>({colorScheme:mode,getPropertyValue:key=>overrides[key]||''});
+  const cleanup=h.start({contrast:ratio});
+  const front=custom?overrides['--info']:pairs[0][index+3],back=custom?overrides['--info-subtle']:pairs[0][index+1];
+  assert.equal(row.querySelector('[data-tool-a11y-sample]').style.color,front);
+  assert.equal(row.querySelector('[data-tool-a11y-sample]').style.backgroundColor,back);
+  assert.equal(out.textContent,front);assert.equal(token.querySelector('i').style.backgroundColor,front);
+  assert.equal(row.dataset.pass,String(!custom));assert.equal(summary.textContent,custom?'1 of 1 fail':'All 1 pass');
+  assert.equal(row.querySelector('[data-tool-a11y-ratio]').textContent,ratio(front,back).toFixed(2)+':1');
+  assert.equal(contrastResult(front,back,4.5,ratio).pass,!custom);
+  cleanup();
+ }
+ console.log('native tooling: source-derived semantic info defaults, retained red contrast, color-scheme-only modes and caller-token resolution passed; CSS cascade/browser support unverified');
+}

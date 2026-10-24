@@ -47,7 +47,7 @@ dialog[data-ui-component]:not([open]) { display: none; }
 [data-ui-option][aria-selected="true"], [data-ui-multi-option]:has(input:checked), [data-ui-selectable-option][aria-selected="true"], [data-ui-tab][aria-selected="true"] { background: var(--accent-tint, #eef2ff); color: var(--color-ink); }
 [data-ui-multi-option] { display: inline-flex; gap: .5rem; align-items: center; border: 1px solid var(--border, #8c8781); border-radius: var(--ely-control-radius); min-height: var(--ely-control-height); padding: .1875rem var(--ely-control-padding); }
 [data-ui-component] [role="tabpanel"] { border: 1px solid var(--border, #8c8781); border-radius: .4rem; padding: 1rem; }
-[data-ui-component] dialog { margin: auto; }
+dialog[data-ui-component="dialog"], [data-ui-component] dialog { margin: auto; }
 
 [data-ui-component="signature-pad"]{inline-size:420px;max-inline-size:100%;display:grid;gap:8px}
 .ui-signature-surface{position:relative;line-height:0}

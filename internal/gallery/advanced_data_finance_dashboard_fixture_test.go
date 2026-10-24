@@ -1,6 +1,12 @@
 package uiexamples
 
-import "testing"
+import (
+	"bytes"
+	"strings"
+	"testing"
+
+	ui "github.com/mrchypark/elysdui/ui/gohtmx"
+)
 
 func TestFinanceAndDashboardFixturesKeepSourceSpecimens(t *testing.T) {
 	fixtures := map[string]AdvancedCase{}
@@ -54,5 +60,104 @@ func TestFinanceAndDashboardFixturesKeepSourceSpecimens(t *testing.T) {
 	dividends := fixtures["finance/DividendTable"].Component.Props
 	if len(dividends["Rows"].([]map[string]any)) != 4 || len(dividends["StatementRows"].([]map[string]any)) != 7 {
 		t.Fatal("DividendTable lost source dividends or statement lines")
+	}
+}
+
+func TestHeatmapChartAndCalendarAliasRenderVisibleCells(t *testing.T) {
+	server, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var chart *AdvancedCase
+	for _, fixture := range advancedDataCases() {
+		if fixture.Component.Chapter == "charts" && fixture.Component.Name == "HeatmapChart" {
+			copy := fixture
+			chart = &copy
+			break
+		}
+	}
+	if chart == nil {
+		t.Fatal("missing canonical HeatmapChart fixture")
+	}
+	cells, ok := chart.Component.Props["Cells"].([]map[string]any)
+	if !ok || len(cells) < 6 {
+		t.Fatalf("HeatmapChart fixture cells = %#v; want supplied calendar grid cells", chart.Component.Props["Cells"])
+	}
+	for _, name := range []string{"HeatmapChart", "CalendarHeatmap"} {
+		t.Run(name, func(t *testing.T) {
+			component := chart.Component
+			component.Name = name
+			var body bytes.Buffer
+			if err := ui.RenderComponent(server.templates, &body, component); err != nil {
+				t.Fatal(err)
+			}
+			markup := body.String()
+			if strings.Count(markup, `class="ely-data__heatmap"`) != 1 || strings.Count(markup, `data-level=`) < 6 {
+				t.Fatalf("heatmap root has no supplied cell geometry: %s", markup)
+			}
+		})
+	}
+}
+
+func TestDataChartViewBoxCallerCases(t *testing.T) {
+	server, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	affected := map[string]bool{"AreaChart": true, "PieChart": true, "ScatterChart": true, "RadarChart": true, "Treemap": true, "SankeyChart": true, "WaterfallChart": true, "Histogram": true, "NetworkGraph": true, "IndicatorOverlay": true, "PortfolioSummary": true}
+	count := 0
+	for _, fixture := range advancedDataCases() {
+		if !affected[fixture.Component.Name] {
+			continue
+		}
+		if viewBox, ok := fixture.Component.Props["ViewBox"].(string); !ok || viewBox == "" {
+			t.Errorf("%s fixture has no explicit ViewBox", fixture.Component.Name)
+		}
+		definition, err := ui.ResolveComponent(fixture.Component.Chapter, fixture.Component.Name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		seen := map[string]bool{}
+		for _, name := range append([]string{definition.Name}, definition.Aliases...) {
+			if seen[name] {
+				continue
+			}
+			seen[name] = true
+			count++
+			for _, state := range []string{"missing", "empty", "custom"} {
+				t.Run(fixture.Component.Chapter+"/"+name+"/"+state, func(t *testing.T) {
+					component := fixture.Component
+					component.Name = name
+					component.Props = make(map[string]any, len(fixture.Component.Props))
+					for key, value := range fixture.Component.Props {
+						component.Props[key] = value
+					}
+					want := "0 0 320 120"
+					switch state {
+					case "missing":
+						delete(component.Props, "ViewBox")
+					case "empty":
+						component.Props["ViewBox"] = ""
+					case "custom":
+						want = "0 0 640 240"
+						component.Props["ViewBox"] = want
+					}
+					var body bytes.Buffer
+					if err := ui.RenderComponent(server.templates, &body, component); err != nil {
+						t.Fatal(err)
+					}
+					markup := body.String()
+					if strings.Count(markup, `viewBox="`+want+`"`) != 1 || strings.Contains(markup, `viewBox=""`) {
+						t.Fatalf("missing valid SVG viewBox: %s", markup)
+					}
+					if !strings.Contains(markup, `<path `) && !strings.Contains(markup, `<polyline `) && !strings.Contains(markup, `<circle `) && !strings.Contains(markup, `<polygon `) && !strings.Contains(markup, `<rect `) {
+						t.Fatalf("missing actual chart geometry: %s", markup)
+					}
+				})
+			}
+		}
+	}
+	if count != 29 {
+		t.Fatalf("covered %d chart names, want 11 canonical plus 18 aliases", count)
 	}
 }

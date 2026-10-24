@@ -23,6 +23,8 @@ jobs:
       - run: go vet ./sdui ./examples/native-profile
       - name: Test simulator readiness gate
         run: python3 scripts/ci/native/test-ios-simulator.py
+      - name: Test owned simulator cleanup
+        run: cd scripts/ci/native/cleanup-ios-simulator-src && go test -race ./...
       - name: Verify shared fixture wire schema
         run: |
           python -m pip install jsonschema==4.25.1
@@ -77,8 +79,8 @@ jobs:
           xcodebuild -project adapters/ios/ElyProfile.xcodeproj -scheme ElyProfile -configuration Debug -destination "platform=iOS Simulator,id=$DEVICE_ID" -resultBundlePath /tmp/ElyProfile.xcresult CODE_SIGNING_ALLOWED=NO test
       - name: Clean up owned iOS simulator
         if: always()
-        timeout-minutes: 2
-        run: python3 scripts/ci/native/ios-simulator.py cleanup
+        timeout-minutes: 3
+        run: scripts/ci/native/cleanup-ios-simulator
       - name: Export iOS launch diagnostics
         if: always()
         timeout-minutes: 3
@@ -117,9 +119,11 @@ jobs:
           path: /tmp/ElyProfile-attachments
           if-no-files-found: ignore
   android:
-    # Intel macOS has native Hypervisor support without changing Linux KVM
-    # permissions. The installed SDK already carries the runner's licenses.
-    runs-on: macos-15-intel
+    # Pilot the same API 29 x86_64 guest on the standard public Linux runner.
+    # The script requires pre-existing accessible KVM and two actual guest
+    # vCPUs; it never mutates Linux device permissions and fails closed otherwise.
+    # Intel macOS avoided KVM setup but its <6-core fallback forced one guest vCPU.
+    runs-on: ubuntu-24.04
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
@@ -135,6 +139,13 @@ jobs:
           gradle-version: '8.11.1'
       # GitHub's hosted image supplies an installed/licensed Android SDK. No
       # user SDK license acceptance or private computer access is performed here.
+      - name: Resolve Android SDK root for Gradle and emulator
+        run: |
+          set -euo pipefail
+          source scripts/ci/native/android-readiness.sh
+          sdk_root=$(android_resolve_sdk_root)
+          echo "Resolved Android SDK root: $sdk_root"
+          printf 'ANDROID_HOME=%s\nANDROID_SDK_ROOT=%s\n' "$sdk_root" "$sdk_root" >> "$GITHUB_ENV"
       - name: Compile Compose app and test real Go transport
         run: |
           go build -o /tmp/ely-native-profile ./examples/native-profile
@@ -149,7 +160,72 @@ jobs:
           cd adapters/android
           ELY_NATIVE_CONTROLS_BASE_URL=http://127.0.0.1:8095 ELY_NATIVE_TEST_BASE_URL=http://127.0.0.1:8094 ./gradlew --no-daemon :protocol:test :app:assembleDebug :app:testDebugUnitTest :app:assembleDebugAndroidTest
       - name: Verify focus observation budget causal control
-        run: python3 scripts/ci/native/focus-budget-controls.py
+        run: |
+          python3 scripts/ci/native/test-focus-diagnostics.py
+          (cd scripts/ci/native/focus-budget-controls-src && go test ./...)
+          scripts/ci/native/focus-budget-controls
+      - name: Install Android emulator host dependency
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends --yes libpulse0
+      - name: Provision Android emulator SDK package
+        run: |
+          set -euo pipefail
+          source scripts/ci/native/android-readiness.sh
+          sdk_root=$(android_resolve_sdk_root)
+          export PATH="$sdk_root/emulator:$PATH"
+          hash -r
+          emulator_binary=$(android_ensure_emulator "$sdk_root")
+          android_verify_emulator_path "$sdk_root"
+          echo "Resolved Android SDK root: $sdk_root"
+          echo "Android emulator binary: $emulator_binary"
+          emulator_lib64="$sdk_root/emulator/lib64"
+          emulator_qt_lib="$emulator_lib64/qt/lib"
+          for bundled_lib_dir in "$emulator_lib64" "$emulator_qt_lib"; do
+            if [ ! -d "$bundled_lib_dir" ]; then
+              echo "Expected Android emulator bundled library directory is missing: $bundled_lib_dir" >&2
+              exit 1
+            fi
+            echo "Android emulator bundled libraries in $bundled_lib_dir (first 24 names):"
+            find "$bundled_lib_dir" -maxdepth 1 -type f -name '*.so*' -printf '%f\n' | sort | awk 'NR <= 24 { print "  " $0 } END { if (NR > 24) print "  ... (truncated)" }'
+          done
+          qemu_binary="$sdk_root/emulator/qemu/linux-x86_64/qemu-system-x86_64"
+          for host_binary in "$emulator_binary" "$qemu_binary"; do
+            if [ ! -x "$host_binary" ]; then
+              echo "Android emulator host binary is missing or not executable: $host_binary" >&2
+              exit 1
+            fi
+            echo "Checking shared-library dependencies: $host_binary"
+            ldd_status=0
+            if [ "$host_binary" = "$qemu_binary" ]; then
+              ldd_search_path="$emulator_lib64:$emulator_qt_lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+              echo 'Using SDK-bundled library paths only for this nested QEMU dependency check.'
+              ldd_output=$(LD_LIBRARY_PATH="$ldd_search_path" ldd "$host_binary" 2>&1) || ldd_status=$?
+            else
+              ldd_output=$(ldd "$host_binary" 2>&1) || ldd_status=$?
+            fi
+            if [ "$ldd_status" -ne 0 ]; then
+              printf '%s\n' "$ldd_output" >&2
+              echo "ldd failed for Android emulator host binary: $host_binary" >&2
+              exit 1
+            fi
+            printf '%s\n' "$ldd_output"
+            if grep -Fq 'not found' <<< "$ldd_output"; then
+              echo "Unresolved shared-library dependencies for Android emulator host binary: $host_binary" >&2
+              exit 1
+            fi
+          done
+          "$emulator_binary" -version
+      - name: Grant this job user access to KVM
+        run: |
+          set -euo pipefail
+          test -c /dev/kvm || { echo '/dev/kvm is not a character device.' >&2; exit 1; }
+          command -v setfacl >/dev/null || { echo 'setfacl is required; refusing permission fallback.' >&2; exit 1; }
+          command -v getfacl >/dev/null || { echo 'getfacl is required; refusing unverified permission changes.' >&2; exit 1; }
+          runner_uid=$(id -u)
+          sudo setfacl -m "u:${runner_uid}:rw" /dev/kvm
+          getfacl -cn /dev/kvm | grep -Fxq "user:${runner_uid}:rw-"
+          test -r /dev/kvm && test -w /dev/kvm
       - name: Native Android emulator lifecycle against Go
         run: bash scripts/ci/native/android-emulator.sh
       - uses: actions/upload-artifact@v4

@@ -3,6 +3,7 @@ package uiexamples
 import (
 	"bytes"
 	ui "github.com/mrchypark/elysdui/ui/gohtmx"
+	"html"
 	"html/template"
 	"maps"
 	"strings"
@@ -33,6 +34,7 @@ func TestNativeMiscSourceFixtures598To613(t *testing.T) {
 				if alternate, ok := example["PreviewName"].(string); ok {
 					name = alternate
 				}
+				props = aliasFixtureProps(props, "misc/"+name)
 				var out bytes.Buffer
 				if err := ui.RenderComponent(tpl, &out, ui.Component{Chapter: "misc", Name: name, ID: "source-misc", Props: props}); err != nil {
 					t.Fatal(err)
@@ -87,9 +89,20 @@ func TestNativeMiscSourceVisualCorrections(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"BarcodeDisplay", "PrintButton", "Clock", "ExportDialog"} {
+	for _, name := range []string{"BarcodeDisplay", "Signature", "Rating Widget", "ShareSheet", "PrintButton", "Clock", "ExportDialog"} {
 		p := map[string]any{}
-		nativeMiscFixtures(name, p)
+		fixtureName := name
+		if name == "Signature" || name == "Rating Widget" {
+			fixtureName = "BarcodeDisplay"
+		}
+		if name == "ShareSheet" {
+			fixtureName = "PrintButton"
+		}
+		nativeMiscFixtures(fixtureName, p)
+		if _, exists := p["GallerySourceOnlyNotice"]; exists {
+			t.Fatal("gallery-only flag must not enter fixture/schema caller data")
+		}
+		p = aliasFixtureProps(p, "misc/"+name)
 		examples := p["PreviewExamples"].([]map[string]any)
 		if name == "Clock" && (examples[0]["Caption"] != "clock" || examples[1]["Caption"] != "world clock") {
 			t.Fatal("clock specimen captions lost")
@@ -103,13 +116,49 @@ func TestNativeMiscSourceVisualCorrections(t *testing.T) {
 		}
 		switch name {
 		case "BarcodeDisplay":
-			if !strings.Contains(out.String(), `data-misc-source-note hidden`) {
-				t.Fatal("description-only specimen duplicates the gallery description")
+			if !strings.Contains(out.String(), `data-misc-source-note>BarcodeDisplay, Signature, and Rating Widget are source-only`) || strings.Contains(out.String(), `data-misc-source-note hidden`) {
+				t.Fatal("barcode family must show its accurate source-only notice")
+			}
+		case "Rating Widget":
+			if !strings.Contains(out.String(), `data-misc-source-note>Rating Widget is source-only`) || strings.Contains(out.String(), `data-native-rating`) {
+				t.Fatal("rating alias must show a source-only notice, not imply a working control")
+			}
+		case "Signature":
+			if !strings.Contains(out.String(), `data-misc-source-note>Signature is source-only`) || strings.Contains(out.String(), `data-native-rating`) {
+				t.Fatal("signature alias must show its gallery source-only notice")
+			}
+		case "ShareSheet":
+			if !strings.Contains(out.String(), `data-misc-source-note>ShareSheet is source-only`) || !strings.Contains(out.String(), `does not invoke platform share UI`) || strings.Contains(out.String(), `data-ely-action=`) || strings.Contains(out.String(), `ely-misc-warning`) {
+				t.Fatal("share alias must accurately describe the demo without presenting an action")
 			}
 		case "PrintButton":
 			if !strings.Contains(out.String(), `class="ely-misc-warning">PrintButton: gpui has no print API.`) || strings.Contains(out.String(), "ShareSheet is") {
 				t.Fatal("print specimen must contain only the short source warning")
 			}
+		}
+	}
+	for _, action := range []string{"", "caller-share"} {
+		props := aliasFixtureProps(map[string]any{"Action": action, "ActionLabel": "Share"}, "misc/ShareSheet")
+		var share bytes.Buffer
+		if err := ui.RenderComponent(tpl, &share, ui.Component{Chapter: "misc", Name: "ShareSheet", ID: "public-share", Props: props}); err != nil {
+			t.Fatal(err)
+		}
+		if action == "" {
+			action = "share"
+		}
+		if !strings.Contains(share.String(), `data-ely-action="`+action+`"`) || strings.Contains(share.String(), `data-misc-source-note`) {
+			t.Fatal("source-only gallery fixture must not alter default or caller ShareSheet actions")
+		}
+	}
+	for _, name := range []string{"BarcodeDisplay", "Rating Widget", "Signature", "PrintButton", "ShareSheet"} {
+		note := "Caller-owned <custom> & source note."
+		props := aliasFixtureProps(map[string]any{"SourceNote": note}, "misc/"+name)
+		var caller bytes.Buffer
+		if err := ui.RenderComponent(tpl, &caller, ui.Component{Chapter: "misc", Name: name, ID: "caller-note", Props: props}); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(caller.String(), `data-misc-source-note>`+html.EscapeString(note)) || strings.Contains(caller.String(), "is source-only in this native demo") {
+			t.Fatalf("%s overwrote a caller-owned SourceNote: %s", name, caller.String())
 		}
 	}
 }

@@ -5,3 +5,4 @@
 .ui-grid>*{min-inline-size:0;max-inline-size:100%}
 
 .ui-calendar-header{display:grid;grid-template-columns:1.75rem minmax(0,1fr) 1.75rem;align-items:center;gap:.5rem;text-align:center}
+[data-ui-component="menu"]>.ui-menu-panel{position:fixed;inset:auto;margin:0;flex-direction:column;min-width:min(12rem,calc(100vw - 16px));overflow:auto}

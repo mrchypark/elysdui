@@ -47,3 +47,51 @@ radio.closest=()=>({getBoundingClientRect:()=>rect(180,42),closest:()=>null});me
 radio.closest=()=>({getBoundingClientRect:()=>rect(180,42),closest:()=>({})});
 assert.throws(()=>measure(scope),/Source radio label/);
 console.log('Caller multiline labels accepted; wrapped source specimen labels still rejected');
+
+// Execute the shared check against each exact caller fixture, not inferred options.
+const pickerCode=checks.slice(checks.indexOf("checks['forms/IconPicker']="),checks.indexOf("checks['forms/GradientEditor']="));
+const pickerDocument={activeElement:null};
+const pickerCheck=runInNewContext('const checks={};'+pickerCode+";checks['forms/IconPicker']",{
+ assert:(ok,message)=>assert.ok(ok,message),document:pickerDocument,
+ KeyboardEvent:class {constructor(type,options){this.type=type;Object.assign(this,options);}},
+ need:(root,selector)=>{const node=root.querySelector(selector);assert.ok(node,`Missing ${selector}`);return node;},
+ input:(node,value)=>node.input(value)
+});
+function pickerFixture(component,values,broken){
+ const selected={value:''},empty={hidden:true},queries=[];
+ const labels=values[0]==='✨'?['Sparkles','Woman technologist']:['alpha','beta'];
+ const options=values.map((value,index)=>({
+  value,hidden:false,querySelector:()=>null,
+  focus(){pickerDocument.activeElement=this;},
+  click(){selected.value=broken==='value'?'wrong':value;},
+  dispatchEvent(event){if(event.key==='ArrowRight'&&broken!=='navigation')options[index+1]?.focus();}
+ }));
+ const search={
+  input(query){queries.push(query);options.forEach((option,index)=>{option.hidden=broken==='search'||!labels[index].toLowerCase().includes(query.toLowerCase());});empty.hidden=options.some(option=>!option.hidden);},
+  dispatchEvent(event){if(event.key==='ArrowDown'&&broken!=='navigation')options.find(option=>!option.hidden)?.focus();}
+ };
+ return {dataset:{elyComponent:component},queries,selected,
+  querySelector(selector){
+   if(selector==='[data-ely-icon-search]')return search;
+   if(selector==='[data-ely-icon-value]')return selected;
+   if(selector==='[data-ely-icon-empty]')return empty;
+   return options.find(option=>selector===`[data-ely-icon-option][value="${option.value}"]`);
+  }
+ };
+}
+for(const [component,values,query] of [
+ ['forms/IconPicker',['alpha','beta'],'alpha'],
+ ['forms/EmojiPicker',['✨','👩‍💻'],'Sparkles']
+]){
+ const fixture=pickerFixture(component,values);
+ await pickerCheck({root:fixture});
+ assert.deepEqual(fixture.queries,[query,'no-matching-icon','']);
+ assert.equal(fixture.selected.value,values[0]);
+ assert.equal(pickerDocument.activeElement.value,values[1]);
+ const wrongValues=component==='forms/EmojiPicker'?['alpha','beta']:['✨','👩‍💻'];
+ await assert.rejects(pickerCheck({root:pickerFixture(component,wrongValues)}),/Missing .*data-ely-icon-option/);
+ for(const broken of ['search','navigation','value']){
+  await assert.rejects(pickerCheck({root:pickerFixture(component,values,broken)}),/Icon search hid|ArrowDown did not|Icon value did not/);
+ }
+}
+console.log('Exact IconPicker/EmojiPicker checks pass search, navigation and values; wrong fixtures and broken behavior rejected');

@@ -1,5 +1,16 @@
 import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
 import {promptVariables,fillPrompt,diffRuns,embeddingProjection,embeddingTurn,parseEmbedding,tuneProgress,nextSort,datasetPage,initNativeGenerativeTools} from '../../assets/ely-api-native-generative-tools.js';
+// Unresolved variables need paired theme roles, not pale fill with inherited dark-theme ink.
+const nativeCSS=readFileSync('ui/gohtmx/assets/ely-api-native.css','utf8');
+assert.match(nativeCSS,/\[data-ely-family='native'\] \[data-native-filled-prompt\] mark\{background:var\(--warning-tint,#FEF2DD\);color:var\(--foreground,#181613\)\}/);
+const inputCSS=readFileSync('ui/gohtmx/assets/input.css','utf8');
+assert.match(readFileSync('ui/gohtmx/assets/ely-api.css','utf8'),/--foreground:var\(--color-ink\);/);
+const declarations=css=>Object.fromEntries([...css.matchAll(/(--[\w-]+)\s*:\s*([^;{}]+);/g)].map(m=>[m[1],m[2].trim()]));
+const lightTokens={...declarations(inputCSS.match(/@theme\s*\{([^}]+)\}/)[1]),...declarations(inputCSS.match(/:root\s*\{([^}]+)\}/)[1])};
+const darkTokens={...lightTokens,...declarations(inputCSS.match(/:root\[data-theme='dark'\]\s*\{([^}]+)\}/)[1])};
+const luminance=hex=>{assert.match(hex,/^#[\da-f]{6}$/i);return [1,3,5].map(i=>parseInt(hex.slice(i,i+2),16)/255).map(c=>c<=.04045?c/12.92:((c+.055)/1.055)**2.4).reduce((sum,c,i)=>sum+c*[.2126,.7152,.0722][i],0)};
+for(const [name,tokens] of [['light',lightTokens],['dark',darkTokens]]){const bg=luminance(tokens['--warning-tint']),fg=luminance(tokens['--color-ink']);assert.ok((Math.max(bg,fg)+.05)/(Math.min(bg,fg)+.05)>=7,`${name} unresolved prompt mark contrast must be at least 7:1`)}
 assert.deepEqual(promptVariables('{topic} {tone} {topic} {bad-name} {{nested}} {이름}'),['topic','tone','nested','이름']);
 assert.deepEqual(fillPrompt('Write {topic} in {tone}.',{topic:'gardens',tone:''}),{text:'Write gardens in {tone}.',blanks:[[17,23]]});
 assert.equal(fillPrompt('{constructor} {__proto__}',{}).blanks.length,2);

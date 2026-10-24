@@ -7,6 +7,27 @@ export const paletteBaseline = '0a972e071452f7bdb9bc64f6d27d50c042108885';
 export const paletteBaselineTree = 'c400233c889a6701682ded31429a3ce0127bacf0';
 export const paletteSourcePins = {palette: '49ed1f84056fa13347d68801b479a4a5a8e03b53', compatibilityAudit: 'da3fdcaf39f2fa85ce1dd9cad07c3c81cf1dd721'};
 export const paletteSurfaces = ['go-qualified', 'go-chapter', 'sdui'];
+export async function recordPaletteBrowserOutcome(request, check, origin, report) {
+  const responseURL = request.url(), method = request.method(); let path, status = null;
+  try {
+    const url = new URL(responseURL); path = url.pathname;
+    assert.equal(url.origin, origin, 'no remote browser assets');
+    const response = await request.response();
+    if (!response) {
+      report.transportErrors.push({check, responseURL, path, method, status, message: request.failure()?.errorText || 'browser request ended without a response'});
+      return;
+    }
+    status = response.status();
+    const responseFixture = path === '/sdui-action' ? '/sdui-response-primary' : path;
+    const wanted = report.assets[path] || report.fixtures[responseFixture]; assert(wanted, 'unexpected browser response');
+    const bytes = await response.body(), receivedSHA256 = createHash('sha256').update(bytes).digest('hex');
+    const proof = {check, path, ...(path === '/sdui-action' ? {responseFixture} : {}), status, expectedSHA256: wanted.servedSHA256, receivedSHA256, bytes: bytes.length};
+    report.browserResponses.push(proof);
+    if (status !== 200 || receivedSHA256 !== wanted.servedSHA256 || bytes.length !== wanted.bytes) report.transportErrors.push(proof);
+  } catch (error) {
+    report.transportErrors.push({check, responseURL, path: path ?? null, method, status, message: String(error)});
+  }
+}
 const groups = {focus: ['query.continue', 'cursor.coherence'], preserve: ['enter.preserve', 'escape.preserve', 'text.space', 'owner.replacement'], adjacent: ['active.relationship', 'action.close-order', 'empty.submit']};
 export function paletteCases(group = 'all') { assert(group === 'all' || Object.hasOwn(groups, group), 'known palette case group'); return group === 'all' ? Object.values(groups).flat() : [...groups[group]]; }
 export const paletteErrors = ['pageErrors', 'consoleErrors', 'requestFailures', 'serverErrors', 'transportErrors', 'runtimeErrors'];

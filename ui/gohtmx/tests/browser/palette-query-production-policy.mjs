@@ -33,14 +33,19 @@ export const paletteAuditCandidateProduction = [
 // keeps the same source-owned boundary as the source loop.
 export const paletteAuditCandidateAssets = [
   'ui/gohtmx/assets/ely-api-interaction.css',
+  'ui/gohtmx/assets/ely-api.css',
+  'ui/gohtmx/assets/ely-api-native.css',
+  'ui/gohtmx/assets/ely-controls.css',
+  'ui/gohtmx/assets/ely-patterns.css',
+  'ui/gohtmx/assets/ely-patterns.js',
 ];
 // The runtime and core digests the audited candidate carries. They are the
 // clean HEAD bytes of the reviewed revision, so they describe the committed
 // candidate rather than the historical strict baseline.
 export const paletteAuditCandidatePins = {
-  'ui/gohtmx/assets/ely-api.js': '6039000e8e983d7ebe55cd733cb4012810d2f15f949a2e1286f605966ad12116',
+  'ui/gohtmx/assets/ely-api.js': 'e13109c6c2555311328544600508c1dc2ac68a7dc3b6324abb83c39062907af3',
   'ui/gohtmx/assets/ely-api-interaction.js': '53f29f4c6232ee96c7e8fa45a61dba5a900a6bb7544f56c163c72052b2f3f5f6',
-  'ui/gohtmx/templates/ely-api-interaction.html': '373d8126b8a07864eb8e5a805f6999e4d853e1f7259b54172c663b5deba41c7d',
+  'ui/gohtmx/templates/ely-api-interaction.html': '454e758440f84e866aa70acad4b07a97a98526598f5db79ff6bc0022792a3a4f',
 };
 // The historical strict digests of the same runtime and core. The core is the
 // immutable actual-main baseline byte set; the runtime is the historical

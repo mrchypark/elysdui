@@ -1,0 +1,475 @@
+import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
+import test from 'node:test';
+import {assertActivityLogScopedAuditPage,assertCommunicationCallerRequest,assertDockCallerAction,assertDockNativeEvents,assertEvalLastColumnGeometry,assertNativeEmbedOpen,activatePresenceStep,assertPresenceNativeRequest,assertFoundationPublicEvents,assertPlainInputNativeEvents,assertFormattedInputState,calendarDraftWheelDecision,requestedStateContract,runRequestedStateActions} from './visual-state-audit-drivers.mjs';
+
+const read=path=>readFile(new URL(`../../../../${path}`,import.meta.url),'utf8');
+
+test('Input TextField ClearableInput finite native contracts preserve aliases and distinguish production clear events',async()=>{
+  const identities=['forms/Input','forms/TextField','forms/ClearableInput'];
+  for(const identity of identities){
+    const contract=requestedStateContract(identity);
+    assert.equal(contract.identity,identity);assert.equal(contract.kind,'Input');assert.equal(contract.requestedStateOnly,true);assert.equal(contract.focusedSequence,'input-public-edit-clear');assert.deepEqual(contract.mappingGaps,[]);
+    assert.deepEqual(contract.steps.map(step=>step.id),['fill-text','commit-text','clear-text','commit-empty']);
+    assert(contract.steps.every(step=>step.source.provenance.includes(identity)&&step.source.provenance.includes('no host fulfillment')));
+    assert.equal(contract.steps[2].control,identity==='forms/ClearableInput'?'button[data-ui-action="clear"]':'input[name="caller_value"]');
+    const id='audit-exact',value='Changed caller value',detail={id,component:identity,name:'caller_value',value,checked:false,type:'text'},events=[{type:'ely:change',detail}];
+    assertFoundationPublicEvents(identity,id,events,{value});
+    for(const bad of [{...detail,component:'forms/Other'},{...detail,id:'twin'},{...detail,name:'other'},{...detail,value:'wrong'}])assert.throws(()=>assertFoundationPublicEvents(identity,id,[{type:'ely:change',detail:bad}],{value}));
+    assert.throws(()=>assertFoundationPublicEvents(identity,id,[...events,...events],{value}));
+    assert.throws(()=>assertFoundationPublicEvents(identity,id,[{type:'ely:action',detail}],{value}));
+  }
+  assert.equal(identities.length*4*4,48,'Three identities, four live profiles, four checkpoints; no alias receipt promotion');
+  assert.equal(requestedStateContract('forms/NumberInput'),null,'No generic input-family expansion');
+  const event=(type,value,isTrusted)=>({type,value,isTrusted,defaultPrevented:false});
+  for(const stage of ['fill-text','commit-text','clear-text','commit-empty']){
+    const value=stage==='fill-text'||stage==='commit-text'?'Changed caller value':'',type=stage.startsWith('commit')?'change':'input',events=[event(type,value,true)];
+    assertPlainInputNativeEvents(stage,events,{value});
+    assert.throws(()=>assertPlainInputNativeEvents(stage,[event(type,value,false)],{value}),/Exact native/);
+    assert.throws(()=>assertPlainInputNativeEvents(stage,[...events,...events],{value}),/Exact native/);
+  }
+  const clearEvents=[event('click','',true),event('input','',false),event('change','',false)];
+  assertPlainInputNativeEvents('clear-text',clearEvents,{clearButton:true,value:''});
+  assertPlainInputNativeEvents('commit-empty',[],{clearButton:true,value:''});
+  assert.throws(()=>assertPlainInputNativeEvents('clear-text',clearEvents.map(e=>({...e,isTrusted:true})),{clearButton:true,value:''}),/Exact native/,'Generated clear events must not be mislabeled trusted');
+  assert.throws(()=>assertPlainInputNativeEvents('clear-text',clearEvents.map(e=>({...e,isTrusted:false})),{clearButton:true,value:''}),/Exact native/,'A synthetic initiating click cannot pass');
+  assert.throws(()=>assertPlainInputNativeEvents('commit-empty',[event('change','',false)],{clearButton:true,value:''}),/Exact native/,'Duplicate clear commit cannot pass');
+  const [fixtures,template,controls,api,actions]=await Promise.all([read('internal/gallery/advanced_forms_fixtures.go'),read('ui/gohtmx/templates/ely-api-forms.html'),read('ui/gohtmx/assets/ely-controls.js'),read('ui/gohtmx/assets/ely-api.js'),read('ui/gohtmx/tests/browser/visual-state-audit-actions.mjs')]);
+  assert.match(fixtures,/"Name": "caller_value", "Value": "alpha"/);
+  assert.match(template,/eq \.Variant "ClearableInput"[\s\S]*?template "clearable-input"/);
+  assert.match(controls,/action === 'clear'[\s\S]*?input\.value = ''[\s\S]*?new Event\('input'[\s\S]*?new Event\('change'[\s\S]*?input\.focus\(\)/);
+  assert.match(api,/component: root\.dataset\.elyComponent, name: event\.target\.name/);
+  assert.match(actions,/if\(contract\.requestedStateOnly\)\{\s*await runRequestedStateActions\(contract,root,step,failureDiagnostics\);/);
+  const driver=runRequestedStateActions.toString(),branch=driver.slice(driver.indexOf("if(contract.focusedSequence==='input-public-edit-clear'"),driver.indexOf("if(['button-public-boundary','textarea-public-multiline']"));
+  assert.match(branch,/Exact primary caller input must be unique/);assert.doesNotMatch(branch,/\.first\(|\.nth\(/);
+  assert.match(branch,/initialPeers/);assert.match(branch,/await fresh\(\)/);assert.match(branch,/field\.fill\(value\)/);assert.match(branch,/clear\.click\(\)/);assert.match(branch,/field\.press\('Backspace'\)/);assert.match(branch,/field\.press\('Tab'\)/);
+  assert.doesNotMatch(branch,/dispatchEvent|requestSubmit|new Event|\.value\s*=/,'Driver must not synthesize input, mutate fixture values, or submit host work');
+  assert.match(branch,/finally\{await root\.evaluate/);
+});
+
+test('five formatted input contracts retain exact fixture types bounds native validity and alias events',async()=>{
+  const expected=[
+    ['forms/EmailInput','EmailInput','email','caller@example.test','changed@example.test','not-an-email','typeMismatch'],
+    ['forms/UrlInput','EmailInput','url','https://example.test/source','https://example.test/changed','not-a-url','typeMismatch'],
+    ...['CurrencyInput','PercentInput','UnitInput'].map(name=>['forms/'+name,'CurrencyInput','number','3','4','11','rangeOverflow']),
+  ];
+  for(const [identity,kind,type,initial,valid,invalid,invalidFlag]of expected){
+    const contract=requestedStateContract(identity),fixture=contract.inputFixture;
+    assert.equal(contract.identity,identity);assert.equal(contract.kind,kind);assert.equal(contract.focusedSequence,'input-public-validity');assert.equal(contract.requestedStateOnly,true);assert.deepEqual(contract.mappingGaps,[]);
+    assert.deepEqual(fixture,{kind,type,initial,...(type==='number'?{min:'0',max:'10',step:'1'}:{}),valid,invalid,invalidFlag});
+    assert.deepEqual(contract.steps.map(step=>step.id),['fill-valid','commit-valid','fill-invalid','commit-invalid']);
+    assert.equal(contract.steps[0].control,`:scope > .ely-api-format-field input[name="caller_value"][type="${type}"]`);
+    assert(contract.steps.every(step=>step.source.provenance.includes(identity)&&step.source.provenance.includes('no unit switching')));
+    for(const bad of [false,true]){
+      const value=bad?invalid:valid,state={name:'caller_value',type,value,...(type==='number'?{min:'0',max:'10',step:'1'}:{}),validity:Object.fromEntries(['badInput','customError','patternMismatch','rangeOverflow','rangeUnderflow','stepMismatch','tooLong','tooShort','typeMismatch','valueMissing','valid'].map(key=>[key,key==='valid'?!bad:bad&&key===invalidFlag]))};
+      assert.deepEqual(assertFormattedInputState(identity,state,{invalid:bad}),state);
+      for(const key of Object.keys(state.validity)){const changed=structuredClone(state);changed.validity[key]=!changed.validity[key];assert.throws(()=>assertFormattedInputState(identity,changed,{invalid:bad}),/Exact native validity/,'Every extra or missing validity reason fails closed: '+key);}
+      for(const key of ['name','type','value',...(type==='number'?['min','max','step']:[])])assert.throws(()=>assertFormattedInputState(identity,{...state,[key]:'wrong'},{invalid:bad}));
+      const id='exact-main',events=[{type:'ely:change',detail:{id,component:identity,name:'caller_value',value,checked:false,type}}];
+      assertFoundationPublicEvents(identity,id,events,{value});
+      for(const change of [{id:'twin'},{component:'forms/Other'},{name:'preview_field'},{type:'text'},{value:'stale'}])assert.throws(()=>assertFoundationPublicEvents(identity,id,[{type:'ely:change',detail:{...events[0].detail,...change}}],{value}));
+      assert.throws(()=>assertFoundationPublicEvents(identity,id,[...events,...events],{value}));assert.throws(()=>assertFoundationPublicEvents(identity,id,[{type:'ely:action',detail:events[0].detail}],{value}));
+      for(const [stage,eventType]of [['fill-text','input'],['commit-text','change']]){const native={type:eventType,value,isTrusted:true,defaultPrevented:false};assertPlainInputNativeEvents(stage,[native],{value});assert.throws(()=>assertPlainInputNativeEvents(stage,[{...native,isTrusted:false}],{value}));}
+    }
+  }
+  assert.equal(expected.length*4*4,80,'Five exact IDs by four checkpoints by four live profiles; no shared alias receipts');
+  for(const identity of ['forms/NumberInput','forms/ScrubInput','forms/DurationPicker'])assert.equal(requestedStateContract(identity),null);
+  assert.throws(()=>assertFormattedInputState('forms/Other',{},{}),/No generic/);
+  const [fixtures,aliases,template]=await Promise.all([read('internal/gallery/advanced_forms_fixtures.go'),read('internal/gallery/advanced.go'),read('ui/gohtmx/templates/ely-api-forms.html')]);
+  assert.match(fixtures,/case "NumberInput", "ScrubInput", "CurrencyInput":\s*props\["Value"\], props\["Min"\], props\["Max"\], props\["Step"\] = "3", "0", 10, "1"/);
+  assert.match(fixtures,/case "EmailInput":\s*props\["Value"\] = "caller@example.test"/);
+  assert.match(aliases,/case "UrlInput":\s*props\["Value"\], props\["Type"\] = "https:\/\/example.test\/source", "url"/);
+  assert.match(template,/eq \.Kind "CurrencyInput"[\s\S]*?"Type" "number"/);
+  assert.match(template,/eq \.Variant "UrlInput"[\s\S]*?\$type = "url"/);
+  const driver=runRequestedStateActions.toString(),branch=driver.slice(driver.indexOf("if(contract.focusedSequence==='input-public-edit-clear'"),driver.indexOf("if(['button-public-boundary','textarea-public-multiline']"));
+  assert.match(branch,/assertFormattedInputState/);assert.match(branch,/node\.validity\[key\]/);assert.match(branch,/formatted\?\.initial/);assert.match(branch,/getAttribute\(key\),formatted\[key\]/);assert.match(branch,/initialPeers/);assert.match(branch,/await fresh\(\)/);
+  assert.doesNotMatch(branch,/\.first\(|\.nth\(|reportValidity|requestSubmit|dispatchEvent|new Event|\.value\s*=/);
+});
+
+test('ActivityLog contract traverses all four native target links by trusted keyboard focus',async()=>{
+  const identity='collab/ActivityLog',hrefs=['#gamma-space','#lift','#on-lift','#lift'],contract=requestedStateContract(identity);
+  assert.equal(contract.identity,identity);assert.equal(contract.kind,'ActivityLog');assert.equal(contract.family,'workspace');assert.equal(contract.requestedStateOnly,true);assert.equal(contract.focusedSequence,'workspace-activity-native-link-focus');assert.deepEqual(contract.mappingGaps,[]);
+  assert.deepEqual(contract.fixtureGuards,{component:identity,entryHrefs:hrefs});
+  assert.deepEqual(contract.steps.map(step=>step.id),hrefs.map((_,index)=>`activity-focus-entry-${index+1}`));
+  assert.deepEqual(contract.steps.map(step=>step.control),hrefs.map((href,index)=>`li[data-ws-activity-entry]:nth-child(${index+1}) a[href="${href}"]`));
+  assert(contract.steps.every(step=>step.event.includes('trusted native Tab')&&step.expectedState.includes('without activating it')&&step.source.siteId.endsWith(`:${step.id}`)&&step.source.sourceAnchor&&step.source.provenance.includes(identity)));
+  assert.match(contract.scope,/single-case audit page with its independent twin/);assert.match(contract.scope,/all four primary target links in DOM order/);assert.match(contract.scope,/No link activation, navigation, host request/);
+  assert.equal(requestedStateContract('collab/CommentThread'),null,'The exact ActivityLog contract does not promote its family peers');
+
+  const [driver,actions,fixture,template]=await Promise.all([read('ui/gohtmx/tests/browser/visual-state-audit-drivers.mjs'),read('ui/gohtmx/tests/browser/visual-state-audit-actions.mjs'),read('internal/gallery/advanced_workspace_fixtures.go'),read('ui/gohtmx/templates/ely-api-workspace.html')]);
+  const start=driver.indexOf("if(contract.focusedSequence==='workspace-activity-native-link-focus')"),end=driver.indexOf("if(contract.focusedSequence==='workspace-native-presence-follow')",start),branch=driver.slice(start,end);
+  assert(start>=0&&end>start);assert.match(branch,/const identity='collab\/ActivityLog'/);assert.match(branch,/links\.count\(\),4/);assert.match(branch,/ownerDocument\.activeElement===node\.ownerDocument\.body/);
+  assert.match(branch,/await assertActivityLogScopedAuditPage\(root\)/,'The scoped audit guard must run through the supplied root');
+  assert.match(branch,/for\(let count=0;count<32;count\+\+\)[\s\S]*?keyboard\.press\('Tab'\)/,'The first link must be reached through a short bounded native Tab traversal on the exact-case page');
+  assert.match(branch,/else await root\.page\(\)\.keyboard\.press\('Tab'\)/,'The remaining three links advance one native Tab at a time');
+  assert.match(branch,/tabs\.every\(event=>event\.trusted&&event\.key==='Tab'\)/);assert.match(branch,/focusin/);assert.match(branch,/state\.actions\.slice\(before\.actions\.length\),\[\]/);
+  assert.doesNotMatch(branch,/\.focus\(|\.click\(|dispatchEvent\(/,'No programmatic focus, activation, or synthetic DOM event may stand in for keyboard traversal');
+  assert.match(actions,/contract\.focusedSequence==='workspace-activity-native-link-focus'[\s\S]*?scopedURL\.searchParams\.set\('case',contract\.identity\)/,'Only the exact native-focus contract opts into the scoped audit route');
+  const activity=fixture.slice(fixture.indexOf('case "collab/ActivityLog":'),fixture.indexOf('case "devtools/QueryEditor"'));
+  for(const href of hrefs)assert(activity.includes(`"URL": "${href}"`),`Default ActivityLog fixture link ${href}`);
+  assert.match(template,/define "ws-activity"[\s\S]*?<a href="\{\{\.URL\}\}">\{\{\.Target\}\}<\/a>[\s\S]*?<time datetime=/);
+});
+
+test('ActivityLog scoped-page guard executes against the supplied runner page',async()=>{
+  const selectors=[],page={locator(selector){selectors.push(selector);return {async count(){return selector==='[data-audit-case]'||selector==='[data-audit-name="collab/ActivityLog"]'?1:0;}};}},root={page(){return page;}};
+  await assertActivityLogScopedAuditPage(root);
+  assert.deepEqual(selectors,['[data-audit-case]','[data-audit-name="collab/ActivityLog"]']);
+  await assert.rejects(assertActivityLogScopedAuditPage({page(){return {locator(){return {async count(){return 0;}};}};}}),/Exact-case audit route must keep the native tab order bounded to one component pair/);
+});
+
+test('forced scroll source guard rejects assignments without mistaking equality comparisons',()=>{
+  const forcedScrollAssignment=/scrollTop\s*=(?!=)/;
+  assert.match('node.scrollTop = 12',forcedScrollAssignment,'A direct forced-scroll assignment remains forbidden');
+  assert.doesNotMatch('next.scrollTop===current.scrollTop',forcedScrollAssignment,'A scroll-position equality check is not an assignment');
+});
+
+test('CookieBanner, PromptPlayground, and SubAgentTree add only exact source-backed local-action contracts',async()=>{
+  const expected=[
+    ['misc/CookieBanner','Terms','native-cookie-owner-boundary',['cookies-accept-all','cookies-reject-all','cookies-open-choices','cookies-select-analytics','cookies-save-choices']],
+    ['generative/PromptPlayground','PromptPlayground','native-prompt-owner-boundary',['prompt-fill-topic','prompt-fill-tone','prompt-run-request']],
+    ['agent/SubAgentTree','SubAgentTree','communication-subagent-tree-local',['tree-collapse-code','tree-expand-code','tree-select-code']],
+  ];
+  const contracts=expected.map(([identity,kind,sequence,steps])=>{
+    const contract=requestedStateContract(identity);assert.equal(contract?.identity,identity);assert.equal(contract.kind,kind);assert.equal(contract.focusedSequence,sequence);assert.equal(contract.requestedStateOnly,true);assert.deepEqual(contract.mappingGaps,[]);assert.deepEqual(contract.steps.map(step=>step.id),steps);
+    assert(contract.steps.every(step=>step.source.siteId===`focused-state:${identity}:${step.id}`&&step.source.sourceAnchor&&step.source.provenance.includes(identity)));
+    return contract;
+  });
+  assert.equal(contracts[0].behaviorKey,'misc/Terms','Terms names the shared behavior only; the exact gallery case remains CookieBanner');
+  assert.equal(contracts.reduce((sum,contract)=>sum+contract.steps.length,0),11);
+  for(const identity of ['misc/Terms','misc/Consent Dialog','generative/PromptDiff','agent/AgentStepList','agent/SubAgentTreeExtra'])assert.equal(requestedStateContract(identity),null,`${identity} must not inherit one of these exact-case contracts`);
+
+  const [driver,nativeTemplate,nativeMisc,nativeMiscJS,promptFixture,promptDefaults,promptJS,communicationTemplate,communicationFixture,communicationJS,communicationGalleryChecks,docs]=await Promise.all([
+    read('ui/gohtmx/tests/browser/visual-state-audit-drivers.mjs'),read('ui/gohtmx/templates/ely-api-native.html'),read('internal/gallery/assets/native-misc-fixtures.json'),read('ui/gohtmx/assets/ely-api-native-misc.js'),read('internal/gallery/advanced_native_generative_fixtures.go'),read('internal/gallery/advanced_native_fixtures.go'),read('ui/gohtmx/assets/ely-api-native-generative-tools.js'),read('ui/gohtmx/templates/ely-api-communication.html'),read('internal/gallery/advanced_communication_fixtures.go'),read('ui/gohtmx/assets/ely-api-communication.js'),read('internal/gallery/assets/advanced-communication-checks.js'),read('docs/gohtmx/advanced-communication.md'),
+  ]);
+  assert.match(nativeTemplate,/eq \.Kind "Terms"[\s\S]*?ne \.Variant "CookieBanner"[\s\S]*?data-cookies="all"[\s\S]*?data-cookies="none"[\s\S]*?data-cookies="choose"/);
+  assert.match(nativeMisc,/"Terms":\s*\{[\s\S]*?"CookieKinds"[\s\S]*?"Analytics"[\s\S]*?"Video"/);
+  assert.match(nativeMiscJS,/b\.dataset\.cookies==='choose'&&options\.hidden[\s\S]*?options\.hidden=false[\s\S]*?send\(cookies,'choose-cookies',\{values,necessary:true\}\)/);
+  assert.match(contracts[0].scope,/no local dismissal or persistence|Host requests do not prove storage/);
+
+  assert.match(promptFixture,/case "PromptPlayground":[\s\S]*?"Write three short notes on \{topic\} in a \{tone\} voice\.",[\s\S]*?"\{\}"/);
+  assert.match(promptDefaults,/"Name":\s*"native_value"/,'The shared gallery fixture supplies native_value as the actual PromptPlayground form field');
+  assert.match(promptJS,/listen\(template,'input',rebuild\)/);assert.match(promptJS,/listen\(fields,'input'/);assert.match(promptJS,/preview\.replaceChildren\(\)[\s\S]*?mark\.textContent=filled\.text\.slice\(start,end\)/);assert.match(promptJS,/running=true[\s\S]*?emit\(root,form\.dataset\.action/);
+  assert.match(promptJS,/listen\(root,'ely:prompt-output'/,'Output is supplied only by the host response boundary');
+  assert.match(driver,/topic\.fill\('observability'\)[\s\S]*?tone\.fill\('concise'\)[\s\S]*?clickVisibleControl\(run\)[\s\S]*?answer:'none; host response not supplied'/);
+  assert.match(contracts[1].scope,/No synthetic host response, generated answer, or provider claim/);
+
+  assert.match(communicationFixture,/case "SubAgentTree":[\s\S]*?"Status": "working", "Progress": 62, "Open": true[\s\S]*?"Value": "code", "Label": "Code: change the lift", "Status": "working", "Progress": 45, "Open": true/);
+  assert.match(communicationTemplate,/define "ely-api-agent-tree-node"[\s\S]*?<details[\s\S]*?<summary[\s\S]*?<progress value="\{\{\.Item\.Progress\}\}" max="100"/);
+  assert.match(communicationJS,/if\(element\.matches\('\[data-ely-select\]'\)\)\{const tree=element\.closest\('\.ely-agent-tree'\);if\(tree\)\{tree\.querySelectorAll\('\[data-ely-select\]\[aria-current="true"\]'\)[\s\S]*?setAttribute\('aria-current','true'\);\}else\{root\.querySelectorAll\('\[data-ely-select\]\[aria-selected="true"\]'\)[\s\S]*?setAttribute\('aria-selected','true'\);\}changed\(root,'selection'[\s\S]*?emit\(root,'select',detail\(root,element\)\);return;\}/,'Tree uses aria-current while generic selectable controls retain aria-selected and the same select event');
+  const treeGalleryCheck=communicationGalleryChecks.slice(communicationGalleryChecks.indexOf("'agent/SubAgentTree':"),communicationGalleryChecks.indexOf("'agent/FileChangeCard':"));
+  assert.match(treeGalleryCheck,/node\.getAttribute\('aria-current'\)==='true'/,'The connected gallery Tree assertion must read its current-selection state');
+  assert.doesNotMatch(treeGalleryCheck,/aria-selected/,'The Tree gallery assertion must not use generic-control aria-selected');
+  assert.match(communicationJS,/const detail=\(root,element=\{\}\)=>\(\{value:element\.value\|\|element\.dataset\.value\|\|element\.dataset\.elyValue\|\|''/,'Selection host details must honor the template public data-ely-value contract');
+  assert.match(driver,/node\.addEventListener\('toggle',event=>node\.__visualDisclosureEvents\.push\([\s\S]*?statusProgress\(current\)[\s\S]*?clickVisibleControl\(marker\)[\s\S]*?clickVisibleControl\(code\)/);
+  assert.match(docs,/SubAgentTree uses nested `Items`[\s\S]*?maintains local disclosure and selection/);
+  assert.match(contracts[2].scope,/status\/progress|status\/progress/);
+  const cookieDriver=driver.slice(driver.indexOf("if(contract.focusedSequence==='native-cookie-owner-boundary')"),driver.indexOf("if(contract.focusedSequence==='native-prompt-owner-boundary')")),promptDriver=driver.slice(driver.indexOf("if(contract.focusedSequence==='native-prompt-owner-boundary')"),driver.indexOf("if(contract.focusedSequence==='communication-subagent-tree-local')"));
+  assert.doesNotMatch(cookieDriver,/dispatchEvent\(/,'Cookie choices are activated by native controls');assert.doesNotMatch(promptDriver,/dispatchEvent\(|ely:prompt-output/,'Prompt interactions stay native and do not fabricate a host response');
+});
+
+test('focused five-case action contracts stay explicit and source-backed',async()=>{
+  const cases=[
+    ['forms/HotkeyInput','HotkeyInput','hotkey-record-clear-restore',['record-shortcut','clear-shortcut','restore-shortcut']],
+    ['forms/ShortcutRecorder','HotkeyInput','hotkey-record-clear-restore',['record-shortcut','clear-shortcut','restore-shortcut']],
+    ['account/SignupForm','SignupForm','signup-terms-label',['fill-name','fill-email','fill-password','accept-terms-label']],
+    ['navigation/Tabs','Tabs','tabs-panel-selection',['select-tab','keyboard-select-tab']],
+    ['motion/Lottie Player','ParticleBackground','lottie-play-pause-frame-reset',['play-animation','pause-animation','seek-visible-frame','reset-visible-frame']],
+  ];
+  for(const [identity,kind,sequence,ids] of cases){
+    const contract=requestedStateContract(identity);
+    assert.equal(contract?.identity,identity);
+    assert.equal(contract.kind,kind);
+    assert.equal(contract.focusedSequence,sequence);
+    assert.equal(contract.requestedStateOnly,true);
+    assert.deepEqual(contract.mappingGaps,[]);
+    assert.deepEqual(contract.steps.map(step=>step.id),ids);
+    assert(contract.steps.every(step=>step.source.siteId.startsWith(`focused-state:${identity}:`)&&step.source.sourceAnchor===null&&step.source.provenance.length>0));
+    assert.match(contract.scope,/separate from registered-check coverage/);
+  }
+
+  const [controls,formsTemplate,formsCSS,formsJS,controlsJS,interactionTemplate,interactionJS,interactionFixture,components]=await Promise.all([
+    read('ui/gohtmx/templates/ely-controls.html'),read('ui/gohtmx/templates/ely-api-forms.html'),read('ui/gohtmx/assets/ely-api-forms.css'),read('ui/gohtmx/assets/ely-api-forms.js'),read('ui/gohtmx/assets/ely-controls.js'),
+    read('ui/gohtmx/templates/ely-api-interaction.html'),read('ui/gohtmx/assets/ely-api-interaction.js'),read('internal/gallery/advanced_interaction_fixtures.go'),read('ui/gohtmx/components.json'),
+  ]);
+  assert.match(controls,/class="ely-api-hotkey-glyph"/);
+  assert.match(formsCSS,/\.ely-api-hotkey-control \.ely-api-hotkey-glyph/);
+  assert.match(formsCSS,/padding-inline-start:2rem/);
+  assert.match(formsJS,/type==='SignupForm'/);
+  assert.match(formsTemplate,/class="ely-suite-terms"><input type="checkbox" name="terms" required>/);
+  assert.match(formsTemplate,/data-suite-validate="\{\{\.Kind\}\}"/);
+  assert.match(formsJS,/form\.checkValidity\(\)/);
+  assert.match(formsJS,/send\.disabled=disabled\(\)\|\|!valid/);
+  assert.match(controlsJS,/if \(event\.key === 'Escape'\).*uiHotkeyPrevious/);
+  assert.match(controlsJS,/if \(event\.key === 'Backspace' \|\| event\.key === 'Delete'\).*value = ''/);
+  assert.match(interactionTemplate,/data-interaction-tab/);
+  assert.match(interactionTemplate,/role="tabpanel"/);
+  assert.match(interactionJS,/animation\.play\(\); status\.textContent = 'Animation playing'/);
+  assert.match(interactionJS,/animation\.pause\(\); status\.textContent = 'Animation paused'/);
+  assert.match(interactionJS,/animation\.goToAndStop\(Number\(seek\.value\)/);
+  assert.match(interactionFixture,/"Autoplay": false, "Loop": false/);
+  assert.match(components,/"ShortcutRecorder"/);
+});
+
+test('focused driver does not imply neighboring cases or catalog approval',()=>{
+  for(const identity of ['forms/PasswordInput','navigation/EditorTabs','motion/ParticleBackground','account/LoginForm'])
+    assert.equal(requestedStateContract(identity),null,`${identity} is outside this focused five-case scope`);
+});
+
+test('five rendered presence aliases keep exact native follow and stop request contracts',async()=>{
+  const identities=['collab/PresenceAvatars','collab/LiveIndicator','collab/FollowMode','collab/RemoteSelection','collab/RemoteCursor'];
+  const steps=['presence-follow-ada','presence-stop-button','presence-follow-ada-again','presence-stop-escape'];
+  for(const identity of identities){
+    const contract=requestedStateContract(identity);assert.equal(contract?.identity,identity);assert.equal(contract.kind,'PresenceAvatars');assert.equal(contract.family,'workspace');assert.equal(contract.behaviorKey,'collab/PresenceAvatars');assert.equal(contract.requestedStateOnly,true);assert.deepEqual(contract.mappingGaps,[]);assert.deepEqual(contract.steps.map(step=>step.id),steps);assert(contract.steps.every(step=>step.source.siteId===`presence-state:${identity}:${step.id}`&&step.source.sourceAnchor.includes('ws-presence')&&step.source.provenance.includes(identity)));
+  }
+  const [driver,template,handler,emitter]=await Promise.all([read('ui/gohtmx/tests/browser/visual-state-audit-drivers.mjs'),read('ui/gohtmx/templates/ely-api-workspace.html'),read('ui/gohtmx/assets/ely-api-workspace.js'),read('ui/gohtmx/assets/ely-api.js')]);
+  assert.match(template,/data-ws-presence data-following="\{\{\.Following\}\}"/);assert.match(template,/data-ws-follow data-ely-action="follow-user" value="\{\{\.ID\}\}"/);assert.match(template,/data-ws-follow-stop/);
+  assert.match(handler,/follow\(following\); emit\(root, 'follow-user', \{value: button\.value, following\}\)/);assert.match(handler,/follow\(''\); emit\(root, 'stop-following', \{\}\)/);assert.match(handler,/if \(presence\?\.dataset\.following\) \{ follow\(''\); emit\(root, 'stop-following', \{\}\); \}/);
+  assert.match(emitter,/detail: \{ \.\.\.detail, id: root\.id, component: root\.dataset\.elyComponent, action \}/);
+  const start=driver.indexOf("if(contract.focusedSequence==='workspace-native-presence-follow')"),end=driver.indexOf("if(contract.focusedSequence==='native-embed-open-host')",start),branch=driver.slice(start,end);
+  assert(start>=0&&end>start);for(const source of [...steps,"activatePresenceStep(id,{ada,stop})","event.isTrusted","assertPresenceNativeRequest(id,newEvents,newActions","fixtureSource","document.addEventListener('click'","document.addEventListener('keydown'"])assert(branch.includes(source),source);
+  assert.match(assertPresenceNativeRequest.toString(),/trusted:true/);assert.match(assertPresenceNativeRequest.toString(),/control:step==='presence-stop-button'\?'stop':'ada'/);assert.match(assertPresenceNativeRequest.toString(),/assert\.deepEqual\(actions,\[request\]/);
+  assert.doesNotMatch(branch,/dispatchEvent\(/,'Presence controls use native Playwright activation, not synthetic dispatch');
+});
+
+test('presence activation invokes the requested native control, including Escape on Ada',async()=>{
+  const calls=[],ada={click(){calls.push(['ada','click']);return 'follow';},press(key){calls.push(['ada','press',key]);return 'escape-stop';}},stop={click(){calls.push(['stop','click']);return 'button-stop';}};
+  assert.equal(await activatePresenceStep('presence-follow-ada',{ada,stop}),'follow');
+  assert.equal(await activatePresenceStep('presence-stop-button',{ada,stop}),'button-stop');
+  assert.equal(await activatePresenceStep('presence-follow-ada-again',{ada,stop}),'follow');
+  assert.equal(await activatePresenceStep('presence-stop-escape',{ada,stop}),'escape-stop');
+  assert.deepEqual(calls,[['ada','click'],['stop','click'],['ada','click'],['ada','press','Escape']]);
+  assert.throws(()=>activatePresenceStep('presence-stop-unknown',{ada,stop}),/Unknown presence step/);
+});
+
+test('presence native request assertion distinguishes Escape target from stop outcome',()=>{
+  const id='presence-root',component='collab/RemoteCursor';
+  const cases=[
+    ['presence-follow-ada',{type:'click',trusted:true,key:null,control:'ada'},{id,component,action:'follow-user',value:'ada',following:'ada'}],
+    ['presence-stop-button',{type:'click',trusted:true,key:null,control:'stop'},{id,component,action:'stop-following'}],
+    ['presence-follow-ada-again',{type:'click',trusted:true,key:null,control:'ada'},{id,component,action:'follow-user',value:'ada',following:'ada'}],
+    ['presence-stop-escape',{type:'keydown',trusted:true,key:'Escape',control:'ada'},{id,component,action:'stop-following'}],
+  ];
+  for(const [step,native,request]of cases)assert.deepEqual(assertPresenceNativeRequest(step,[native],[request],{id,component}),{native,request});
+  assert.throws(()=>assertPresenceNativeRequest('presence-stop-escape',[{type:'keydown',trusted:true,key:'Escape',control:'stop'}],[cases[3][2]],{id,component}),/actual target/,'Escape targets the focused Ada button, not the stop button');
+  assert.throws(()=>assertPresenceNativeRequest('presence-stop-escape',[cases[3][1]],[cases[0][2]],{id,component}),/expected alias-scoped host request/,'Escape still must emit stop-following');
+  assert.throws(()=>assertPresenceNativeRequest('presence-stop-escape',[{...cases[3][1],trusted:false}],[cases[3][2]],{id,component}),/trusted native input/,'Synthetic key dispatch cannot stand in for native Escape');
+});
+
+test('each declared focused sequence has a matching asserted driver path',()=>{
+  const driver=runRequestedStateActions.toString();
+  for(const id of ['record-shortcut','clear-shortcut','restore-shortcut','fill-name','fill-email','fill-password','accept-terms-label','select-tab','keyboard-select-tab','play-animation','pause-animation','seek-visible-frame','reset-visible-frame'])
+    assert.match(driver,new RegExp(`runStep\\('${id}'`),`${id} must be executed by the focused driver`);
+  assert.match(driver,/clickVisibleControl\(label\)/,'Signup terms must be activated by a hit-tested visible label');
+  assert.match(driver,/await seek\.press\('Home'\)/,'Lottie reset must use the public range keyboard interaction');
+  assert.match(driver,/node\.addEventListener\('ely:change'/,'Tabs and Lottie must observe real root-scoped change events');
+  assert.match(driver,/name==='tab'&&change\.value===expected&&change\.selected===true/,'Tab changes must be asserted from their emitted detail');
+  assert.match(driver,/name==='frame'&&change\.value===String\(expected\)/,'Lottie frame changes must be asserted from their emitted detail');
+  assert.match(driver,/getBoundingClientRect\(\)/,'Lottie frame shape geometry must come from rendered SVG bounds');
+  assert.match(driver,/movement>4/,'The moving marker must measurably change position at frame 50');
+  assert.match(driver,/resetDelta<=1/,'Reset must restore independently observed frame-zero geometry');
+});
+
+test('Missing35 shipped communication fixtures have finite native local-action contracts with alias behavior deduplicated',async()=>{
+  const expected={
+    'agent/EvalResultTable':['sort-tokens-ascending','sort-tokens-descending','eval-scroll-last-column'],
+    'calendar/CalendarMonthView':['month-page-down','month-open-day'],
+    'calendar/CalendarWeekView':['week-scroll-late-events','week-open-samples','week-open-client','week-create-event','week-open-allday'],
+    'calendar/TimeGrid':['week-scroll-late-events','week-open-samples','week-open-client','week-create-event','week-open-allday'],
+    'calendar/AllDayRow':['week-scroll-late-events','week-open-samples','week-open-client','week-create-event','week-open-allday'],
+    'calendar/CurrentTimeIndicator':['week-scroll-late-events','week-open-samples','week-open-client','week-create-event','week-open-allday'],
+    'calendar/CalendarDayView':['day-scroll-late-events','day-open-samples','day-open-client','day-create-event','day-reveal-created-draft'],
+    'calendar/TimezoneOverlay':['day-scroll-late-events','day-open-samples','day-open-client','day-create-event','day-reveal-created-draft'],
+    'calendar/EventPopover':['popover-open','popover-edit','popover-delete','popover-close','popover-reopen','popover-escape'],
+    'calendar/AttendeeList':['popover-open','popover-edit','popover-delete','popover-close','popover-reopen','popover-escape'],
+  };
+  const contracts=Object.entries(expected).map(([identity,ids])=>{
+    const contract=requestedStateContract(identity);assert.equal(contract?.identity,identity);assert.equal(contract.requestedStateOnly,true);assert.deepEqual(contract.mappingGaps,[]);assert.deepEqual(contract.steps.map(step=>step.id),ids);
+    assert(contract.steps.every(step=>step.event.includes('trusted native')&&step.source.siteId===`communication-state:${identity}:${step.id}`&&step.source.provenance.includes(identity)));
+    return contract;
+  });
+  const byKey=new Map();for(const contract of contracts){const prior=byKey.get(contract.behaviorKey);if(prior)assert.deepEqual(contract.steps.map(step=>step.id),prior.steps.map(step=>step.id));else byKey.set(contract.behaviorKey,contract);}
+  assert.equal(contracts.length,10,'All ten exact Missing35 gallery identities remain represented');
+  assert.equal(byKey.size,5,'The five shared aliases do not inflate the unique handler roster');
+  assert.equal(contracts.reduce((sum,contract)=>sum+contract.steps.length,0),47,'Each identity retains its default-fixture checkpoints, including the appended day draft reveal for each exact identity');
+  assert.equal([...byKey.values()].reduce((sum,contract)=>sum+contract.steps.length,0),21,'Unique local handler checkpoint total is deduplicated by behavior key');
+  assert.equal(47*4,188,'Four mobile profiles require 188 identity/profile checkpoints');
+  assert.equal(188*2,376,'Each checkpoint requires owned before/after PNGs');
+  assert.equal(21*4*2,168,'Deduplicated handler comparison is 84 checkpoints/168 PNGs, not the alias-expanded capture denominator');
+  assert.equal(5*2*4,40,'The requested day rerun is two exact identities × four mobile profiles × five checkpoints');
+  assert.equal(40*2,80,'The requested day rerun requires 80 owned before/after PNGs');
+  assert.equal(requestedStateContract('calendar/MiniCalendar'),null,'Unrelated calendar siblings stay outside this contract');
+  assert.equal(requestedStateContract('agent/TraceViewer'),null,'The canonical TraceViewer check does not create a second gallery specimen contract');
+  assert.equal(requestedStateContract('calendar/CurrentTimeIndicator').directControlRole,'display-only indicator within the shared week fixture');
+  assert.equal(requestedStateContract('calendar/TimezoneOverlay').directControlRole,'display-only overlay within the shared day fixture');
+  assert.equal(requestedStateContract('calendar/AttendeeList').directControlRole,'display-only attendee content within the shared popover fixture');
+  const day=requestedStateContract('calendar/CalendarDayView');
+  assert.deepEqual(day.steps.slice(0,4).map(step=>step.id),['day-scroll-late-events','day-open-samples','day-open-client','day-create-event'],'The four existing day checkpoints remain in their original order');
+  assert.equal(day.steps[4].id,'day-reveal-created-draft');
+  assert.match(day.steps[4].expectedState,/complete painted.*16:00.*16:30/);
+
+  const notificationReview=requestedStateContract('feedback/Notification').steps.find(step=>step.id==='notification-open-review');
+  assert.match(notificationReview.expectedState,/review\(""\)/,'Nested Review actions do not inherit the notification row value');
+  assert.equal(assertCommunicationCallerRequest([{action:'review',component:'feedback/Notification',value:''}],0,'feedback/Notification','review','').event.value,'');
+  assert.throws(()=>assertCommunicationCallerRequest([{action:'review',component:'feedback/Notification',value:'review'}],0,'feedback/Notification','review',''),/default-fixture value/,'A row-derived value must not be invented for nested notification actions');
+
+  assert.throws(()=>assertCommunicationCallerRequest([{action:'delete-event',component:'calendar/EventPopover',value:'review'}],0,'calendar/EventPopover','edit-event','review'),/wrong caller request/,'A plausible but wrong host request must fail the causal control');
+  assert.throws(()=>assertCommunicationCallerRequest([{action:'edit-event',component:'calendar/EventPopover',value:'review'},{action:'edit-event',component:'calendar/EventPopover',value:'review'}],0,'calendar/EventPopover','edit-event','review'),/exactly one new caller request/,'Duplicate host requests must fail the causal control');
+  const visibleColumns=Array.from({length:6},()=>({insideRoot:true,insideClip:true}));
+  assert.equal(assertEvalLastColumnGeometry({scrollLeft:200,previousScrollLeft:0,scrollWidth:580,clientWidth:380,columns:visibleColumns,actionsBefore:2,actionsAfter:2,initiallyVisible:false,didScroll:true}).overflow,true,'Scrollable final column is accepted after local wheel movement with no action');
+  assert.equal(assertEvalLastColumnGeometry({scrollLeft:0,previousScrollLeft:0,scrollWidth:380,clientWidth:380,columns:visibleColumns,actionsBefore:2,actionsAfter:2,initiallyVisible:true,didScroll:false}).overflow,false,'A fitting final column is accepted by passive geometry with no wheel or host action');
+  assert.throws(()=>assertEvalLastColumnGeometry({scrollLeft:200,previousScrollLeft:0,scrollWidth:580,clientWidth:380,columns:[...visibleColumns.slice(0,5),{insideRoot:true,insideClip:false}],actionsBefore:2,actionsAfter:2,initiallyVisible:false,didScroll:true}),/within the component root and local scrollport/,'A clipped final value cannot pass on wheel movement alone');
+  assert.throws(()=>assertEvalLastColumnGeometry({scrollLeft:0,previousScrollLeft:0,scrollWidth:580,clientWidth:380,columns:visibleColumns,actionsBefore:2,actionsAfter:2,initiallyVisible:false,didScroll:false}),/requires native horizontal wheel input/,'An initially hidden final column cannot pass without native wheel input');
+  assert.throws(()=>assertEvalLastColumnGeometry({scrollLeft:200,previousScrollLeft:0,scrollWidth:580,clientWidth:380,columns:visibleColumns,actionsBefore:2,actionsAfter:3,initiallyVisible:false,didScroll:true}),/must not emit a host action/,'The passive reachability checkpoint rejects an extra host action');
+
+  const [driver,template,fixture,communicationJS,communicationCSS,actions]=await Promise.all([read('ui/gohtmx/tests/browser/visual-state-audit-drivers.mjs'),read('ui/gohtmx/templates/ely-api-communication.html'),read('internal/gallery/advanced_communication_fixtures.go'),read('ui/gohtmx/assets/ely-api-communication.js'),read('ui/gohtmx/assets/ely-api-communication.css'),read('ui/gohtmx/tests/browser/visual-state-audit-actions.mjs')]);
+  assert.match(driver,/if\(contract\.focusedSequence\?\.startsWith\('communication-'\)\)/,'Legacy requested-state contracts may omit focusedSequence and must retain the safe optional guard');
+  const communicationPath=driver.slice(driver.indexOf("if(contract.focusedSequence?.startsWith('communication-'))"),driver.indexOf("if(contract.focusedSequence==='vertical-range-native-scroll')"));
+  assert.doesNotMatch(communicationPath,/\.dispatchEvent\(|innerHTML|scrollTop\s*=(?!=)/,'Input stays native and no DOM injection or forced scroll substitutes for user actions');
+  assert.match(communicationPath,/mouse\.wheel/);assert.match(communicationPath,/keyboard\.press\('Escape'\)/);assert.match(communicationPath,/aria-expanded/);assert.match(communicationPath,/assertCommunicationCallerRequest/);
+  assert.match(actions,/if\(contract\.requestedStateOnly\)\{\s*await runRequestedStateActions\(contract,root,step,failureDiagnostics\);/,'The existing generic requested-state route must execute these communication contracts without a new whitelist');
+  assert.match(communicationPath,/let beforeDate='',expectedDate='';[\s\S]*PageDown selection must equal the independently derived clamped next-month date/,'PageDown result must be checked against a date derived from the pre-action selected date');
+  assert.match(communicationPath,/data-ely-date="2026-10-13"\]\[data-ely-time="16:00"/);assert.match(communicationPath,/data-ely-date="2026-10-13"\]\[data-ely-time="16:30"/);
+  assert.match(communicationPath,/Exactly one Tuesday 16:00 slot must exist/);assert.match(communicationPath,/event\.start,'2026-10-13T16:00'/);assert.match(communicationPath,/event\.end,'2026-10-13T16:30'/);
+  assert.match(communicationJS,/emit\(root,'create-event',\{start:values\[0\],end:values\[1\]\}\)/,'Calendar creation emits an interval payload from native pointer-drag input');
+  assert.match(template,/<section class="ely-agent-evals">[\s\S]*?<table>/,'The evaluation table is nested inside its source-defined component section');
+  assert.match(communicationCSS,/\.ely-agent-evals\{[^}]*overflow:auto/,'The evaluation section is the native horizontal scroll owner');assert.match(communicationCSS,/\.ely-agent-evals table\{[^}]*min-width:580px/,'The source table can exceed narrow profile width');
+  assert.match(communicationPath,/owner=root\.locator\('\.ely-agent-evals'\)/,'The final-column check must use the component section that owns overflow');
+  assert.match(communicationPath,/data-eval-column.*?time/,'The final header and cells must be selected by their source-initialized Time-column identity');
+  assert.match(communicationPath,/mouse\.wheel\(Math\.max\(120,Math\.round\(box\.width\*\.75\)\),0\)/,'Overflow is inspected with bounded native horizontal wheel input');
+  assert.match(communicationPath,/if\(current\.scrollWidth>current\.clientWidth&&!initiallyVisible\)/,'The driver scrolls only when local overflow clips the final column');
+  assert.match(fixture,/\{"Value": "time", "Label": "Time"\}/,'The last asserted column is the default fixture Time field');
+  assert.equal((template.match(/data-ely-calendar-time-slot data-ely-date="\{\{\.Date\}\}" data-ely-time="\{\{\$slotTime\}\}"/g)||[]).length,2,'Week and day time slots expose both date and time for an exact column match');
+  assert.match(communicationPath,/mouse\.wheel\([\s\S]*?requestAnimationFrame\(\(\)=>requestAnimationFrame\(resolve\)\)/,'Every bounded wheel input must settle through two animation frames before reachability is rechecked');
+  const calendarKeydown=communicationJS.slice(communicationJS.indexOf("root.addEventListener('keydown',event=>{const day="),communicationJS.indexOf("},options);",communicationJS.indexOf("root.addEventListener('keydown',event=>{const day="))+10);
+  assert.match(calendarKeydown,/event\.stopImmediatePropagation\(\)[\s\S]*calendarShift\(day\.value,delta\)[\s\S]*navigate\(delta<0\?'previous':'next',date\)[\s\S]*selectDay\(date\)[\s\S]*next\?\.focus\(\)/,'CalendarMonthView PageDown uses the stateful calendar handler, not the event-only generic fallback');
+  assert.match(communicationJS,/emit\(root,'calendar-navigation',\{direction,view:kind,date:shown\}\)/,'The stateful calendar handler emits the navigated date in its caller payload');
+  assert(communicationJS.indexOf("if(root.dataset.elyComponent?.startsWith('calendar/'))mountCalendar(root,lifecycle)")<communicationJS.indexOf("root.addEventListener('keydown',onKeyDown)"),'The calendar handler registers before the generic event-only fallback and stops propagation for calendar-day keys');
+  assert.match(template,/<td>\{\{\.\}\}<\/td>/,'Evaluation cells remain html/template-escaped text');
+  assert.match(template,/\{\{\.Content\}\}/);assert.match(template,/\{\{\.Name\}\}/);assert.doesNotMatch(template,/template\.HTML/,'Communication caller data is not promoted to trusted HTML');
+  assert.match(fixture,/case "CalendarWeekView"/);assert.match(fixture,/case "CalendarDayView"/);assert.match(fixture,/case "EventPopover"/);
+});
+
+test('WebSocket history and day-event draft reveals append native-wheel checkpoints without changing prior actions',async()=>{
+  const socket=requestedStateContract('devtools/WebSocketConsole'),day=requestedStateContract('calendar/CalendarDayView'),dayAlias=requestedStateContract('calendar/TimezoneOverlay');
+  assert.deepEqual(socket.steps.slice(0,12).map(step=>step.id),['empty-enter','type-ping','send-enter','type-pong','send-button','request-disconnect','host-ack-closed','type-closed-draft','closed-enter','clear-closed-draft','request-connect','host-ack-open'],'All twelve existing WebSocket send, event, and host-ack checkpoints remain unchanged');
+  assert.equal(socket.steps[12].id,'history-wheel-reveal');assert(socket.steps[12].event.includes('native'));assert(socket.steps[12].expectedState.includes('complete first history row'));
+  assert.deepEqual(day.steps.slice(0,4).map(step=>step.id),['day-scroll-late-events','day-open-samples','day-open-client','day-create-event'],'All four existing day checkpoints remain unchanged');
+  assert.equal(day.steps[4].id,'day-reveal-created-draft');assert.equal(dayAlias.steps[4].id,'day-reveal-created-draft');assert.deepEqual(dayAlias.steps.map(step=>step.id),day.steps.map(step=>step.id));
+  assert.equal(13*2,26,'Two WebSocket mobile themes require 26 checkpoints');assert.equal(26*2,52,'WebSocket replay needs 52 before/after primary images');
+  assert.equal(5*2*4,40,'Two day identities across four mobile profiles require 40 checkpoints');assert.equal(40*2,80,'Day replay needs 80 before/after primary images');
+  const driver=await read('ui/gohtmx/tests/browser/visual-state-audit-drivers.mjs'),socketStart=driver.indexOf("if(contract.focusedSequence==='websocket-public-host-boundary')"),socketEnd=driver.indexOf("if(['sheet-native-actions'",socketStart),calendarStart=driver.indexOf("if(contract.focusedSequence==='communication-calendar-week'||contract.focusedSequence==='communication-calendar-day')"),calendarEnd=driver.indexOf("if(contract.focusedSequence==='communication-event-popover')",calendarStart);
+  assert(socketStart>=0&&socketEnd>socketStart&&calendarStart>=0&&calendarEnd>calendarStart);
+  const socketPath=driver.slice(socketStart,socketEnd),calendarPath=driver.slice(calendarStart,calendarEnd);
+  assert.match(socketPath,/root\.page\(\)\.mouse\.wheel\(0,-Math\.max\(120/);assert.match(socketPath,/scrollTop:[^,]+,scrollHeight:[^,]+,clientHeight:[^,]+,scrollMax:/);assert.match(socketPath,/firstRowFullyVisible/);assert.match(socketPath,/history-log/);
+  assert.match(calendarPath,/root\.page\(\)\.mouse\.wheel\(decision\.deltaX,decision\.deltaY\)/);assert.match(calendarPath,/scrollLeft:node\.scrollLeft,scrollWidth:node\.scrollWidth,clientWidth:node\.clientWidth,scrollMaxX/);assert.match(calendarPath,/scrollTop:node\.scrollTop,scrollHeight:node\.scrollHeight,clientHeight:node\.clientHeight,scrollMaxY/);assert.match(calendarPath,/draftVisible/);assert.match(calendarPath,/New event · 16:00 – 16:30/);assert.match(calendarPath,/nativeWheels/);
+  assert.match(driver,/export function calendarDraftWheelDecision/);assert.match(driver,/if\(left<metrics\.clip\.left\)[\s\S]*?if\(right>metrics\.clip\.right\)[\s\S]*?if\(top<metrics\.clip\.top\)[\s\S]*?if\(bottom>metrics\.clip\.bottom\)/,'The pure classifier resolves horizontal bounds before vertical bounds');
+  assert.doesNotMatch(socketPath,/scrollTop\s*=(?!=)|\.scrollIntoView\(|\.style\s*\./,'WebSocket reveal uses native input without forced DOM scrolling or style writes');
+  assert.doesNotMatch(calendarPath,/scrollTop\s*=(?!=)|\.scrollIntoView\(|\.style\s*\./,'Calendar reveal uses native input without forced DOM scrolling or style writes');
+});
+
+test('calendar draft reveal classifies horizontal clipping before vertical clipping and rejects unreachable text',()=>{
+  const metrics=({rects,scrollLeft=0,scrollTop=20})=>({textRects:rects,scrollLeft,scrollWidth:400,clientWidth:300,scrollMaxX:100,scrollTop,scrollHeight:300,clientHeight:100,scrollMaxY:200,clip:{left:0,right:300,top:0,bottom:100}});
+  assert.deepEqual(calendarDraftWheelDecision(metrics({rects:[{left:298,right:312,top:95,bottom:115}]})),{axis:'horizontal',deltaX:12,deltaY:0},'Horizontal overrun takes precedence and does not issue a vertical wheel');
+  assert.deepEqual(calendarDraftWheelDecision(metrics({rects:[{left:-5,right:50,top:20,bottom:35}],scrollLeft:10})),{axis:'horizontal',deltaX:-5,deltaY:0},'A left-clipped fragment uses native horizontal movement toward the start');
+  assert.deepEqual(calendarDraftWheelDecision(metrics({rects:[{left:20,right:80,top:95,bottom:115}]})),{axis:'vertical',deltaX:0,deltaY:15},'Vertical movement is selected only after horizontal bounds fit');
+  assert.deepEqual(calendarDraftWheelDecision(metrics({rects:[{left:20,right:80,top:-5,bottom:35}],scrollTop:10})),{axis:'vertical',deltaX:0,deltaY:-5},'A top-clipped fragment uses native vertical movement toward the start');
+  assert.equal(calendarDraftWheelDecision(metrics({rects:[{left:-5,right:20,top:10,bottom:30}]})).reason,'Calendar draft remains clipped at the horizontal start endpoint');
+  assert.equal(calendarDraftWheelDecision(metrics({rects:[{left:20,right:330,top:10,bottom:30}]})).reason,'Calendar draft text spans 310px, wider than the owned 300px horizontal scrollport');
+  assert.deepEqual(calendarDraftWheelDecision(metrics({rects:[{left:20,right:80,top:10,bottom:30}]})),{axis:'visible',deltaX:0,deltaY:0});
+});
+
+test('IframeEmbed and EmbedCard retain exact native host-open contracts without provider navigation',async()=>{
+  const identities=[['misc/IframeEmbed','iframe-open-host'],['misc/EmbedCard','embedcard-open-host']],url='https://example.com',sourceNote='Web views need macOS for now.';
+  for(const [identity,stepId]of identities){
+    const contract=requestedStateContract(identity);assert.equal(contract?.identity,identity);assert.equal(contract.kind,'IframeEmbed');assert.equal(contract.family,'native');assert.equal(contract.requestedStateOnly,true);assert.equal(contract.focusedSequence,'native-embed-open-host');assert.deepEqual(contract.mappingGaps,[]);assert.deepEqual(contract.steps.map(step=>step.id),[stepId]);
+    const step=contract.steps[0];assert.equal(step.control,'header button[data-ely-action="open"][data-value="https://example.com"]');assert.match(step.event,/trusted native Playwright button click/);assert(step.expectedState.includes('exact URL')&&step.expectedState.includes('remain unchanged'));assert.equal(step.source.siteId,`native-state:${identity}:${stepId}`);assert(step.source.provenance.includes(identity));
+  }
+  assert.equal(identities.length*4,8,'Two exact identities over four live profiles require eight checkpoints');assert.equal(identities.length*4*2,16,'Each checkpoint requires before/after primary captures');
+
+  const [catalogue,fixtures,template,api,driver,actions]=await Promise.all([read('ui/gohtmx/components.json'),read('internal/gallery/assets/native-misc-fixtures.json'),read('ui/gohtmx/templates/ely-api-native.html'),read('ui/gohtmx/assets/ely-api.js'),read('ui/gohtmx/tests/browser/visual-state-audit-drivers.mjs'),read('ui/gohtmx/tests/browser/visual-state-audit-actions.mjs')]);
+  const pages=JSON.parse(catalogue).pages,story=pages.flatMap(page=>page.stories).find(item=>item.name==='IframeEmbed'),fixture=JSON.parse(fixtures).IframeEmbed;
+  assert.deepEqual(story.components,['IframeEmbed','EmbedCard'],'EmbedCard is the native catalogue alias, with a separate gallery identity');assert.equal(fixture.URL,url);assert.equal(fixture.SourceNote,sourceNote);assert.equal(fixture.HideHeader,true,'The source fixture header policy must remain as-authored');
+  assert.match(template,/<header><span>◎ \{\{\.URL\}\}<\/span><button type="button" data-ely-action="\{\{or \.Action "open"\}\}" data-value="\{\{\.URL\}\}" aria-label="Open with host">/,'The embedded native header action stays rendered independently of the source note');
+  assert.match(api,/emit\(root, button\.dataset\.elyAction, \{ value: button\.value \|\| button\.dataset\.value \|\| ''/);assert.match(api,/detail: \{ \.\.\.detail, id: root\.id, component: root\.dataset\.elyComponent, action \}/);assert.doesNotMatch(api,/window\.open\s*\(/,'The control emits to the host; it does not navigate or launch an external provider');
+  const embedPath=runRequestedStateActions.toString().slice(runRequestedStateActions.toString().indexOf("if(contract.focusedSequence==='native-embed-open-host')"),runRequestedStateActions.toString().indexOf("if(contract.focusedSequence==='dock-native-actions')"));
+  assert.match(embedPath,/header button\[data-ely-action="open"\]\[data-value="https:\/\/example\.com"\]/);assert.match(embedPath,/button\.click\(\)/);assert.match(embedPath,/event\.isTrusted/);assert.match(embedPath,/finally/);assert.doesNotMatch(embedPath,/dispatchEvent|window\.open/,'Native input and host request must not be replaced by synthetic dispatch or navigation');
+  assert.match(actions,/if\(contract\.requestedStateOnly\)\{\s*await runRequestedStateActions\(contract,root,step,failureDiagnostics\);/,'The existing generic requested-state route must execute both Embed identities');
+
+  for(const [identity]of identities){
+    const rootId=`audit-${identity.replace('/','-')}`,before={id:rootId,component:identity,kind:'IframeEmbed',button:{action:'open',value:url,disabled:false,ariaLabel:'Open with host'},sourceNote,iframeCount:0};
+    const action={id:rootId,component:identity,action:'open',value:url},click={trusted:true,id:rootId,component:identity,action:'open',value:url};
+    assert.deepEqual(assertNativeEmbedOpen({actions:[action],clicks:[click],identity,rootId,url,before,after:{...before,button:{...before.button}}}),{identity,rootId,url,action:'open',trustedClick:true,localStateUnchanged:true});
+    assert.throws(()=>assertNativeEmbedOpen({actions:[{...action,value:'https://wrong.example'}],clicks:[click],identity,rootId,url,before,after:before}),/exact fixture URL/,'A wrong host URL cannot pass');
+    const wrongIdentity=identity==='misc/IframeEmbed'?'misc/EmbedCard':'misc/IframeEmbed';
+    assert.throws(()=>assertNativeEmbedOpen({actions:[{...action,component:wrongIdentity}],clicks:[click],identity,rootId,url,before,after:before}),/alias identity/,'An alias action cannot be relabeled as its canonical component');
+    assert.throws(()=>assertNativeEmbedOpen({actions:[{...action,id:'other-root'}],clicks:[click],identity,rootId,url,before,after:before}),/exact rendered root ID/,'An action from another component root cannot pass');
+    assert.throws(()=>assertNativeEmbedOpen({actions:[action],clicks:[{...click,trusted:false}],identity,rootId,url,before,after:before}),/trusted browser input/,'Synthetic click cannot pass');
+    assert.throws(()=>assertNativeEmbedOpen({actions:[action],clicks:[click],identity,rootId,url,before,after:{...before,iframeCount:1}}),/must not mutate/,'A provider/frame poststate cannot pass as this host-only fixture action');
+  }
+});
+
+test('Dock default fixture covers four native tab clicks, Enter/Space activation, and one native HTML drop',async()=>{
+  const contract=requestedStateContract('layout/Dock'),ids=['dock-click-files','dock-click-outline','dock-click-search','dock-click-terminal','dock-key-enter-search','dock-key-space-search','dock-drag-files-center'];
+  assert.equal(contract?.kind,'Dock');assert.equal(contract.requestedStateOnly,true);assert.deepEqual(contract.mappingGaps,[]);assert.deepEqual(contract.steps.map(step=>step.id),ids);
+  assert(contract.steps.every(step=>step.source.siteId.startsWith('dock-state:layout/Dock:')&&step.source.sourceAnchor.includes('ely-api-foundation')));
+  assert.match(contract.steps[4].event,/trusted native.*keyboard/);assert.match(contract.steps[5].event,/trusted native.*keyboard/);assert.match(contract.steps[6].event,/trusted native.*HTML drag-and-drop/);
+  assert.equal(ids.length,7,'Dock contributes seven distinct target checkpoints per selected profile');
+
+  assertDockCallerAction([{action:'change',component:'layout/Dock',value:'Files'}],0,'layout/Dock','Files');
+  assertDockCallerAction([{action:'change',component:'layout/Dock',value:'Files',dock:'center'}],0,'layout/Dock','Files','center');
+  assert.throws(()=>assertDockCallerAction([{action:'change',component:'layout/Dock',value:'Outline'}],0,'layout/Dock','Files'),/Files/,'A wrong tab payload cannot pass');
+  assert.throws(()=>assertDockCallerAction([{action:'change',component:'layout/Dock',value:'Files'},{action:'change',component:'layout/Dock',value:'Files'}],0,'layout/Dock','Files'),/exactly one/,'Duplicate host requests cannot pass');
+  assert.throws(()=>assertDockCallerAction([{action:'change',component:'layout/Dock',value:'Files',dock:'right'}],0,'layout/Dock','Files','center'),/center/,'A drop into a different zone cannot pass');
+  assertDockNativeEvents('dock-click-files',[{type:'click',trusted:true,detail:1,tab:'Files'}],'Files');
+  assertDockNativeEvents('dock-key-enter-search',[{type:'keydown',trusted:true,key:'Enter',tab:'Search'},{type:'click',trusted:true,detail:0,tab:'Search'},{type:'keyup',trusted:true,key:'Enter',tab:'Search'}],'Search');
+  assertDockNativeEvents('dock-key-space-search',[{type:'keydown',trusted:true,key:' ',tab:'Search'},{type:'keyup',trusted:true,key:' ',tab:'Search'},{type:'click',trusted:true,detail:0,tab:'Search'}],'Search');
+  assertDockNativeEvents('dock-drag-files-center',[{type:'dragstart',trusted:true,tab:'Files'},{type:'dragover',trusted:true,zone:'center'},{type:'drop',trusted:true,zone:'center',transferText:'Files'}],'Files');
+  assert.throws(()=>assertDockNativeEvents('dock-click-files',[{type:'click',trusted:false,detail:1,tab:'Files'}],'Files'),/trusted browser input/,'Synthetic click dispatch cannot pass');
+  assert.throws(()=>assertDockNativeEvents('dock-key-enter-search',[{type:'keydown',trusted:true,key:'Enter',tab:'Search'},{type:'keyup',trusted:true,key:'Enter',tab:'Search'},{type:'click',trusted:true,detail:0,tab:'Search'}],'Search'),/browser key order/,'Enter in Space order cannot pass');
+  assert.throws(()=>assertDockNativeEvents('dock-key-space-search',[{type:'keydown',trusted:true,key:' ',tab:'Search'},{type:'click',trusted:true,detail:0,tab:'Search'},{type:'keyup',trusted:true,key:' ',tab:'Search'}],'Search'),/browser key order/,'Space in Enter order cannot pass');
+  assert.throws(()=>assertDockNativeEvents('dock-drag-files-center',[{type:'dragstart',trusted:true,tab:'Files'},{type:'drop',trusted:false,zone:'center',transferText:'Files'}],'Files'),/trusted browser input/,'Synthetic drop cannot pass');
+  assert.throws(()=>assertDockNativeEvents('dock-drag-files-center',[{type:'dragstart',trusted:true,tab:'Files'},{type:'drop',trusted:true,zone:'right',transferText:'Files'}],'Files'),/center/,'A drop into the wrong zone cannot pass');
+
+  const [template,fixture,foundation,driver,actions]=await Promise.all([read('ui/gohtmx/templates/ely-api-foundation.html'),read('internal/gallery/advanced_foundation_fixtures.go'),read('ui/gohtmx/assets/ely-api-foundation.js'),read('ui/gohtmx/tests/browser/visual-state-audit-drivers.mjs'),read('ui/gohtmx/tests/browser/visual-state-audit-actions.mjs')]);
+  assert.match(template,/data-foundation-dock-zone="left"[\s\S]*data-foundation-dock-zone="center"[\s\S]*data-foundation-dock-zone="right"[\s\S]*data-foundation-dock-zone="bottom"/,'The contract targets the four default template zones');
+  assert.match(fixture,/case "Dock":[\s\S]*"Items": \[\]string\{"Files", "Outline", "Search"\}/,'The default Dock labels are source-backed');
+  assert.match(foundation,/const dockTab = event\.target\.closest\('\[data-foundation-dock-tab\]'\)/);assert.match(foundation,/emit\(root, 'change', \{value: dockTab\.textContent\}\)/);
+  assert.match(foundation,/const onDragStart = event => \{ const tab = event\.target\.closest\?\.\('\[data-foundation-dock-tab\]'\)/);assert.match(foundation,/emit\(root, 'change', \{dock: dockZone\.dataset\.foundationDockZone, value: label\}\)/);
+  const dockPath=runRequestedStateActions.toString().slice(runRequestedStateActions.toString().indexOf("if(contract.focusedSequence==='dock-native-actions')"),runRequestedStateActions.toString().indexOf("if(contract.focusedSequence==='foundation-native-resize')"));
+  assert.match(dockPath,/\.click\(\)/);assert.match(dockPath,/\.press\(key\)/);assert.match(dockPath,/\.dragTo\(target\)/);assert.match(dockPath,/event\.isTrusted/);assert.doesNotMatch(dockPath,/dispatchEvent|new DataTransfer/,'Dock input must come from Playwright native interaction, not synthetic dispatch');
+  assert.match(actions,/if\(contract\.requestedStateOnly\)\{\s*await runRequestedStateActions\(contract,root,step,failureDiagnostics\);/,'The existing generic requested-state path must execute Dock without a new whitelist');
+});
+
+test('ResizeHandle, Notification identities, local scroll sync, and RTL host locale have exact requested-state mappings',async()=>{
+  const expected=[
+    ['layout/ResizeHandle','ResizeHandle','foundation-native-resize',['resize-horizontal-pointer','resize-vertical-range-home','resize-horizontal-range-end','resize-separator-arrow-up','resize-separator-arrow-down','resize-separator-home','resize-separator-end']],
+    ['feedback/Notification','Notification','interaction-notification-actions',['notification-scroll-last-row','notification-open-review','notification-mark-all-read','notification-clear','notification-reset']],
+    ['feedback/NotificationCenter','Notification','interaction-notification-actions',['notification-scroll-last-row','notification-open-review','notification-mark-all-read','notification-clear','notification-reset']],
+    ['interaction/ScrollSync','VirtualScroller','interaction-scroll-sync',['scrollsync-before-to-after','scrollsync-after-to-before']],
+    ['interaction/VirtualScroller','VirtualScroller','interaction-scroll-sync',['virtual-scroller-advance','virtual-sync-before-to-after','virtual-sync-after-to-before']],
+    ['i18n/RTL layout','RTL layout','native-rtl-locale-host',['rtl-locale-he','rtl-locale-en-restore']],
+  ];
+  for(const [identity,kind,sequence,ids]of expected){
+    const contract=requestedStateContract(identity);assert.equal(contract?.identity,identity);assert.equal(contract.kind,kind);assert.equal(contract.requestedStateOnly,true);assert.equal(contract.focusedSequence,sequence);assert.deepEqual(contract.mappingGaps,[]);assert.deepEqual(contract.steps.map(step=>step.id),ids);assert(contract.steps.every(step=>step.source.siteId.endsWith(`:${step.id}`)&&step.source.sourceAnchor&&step.source.provenance.length>0));
+  }
+  assert.equal(expected.reduce((sum,[identity])=>sum+requestedStateContract(identity).steps.length,0),24,'The six exact identities resolve to twenty-four checkpoints per live profile');
+  assert.equal(requestedStateContract('layout/SplitPane'),null,'ResizeHandle mapping does not expand to nested SplitPane');
+  assert.equal(requestedStateContract('i18n/LocaleNumber'),null,'RTL host event mapping does not invent a locale toggle or expand to LocaleNumber');
+  const [actions,foundationTemplate,foundationJS,interactionTemplate,interactionJS,nativeTemplate,nativeJS,foundationFixtures,interactionFixtures,nativeFixtures]=await Promise.all([
+    read('ui/gohtmx/tests/browser/visual-state-audit-actions.mjs'),read('ui/gohtmx/templates/ely-api-foundation.html'),read('ui/gohtmx/assets/ely-api-foundation.js'),read('ui/gohtmx/templates/ely-api-interaction.html'),read('ui/gohtmx/assets/ely-api-interaction.js'),read('ui/gohtmx/templates/ely-api-native.html'),read('ui/gohtmx/assets/ely-api-native-theme.js'),read('internal/gallery/advanced_foundation_fixtures.go'),read('internal/gallery/advanced_interaction_fixtures.go'),read('internal/gallery/advanced_native_fixtures.go'),
+  ]);
+  const requested=runRequestedStateActions.toString(),branch=requested.slice(requested.indexOf("if(contract.focusedSequence==='foundation-native-resize')"),requested.indexOf("if(contract.focusedSequence?.startsWith('communication-'))"));
+  assert.match(actions,/if\(contract\.requestedStateOnly\)\{\s*await runRequestedStateActions\(contract,root,step,failureDiagnostics\);/,'All six exact cases use the existing requested-state route');
+  assert.match(foundationTemplate,/eq \.Kind "ResizeHandle"[\s\S]*?data-foundation-split-handle[\s\S]*?input class="ely-foundation__split-range" type="range"/);assert.match(foundationJS,/const setSplit = \(split, value\) =>[\s\S]*?emit\(root, 'change', \{value: bounded\}\)/);assert.match(foundationJS,/splitHandle && \['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'\]\.includes\(event\.key\)[\s\S]*?setSplit\(split, event\.key === 'Home' \? 25 : event\.key === 'End' \? 75 : current \+ \(decrease \? -5 : 5\)/,'Separator keyboard contract remains distinct from the native range input');assert.match(foundationFixtures,/"layout\/ResizeHandle": \{"Before": "", "After": "", "Label": "Resize panes"\}/);
+  assert.match(interactionTemplate,/eq \.Kind "Notification"[\s\S]*?data-interaction-notification-read[\s\S]*?data-interaction-notification-clear[\s\S]*?data-interaction-notification-reset/);assert.match(interactionTemplate,/eq \.Kind "VirtualScroller"[\s\S]*?data-direct-count[\s\S]*?data-direct-sync/);assert.match(interactionJS,/value = 'read-all'[\s\S]*?value = 'reset'[\s\S]*?value = 'cleared'/);assert.match(interactionJS,/const directWindow = \(count, height, top, viewport\)/);assert.match(interactionJS,/root\.querySelectorAll\('\[data-direct-sync\]'\)[\s\S]*?other\.scrollTop = pane\.scrollTop/);assert.match(interactionFixtures,/if name == "VirtualScroller"[\s\S]*?props\["Count"\], props\["RowHeight"\], props\["Label"\] = 10000, 28, "Ten thousand rows"/);
+  const notificationReview=requestedStateContract('feedback/Notification').steps.find(step=>step.id==='notification-open-review');
+  assert.match(notificationReview.expectedState,/review\(""\)/,'The nested Review action emits an empty value, not its parent row value');
+  assert.match(interactionFixtures,/\{"Label": "Review", "Action": "review", "ButtonVariant": "primary"\}/,'The default nested Review action has no caller-supplied Value');
+  assert.equal(assertCommunicationCallerRequest([{action:'review',component:'feedback/Notification',value:''}],0,'feedback/Notification','review','').event.value,'');
+  assert.throws(()=>assertCommunicationCallerRequest([{action:'review',component:'feedback/Notification',value:'review'}],0,'feedback/Notification','review',''),/default-fixture value/,'The containing row value must not be inherited by its nested Review button');
+  assert.match(branch,/const review=host\.locator\('\[data-ely-action="review"\]'\);assert\.equal\(await review\.count\(\),1/,'Review target is the unique action control within this exact fixture host');
+  assert.match(nativeTemplate,/eq \.Kind "RTL layout"[\s\S]*?data-native-locale-scope/);assert.match(nativeJS,/listen\(root,'ely:locale',event=>[\s\S]*?scope\.dataset\.locale=event\.detail\.locale[\s\S]*?sync\(event\)/);assert.match(nativeFixtures,/props\["Locale"\], props\["RTL"\] = "en-US", false/);
+  assert.match(branch,/mouse\.move\(x,box\.y\+box\.height\*\.7/);assert.match(branch,/horizontalHandle\.press\(key\)/);assert.match(branch,/resize-separator-arrow-up/);assert.match(branch,/resize-separator-arrow-down/);assert.match(branch,/resize-separator-home/);assert.match(branch,/resize-separator-end/);assert.match(branch,/control==='separator'&&event\.orientation==='horizontal'/);assert.match(branch,/\.press\(key\)/);assert.match(branch,/assertChange\(cursor,'notification',value\)/);assert.match(branch,/notification-scroll-last-row/);assert.match(branch,/mouse\.wheel/);assert.match(branch,/virtual-scroller-advance/);assert.match(branch,/Math\.abs\(positions\[0\]-positions\[1\]\)<=1/);assert.match(branch,/new CustomEvent\('ely:locale'/);assert.match(branch,/twinUnchanged:true/);
+  assert.doesNotMatch(branch,/scrollTop\s*=|\.dispatchEvent\(new (?:PointerEvent|MouseEvent|KeyboardEvent)/,'Scroll/resize inputs cannot be replaced by forced scroll assignment or synthetic native input');
+  assert.match(branch,/finally\{await root\.evaluate/,'Temporary event observers must be removed even when a checkpoint fails');
+});

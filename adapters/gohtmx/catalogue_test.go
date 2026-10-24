@@ -46,7 +46,7 @@ func TestCatalogueGeneratedFilesCurrent(t *testing.T) {
 			t.Fatal(err)
 		}
 		if !bytes.Equal(current, item.data) {
-			t.Errorf("%s is stale; run go generate ./sdui", item.name)
+			t.Errorf("%s is stale; run go generate ./adapters/gohtmx", item.name)
 		}
 	}
 }

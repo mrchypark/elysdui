@@ -120,6 +120,7 @@ func advancedFormsCases() []AdvancedCase {
 			case "Slider":
 				props["PreviewExamples"] = []map[string]any{{"Label": "Volume 40", "Name": "volume", "Value": "40", "Caption": "volume 40", "Min": "0", "Max": 100, "Width": "320"}, {"PreviewName": "RangeSlider", "Label": "Price 20 to 80", "Name": "price", "Value": "20", "End": "80", "Caption": "price 20 to 80", "Min": "0", "Max": 100, "Step": "5", "Width": "320"}, {"PreviewName": "VerticalSlider", "Label": "Level 60", "Name": "level", "Value": "60", "Caption": "level 60", "Min": "0", "Max": 100, "Step": "5", "Vertical": true}}
 			case "Knob":
+				props["Value"] = "2"
 				props["PreviewExamples"] = []map[string]any{{"Label": "Gain 65", "Name": "gain", "Value": "65", "Caption": "gain 65", "Min": "0", "Max": 100}, {"PreviewName": "Dial", "Label": "Pan 0", "Name": "pan", "Value": "0", "Caption": "pan 0", "Min": "-50", "Max": 50}, {"PreviewName": "Stepper", "Label": "Guests", "Name": "guests", "Value": "2", "Caption": "guests", "Min": "1", "Max": 10}}
 			case "EmailInput":
 				props["Value"] = "caller@example.test"

@@ -7,7 +7,7 @@ permissions:
   contents: read
 jobs:
   searchable-menu:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -43,7 +43,7 @@ jobs:
             test-results/contracts/searchable-menu-fixtures/
           if-no-files-found: error
   repair-causal-controls:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:

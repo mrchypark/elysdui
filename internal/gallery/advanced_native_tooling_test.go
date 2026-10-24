@@ -65,6 +65,11 @@ func TestNativeToolingFixtures(t *testing.T) {
 				if strings.Contains(html, "<button") {
 					t.Fatal("source gallery is descriptive")
 				}
+				for _, want := range []string{`aria-label="Component gallery"`, `href="/gallery/foundation"`, `href="/gallery/media"`, `href="/gallery/tooling"`} {
+					if !strings.Contains(html, want) {
+						t.Errorf("caller gallery fixture missing %q", want)
+					}
+				}
 			case "PlaygroundPanel":
 				if strings.Count(html, "data-tool-playground=") != 2 {
 					t.Fatal("both source playgrounds required")

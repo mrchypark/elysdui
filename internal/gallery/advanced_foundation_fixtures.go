@@ -76,6 +76,7 @@ func advancedFoundationCases() []AdvancedCase {
 				props["PreviewExamples"] = []map[string]any{floating}
 			case "Dock":
 				dock := map[string]any{"Before": "files panel", "Text": "Center. Drag a tab onto a zone.", "RightText": "search panel", "DockIcons": []string{"folder", "layers", "search"}, "BottomIcon": "terminal", "After": "Terminal", "AfterText": "terminal panel", "Items": []string{"Files", "Outline", "Search"}}
+				props["Disabled"] = false
 				for key, value := range dock {
 					props[key] = value
 				}
