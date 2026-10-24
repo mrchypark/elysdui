@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import test from 'node:test';
 import {assertSpecialInputState} from './visual-state-audit-drivers.mjs';
+import {assertCronNativePreview} from './visual-state-audit-drivers.mjs';
 import {assertActivityLogScopedAuditPage,assertCommunicationCallerRequest,assertDockCallerAction,assertDockNativeEvents,assertEvalLastColumnGeometry,assertNativeEmbedOpen,activatePresenceStep,assertPresenceNativeRequest,assertFoundationPublicEvents,assertPlainInputNativeEvents,assertFormattedInputState,calendarDraftWheelDecision,requestedStateContract,runRequestedStateActions} from './visual-state-audit-drivers.mjs';
 
 const read=path=>readFile(new URL(`../../../../${path}`,import.meta.url),'utf8');
@@ -519,6 +520,47 @@ test('ResizeHandle, Notification identities, local scroll sync, and RTL host loc
   assert.match(branch,/mouse\.move\(x,box\.y\+box\.height\*\.7/);assert.match(branch,/horizontalHandle\.press\(key\)/);assert.match(branch,/resize-separator-arrow-up/);assert.match(branch,/resize-separator-arrow-down/);assert.match(branch,/resize-separator-home/);assert.match(branch,/resize-separator-end/);assert.match(branch,/control==='separator'&&event\.orientation==='horizontal'/);assert.match(branch,/\.press\(key\)/);assert.match(branch,/assertChange\(cursor,'notification',value\)/);assert.match(branch,/notification-scroll-last-row/);assert.match(branch,/mouse\.wheel/);assert.match(branch,/virtual-scroller-advance/);assert.match(branch,/Math\.abs\(positions\[0\]-positions\[1\]\)<=1/);assert.match(branch,/new CustomEvent\('ely:locale'/);assert.match(branch,/twinUnchanged:true/);
   assert.doesNotMatch(branch,/scrollTop\s*=|\.dispatchEvent\(new (?:PointerEvent|MouseEvent|KeyboardEvent)/,'Scroll/resize inputs cannot be replaced by forced scroll assignment or synthetic native input');
   assert.match(branch,/finally\{await root\.evaluate/,'Temporary event observers must be removed even when a checkpoint fails');
+});
+
+test('Cron native driver rejects stale increasing runs and requires exact frozen expression previews',async()=>{
+  const contract=requestedStateContract('forms/CronEditor'),initial=['2026-09-25T12:05:00.000Z','2026-09-25T12:10:00.000Z','2026-09-25T12:15:00.000Z'];
+  const edited=['2026-09-28T09:00:00.000Z','2026-09-29T09:00:00.000Z','2026-09-30T09:00:00.000Z'],preset=['2026-09-26T09:00:00.000Z','2026-09-27T09:00:00.000Z','2026-09-28T09:00:00.000Z'];
+  const {cronPreview}=await import('../../assets/ely-expressions.js');
+  for(const [expression,want]of [[contract.fixtureGuards.initial,initial],[contract.fixtureGuards.edited,edited],[contract.fixtureGuards.preset,preset]]){assert.deepEqual(cronPreview(expression,new Date(contract.fixtureGuards.now)).runs,want);assertCronNativePreview(expression,contract.fixtureGuards.now,want);}
+  assert.throws(()=>assertCronNativePreview(contract.fixtureGuards.edited,'2026-09-26T12:00:00Z',edited),/frozen cron clock/);
+  assert.throws(()=>assertCronNativePreview('0 10 * * *',contract.fixtureGuards.now,preset),/finite canonical/);
+  const execute=async staleStage=>{
+    let value=contract.fixtureGuards.initial,values=initial;const reached=[];
+    const field={inputValue:async()=>value,evaluate:async()=>true,fill:async next=>{value=next;if(staleStage!=='cron-edit')values=edited;}};
+    const root={getAttribute:async name=>name==='data-ely-component'?contract.identity:contract.kind,locator:selector=>{
+      if(selector==='[data-ely-cron]')return field;
+      if(selector==='[data-ely-cron-runs] time')return {evaluateAll:async fn=>fn(values.map(dateTime=>({dateTime})))};
+      if(selector==='[data-ely-cron-now]')return {getAttribute:async()=>contract.fixtureGuards.now};
+      if(selector==='[data-ely-cron-preset][value="0 9 * * *"]')return {scrollIntoViewIfNeeded:async()=>{},evaluate:async()=>({x:1,y:1}),click:async()=>{value=contract.fixtureGuards.preset;if(staleStage!=='cron-preset')values=preset;}};
+      assert.fail('Unexpected cron selector '+selector);
+    }};
+    await runRequestedStateActions(contract,root,async(id,action,verify)=>{reached.push(id);await action();await verify({actions:[]},{actions:[]});});return reached;
+  };
+  assert.deepEqual(await execute(null),['cron-edit','cron-preset']);
+  for(const stale of ['cron-edit','cron-preset'])await assert.rejects(()=>execute(stale),/Cron preview must be fresh/,'Execute the real driver with stale but increasing prior runs; do not merely test collection');
+});
+
+test('ColorPicker native driver follows palette hue150 then ArrowRight151',async()=>{
+  const contract=requestedStateContract('forms/ColorPicker');
+  const execute=async arrowHue=>{
+    let selected=contract.fixtureGuards.initial,h=0;const reached=[];
+    const root={getAttribute:async name=>name==='data-ely-component'?contract.identity:contract.kind,locator:selector=>{
+      if(selector==='[data-ely-color]'||selector==='[data-ely-color-hex]')return {inputValue:async()=>selected};
+      if(selector==='[data-ely-color-status]')return {evaluate:async()=>selected+' at 100%'};
+      if(selector==='[data-ely-color-hue]')return {inputValue:async()=>String(h),press:async key=>{assert.equal(key,'ArrowRight');h=arrowHue;selected='#228857';}};
+      if(selector==='[data-ely-color-choice="#228855"]')return {count:async()=>1,scrollIntoViewIfNeeded:async()=>{},evaluate:async()=>({x:1,y:1}),click:async()=>{selected='#228855';h=150;}};
+      if(selector==='[data-ely-pick-screen-color]')return {count:async()=>1};
+      if(selector==='[data-ely-color-channel="g"]')return {inputValue:async()=>'136'};
+      assert.fail('Unexpected color selector '+selector);
+    }};
+    await runRequestedStateActions(contract,root,async(id,action,verify)=>{reached.push(id);await action();await verify({actions:[]},{actions:[]});});return reached;
+  };
+  assert.deepEqual(await execute(151),['color-palette','color-hue-key']);await assert.rejects(()=>execute(121));await assert.rejects(()=>execute(150));
 });
 
 test('Seven exact forms roots have finite native local-state contracts without PreviewName promotion',async()=>{
