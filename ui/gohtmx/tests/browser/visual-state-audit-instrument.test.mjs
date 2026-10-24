@@ -10,6 +10,38 @@ import {compileFunction,runInNewContext} from 'node:vm';
 import {parse} from 'acorn';
 import {caseActionContract,requestedStateContract,runRequestedStateActions,runRegisteredCanvasActions,assertRegisteredCanvasTransition,assertCanvasRulerPan,deliverDirectActionVerification,assertVerticalRangeSnapshot,clickVisibleControl,ownedOverlayInventory,captureTargetPNG,inventoryReceipt,inventoryDrift,unhandledBrowserErrors,assertThreewayState,threewaySourcePins,threewayCleanup,activeOutlineBounds,lastPaintedLicenseFragment,persistDirectCaseFailure,retainFailurePayload,cleanupPreservingPrimary,probeFailureStateAndPayload} from './visual-state-audit-drivers.mjs';
 
+test('initial paint camera diagnostic pure: exact scope, clipping, movement and failure persistence',async()=>{
+  const source=await readFile(new URL('./visual-state-audit-baseline.mjs',import.meta.url),'utf8');
+  const ast=parse(source,{ecmaVersion:'latest',sourceType:'module'});
+  const load=name=>{const fn=ast.body.find(n=>n.type==='FunctionDeclaration'&&n.id.name===name);assert.ok(fn);return compileFunction(`return (${source.slice(fn.start,fn.end)});`)();};
+  const snapshot=load('initialPaintSnapshot'),failures=load('initialPaintFailures');
+  assert.equal(snapshot(null,'gallery:devtools/QueryEditor'),null,'unrelated fixtures stay untouched');
+  const emptyRoot={getBoundingClientRect:()=>({left:0,top:0,right:100,bottom:100}),querySelector:()=>null};
+  for(const [caseId,names] of [['gallery:devtools/ColorContrastChecker',['pattern','flag-i','flag-m','flag-s','flag-x']],['gallery:devtools/Encoder',['pattern','flag-i','flag-m','flag-s','flag-x']],['gallery:devtools/Base64',['pattern','flag-i','flag-m','flag-s','flag-x']],['gallery:collab/ActivityLog',['first-avatar','first-text']]]){
+    const result=runInNewContext(`(${snapshot.toString()})(root,caseId)`,{root:emptyRoot,caseId,scrollX:0,scrollY:0});
+    assert.deepEqual(Array.from(result.required,x=>x.name),names);assert.ok(result.required.every(x=>x.missing),'missing required caller nodes must not pass');
+  }
+  const bounds={left:10,top:10,right:30,bottom:30},clip={x:0,y:0,width:100,height:100};
+  const item={name:'flag-x',bounds,ranges:[{left:25,top:12,right:29,bottom:25}],ancestors:[{bounds:{left:0,top:0,right:100,bottom:100},overflowX:'hidden',overflowY:'auto',clip:'auto',clipPath:'none',display:'block',visibility:'visible',opacity:'1',scrollLeft:0,scrollTop:0}]};
+  const before={root:{left:0,top:0,right:100,bottom:100},scroll:{x:0,y:0},required:[item]};
+  assert.deepEqual(failures(before,structuredClone(before),clip),[]);
+  for(const name of ['flag-x','first-text']){
+    const clipped=structuredClone(before);clipped.required[0].name=name;clipped.required[0].ranges[0].top=-1;
+    assert.ok(failures(clipped,clipped,clip).some(x=>x.includes('outside capture')));
+    const ancestor=structuredClone(before);ancestor.required[0].ancestors[0].bounds.right=28;
+    assert.ok(failures(ancestor,ancestor,clip).some(x=>x.includes('ancestor clip')));
+  }
+  for(const change of [x=>x.scroll.y++,x=>x.root.top++,x=>x.required[0].ranges[0].left++,x=>x.required[0].ancestors[0].scrollTop++]){
+    const after=structuredClone(before);change(after);assert.ok(failures(before,after,clip).some(x=>x.includes('movement')));
+  }
+  for(const required of [[{name:'pattern',missing:true}],[{...item,rangesTruncated:true}],[{...item,ancestorsTruncated:true}]])assert.ok(failures({...before,required},{...before,required},clip).length);
+  assert.deepEqual(failures(null,null,clip),[]);
+  const failBlock=source.slice(source.indexOf('if (paintFailures.length)'),source.indexOf('const overlayVisible'));
+  assert.ok(failBlock.indexOf('result.png = png')<failBlock.indexOf('assert.fail'),'failed PNG retained before assertion');
+  const retained=source.indexOf('initialPaintDiagnostic,{after:paintAfter,failures:paintFailures}');
+  assert.ok(retained>=0&&retained<source.indexOf('if (paintFailures.length)'),'metrics retained before assertion');
+});
+
 test('hidden action shim style exits before outline color parsing',()=>{
   const bounds={clip:{x:0,y:0,width:10,height:10}},active={},node={contains:candidate=>candidate===active};
   const result=runInNewContext(`(${activeOutlineBounds.toString()})(node,bounds)`,{

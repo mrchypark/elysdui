@@ -25,6 +25,52 @@ function captureCamera(clip, scroll, viewport) {
   const fits = viewportClip.x >= 0 && viewportClip.y >= 0 && viewportClip.x + clip.width <= viewport.width && viewportClip.y + clip.height <= viewport.height;
   return {fullPage: !fits, clip: fits ? viewportClip : clip};
 }
+function initialPaintSnapshot(element, caseId) {
+  const regex = ['gallery:devtools/ColorContrastChecker','gallery:devtools/Encoder','gallery:devtools/Base64'].includes(caseId);
+  if (!regex && caseId !== 'gallery:collab/ActivityLog') return null;
+  const rect = r => ({left:r.left+scrollX,top:r.top+scrollY,right:r.right+scrollX,bottom:r.bottom+scrollY});
+  const required = regex ? [['pattern',element.querySelector('[data-dt-pattern]')],...['i','m','s','x'].map(flag=>['flag-'+flag,element.querySelector(`input[aria-label="${flag}"]`)?.closest('label')])] : [
+    ['first-avatar',element.querySelector('[data-ws-activity-entry] [data-ws-activity-avatar], [data-ws-activity-entry] img')],
+    ['first-text',element.querySelector('[data-ws-activity-entry] p')],
+  ];
+  return {caseId,root:rect(element.getBoundingClientRect()),scroll:{x:scrollX,y:scrollY},required:required.map(([name,node])=>{
+    if (!node || !element.contains(node)) return {name,missing:true};
+    const ranges=[],walker=document.createTreeWalker(node,NodeFilter.SHOW_TEXT);
+    let text;while((text=walker.nextNode()))if(text.textContent.trim()){
+      const range=document.createRange();range.selectNodeContents(text);
+      for(const r of range.getClientRects())if(r.width>0&&r.height>0)ranges.push(rect(r));
+    }
+    const ancestors=[];let parent=node;
+    while(parent&&ancestors.length<32){
+      const style=getComputedStyle(parent),r=parent.getBoundingClientRect();
+      ancestors.push({tag:parent.tagName,id:parent.id,overflowX:style.overflowX,overflowY:style.overflowY,clip:style.clip,clipPath:style.clipPath,
+        scrollLeft:parent.scrollLeft,scrollTop:parent.scrollTop,display:style.display,visibility:style.visibility,opacity:style.opacity,
+        bounds:rect({left:r.left+parent.clientLeft,top:r.top+parent.clientTop,right:r.left+parent.clientLeft+parent.clientWidth,bottom:r.top+parent.clientTop+parent.clientHeight})});
+      parent=parent.parentElement;
+    }
+    return {name,bounds:rect(node.getBoundingClientRect()),ranges:ranges.slice(0,64),rangesTruncated:ranges.length>64,ancestors,ancestorsTruncated:Boolean(parent)};
+  })};
+}
+function initialPaintFailures(before, after, clip) {
+  if (!before && !after) return [];
+  const failures=[],epsilon=.01;
+  const same=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
+  if (!before || !after || !same(before,after)) failures.push('pre/post required paint, root, ancestor or scroll movement');
+  const frame={left:clip.x,top:clip.y,right:clip.x+clip.width,bottom:clip.y+clip.height};
+  const outside=(r,b,x=true,y=true)=>(x&&(r.left<b.left-epsilon||r.right>b.right+epsilon))||(y&&(r.top<b.top-epsilon||r.bottom>b.bottom+epsilon));
+  for(const phase of [before,after])for(const item of phase?.required||[]){
+    if(item.missing||item.rangesTruncated||item.ancestorsTruncated){failures.push(`${item.name}: missing or truncated diagnostic`);continue;}
+    for(const r of [item.bounds,...item.ranges]){
+      if(r.right<=r.left||r.bottom<=r.top||outside(r,frame))failures.push(`${item.name}: required bounds outside capture`);
+      for(const a of item.ancestors){
+        if(a.display==='none'||a.visibility!=='visible'||Number(a.opacity)===0)failures.push(`${item.name}: hidden required paint`);
+        if(a.clip!=='auto'||a.clipPath!=='none')failures.push(`${item.name}: nonrectangular/legacy clip requires adjudication`);
+        if(outside(r,a.bounds,/hidden|clip|scroll|auto/.test(a.overflowX),/hidden|clip|scroll|auto/.test(a.overflowY)))failures.push(`${item.name}: required bounds outside ancestor clip`);
+      }
+    }
+  }
+  return [...new Set(failures)];
+}
 async function fulfillAsset(route, page, timeout = 30000) {
   const request = route.request(), path = new URL(request.url()).pathname;
   const context = page.context();
@@ -583,11 +629,22 @@ try {
       // Keep in-memory screenshot bytes only until this bounded batch is sealed.
       // Playwright's non-fullPage clip is viewport-relative; avoid deferred offscreen paint.
       const camera = captureCamera(bounds.clip, metadata.scroll, metadata.viewport);
+      const diagnosePaint = ['gallery:devtools/ColorContrastChecker','gallery:devtools/Encoder','gallery:devtools/Base64','gallery:collab/ActivityLog'].includes(item.caseId);
+      const paintBefore = diagnosePaint ? await root.evaluate(initialPaintSnapshot, item.caseId) : null;
+      if (paintBefore) result.actual.initialPaintDiagnostic = {before:paintBefore,camera,clip:bounds.clip};
       const png = await page.screenshot({...camera, animations: 'disabled', caret: 'hide', scale: 'css', timeout: 30000});
+      const paintAfter = diagnosePaint ? await root.evaluate(initialPaintSnapshot, item.caseId) : null;
+      const paintFailures = initialPaintFailures(paintBefore, paintAfter, bounds.clip);
+      if (paintBefore) Object.assign(result.actual.initialPaintDiagnostic,{after:paintAfter,failures:paintFailures});
       assert.equal(png.readUInt32BE(16), bounds.clip.width, 'PNG width must match target capture bounds');
       assert.equal(png.readUInt32BE(20), bounds.clip.height, 'PNG height must match target capture bounds');
       result.evidence = {path: `${batchName}/${initialFile}`, bytes: png.length, sha256: sha256(png), crop: 'target root union visible descendant/text bounds; intentional CSS clipping retained', componentIdentity: item.componentIdentity};
       result.screenshotGeometry = {widthCSS: bounds.clip.width, heightCSS: bounds.clip.height, clip: bounds.clip, camera, coordinateSpace: 'document receipt; camera.clip is viewport-relative when fullPage=false', scale: 'css', deviceScaleFactor: metadata.viewport.devicePixelRatio};
+      if (paintFailures.length) {
+        // Preserve the failed original and structured diagnostics before the case is blocked.
+        result.png = png;
+        assert.fail(`initial required paint gap: ${paintFailures.join('; ')}`);
+      }
       const overlayVisible = metadata.visibleOverlays.length > 0;
       const contextRequested = options.contextCases.includes(item.caseId) || options.contextCases.includes(item.componentIdentity);
       if (contextRequested || overlayVisible || bounds.extendsRoot || bounds.viewportTruncated || bounds.clippedCount) {
