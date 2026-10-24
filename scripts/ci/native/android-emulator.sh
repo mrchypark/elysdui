@@ -8,8 +8,26 @@ cd "$ROOT"
 source "$ROOT/scripts/ci/native/android-readiness.sh"
 RESULTS="$ROOT/test-results/android-native"
 mkdir -p "$RESULTS"
-export ANDROID_HOME="${ANDROID_HOME:-${ANDROID_SDK_ROOT:?An existing Android SDK is required}}"
-export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/emulator:$ANDROID_HOME/platform-tools:$PATH"
+SDK_ROOT=$(android_resolve_sdk_root)
+export ANDROID_HOME="$SDK_ROOT" ANDROID_SDK_ROOT="$SDK_ROOT"
+export PATH="$SDK_ROOT/cmdline-tools/latest/bin:$SDK_ROOT/emulator:$SDK_ROOT/platform-tools:$PATH"
+hash -r
+EMULATOR_BINARY=$(android_emulator_binary "$SDK_ROOT")
+SDKMANAGER="$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+AVDMANAGER="$SDK_ROOT/cmdline-tools/latest/bin/avdmanager"
+if [ ! -x "$EMULATOR_BINARY" ]; then
+	echo "Android emulator package was not provisioned from selected SDK root: $SDK_ROOT" >&2
+	exit 1
+fi
+android_verify_emulator_path "$SDK_ROOT"
+"$EMULATOR_BINARY" -version > "$RESULTS/emulator-version.txt" 2>&1 || {
+	echo "Android emulator version check failed: $EMULATOR_BINARY" >&2
+	cat "$RESULTS/emulator-version.txt" >&2
+	exit 1
+}
+cat "$RESULTS/emulator-version.txt"
+[ -x "$SDKMANAGER" ] || { echo "sdkmanager is missing from selected Android SDK root: $SDKMANAGER" >&2; exit 1; }
+[ -x "$AVDMANAGER" ] || { echo "avdmanager is missing from selected Android SDK root: $AVDMANAGER" >&2; exit 1; }
 SERIAL=emulator-5554
 SERVER_PID=
 CONTROLS_PID=
@@ -68,7 +86,7 @@ if [ ! -c /dev/kvm ] || [ ! -r /dev/kvm ] || [ ! -w /dev/kvm ]; then
 	cat "$RESULTS/kvm-device.txt" >&2
 	exit 1
 fi
-if ! emulator -accel-check > "$RESULTS/kvm-accel-check.txt" 2>&1; then
+if ! "$EMULATOR_BINARY" -accel-check > "$RESULTS/kvm-accel-check.txt" 2>&1; then
 	echo 'KVM preflight failed: emulator -accel-check returned failure.' >&2
 	cat "$RESULTS/kvm-accel-check.txt" >&2
 	exit 1
@@ -79,8 +97,8 @@ if ! android_kvm_accel_check_usable < "$RESULTS/kvm-accel-check.txt"; then
 	exit 1
 fi
 echo 'Accessible /dev/kvm and usable emulator acceleration confirmed without changing permissions.'
-sdkmanager "$SYSTEM_IMAGE" < /dev/null
-printf 'no\n' | avdmanager create avd --force --name ely-profile --device pixel_2 --package "$SYSTEM_IMAGE"
+"$SDKMANAGER" "$SYSTEM_IMAGE" < /dev/null
+printf 'no\n' | "$AVDMANAGER" create avd --force --name ely-profile --device pixel_2 --package "$SYSTEM_IMAGE"
 # Reduce software-rendering work while keeping a useful phone-sized dp viewport.
 python3 - <<'PY'
 from pathlib import Path
@@ -90,7 +108,7 @@ values.update({'hw.lcd.width': '720', 'hw.lcd.height': '1280', 'hw.lcd.density':
                'skin.name': '720x1280', 'skin.path': '720x1280', 'skin.dynamic': 'yes'})
 path.write_text(''.join(f'{key}={value}\n' for key, value in values.items()))
 PY
-emulator -avd ely-profile -port 5554 -cores 2 -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect -accel on > "$RESULTS/emulator.log" 2>&1 &
+"$EMULATOR_BINARY" -avd ely-profile -port 5554 -cores 2 -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect -accel on > "$RESULTS/emulator.log" 2>&1 &
 EMULATOR_PID=$!
 ANR_LOG="$RESULTS/system-anr-watch.log"
 : > "$ANR_LOG"

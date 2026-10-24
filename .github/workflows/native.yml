@@ -139,6 +139,13 @@ jobs:
           gradle-version: '8.11.1'
       # GitHub's hosted image supplies an installed/licensed Android SDK. No
       # user SDK license acceptance or private computer access is performed here.
+      - name: Resolve Android SDK root for Gradle and emulator
+        run: |
+          set -euo pipefail
+          source scripts/ci/native/android-readiness.sh
+          sdk_root=$(android_resolve_sdk_root)
+          echo "Resolved Android SDK root: $sdk_root"
+          printf 'ANDROID_HOME=%s\nANDROID_SDK_ROOT=%s\n' "$sdk_root" "$sdk_root" >> "$GITHUB_ENV"
       - name: Compile Compose app and test real Go transport
         run: |
           go build -o /tmp/ely-native-profile ./examples/native-profile
@@ -157,6 +164,18 @@ jobs:
           python3 scripts/ci/native/test-focus-diagnostics.py
           (cd scripts/ci/native/focus-budget-controls-src && go test ./...)
           scripts/ci/native/focus-budget-controls
+      - name: Provision Android emulator SDK package
+        run: |
+          set -euo pipefail
+          source scripts/ci/native/android-readiness.sh
+          sdk_root=$(android_resolve_sdk_root)
+          export PATH="$sdk_root/emulator:$PATH"
+          hash -r
+          emulator_binary=$(android_ensure_emulator "$sdk_root")
+          android_verify_emulator_path "$sdk_root"
+          echo "Resolved Android SDK root: $sdk_root"
+          echo "Android emulator binary: $emulator_binary"
+          "$emulator_binary" -version
       - name: Grant this job user access to KVM
         run: |
           set -euo pipefail

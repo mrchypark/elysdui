@@ -3,6 +3,72 @@
 # Print a direct focus identity, or on API 29 the unique eligible window on the
 # top-focused display, only with visible system bars and no visible ANR alert.
 # Callers still require repeated identical samples.
+android_canonical_sdk_root() {
+	local root=$1
+	[ -n "$root" ] && [ -d "$root" ] || return 1
+	(CDPATH= cd -- "$root" && pwd -P)
+}
+
+android_resolve_sdk_root() {
+	local android_home=${ANDROID_HOME:-} sdk_root=${ANDROID_SDK_ROOT:-} home_real sdk_real
+	if [ -n "$android_home" ] && [ -n "$sdk_root" ]; then
+		home_real=$(android_canonical_sdk_root "$android_home") || {
+			printf 'ANDROID_HOME is not an existing SDK directory: %s\n' "$android_home" >&2
+			return 1
+		}
+		sdk_real=$(android_canonical_sdk_root "$sdk_root") || {
+			printf 'ANDROID_SDK_ROOT is not an existing SDK directory: %s\n' "$sdk_root" >&2
+			return 1
+		}
+		[ "$home_real" = "$sdk_real" ] || {
+			printf 'Android SDK roots disagree: ANDROID_HOME=%s ANDROID_SDK_ROOT=%s\n' "$home_real" "$sdk_real" >&2
+			return 1
+		}
+		printf '%s\n' "$home_real"
+		return 0
+	fi
+	android_canonical_sdk_root "${android_home:-$sdk_root}" || {
+		printf 'Set ANDROID_HOME or ANDROID_SDK_ROOT to an existing Android SDK directory.\n' >&2
+		return 1
+	}
+}
+
+android_emulator_binary() {
+	printf '%s/emulator/emulator\n' "$1"
+}
+
+android_ensure_emulator() {
+	local sdk_root=$1 emulator sdkmanager
+	emulator=$(android_emulator_binary "$sdk_root")
+	if [ ! -x "$emulator" ]; then
+		sdkmanager="$sdk_root/cmdline-tools/latest/bin/sdkmanager"
+		[ -x "$sdkmanager" ] || {
+			printf 'Android emulator is missing and sdkmanager is unavailable: %s\n' "$sdkmanager" >&2
+			return 1
+		}
+		printf 'Installing only the Android SDK emulator package from %s\n' "$sdk_root" >&2
+		"$sdkmanager" emulator < /dev/null >&2 || {
+			printf 'sdkmanager failed to install the Android emulator package.\n' >&2
+			return 1
+		}
+	fi
+	[ -x "$emulator" ] || {
+		printf 'Android emulator package did not provide an executable: %s\n' "$emulator" >&2
+		return 1
+	}
+	printf '%s\n' "$emulator"
+}
+
+android_verify_emulator_path() {
+	local sdk_root=$1 expected resolved
+	expected=$(android_emulator_binary "$sdk_root")
+	resolved=$(type -P emulator 2>/dev/null || true)
+	[ "$resolved" = "$expected" ] || {
+		printf 'PATH emulator does not resolve to the selected Android SDK: expected=%s actual=%s\n' "$expected" "${resolved:-<missing>}" >&2
+		return 1
+	}
+}
+
 android_window_readiness_identity() {
 	local dump identity
 	dump=$(cat)
