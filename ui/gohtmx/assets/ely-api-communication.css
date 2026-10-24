@@ -367,3 +367,4 @@
 [data-ely-family='communication'] .ely-agent-tree summary small{flex:0 1 auto;min-width:0;white-space:normal;overflow-wrap:anywhere}
 [data-ely-family='communication'] .ely-agent-tree summary progress{flex:0 0 4rem;min-width:4rem}
 [data-ely-family='communication'] .ely-agent-tree details:not([open])>ul{display:none}
+[data-ely-family='communication'] .ely-agent-tree summary button[aria-current=true]{background:var(--color-selected,var(--accent-tint,#e9f2eb))!important;color:var(--color-accent,#306b43);font-weight:600;box-shadow:inset 0 0 0 1px var(--color-accent,#306b43)}

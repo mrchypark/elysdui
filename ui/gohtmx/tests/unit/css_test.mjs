@@ -26,10 +26,12 @@ const agentTreeSummaryRule = communicationCSS.match(/\[data-ely-family='communic
 const agentTreeButtonRule = communicationCSS.match(/\[data-ely-family='communication'\] \.ely-agent-tree summary button\{([^}]*)\}/);
 const agentTreeStatusRule = communicationCSS.match(/\[data-ely-family='communication'\] \.ely-agent-tree summary small\{([^}]*)\}/);
 const agentTreeProgressRule = communicationCSS.match(/\[data-ely-family='communication'\] \.ely-agent-tree summary progress\{([^}]*)\}/);
+const agentTreeSelectedRule = communicationCSS.match(/\[data-ely-family='communication'\] \.ely-agent-tree summary button\[aria-current=true\]\{([^}]*)\}/);
 assert(agentTreeSummaryRule?.[1].includes('flex-wrap:wrap'), 'SubAgentTree summaries must wrap rows when narrow');
 assert(agentTreeButtonRule?.[1].includes('flex:1 1 auto') && agentTreeButtonRule[1].includes('min-width:0') && agentTreeButtonRule[1].includes('overflow-wrap:anywhere'), 'SubAgentTree labels must shrink and wrap without overflow');
 assert(agentTreeStatusRule?.[1].includes('flex:0 1 auto') && agentTreeStatusRule[1].includes('min-width:0') && agentTreeStatusRule[1].includes('white-space:normal') && agentTreeStatusRule[1].includes('overflow-wrap:anywhere'), 'SubAgentTree status must wrap normally and break long tokens only as needed');
 assert(agentTreeProgressRule?.[1].includes('flex:0 0 4rem') && agentTreeProgressRule[1].includes('min-width:4rem'), 'SubAgentTree progress must retain its usable width and wrap to another row');
+assert(agentTreeSelectedRule?.[1].includes('background:') && agentTreeSelectedRule[1].includes('box-shadow:'), 'SubAgentTree current selection must be visibly distinguishable');
 assert(communicationCSS.includes("[data-ely-family='communication'] .ely-agent-tree details:not([open])>ul{display:none}"), 'SubAgentTree must hide child lists when native details closes, despite the shared ul grid rule');
 
 
