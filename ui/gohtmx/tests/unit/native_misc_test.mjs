@@ -41,7 +41,16 @@ const declarations=css=>Object.fromEntries([...css.matchAll(/(--[\w-]+)\s*:\s*([
 const baseTokens={...declarations(inputCSS.match(/@theme\s*\{([^}]+)\}/)[1]),...declarations(inputCSS.match(/:root\s*\{([^}]+)\}/)[1]),...declarations(apiCSS.slice(0,apiCSS.indexOf('}')))};
 const darkTokens={...baseTokens,...declarations(inputCSS.match(/:root\[data-theme='dark'\]\s*\{([^}]+)\}/)[1])};
 const resolve=(value,tokens,depth=0)=>{assert.ok(depth<12,'token cycle');const key=value.match(/^var\((--[\w-]+)\)$/)?.[1];return key?resolve(tokens[key],tokens,depth+1):value};
+// Match the base button:not([data-slot]) specificity, then win by source order.
+const cookieSelector="[data-ely-family='native'] button[data-cookies='all']";
+const cookieRule=miscCSS.slice(miscCSS.indexOf(cookieSelector)).match(/^[^{]+\{([^}]+)\}/)?.[1];
+assert.ok(cookieRule,'cookie primary rule must include button to beat the native base background');
+assert.ok(miscCSS.indexOf(cookieSelector)>miscCSS.lastIndexOf("[data-ely-family='native'] button:not([data-slot='button']){"),'cookie primary paint must follow the equally specific base rule');
+assert.match(cookieRule,/(?:^|;)background:var\(--color-primary\);/);
+assert.match(cookieRule,/(?:^|;)color:var\(--color-primary-foreground,var\(--on-accent\)\);/);
+assert.match(cookieRule,/(?:^|;)border-color:var\(--color-primary\)/);
 const luminance=hex=>{assert.match(hex,/^#[\da-f]{6}$/i);return [1,3,5].map(i=>parseInt(hex.slice(i,i+2),16)/255).map(c=>c<=.04045?c/12.92:((c+.055)/1.055)**2.4).reduce((n,c,i)=>n+c*[.2126,.7152,.0722][i],0)};
+for(const [name,tokens] of [['light',baseTokens],['dark',darkTokens]]){const bg=luminance(resolve('var(--color-primary)',tokens)),fg=luminance(resolve('var(--color-primary-foreground)',tokens));assert.ok((Math.max(bg,fg)+.05)/(Math.min(bg,fg)+.05)>=7,`${name} cookie primary contrast must be at least 7:1`)}
 for(const [name,tokens] of [['light',baseTokens],['dark',darkTokens]]){const bg=luminance(resolve('var(--surface-sunken)',tokens)),fg=luminance(resolve('var(--foreground)',tokens)),ratio=(Math.max(bg,fg)+.05)/(Math.min(bg,fg)+.05);assert.ok(ratio>=7,`${name} license contrast ${ratio} is below 7:1`)}
 assert.match(miscCSS,/component-examples:has\(> \[data-ely-family='native'\] \[data-misc-clock\]\)\{[^}]*align-items:flex-end/);
 assert.match(miscCSS,/component-examples:has\(> \[data-ely-family='native'\] \[data-misc-transfer\]\)\{[^}]*gap:8px/);
