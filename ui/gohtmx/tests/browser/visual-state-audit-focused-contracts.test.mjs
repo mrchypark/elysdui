@@ -11,6 +11,45 @@ test('forced scroll source guard rejects assignments without mistaking equality 
   assert.doesNotMatch('next.scrollTop===current.scrollTop',forcedScrollAssignment,'A scroll-position equality check is not an assignment');
 });
 
+test('CookieBanner, PromptPlayground, and SubAgentTree add only exact source-backed local-action contracts',async()=>{
+  const expected=[
+    ['misc/CookieBanner','Terms','native-cookie-owner-boundary',['cookies-accept-all','cookies-reject-all','cookies-open-choices','cookies-select-analytics','cookies-save-choices']],
+    ['generative/PromptPlayground','PromptPlayground','native-prompt-owner-boundary',['prompt-fill-topic','prompt-fill-tone','prompt-run-request']],
+    ['agent/SubAgentTree','SubAgentTree','communication-subagent-tree-local',['tree-collapse-code','tree-expand-code','tree-select-code']],
+  ];
+  const contracts=expected.map(([identity,kind,sequence,steps])=>{
+    const contract=requestedStateContract(identity);assert.equal(contract?.identity,identity);assert.equal(contract.kind,kind);assert.equal(contract.focusedSequence,sequence);assert.equal(contract.requestedStateOnly,true);assert.deepEqual(contract.mappingGaps,[]);assert.deepEqual(contract.steps.map(step=>step.id),steps);
+    assert(contract.steps.every(step=>step.source.siteId===`focused-state:${identity}:${step.id}`&&step.source.sourceAnchor&&step.source.provenance.includes(identity)));
+    return contract;
+  });
+  assert.equal(contracts[0].behaviorKey,'misc/Terms','Terms names the shared behavior only; the exact gallery case remains CookieBanner');
+  assert.equal(contracts.reduce((sum,contract)=>sum+contract.steps.length,0),11);
+  for(const identity of ['misc/Terms','misc/Consent Dialog','generative/PromptDiff','agent/AgentStepList','agent/SubAgentTreeExtra'])assert.equal(requestedStateContract(identity),null,`${identity} must not inherit one of these exact-case contracts`);
+
+  const [driver,nativeTemplate,nativeMisc,nativeMiscJS,promptFixture,promptJS,communicationTemplate,communicationFixture,communicationJS,docs]=await Promise.all([
+    read('ui/gohtmx/tests/browser/visual-state-audit-drivers.mjs'),read('ui/gohtmx/templates/ely-api-native.html'),read('internal/gallery/assets/native-misc-fixtures.json'),read('ui/gohtmx/assets/ely-api-native-misc.js'),read('internal/gallery/advanced_native_generative_fixtures.go'),read('ui/gohtmx/assets/ely-api-native-generative-tools.js'),read('ui/gohtmx/templates/ely-api-communication.html'),read('internal/gallery/advanced_communication_fixtures.go'),read('ui/gohtmx/assets/ely-api-communication.js'),read('docs/gohtmx/advanced-communication.md'),
+  ]);
+  assert.match(nativeTemplate,/eq \.Kind "Terms"[\s\S]*?ne \.Variant "CookieBanner"[\s\S]*?data-cookies="all"[\s\S]*?data-cookies="none"[\s\S]*?data-cookies="choose"/);
+  assert.match(nativeMisc,/"Terms":\s*\{[\s\S]*?"CookieKinds"[\s\S]*?"Analytics"[\s\S]*?"Video"/);
+  assert.match(nativeMiscJS,/b\.dataset\.cookies==='choose'&&options\.hidden[\s\S]*?options\.hidden=false[\s\S]*?send\(cookies,'choose-cookies',\{values,necessary:true\}\)/);
+  assert.match(contracts[0].scope,/no local dismissal or persistence|Host requests do not prove storage/);
+
+  assert.match(promptFixture,/case "PromptPlayground":[\s\S]*?"Write three short notes on \{topic\} in a \{tone\} voice\.",[\s\S]*?"\{\}"/);
+  assert.match(promptJS,/listen\(template,'input',rebuild\)/);assert.match(promptJS,/listen\(fields,'input'/);assert.match(promptJS,/preview\.replaceChildren\(\)[\s\S]*?mark\.textContent=filled\.text\.slice\(start,end\)/);assert.match(promptJS,/running=true[\s\S]*?emit\(root,form\.dataset\.action/);
+  assert.match(promptJS,/listen\(root,'ely:prompt-output'/,'Output is supplied only by the host response boundary');
+  assert.match(driver,/topic\.fill\('observability'\)[\s\S]*?tone\.fill\('concise'\)[\s\S]*?clickVisibleControl\(run\)[\s\S]*?answer:'none; host response not supplied'/);
+  assert.match(contracts[1].scope,/No synthetic host response, generated answer, or provider claim/);
+
+  assert.match(communicationFixture,/case "SubAgentTree":[\s\S]*?"Status": "working", "Progress": 62, "Open": true[\s\S]*?"Value": "code", "Label": "Code: change the lift", "Status": "working", "Progress": 45, "Open": true/);
+  assert.match(communicationTemplate,/define "ely-api-agent-tree-node"[\s\S]*?<details[\s\S]*?<summary[\s\S]*?<progress value="\{\{\.Item\.Progress\}\}" max="100"/);
+  assert.match(communicationJS,/if\(element\.matches\('\[data-ely-select\]'\)\)[\s\S]*?setAttribute\('aria-selected','true'\)[\s\S]*?emit\(root,'select',detail\(root,element\)\)/);
+  assert.match(driver,/node\.addEventListener\('toggle',event=>node\.__visualDisclosureEvents\.push\([\s\S]*?statusProgress\(current\)[\s\S]*?clickVisibleControl\(marker\)[\s\S]*?clickVisibleControl\(code\)/);
+  assert.match(docs,/SubAgentTree uses nested `Items`[\s\S]*?maintains local disclosure and selection/);
+  assert.match(contracts[2].scope,/status\/progress|status\/progress/);
+  const cookieDriver=driver.slice(driver.indexOf("if(contract.focusedSequence==='native-cookie-owner-boundary')"),driver.indexOf("if(contract.focusedSequence==='native-prompt-owner-boundary')")),promptDriver=driver.slice(driver.indexOf("if(contract.focusedSequence==='native-prompt-owner-boundary')"),driver.indexOf("if(contract.focusedSequence==='communication-subagent-tree-local')"));
+  assert.doesNotMatch(cookieDriver,/dispatchEvent\(/,'Cookie choices are activated by native controls');assert.doesNotMatch(promptDriver,/dispatchEvent\(|ely:prompt-output/,'Prompt interactions stay native and do not fabricate a host response');
+});
+
 test('focused five-case action contracts stay explicit and source-backed',async()=>{
   const cases=[
     ['forms/HotkeyInput','HotkeyInput','hotkey-record-clear-restore',['record-shortcut','clear-shortcut','restore-shortcut']],
