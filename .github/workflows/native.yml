@@ -157,6 +157,16 @@ jobs:
           python3 scripts/ci/native/test-focus-diagnostics.py
           (cd scripts/ci/native/focus-budget-controls-src && go test ./...)
           scripts/ci/native/focus-budget-controls
+      - name: Grant this job user access to KVM
+        run: |
+          set -euo pipefail
+          test -c /dev/kvm || { echo '/dev/kvm is not a character device.' >&2; exit 1; }
+          command -v setfacl >/dev/null || { echo 'setfacl is required; refusing permission fallback.' >&2; exit 1; }
+          command -v getfacl >/dev/null || { echo 'getfacl is required; refusing unverified permission changes.' >&2; exit 1; }
+          runner_uid=$(id -u)
+          sudo setfacl -m "u:${runner_uid}:rw" /dev/kvm
+          getfacl -cn /dev/kvm | grep -Fxq "user:${runner_uid}:rw-"
+          test -r /dev/kvm && test -w /dev/kvm
       - name: Native Android emulator lifecycle against Go
         run: bash scripts/ci/native/android-emulator.sh
       - uses: actions/upload-artifact@v4
