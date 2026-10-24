@@ -133,6 +133,31 @@ test('source-only active owned outline union respects axis clips and fails close
   assert.match(driver,/captureForeignPaint,\{clip:bounds\.clip,checkedRootID\}/,'Foreign ownership must use the expanded clip');
 });
 
+test('currency focus-within ancestor outline expands the camera beyond its own overflow clip without waiving ownership',async()=>{
+  const family={},base={display:'block',visibility:'visible',opacity:'1',contentVisibility:'visible',outlineStyle:'none',outlineWidth:'0px',outlineOffset:'0px',outlineColor:'rgb(55,114,187)',boxShadow:'none',transform:'none',translate:'none',rotate:'none',scale:'none',perspective:'none',filter:'none',clipPath:'none',clip:'auto',maskImage:'none',contain:'none',zoom:'1',overflowX:'visible',overflowY:'visible',overflowClipMargin:'0px',position:'static'};
+  const contains=function(candidate){for(let current=candidate;current;current=current.parentElement)if(current===this)return true;return false;};
+  const make=(tag,rect,style,parent=null)=>({localName:tag,namespaceURI:'http://www.w3.org/1999/xhtml',parentElement:parent,style:{...base,...style},closest:()=>family,matches:()=>false,getBoundingClientRect:()=>rect,getClientRects:()=>[rect],contains});
+  const root=make('div',{left:98,top:98,right:302,bottom:130,width:204,height:32},{});
+  const currency=make('span',{left:100,top:100,right:300,bottom:128,width:200,height:28},{outlineStyle:'solid',outlineWidth:'2px',outlineOffset:'2px',overflowX:'hidden',overflowY:'hidden'},root);currency.matches=selector=>selector===':focus-within';
+  const input=make('input',{left:101,top:101,right:299,bottom:127,width:198,height:26},{outlineStyle:'solid',outlineWidth:'2px',outlineOffset:'4px'},currency);
+  const bounds={clip:{x:100,y:1100,width:200,height:28},root:{left:100,top:100,right:300,bottom:128},extendsRoot:false,viewportTruncated:false};
+  const context={document:{activeElement:input},getComputedStyle:element=>element.style,node:root,bounds,scrollX:0,scrollY:1000,innerWidth:1440,innerHeight:1000};
+  const run=()=>JSON.parse(JSON.stringify(runInNewContext(`(${activeOutlineBounds.toString()})(node,bounds)`,context)));
+  assert.deepEqual(run().clip,{x:96,y:1096,width:208,height:36},'Measured parent outline extends four pixels beyond its border box; self overflow must not cut its own ring');
+  assert.deepEqual(run().focusWithinOutlines[0].outline.paint,{left:96,top:96,right:304,bottom:132});assert.equal(run().extendsRoot,true);
+  input.style={...base};assert.deepEqual(run().clip,{x:96,y:1096,width:208,height:36},'Ancestor ring must be captured even when the active input has no outline');
+  root.style.overflowX='hidden';root.style.overflowY='hidden';assert.deepEqual(run().focusOutline.paint,{left:98,top:98,right:302,bottom:130},'External ancestor clipping remains effective');assert.deepEqual(run().clip,{x:98,y:1098,width:204,height:32});root.style={...base};
+  for(const change of [{transform:'matrix(1,0,0,1,0,-12)'},{transform:'matrix(2,0,0,1,0,0)'},{rotate:'10deg'},{perspective:'100px'},{clipPath:'inset(1px)'},{filter:'blur(1px)'},{outlineStyle:'auto'}]){currency.style={...base,outlineStyle:'solid',outlineWidth:'2px',outlineOffset:'2px',...change};assert.equal(run().focusOutline.status,'unsupported');}
+  currency.style={...base,outlineStyle:'solid',outlineWidth:'2px',outlineOffset:'2px',boxShadow:'0px 0px 0px 4px rgb(55,114,187)'};assert.equal(run().focusOutline.reason,'unbounded focus-within shadow','Unknown focus-within shadows must fail closed, not receive generic padding');
+  currency.style={...base,outlineStyle:'solid',outlineWidth:'2px',outlineOffset:'2px'};currency.closest=()=>({});assert.equal(run().focusOutline.reason,'nested component focus ownership');currency.closest=()=>family;
+  currency.getClientRects=()=>[currency.getBoundingClientRect(),currency.getBoundingClientRect()];assert.equal(run().focusOutline.reason,'fragmented focus outline');currency.getClientRects=()=>[currency.getBoundingClientRect()];
+  currency.matches=()=>false;assert.deepEqual(run(),bounds,'Non-focus-within ancestors cannot add an envelope');currency.matches=selector=>selector===':focus-within';
+  context.document.activeElement={};assert.deepEqual(run(),bounds,'Focus in a different audit instance cannot expand this target');
+  const css=await readFile(new URL('../../assets/ely-api-forms.css',import.meta.url),'utf8');
+  assert.match(css,/\.ely-api-currency:focus-within\{outline:2px solid var\(--focus\);outline-offset:2px\}/);
+  const actions=await readFile(new URL('./visual-state-audit-actions.mjs',import.meta.url),'utf8');assert.match(actions,/countsAsOwnedEvidence:!foreignDOMIntersections\.length&&!focusOutlineGap/,'Expanded ring still requires foreign paint and outline ownership gates');
+});
+
 test('ClearableInput self-only pure translation retains measured outline bounds and strict ownership guards',()=>{
   const family={},rect={left:1329,top:545.609375,right:1353,bottom:569.609375,width:24,height:24},rowRect={left:85,top:543.609375,right:1355,bottom:571.609375,width:1270,height:28};
   const base={display:'block',visibility:'visible',opacity:'1',contentVisibility:'visible',outlineStyle:'solid',outlineWidth:'2px',outlineOffset:'4px',outlineColor:'rgb(55, 114, 187)',transform:'none',translate:'none',rotate:'none',scale:'none',perspective:'none',filter:'none',clipPath:'none',clip:'auto',maskImage:'none',contain:'none',zoom:'1',overflowX:'visible',overflowY:'visible',overflowClipMargin:'0px',position:'static'};

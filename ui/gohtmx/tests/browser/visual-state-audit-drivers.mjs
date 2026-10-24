@@ -55,15 +55,27 @@ const actionBounds=new Function('node',`
   return (${activeOutlineBounds.toString()})(node, (${captureBounds.toString()})(node));
 `);
 
-// Only the active owned control's simple outline; not generic shadow or paint padding.
+// Measured owned focus outlines, including focus-within ancestors; never generic paint padding.
 export function activeOutlineBounds(node,bounds){
-  const active=document.activeElement;
-  if(!active||!node.contains(active))return bounds;
+  const focused=document.activeElement;
+  if(!focused||!node.contains(focused))return bounds;
+  let result=outline(focused,bounds);
+  if(result.focusOutline?.status==='unsupported')return result;
+  const envelopes=[];
+  for(let parent=focused.parentElement;parent&&node.contains(parent);parent=parent.parentElement){
+    if(!parent.matches?.(':focus-within'))continue;
+    const next=outline(parent,result);
+    if(next.focusOutline?.status==='unsupported')return next;
+    if(next!==result)envelopes.push({tag:parent.localName,id:parent.id||null,outline:next.focusOutline});
+    result=next;
+  }
+  return envelopes.length?{...result,focusWithinOutlines:envelopes}:result;
+
+  function outline(active,bounds){
   const style=getComputedStyle(active);
   if(style.display==='none')return bounds;
   const width=parseFloat(style.outlineWidth),offset=parseFloat(style.outlineOffset);
   const alpha=style.outlineColor.match(/\/\s*([\d.]+%?)\s*\)$/)?.[1]??style.outlineColor.match(/^rgba\([^,]+,[^,]+,[^,]+,\s*([\d.]+%?)\s*\)$/)?.[1];
-  if(style.outlineStyle==='none'||style.outlineStyle==='hidden'||width===0||style.outlineColor==='transparent'||(alpha!==undefined&&parseFloat(alpha)===0))return bounds;
   const rectJSON=rect=>rect?{left:rect.left,top:rect.top,right:rect.right,bottom:rect.bottom,width:rect.width,height:rect.height}:null;
   const identity=element=>element?{tag:element.localName,namespace:element.namespaceURI,id:element.id||null,dataCsMinimap:element.hasAttribute?.('data-cs-minimap')??false,rect:rectJSON(element.getBoundingClientRect?.())}:null;
   const diagnostic=(extra={})=>{
@@ -73,11 +85,13 @@ export function activeOutlineBounds(node,bounds){
       ancestors.push({...identity(element),position:s.position,overflowX:s.overflowX,overflowY:s.overflowY,overflowClipMargin:s.overflowClipMargin,clip:s.clip,clipPath:s.clipPath,transform:s.transform,translate:s.translate,rotate:s.rotate,scale:s.scale,perspective:s.perspective,filter:s.filter,contain:s.contain});
     }
     const offsetParent=identity(active.offsetParent);
-    return {active:{...identity(active),matchesFocusVisible:active.matches?.(':focus-visible')??false,outlineStyle:style.outlineStyle,outlineWidth:style.outlineWidth,outlineOffset:style.outlineOffset,outlineColor:style.outlineColor,clientRects:[...(active.getClientRects?.()??[])].map(rectJSON)},offsetParent,ancestors,...extra};
+    return {active:{...identity(active),matchesFocusVisible:active.matches?.(':focus-visible')??false,outlineStyle:style.outlineStyle,outlineWidth:style.outlineWidth,outlineOffset:style.outlineOffset,outlineColor:style.outlineColor,boxShadow:style.boxShadow,clientRects:[...(active.getClientRects?.()??[])].map(rectJSON)},offsetParent,ancestors,...extra};
   };
   const gap=(reason,extra)=>({...bounds,focusOutline:{status:'unsupported',reason,diagnostic:diagnostic(extra)}});
   const positioned=[];
   if(active.closest('[data-ely-family]')!==node.closest('[data-ely-family]'))return gap('nested component focus ownership');
+  if(active!==focused&&style.boxShadow&&style.boxShadow!=='none')return gap('unbounded focus-within shadow');
+  if(style.outlineStyle==='none'||style.outlineStyle==='hidden'||width===0||style.outlineColor==='transparent'||(alpha!==undefined&&parseFloat(alpha)===0))return bounds;
   if(style.outlineStyle==='auto'||!Number.isFinite(width)||!Number.isFinite(offset))return gap('unbounded outline style');
   if(active.getClientRects().length!==1)return gap('fragmented focus outline');
   const margin=Math.max(0,width+offset),r=active.getBoundingClientRect();
@@ -88,7 +102,7 @@ export function activeOutlineBounds(node,bounds){
     if(s.display==='none'||Number(s.opacity)===0||s.contentVisibility==='hidden'||(ancestor===active&&s.visibility!=='visible'))return bounds;
     if(ancestor!==active&&s.visibility!=='visible')return gap('ancestor visibility overridden by visible focused child');
     // A self-only 2D translation is already included in the measured rectangle; outline width is unchanged.
-    const matrix=ancestor===active&&s.transform.match(/^matrix\(([^()]+)\)$/)?.[1].split(',').map(value=>value.trim());
+    const matrix=ancestor===active&&active===focused&&s.transform.match(/^matrix\(([^()]+)\)$/)?.[1].split(',').map(value=>value.trim());
     const translated=matrix&&matrix.length===6&&matrix.every(value=>value!==''&&Number.isFinite(Number(value)))&&matrix.slice(0,4).every((value,index)=>Number(value)===[1,0,0,1][index]);
     if(s.transform!=='none'&&!translated||s.translate !== 'none'||s.rotate !== 'none'||s.scale !== 'none'||s.perspective!=='none'||s.filter !== 'none'||s.clipPath!=='none'||s.clip!=='auto'||s.maskImage!=='none'||s.contain.split(/\s+/).some(value=>['paint','strict','content'].includes(value))||(s.zoom!=='normal'&&Number(s.zoom)!==1))return gap('complex outline geometry or clipping');
     if(ancestor===active)continue;
@@ -119,6 +133,7 @@ export function activeOutlineBounds(node,bounds){
     extendsRoot:bounds.extendsRoot||paint.left<bounds.root.left||paint.right>bounds.root.right||paint.top<bounds.root.top||paint.bottom>bounds.root.bottom,
     viewportTruncated:bounds.viewportTruncated||paint.left<0||paint.top<0||paint.right>innerWidth||paint.bottom>innerHeight,
     focusOutline:{status:'bounded',width,offset,paint}};
+  }
 }
 
 export function visualCaptureGap(before,after){
