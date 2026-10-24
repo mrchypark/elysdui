@@ -55,7 +55,7 @@ test('baseline document asset ownership pure: departed abort retained, arriving 
   const body=name=>{const fn=ast.body.find(n=>n.type==='FunctionDeclaration'&&n.id.name===name);assert.ok(fn);return source.slice(fn.start,fn.end);};
   const ledger=compileFunction(`return (${body('navigationOwnership')})();`)();
   const errorsByCase=new Map(),fallback=[];
-  const add=compileFunction(`return (${body('addPageError')});`,['errorsByCase','familyErrors','activeCaseId'])(errorsByCase,fallback,null);
+  const add=compileFunction(`return (${body('addPageError')});`,['errorsByCase','familyErrors','activeCaseId','navigation'])(errorsByCase,fallback,null,ledger);
   const request=(url,navigation=false)=>({frame:()=>({url:()=>url}),isNavigationRequest:()=>navigation,redirectedFrom:()=>null});
   const old=ledger.begin('https://fixture/old'),departed=request(old.url);ledger.stamp(departed);
   const arriving=ledger.begin('https://fixture/new');
@@ -73,6 +73,36 @@ test('baseline document asset ownership pure: departed abort retained, arriving 
   assert.match(source,/page\.on\('request', request => navigation\.stamp/);
   assert.match(source,/waitForLoadState\('load'/);
   assert.match(source,/navigationDiagnostics:navigation\.documents/,'ownership evidence must be retained, not ignored');
+});
+
+test('baseline final status pure: late current error blocks but departed abort leaves valid neighbor complete',async()=>{
+  const source=await readFile(new URL('./visual-state-audit-baseline.mjs',import.meta.url),'utf8'),ast=parse(source,{ecmaVersion:'latest',sourceType:'module'});
+  const load=(name,names=[],values=[])=>{const fn=ast.body.find(n=>n.type==='FunctionDeclaration'&&n.id.name===name);return compileFunction(`return (${source.slice(fn.start,fn.end)});`,names)(...values);};
+  const ledger=load('navigationOwnership')(),gate=load('finalCaptureGate'),errorsByCase=new Map();
+  const add=load('addPageError',['errorsByCase','familyErrors','activeCaseId','navigation'],[errorsByCase,[],null,ledger]);
+  const request=url=>({frame:()=>({url:()=>url}),isNavigationRequest:()=>false,redirectedFrom:()=>null});
+  const departed=ledger.begin('https://fixture/departed'),oldRequest=request(departed.url);ledger.stamp(oldRequest,'old-case');
+  const current=ledger.begin('https://fixture/current');current.caseIds.push('current-case');
+  const input={sourceDrift:null,failed:0,attempted:1,selected:1,caseErrors:[],documents:ledger.documents};
+  add('requestfailed','net::ERR_ABORTED /old.js',ledger.owner(oldRequest));
+  assert.equal(departed.errors.length,1,'departed failure remains in provenance');
+  assert.equal(gate(input).status,'complete');assert.equal(gate(input).exitCode,0);
+  const late=request(current.url);ledger.stamp(late);
+  add('requestfailed','net::ERR_ABORTED /late-current.js',ledger.owner(late));
+  assert.equal(gate(input).status,'blocked');assert.equal(gate(input).exitCode,1);
+  assert.deepEqual(gate(input).affectedCases,['current-case'],'late family-level failure invalidates its captured cases');
+  assert.equal(gate(input).activeGenerationErrors.length,1);
+  current.errors.length=0;
+  assert.equal(gate({...input,caseErrors:['earlier-real-error']}).status,'blocked');
+  add('http','404 /required.css',ledger.owner(late));assert.equal(gate(input).status,'blocked');
+  current.errors.length=0;ledger.captureClosed=true;
+  add('requestfailed','net::ERR_ABORTED intentional close',ledger.owner(late));
+  assert.equal(current.errors.length,1);assert.equal(gate(input).status,'complete','intentional-close diagnostics do not retroactively invalidate the fenced capture');
+  const fence=source.indexOf('const finalGate=finalCaptureGate(');
+  assert.ok(fence>=0&&source.indexOf('navigation.captureClosed=true',fence)>fence);
+  assert.ok(source.indexOf('await context.close()',fence)>source.indexOf('navigation.captureClosed=true',fence));
+  assert.match(source,/finalGate\.exitCode\)process\.exitCode=finalGate\.exitCode/);
+  assert.match(source,/status: profileStatus, finalGate,/,'final status gate is retained in the summary');
 });
 
 test('hidden action shim style exits before outline color parsing',()=>{

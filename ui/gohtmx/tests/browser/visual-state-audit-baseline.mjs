@@ -82,7 +82,7 @@ function navigationOwnership() {
   const documents=[],requests=new WeakMap();let current=null;
   return {
     documents,
-    begin(url){current={generation:documents.length+1,url,errors:[],assets:new Map()};documents.push(current);return current;},
+    begin(url){current={generation:documents.length+1,url,errors:[],caseIds:[],assets:new Map()};documents.push(current);return current;},
     stamp(request,caseId=null){
       if(requests.has(request))return requests.get(request);
       const redirected=request.redirectedFrom?.();
@@ -99,6 +99,12 @@ function navigationOwnership() {
 }
 function requiredAssetFailures(results, readiness) {
   return [...results.filter(x=>x.error).map(x=>`${x.path}: ${x.error}`),...readiness.missing.map(x=>`required asset not ready: ${x}`)];
+}
+function finalCaptureGate({sourceDrift,failed,attempted,selected,caseErrors,documents}) {
+  const errors=documents.flatMap(d=>d.errors.filter(e=>e.blocking).map(e=>({...e,generation:d.generation,documentURL:d.url})));
+  const affectedCases=[...new Set([...caseErrors,...documents.flatMap(d=>d.errors.filter(e=>e.blocking).flatMap(e=>e.caseId?[e.caseId]:d.caseIds||[]))])];
+  const status=sourceDrift?'stale':failed||errors.length||affectedCases.length?'blocked':attempted===selected?'complete':'partial';
+  return {status,exitCode:status==='complete'?0:1,affectedCases,activeGenerationErrors:errors};
 }
 async function fulfillAsset(route, page, timeout = 30000) {
   const request = route.request(), path = new URL(request.url()).pathname;
@@ -258,7 +264,7 @@ const errorsByCase = new Map();
 let activeCaseId = null;
 let familyErrors = [];
 function addPageError(type, text, owner=null) {
-  const row={type,text,...(owner?{generation:owner.document?.generation,documentURL:owner.document?.url}: {})};
+  const row={type,text,blocking:!navigation.captureClosed&&(!owner||owner.document===navigation.documents.at(-1)),caseId:owner?owner.caseId:activeCaseId,...(owner?{generation:owner.document?.generation,documentURL:owner.document?.url}: {})};
   const caseId=owner?owner.caseId:activeCaseId;
   if(owner?.document)owner.document.errors.push(row);
   if (!caseId) { if(!owner?.document)familyErrors.push(row); return; }
@@ -491,6 +497,7 @@ try {
       await familyPage(currentFamily);
     }
     activeCaseId = item.caseId;
+    navigation.documents.at(-1).caseIds.push(item.caseId);
     captureAttemptCount++;
     errorsByCase.set(item.caseId, []);
     const caseSelector = `[data-audit-name=${JSON.stringify(item.componentIdentity)}]`;
@@ -732,9 +739,14 @@ try {
   if (batch.length) await flush();
   const endingSourceBase = await sourceBaseSnapshot(matrixBytes, matrix);
   if (!sourceDrift && endingSourceBase.sourceTreeSHA256 !== sourceBase.sourceTreeSHA256) sourceDrift = {checkpoint: 'profile-end', expectedSourceTreeSHA256: sourceBase.sourceTreeSHA256, actualSourceTreeSHA256: endingSourceBase.sourceTreeSHA256, detectedAt: new Date().toISOString(), actualSourceBase: endingSourceBase};
-  const profileStatus = sourceDrift ? 'stale' : captureFailureCount ? 'blocked' : captureAttemptCount === selectedCaseCount ? 'complete' : 'partial';
-  if (sourceDrift || captureFailureCount || captureAttemptCount !== selectedCaseCount) process.exitCode = 1;
-  await writeFile(join(outputDir, 'profile-summary.json'), JSON.stringify({schemaVersion: 1, status: profileStatus, profile: options.profile, mode: options.mode, sourceBase, endingSourceBase, sourceDrift, selected: selectedCaseCount, attempted: captureAttemptCount, captured: captureSuccessCount, blocked: captureFailureCount, unattempted: selectedCaseCount - captureAttemptCount, startedAt: profileRunStartedAt, completedAt: new Date().toISOString(), noActionsExecuted: true, navigationDiagnostics:navigation.documents.map(({generation,url,errors,readiness})=>({generation,url,errors,readiness}))}, null, 2) + '\n', {flag: 'wx'});
+  // One bounded event-loop drain, then fence intentional-close errors from capture evidence.
+  await new Promise(resolve=>setImmediate(resolve));
+  const finalGate=finalCaptureGate({sourceDrift,failed:captureFailureCount,attempted:captureAttemptCount,selected:selectedCaseCount,caseErrors:[...casesWithErrors],documents:navigation.documents});
+  const profileStatus=finalGate.status;
+  if(finalGate.exitCode)process.exitCode=finalGate.exitCode;
+  navigation.captureClosed=true;
+  await context.close();
+  await writeFile(join(outputDir, 'profile-summary.json'), JSON.stringify({schemaVersion: 1, status: profileStatus, finalGate, profile: options.profile, mode: options.mode, sourceBase, endingSourceBase, sourceDrift, selected: selectedCaseCount, attempted: captureAttemptCount, captured: captureSuccessCount, blocked: captureFailureCount, unattempted: selectedCaseCount - captureAttemptCount, startedAt: profileRunStartedAt, completedAt: new Date().toISOString(), noActionsExecuted: true, navigationDiagnostics:navigation.documents.map(({generation,url,errors,readiness})=>({generation,url,errors,readiness}))}, null, 2) + '\n', {flag: 'wx'});
   const elapsedSeconds = (Date.now() - captureStartedAt) / 1000;
   const attempted = captureAttemptCount;
   console.log(JSON.stringify({runKind: options.caseIds.length || options.families.length ? 'filtered-profile-capture' : 'profile-capture', status: profileStatus, selected: selectedCaseCount, attempted, captured: captureSuccessCount, blocked: captureFailureCount, unattempted: selectedCaseCount - attempted, sourceTreeSHA256: sourceBase.sourceTreeSHA256, profile: options.profile, elapsedSeconds: Math.round(elapsedSeconds), averageSecondsPerCase: attempted ? +(elapsedSeconds / attempted).toFixed(2) : null, chromiumPeakRSSMiB: +(chromiumRssPeak / 1048576).toFixed(1), nodePeakRSSMiB: +(nodeRssPeak / 1048576).toFixed(1), output: outputDir, noActionsExecuted: true, allVisualStatusesPending: true, casesWithConsoleOrErrors: casesWithErrors.size}, null, 2));
