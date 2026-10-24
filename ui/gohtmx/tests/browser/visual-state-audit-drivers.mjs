@@ -85,7 +85,8 @@ export function activeOutlineBounds(node,bounds){
       ancestors.push({...identity(element),position:s.position,overflowX:s.overflowX,overflowY:s.overflowY,overflowClipMargin:s.overflowClipMargin,clip:s.clip,clipPath:s.clipPath,transform:s.transform,translate:s.translate,rotate:s.rotate,scale:s.scale,perspective:s.perspective,filter:s.filter,contain:s.contain});
     }
     const offsetParent=identity(active.offsetParent);
-    return {active:{...identity(active),matchesFocusVisible:active.matches?.(':focus-visible')??false,outlineStyle:style.outlineStyle,outlineWidth:style.outlineWidth,outlineOffset:style.outlineOffset,outlineColor:style.outlineColor,boxShadow:style.boxShadow,clientRects:[...(active.getClientRects?.()??[])].map(rectJSON)},offsetParent,ancestors,...extra};
+    const focusStyle=getComputedStyle(focused);
+    return {focused:{...identity(focused),type:focused.type||null,matchesFocusVisible:focused.matches?.(':focus-visible')??false,outlineStyle:focusStyle.outlineStyle,outlineWidth:focusStyle.outlineWidth,outlineOffset:focusStyle.outlineOffset,outlineColor:focusStyle.outlineColor,boxShadow:focusStyle.boxShadow,clientRects:[...(focused.getClientRects?.()??[])].map(rectJSON)},focusedOutline:active===focused?null:bounds.focusOutline??null,active:{...identity(active),matchesFocusVisible:active.matches?.(':focus-visible')??false,outlineStyle:style.outlineStyle,outlineWidth:style.outlineWidth,outlineOffset:style.outlineOffset,outlineColor:style.outlineColor,boxShadow:style.boxShadow,clientRects:[...(active.getClientRects?.()??[])].map(rectJSON)},offsetParent,ancestors,...extra};
   };
   const gap=(reason,extra)=>({...bounds,focusOutline:{status:'unsupported',reason,diagnostic:diagnostic(extra)}});
   const positioned=[];
@@ -2343,8 +2344,19 @@ export function ownedOverlayInventory(node){
       if(!candidates.includes(calendarPanel))candidates.push(calendarPanel);
     }
   }
+  let multiPanel=null;
+  const multiSelector='[data-ely-multi-source] [data-ui-multi-list][role=group]';
+  if(node.id&&rootIDs.length===1&&rootIDs[0]===node&&node.dataset.elyComponent==='forms/MultiSelect'&&node.dataset.elyKind==='MultiSelect'&&node.matches('[data-audit-main]>[data-ely-family]')){
+    const entries=[...node.querySelectorAll('[data-ely-multi-entry][role=combobox]')],sources=[...node.querySelectorAll('[data-ely-multi-source][data-ui-component="multi-select"]')];
+    const refs=(entries[0]?.getAttribute('aria-controls')||'').trim().split(/\s+/).filter(Boolean);
+    const panels=[...node.querySelectorAll(multiSelector)],matchingIDs=idElements.filter(element=>element.id===refs[0]),panel=panels[0];
+    if(entries.length===1&&entries[0].getAttribute('aria-expanded')==='true'&&refs.length===1&&sources.length===1&&sources[0].classList.contains('is-open')&&entries[0].closest('[data-ely-multi-source]')===sources[0]&&entries[0].closest('[data-ely-family]')===node&&panels.length===1&&panel.id===refs[0]&&matchingIDs.length===1&&matchingIDs[0]===panel&&panel.closest('[data-ely-multi-source]')===sources[0]&&panel.closest('[data-ely-family]')===node&&panel.checkVisibility({checkOpacity:true,checkVisibilityCSS:true})){
+      const rect=panel.getBoundingClientRect();
+      if(rect.width>0&&rect.height>0){multiPanel=panel;if(!candidates.includes(panel))candidates.push(panel);}
+    }
+  }
   return candidates.map(element=>{
-      const calendar=element===calendarPanel,selector=calendar?'article[data-calendar-popover]:visible':selectorAll;
+      const calendar=element===calendarPanel,selector=calendar?'article[data-calendar-popover]:visible':element===multiPanel?multiSelector:selectorAll;
       const inside=node.contains(element),foreign=element.closest('[data-audit-main]>[data-ely-family],[data-audit-twin]>[data-ely-family],[data-audit-main]>[data-basic-component],[data-audit-twin]>[data-basic-component]')||element.closest('[data-ely-family]');
       const explicitOwner=element.getAttribute('data-ely-owner')?.replace(/^#/,'');
       const scope=foreign&&!inside&&foreign!==node&&!owners.has(foreign.id)?'foreign-component':explicitOwner&&!owners.has(explicitOwner)?'foreign-portal-owner':owners.has(explicitOwner)?'portal-owner-attribute':references.has(element.id)?'trigger-reference':inside&&!element.matches('[role=region]')?'component-root':'unowned';

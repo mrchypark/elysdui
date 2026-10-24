@@ -240,6 +240,31 @@ test('popover overlay inventory requires exact identity, root, unique open refer
   assert.equal(run({panels:[panel,foreign]}).length,0,'Multiple visible in-root articles remain ambiguous');
 });
 
+test('MultiSelect panel discovery requires unique primary combobox owned open group and never grants paint approval',async()=>{
+  const run=({identity='forms/MultiSelect',kind='MultiSelect',primary=true,expanded='true',controls='options',open=true,duplicateEntry=false,duplicateRoot=false,duplicatePanelID=false,foreign=false,visible=true,extraPanel=false}={})=>{
+    const multiSelector='[data-ely-multi-source] [data-ui-multi-list][role=group]';
+    const source={id:'source',classList:{contains:name=>name==='is-open'&&open}};
+    const entry={id:'entry',getAttribute:name=>name==='aria-controls'?controls:name==='aria-expanded'?expanded:null,closest:selector=>selector==='[data-ely-multi-source]'?source:root};
+    const panel={id:'options',tagName:'DIV',innerText:'Caller Beta',getAttribute:name=>name==='role'?'group':null,checkVisibility:()=>visible,getBoundingClientRect:()=>({x:85,y:586,width:360,height:38}),matches:()=>false,closest:selector=>selector==='[data-ely-multi-source]'?source:foreign?{id:'twin'}:root};
+    const root={id:'main',dataset:{elyComponent:identity,elyKind:kind},getAttribute:()=>null,matches:selector=>selector==='[data-audit-main]>[data-ely-family]'&&primary,contains:element=>element===panel,querySelectorAll:selector=>{
+      if(selector==='[id]')return [source,entry,panel];
+      if(selector==='[aria-controls]'||selector==='[aria-controls],[popovertarget],[data-foundation-dialog-open],[data-interaction-dialog],[data-ely-dialog-open]')return [entry];
+      if(selector==='[data-ely-multi-entry][role=combobox]')return duplicateEntry?[entry,entry]:[entry];
+      if(selector==='[data-ely-multi-source][data-ui-component="multi-select"]')return [source];
+      if(selector===multiSelector)return extraPanel?[panel,{...panel,id:'other'}]:[panel];
+      return [];
+    }};
+    const document={querySelectorAll:selector=>selector==='[id]'?[root,source,entry,panel,...(duplicateRoot?[{id:'main'}]:[]),...(duplicatePanelID?[{id:'options'}]:[])]:selector===multiSelector?[panel]:[]};
+    return JSON.parse(JSON.stringify(runInNewContext(`(${ownedOverlayInventory.toString()})(node)`,{node:root,document})));
+  };
+  const accepted=run();assert.equal(accepted.length,1);assert.equal(accepted[0].id,'options');assert.equal(accepted[0].role,'group');assert.equal(accepted[0].owned,true);assert.equal(accepted[0].ownershipScope,'trigger-reference');assert.equal(accepted[0].checkedRootID,'main');assert.equal(accepted[0].locatorIndex,0);assert.deepEqual(accepted[0].openerReferences,[{id:'entry',ariaControls:'options'}]);
+  for(const change of [{identity:'forms/Other'},{kind:'Input'},{primary:false},{expanded:'false'},{controls:'twin-options'},{controls:'options twin-options'},{open:false},{duplicateEntry:true},{duplicateRoot:true},{duplicatePanelID:true},{foreign:true},{visible:false},{extraPanel:true}])assert.deepEqual(run(change),[],JSON.stringify(change));
+  const actions=await readFile(new URL('./visual-state-audit-actions.mjs',import.meta.url),'utf8');
+  assert.match(actions,/captureComponent\(page,locator,path,item\.checkedRootID\)/,'Discovered group must use the existing panel foreign-paint/occlusion checks');
+  assert.match(actions,/ownedStateEvidence:!component\.focusOutlineGap&&/,'A discovered panel must not waive the unresolved component shadow gap');
+  assert.match(actions,/countsAsOwnedEvidence:!foreignDOMIntersections\.length&&!focusOutlineGap/,'Foreign-painted witnesses remain blocking');
+});
+
 test('threeway direct pure: primary identity survives cleanup and diagnostic attachment failures',async()=>{
   const primary=Object.freeze(new Error('before-first-capture')),cleanup=new Error('listener cleanup failed');
   const run=async diagnostics=>{let failed=false;try{throw primary;}catch(error){failed=true;throw error;}finally{await threewayCleanup(async()=>{throw cleanup;},failed,diagnostics);}};

@@ -189,6 +189,19 @@ test('currency focus-within ancestor outline expands the camera beyond its own o
   const actions=await readFile(new URL('./visual-state-audit-actions.mjs',import.meta.url),'utf8');assert.match(actions,/countsAsOwnedEvidence:!foreignDOMIntersections\.length&&!focusOutlineGap/,'Expanded ring still requires foreign paint and outline ownership gates');
 });
 
+test('blurred focus-within panel shadow stays unresolved while actual focused checkbox paint is retained',()=>{
+  const family={},rect={left:85,top:586,right:445,bottom:624,width:360,height:38},base={display:'block',position:'static',visibility:'visible',opacity:'1',contentVisibility:'visible',outlineStyle:'none',outlineWidth:'0px',outlineOffset:'0px',outlineColor:'rgb(24,22,19)',boxShadow:'none',transform:'none',translate:'none',rotate:'none',scale:'none',perspective:'none',filter:'none',clipPath:'none',clip:'auto',maskImage:'none',contain:'none',zoom:'1',overflowX:'visible',overflowY:'visible'};
+  const panel={localName:'div',id:'options',style:{...base,position:'absolute',overflowX:'auto',overflowY:'auto',boxShadow:'rgba(0, 0, 0, 0.133) 0px 8px 16px 0px'},parentElement:null,matches:selector=>selector===':focus-within',closest:()=>family,getBoundingClientRect:()=>rect,getClientRects:()=>[rect]};
+  const checkbox={localName:'input',type:'checkbox',id:'beta',style:{...base,outlineStyle:'solid',outlineWidth:'2px',outlineOffset:'4px',boxShadow:'rgb(55,114,187) 0px 0px 0px 3px'},parentElement:panel,matches:selector=>selector===':focus-visible',closest:()=>family,getBoundingClientRect:()=>({left:95,top:595,right:111,bottom:611,width:16,height:16}),getClientRects(){return [this.getBoundingClientRect()];}};
+  const node={contains:element=>element===panel||element===checkbox,closest:()=>family},bounds={clip:{x:85,y:586,width:360,height:38},root:rect};
+  const result=JSON.parse(JSON.stringify(runInNewContext(`(${activeOutlineBounds.toString()})(node,bounds)`,{node,bounds,document:{activeElement:checkbox},getComputedStyle:element=>element.style,scrollX:0,scrollY:0,innerWidth:1440,innerHeight:1000})));
+  const gap=result.focusOutline;assert.equal(gap.status,'unsupported');assert.equal(gap.reason,'unbounded focus-within shadow');
+  assert.equal(gap.diagnostic.active.id,'options');assert.equal(gap.diagnostic.active.matchesFocusVisible,false);assert.equal(gap.diagnostic.active.outlineStyle,'none');assert.equal(gap.diagnostic.active.boxShadow,panel.style.boxShadow);
+  assert.equal(gap.diagnostic.focused.id,'beta');assert.equal(gap.diagnostic.focused.type,'checkbox');assert.equal(gap.diagnostic.focused.matchesFocusVisible,true);assert.equal(gap.diagnostic.focused.boxShadow,checkbox.style.boxShadow);assert.equal(gap.diagnostic.focused.outlineWidth,'2px');assert.equal(gap.diagnostic.focused.clientRects.length,1);
+  assert.equal(gap.diagnostic.focusedOutline.status,'bounded','Retain the previously measured child outline separately; this does not bound either shadow');
+  assert.deepEqual(result.clip,bounds.clip,'Unresolved blur cannot gain arbitrary capture padding or approval');
+});
+
 test('ClearableInput self-only pure translation retains measured outline bounds and strict ownership guards',()=>{
   const family={},rect={left:1329,top:545.609375,right:1353,bottom:569.609375,width:24,height:24},rowRect={left:85,top:543.609375,right:1355,bottom:571.609375,width:1270,height:28};
   const base={display:'block',visibility:'visible',opacity:'1',contentVisibility:'visible',outlineStyle:'solid',outlineWidth:'2px',outlineOffset:'4px',outlineColor:'rgb(55, 114, 187)',transform:'none',translate:'none',rotate:'none',scale:'none',perspective:'none',filter:'none',clipPath:'none',clip:'auto',maskImage:'none',contain:'none',zoom:'1',overflowX:'visible',overflowY:'visible',overflowClipMargin:'0px',position:'static'};
