@@ -332,6 +332,13 @@ async function directCaseDriver({item, familyURL, captures, reference, semanticS
   page.on('pageerror',error=>browserErrors.push({family:item.family,driver:'direct-playwright',caseId:item.caseId,type:'pageerror',text:String(error)}));
   try {
     await page.addInitScript(semanticSnapshotInit);
+    if(contract.focusedSequence==='workspace-activity-native-link-focus'){
+      const scopedURL=new URL(familyURL);
+      assert.equal(scopedURL.pathname,'/components/audit','Native ActivityLog focus requires the live, exact-case audit route');
+      assert.equal(scopedURL.searchParams.get('family'),'workspace');
+      scopedURL.searchParams.set('case',contract.identity);
+      familyURL=scopedURL.href;
+    }
     const trashAssets=[];
     if(contract.trashFixture)await page.route('**/assets/**',async route=>{
       const url=new URL(route.request().url());assert.equal(url.origin,new URL(familyURL).origin);

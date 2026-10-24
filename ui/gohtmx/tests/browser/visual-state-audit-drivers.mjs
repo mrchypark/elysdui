@@ -564,9 +564,9 @@ export function requestedStateContract(identity,trashFixture){
     const hrefs=['#gamma-space','#lift','#on-lift','#lift'];
     const steps=hrefs.map((href,index)=>{
       const entry=index+1,id=`activity-focus-entry-${entry}`;
-      return {id,control:`li[data-ws-activity-entry]:nth-child(${entry}) a[href="${href}"]`,expectedState:`Native Tab traversal focuses ActivityLog entry ${entry}'s existing ${href} target without activating it or emitting a host request.`,event:'trusted native Tab key; no synthetic focus or anchor activation',source:{siteId:`focused-state:${identity}:${id}`,sourceAnchor:'internal/gallery/advanced_workspace_fixtures.go collab/ActivityLog; ui/gohtmx/templates/ely-api-workspace.html ws-activity; ui/gohtmx/assets/ely-api-workspace.css ActivityLog responsive text/time grid',provenance:`Exact default ${identity} fixture link ${entry} in source order; links are native anchors and focus does not fulfill or activate their targets.`}};
+      return {id,control:`li[data-ws-activity-entry]:nth-child(${entry}) a[href="${href}"]`,expectedState:`Native Tab traversal focuses ActivityLog entry ${entry}'s existing ${href} target without activating it or emitting a host request.`,event:'trusted native Tab key; no synthetic focus or anchor activation',source:{siteId:`focused-state:${identity}:${id}`,sourceAnchor:'internal/gallery/advanced_workspace_fixtures.go collab/ActivityLog; ui/gohtmx/templates/ely-api-workspace.html ws-activity; ui/gohtmx/assets/ely-api-workspace.css ActivityLog responsive text/time grid; internal/gallery/advanced.go exact-case audit filter',provenance:`Exact default ${identity} fixture link ${entry} in the opt-in single-case audit pair; native Tab starts at untouched body and traverses the short page chrome into source-order anchors, without focus injection or activation.`}};
     });
-    return {identity,kind:'ActivityLog',family:'workspace',requestedStateOnly:true,focusedSequence:'workspace-activity-native-link-focus',mappingGaps:[],fixtureGuards:{component:identity,entryHrefs:hrefs},steps,scope:'Only the exact collab/ActivityLog default fixture; native keyboard focus through all four target links in DOM order. No link activation, navigation, host request, or external target fulfillment is claimed.'};
+    return {identity,kind:'ActivityLog',family:'workspace',requestedStateOnly:true,focusedSequence:'workspace-activity-native-link-focus',mappingGaps:[],fixtureGuards:{component:identity,entryHrefs:hrefs},steps,scope:'Only the exact collab/ActivityLog default fixture in an opt-in single-case audit page with its independent twin; native keyboard focus from untouched body through all four primary target links in DOM order. No link activation, navigation, host request, or external target fulfillment is claimed.'};
   }
   if(identity==='misc/IframeEmbed'||identity==='misc/EmbedCard'){
     const stepId=identity==='misc/IframeEmbed'?'iframe-open-host':'embedcard-open-host',url='https://example.com';
@@ -1120,6 +1120,8 @@ export async function runRequestedStateActions(contract,root,runStep,failureDiag
   if(contract.focusedSequence==='workspace-activity-native-link-focus'){
     const identity='collab/ActivityLog',links=root.locator('[data-ws-activity-entry] a[href]'),hrefs=contract.fixtureGuards.entryHrefs;
     assert.equal(contract.identity,identity);assert.equal(await root.getAttribute('data-ely-component'),identity);assert.equal(await root.getAttribute('data-ely-kind'),'ActivityLog');
+    assert.equal(await page.locator('[data-audit-case]').count(),1,'Exact-case audit route must keep the native tab order bounded to one component pair');
+    assert.equal(await page.locator('[data-audit-name="collab/ActivityLog"]').count(),1,'Exact public ActivityLog fixture wrapper required');
     assert.equal(await links.count(),4,'Exact four-entry ActivityLog fixture required');assert.deepEqual(await links.evaluateAll(nodes=>nodes.map(node=>node.getAttribute('href'))),hrefs,'Default target links and order are pinned');
     const twin=()=>root.evaluate(node=>node.closest('[data-audit-name]')?.querySelector('[data-audit-twin] > [data-ely-family]')?.innerHTML);
     const initialTwin=await twin();assert.equal(typeof initialTwin,'string','Independent ActivityLog twin required');
@@ -1141,7 +1143,7 @@ export async function runRequestedStateActions(contract,root,runStep,failureDiag
         await runStep(step,async()=>{
           if(index===0){
             let reached=false;
-            for(let count=0;count<256;count++){
+            for(let count=0;count<32;count++){
               await root.page().keyboard.press('Tab');
               if(await root.evaluate((node,targetIndex)=>node.ownerDocument.activeElement===node.querySelectorAll('[data-ws-activity-entry] a[href]')[targetIndex],index)){reached=true;break;}
             }

@@ -58,6 +58,14 @@ func (s *Server) advancedAudit(w http.ResponseWriter, r *http.Request) {
 		fixtures[fixture.Component.Chapter+"/"+fixture.Component.Name] = fixture
 	}
 	family, aliases := r.URL.Query().Get("family"), r.URL.Query().Get("aliases") == "1"
+	selectedCase := r.URL.Query().Get("case")
+	if selectedCase != "" {
+		chapter, name, ok := strings.Cut(selectedCase, "/")
+		if !ok || chapter == "" || name == "" || strings.Contains(name, "/") {
+			http.Error(w, "invalid audit case", http.StatusBadRequest)
+			return
+		}
+	}
 	trashFixture := r.URL.Query().Get("trash-fixture")
 	if trashFixture != "" && (family != "workspace" || (trashFixture != "default" && trashFixture != "empty" && trashFixture != "longpath")) {
 		http.Error(w, "invalid action-only trash fixture", http.StatusBadRequest)
@@ -75,6 +83,9 @@ func (s *Server) advancedAudit(w http.ResponseWriter, r *http.Request) {
 		}
 		for _, name := range names {
 			key := definition.Chapter + "/" + name
+			if selectedCase != "" && key != selectedCase {
+				continue
+			}
 			if trashFixture != "" && key != "documents/TrashBin" {
 				continue
 			}
@@ -129,6 +140,10 @@ func (s *Server) advancedAudit(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			break
 		}
+	}
+	if selectedCase != "" && len(p.Cases) != 1 {
+		http.Error(w, "unknown audit case", http.StatusBadRequest)
+		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err != nil {
