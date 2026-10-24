@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {runInNewContext} from 'node:vm';
+const motionCSS=readFileSync(new URL('../../assets/ely-api-interaction.css',import.meta.url),'utf8');
+assert.match(motionCSS,/\.ely-interaction--motion-source :is\(\.ely-interaction__particles,\.ely-interaction__gradient\)\{[^}]*background:var\(--surface,#fff\);color:inherit;/,'motion source tiles must inherit the family foreground after setting a surface background');
 const source = readFileSync(new URL('../../assets/ely-api-interaction.js', import.meta.url), 'utf8');
 const helpers = source.slice(source.indexOf('const directClamp ='), source.indexOf("register('interaction'"));
 let now = 0, serial = 0;
