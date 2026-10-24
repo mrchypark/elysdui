@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import test from 'node:test';
-import {assertCanvasRulerPan,assertMinimapViewport,requestedStateContract,runRequestedStateActions} from './visual-state-audit-drivers.mjs';
+import {assertCanvasRulerPan,assertMinimapViewport,installCanvasNativeInputObservers,requestedStateContract,runRequestedStateActions} from './visual-state-audit-drivers.mjs';
 
 const read=path=>readFile(new URL(`../../../../${path}`,import.meta.url),'utf8');
 
@@ -45,6 +45,40 @@ test('ruler pan oracle requires exact native x transition and partial-to-full ti
     {input:{...input,defaultPrevented:false}},
     {input:{...input,type:'click'}},
   ])assert.throws(()=>assertCanvasRulerPan(defect.before||before,defect.after||after,detail,{inputs:defect.inputs||[defect.input||input],beforePaint:defect.beforePaint||paint(814,844),afterPaint:defect.afterPaint||paint(766,796)}));
+});
+
+test('native wheel ownership uses pinned dispatch ancestry after render detaches its target',()=>{
+  let targetAttached=true;
+  const listeners=new Map(),target={localName:'text',id:'ruler-1100',isConnected:true};
+  const stage={contains:node=>targetAttached&&node===target},scene={contains:node=>node===stage,querySelector:selector=>selector==='[data-cs-stage]'?stage:null};
+  const root={id:'owner-root',dataset:{elyComponent:'canvas/CanvasGrid'},contains:node=>node===scene||node===stage,
+    querySelector:selector=>selector==='[data-ws-canvas-scene]'?scene:selector==='[data-cs-stage]'||selector==='[data-ws-canvas-scene] [data-cs-stage]'?stage:null,
+    addEventListener:(type,listener)=>listeners.set(type,listener),removeEventListener(){}};
+  installCanvasNativeInputObservers(root);
+  const dispatchAtRoot=(eventTarget,path)=>listeners.get('wheel')({type:'wheel',target:eventTarget,isTrusted:true,deltaX:48,deltaY:0,defaultPrevented:true,composedPath:()=>path});
+  const originalPath=[target,stage,scene,root];targetAttached=false;target.isConnected=false;
+  dispatchAtRoot(target,originalPath);
+  const [detachedWitness]=root.__visualCanvasWheels;
+  assert.equal(stage.contains(target),false,'The original target is detached before root-bubble observation');
+  assert.equal(detachedWitness.targetStage,true,'The frozen event path still proves the pinned original stage and root');
+  assert.equal(detachedWitness.defaultPrevented,true,'Read defaultPrevented at bubble after the SVG listener');
+  assert.equal(detachedWitness.trusted,true);assert.equal(detachedWitness.deltaX,48);assert.equal(detachedWitness.deltaY,0);
+  assert.deepEqual(detachedWitness.target,{tag:'text',id:'ruler-1100',connected:false,currentStageContainsTarget:false});
+  assert.equal(detachedWitness.pathHasPinnedRoot,true);assert.equal(detachedWitness.pathHasPinnedStage,true);
+  assert.deepEqual(Object.keys(detachedWitness.target).sort(),['connected','currentStageContainsTarget','id','tag'],'Only sanitized target metadata is retained');
+
+  const foreignRoot={contains:()=>false},foreignStage={contains:()=>false},foreignScene={};
+  const foreignTarget={localName:'text',id:'foreign-tick',isConnected:false};
+  dispatchAtRoot(foreignTarget,[foreignTarget,foreignStage,foreignScene,foreignRoot]);
+  dispatchAtRoot(foreignTarget,[foreignTarget,foreignStage,scene,root]);
+  dispatchAtRoot(foreignTarget,[foreignTarget,stage,foreignScene,foreignRoot]);
+  const [foreignRootWitness,foreignStageWitness,crossInstanceWitness]=root.__visualCanvasWheels.slice(1);
+  assert.equal(foreignRootWitness.targetStage,false,'A foreign root path cannot satisfy the pinned root');
+  assert.equal(foreignStageWitness.targetStage,false,'A foreign stage path cannot satisfy the pinned stage');
+  assert.equal(crossInstanceWitness.targetStage,false,'A cross-instance path cannot satisfy the exact pinned root/stage pair');
+  assert.deepEqual([foreignRootWitness.pathHasPinnedRoot,foreignRootWitness.pathHasPinnedStage],[false,false]);
+  assert.deepEqual([foreignStageWitness.pathHasPinnedRoot,foreignStageWitness.pathHasPinnedStage],[true,false]);
+  assert.deepEqual([crossInstanceWitness.pathHasPinnedRoot,crossInstanceWitness.pathHasPinnedStage],[false,true]);
 });
 
 test('source-only: six three-step and two four-step canvas contracts; 32 case/profile runtime runs remain mandatory',async()=>{
@@ -94,6 +128,7 @@ test('source-only: six three-step and two four-step canvas contracts; 32 case/pr
   assert.match(runtime,/on\(map,'click',e=>\{if\(disabled\)return;.*setView\(\{\.\.\.state\.view,x:bounds\.x\+/);
 
   const driver=runRequestedStateActions.toString();
+  assert.match(driver,/root\.evaluate\(installCanvasNativeInputObservers\)/,'The production direct runner must install the same observer exercised by the pure replacement test');
   for(const id of ['zoom-in','fit-canvas','navigate-minimap'])assert.match(driver,new RegExp(`runStep\\('${id}'`));
   assert.match(driver,/clickVisibleControl\(root\.locator\('\[data-cs-minimap\]'\)\)/,'Minimap interaction must be native and point-hit-tested');
   assert.match(driver,/getScreenCTM\(\)\.inverse\(\)/,'Minimap expectation must use the actual SVG pointer coordinate transform');

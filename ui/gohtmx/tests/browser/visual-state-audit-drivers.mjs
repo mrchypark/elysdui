@@ -412,6 +412,25 @@ export async function deliverDirectActionVerification(receipt,verify){
   receipt.assertionsPassed=true;
 }
 
+export function installCanvasNativeInputObservers(node){
+  node.__visualCanvasClicks=[];
+  node.__visualCanvasClickObserver=event=>{if(event.target.closest?.('[data-cs-minimap]'))node.__visualCanvasClicks.push({trusted:event.isTrusted,x:event.clientX,y:event.clientY});};
+  node.addEventListener('click',node.__visualCanvasClickObserver,true);
+  const scene=node.querySelector('[data-ws-canvas-scene]'),pinnedStage=scene?.querySelector('[data-cs-stage]')??null;
+  const pinnedStageOwned=!!pinnedStage&&scene.contains(pinnedStage)&&node.contains(pinnedStage);
+  node.__visualCanvasWheels=[];
+  // View rendering detaches SVG children before this root bubble listener runs; preserve dispatch ancestry.
+  node.__visualCanvasWheelObserver=event=>{
+    const path=event.composedPath?.()??[],pathHasPinnedRoot=path.includes(node),pathHasPinnedStage=!!pinnedStage&&path.includes(pinnedStage);
+    const target=event.target,currentStage=node.querySelector('[data-ws-canvas-scene] [data-cs-stage]');
+    node.__visualCanvasWheels.push({type:event.type,trusted:event.isTrusted,deltaX:event.deltaX,deltaY:event.deltaY,
+      targetStage:pinnedStageOwned&&pathHasPinnedRoot&&pathHasPinnedStage,defaultPrevented:event.defaultPrevented,
+      pathHasPinnedRoot,pathHasPinnedStage,target:{tag:target?.localName??target?.tagName?.toLowerCase()??null,id:target?.id||null,
+        connected:target?.isConnected===true,currentStageContainsTarget:!!currentStage&&!!target&&currentStage.contains(target)}});
+  };
+  node.addEventListener('wheel',node.__visualCanvasWheelObserver);
+}
+
 // Separate fresh two-action replay; the three supplemental fit/pointer actions stay distinct.
 export async function runRegisteredCanvasActions(contract,root,runStep){
   assert(registeredCanvasIDs.includes(contract.identity)&&contract.registeredCanvas===true);
@@ -1661,7 +1680,7 @@ export async function runRequestedStateActions(contract,root,runStep,failureDiag
       await mapTarget.evaluate(node=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
       const mapHit=await mapTarget.evaluate(node=>{const rect=node.getBoundingClientRect(),x=rect.left+rect.width/2,y=rect.top+rect.height/2,element=document.elementFromPoint(x,y);return !!element&&(element===node||node.contains(element));});
       assert.equal(mapHit,true,'Minimap center must be an owned hit target');
-      await root.evaluate(node=>{node.__visualCanvasClicks=[];node.__visualCanvasClickObserver=event=>{if(event.target.closest?.('[data-cs-minimap]'))node.__visualCanvasClicks.push({trusted:event.isTrusted,x:event.clientX,y:event.clientY});};node.addEventListener('click',node.__visualCanvasClickObserver,true);node.__visualCanvasWheels=[];node.__visualCanvasWheelObserver=event=>{const stage=node.querySelector('[data-ws-canvas-scene] [data-cs-stage]');node.__visualCanvasWheels.push({type:event.type,trusted:event.isTrusted,deltaX:event.deltaX,deltaY:event.deltaY,targetStage:!!stage&&(event.target===stage||stage.contains(event.target)),defaultPrevented:event.defaultPrevented});};node.addEventListener('wheel',node.__visualCanvasWheelObserver);});
+      await root.evaluate(installCanvasNativeInputObservers);
       try{
         if(['canvas/CanvasGrid','canvas/Guides'].includes(identity)){
           let beforePan,beforePaint,pageScroll;
