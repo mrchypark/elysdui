@@ -38,6 +38,45 @@ test('canvas focus gap diagnostic pure: preserves exact gap and serializes compu
   assert(captureSource.includes('focusOutlineGap,bounds,foreignDOMIntersections,occludedForeignPaint'),'The existing report capture receipt retains the expanded bounds object');
 });
 
+test('canvas SVG outline proof pure: nullish offsetParent only with direct positioned clipping parent',()=>{
+  const rect={left:70,top:70,right:80,bottom:80,width:10,height:10},clipRect={left:10,top:10,right:90,bottom:90,width:80,height:80},family={};
+  const make=(tag,parent,namespace='http://www.w3.org/1999/xhtml')=>({localName:tag,namespaceURI:namespace,id:'',parentElement:parent,hasAttribute:()=>false,getBoundingClientRect:()=>tag==='svg'?rect:clipRect});
+  const evaluate=({offsetParent,parentPosition='relative',wrapper=false}={})=>{
+    const clip=make('div',null);let parent=clip;
+    if(wrapper){parent=make('div',clip);parent.contains=node=>node===parent;}
+    clip.contains=node=>node===clip||(wrapper&&node===parent);
+    const active=make('svg',parent,'http://www.w3.org/2000/svg');active.offsetParent=offsetParent;active.matches=()=>false;active.closest=()=>family;active.getClientRects=()=>[rect];
+    const node={contains:item=>item===active,closest:()=>family};
+    const base={display:'block',opacity:'1',contentVisibility:'visible',visibility:'visible',overflowClipMargin:'0px',clip:'auto',clipPath:'none',transform:'none',translate:'none',rotate:'none',scale:'none',perspective:'none',filter:'none',maskImage:'none',contain:'none',zoom:'normal'};
+    const styles=new Map([[active,{...base,position:'absolute',overflowX:'hidden',overflowY:'hidden',outlineStyle:'solid',outlineWidth:'2px',outlineOffset:'-2px',outlineColor:'rgb(55, 114, 187)'}],
+      [clip,{...base,position:wrapper?'static':parentPosition,overflowX:'hidden',overflowY:'hidden'}],...(wrapper?[[parent,{...base,position:'relative',overflowX:'visible',overflowY:'visible'}]]:[])]);
+    const bounds={clip:{x:10,y:10,width:80,height:80},root:{left:10,top:10,right:90,bottom:90},extendsRoot:false,viewportTruncated:false};
+    return JSON.parse(JSON.stringify(runInNewContext(`(${activeOutlineBounds.toString()})(node,bounds)`,{document:{activeElement:active},getComputedStyle:item=>styles.get(item),node,bounds,scrollX:0,scrollY:0,innerWidth:100,innerHeight:100})));
+  };
+  for(const offsetParent of [null,undefined]){
+    const result=evaluate({offsetParent});assert.equal(result.focusOutline.status,'bounded');
+  }
+  const nonnull=evaluate({offsetParent:make('div',null)}).focusOutline.diagnostic.rejectedClipRelationships[0];
+  assert.equal(nonnull.containingBlockState,'element');assert.equal(nonnull.directSVGChild,true);assert.equal(nonnull.directSVGParentNonStatic,true);assert.equal(nonnull.directSVGParentFallback,false);
+  const wrapped=evaluate({offsetParent:undefined,wrapper:true}).focusOutline.diagnostic.rejectedClipRelationships[0];
+  assert.equal(wrapped.containingBlockState,'undefined');assert.equal(wrapped.directSVGChild,false);assert.equal(wrapped.proven,false);
+  const nullStaticParent=evaluate({offsetParent:null,parentPosition:'static'}).focusOutline.diagnostic.rejectedClipRelationships[0];
+  assert.equal(nullStaticParent.containingBlockState,'null');assert.equal(nullStaticParent.directSVGParentNonStatic,false);assert.equal(nullStaticParent.proven,false);
+  const staticParent=evaluate({offsetParent:undefined,parentPosition:'static'}).focusOutline.diagnostic.rejectedClipRelationships[0];
+  assert.equal(staticParent.containingBlockState,'undefined');assert.equal(staticParent.directSVGChild,true);assert.equal(staticParent.directSVGParentNonStatic,false);assert.equal(staticParent.proven,false);
+});
+
+test('presence sequence kind pure: action labels stay separate from component kind',async()=>{
+  const source=await readFile(new URL('./visual-state-audit-drivers.mjs',import.meta.url),'utf8');
+  const start=source.indexOf("if(contract.focusedSequence==='workspace-native-presence-follow')"),end=source.indexOf("if(contract.focusedSequence==='native-embed-open-host')",start),presence=source.slice(start,end);
+  assert(presence.includes('for(const [id,actionKind]of sequences)'));
+  assert(presence.includes('assert.equal(after.kind,initial.kind)'));
+  const initial={kind:'PresenceAvatars'},after={kind:'PresenceAvatars'},actionKind='follow';
+  assert.equal(after.kind,initial.kind,'The component-kind invariant survives a follow action');
+  assert.notEqual(after.kind,actionKind,'An action-sequence label is not the component kind');
+  assert.throws(()=>assert.equal(after.kind,actionKind),assert.AssertionError,'The former follow-vs-PresenceAvatars comparison must fail');
+});
+
 test('popover overlay inventory requires exact identity, root, unique open reference and visible article',()=>{
   const make=(id,visible=true)=>({id,tagName:'ARTICLE',innerText:'Details',checkVisibility:()=>visible,getBoundingClientRect:()=>({x:0,y:0,width:200,height:120}),getAttribute:()=>null,matches:()=>false,closest:()=>null});
   const panel=make('owned-panel'),foreign=make('foreign-panel'),triggerFor=({expanded='true',controls='owned-panel'}={})=>({id:'open',getAttribute:name=>name==='aria-expanded'?expanded:name==='aria-controls'?controls:null});

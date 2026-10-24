@@ -95,9 +95,10 @@ export function activeOutlineBounds(node,bounds){
       const itemStyle=getComputedStyle(item.node),parent=item.node.parentElement,parentStyle=parent&&getComputedStyle(parent),containingBlockContained=!!item.containingBlock&&ancestor.contains(item.containingBlock);
       const directSVGChild=item.node.namespaceURI==='http://www.w3.org/2000/svg'&&item.node.localName==='svg'&&parent===ancestor;
       const directSVGParentNonStatic=!!parentStyle&&parentStyle.position!=='static';
-      const directSVGParentFallback=item.containingBlock===null&&itemStyle.position==='absolute'&&directSVGChild&&directSVGParentNonStatic;
+      const containingBlockState=item.containingBlock===null?'null':item.containingBlock===undefined?'undefined':'element';
+      const directSVGParentFallback=(item.containingBlock===null||item.containingBlock===undefined)&&itemStyle.position==='absolute'&&directSVGChild&&directSVGParentNonStatic;
       const sameAsClipAncestor=item.node===ancestor;
-      return {node:identity(item.node),position:itemStyle.position,namespace:item.node.namespaceURI,offsetParent:identity(item.containingBlock),directParent:identity(parent),clippingAncestor:identity(ancestor),clippingAncestorPosition:s.position,overflowX:s.overflowX,overflowY:s.overflowY,sameAsClipAncestor,containingBlockContained,directSVGChild,directSVGParentNonStatic,directSVGParentFallback,proven:sameAsClipAncestor||containingBlockContained||directSVGParentFallback};
+      return {node:identity(item.node),position:itemStyle.position,namespace:item.node.namespaceURI,offsetParent:identity(item.containingBlock),containingBlockState,directParent:identity(parent),clippingAncestor:identity(ancestor),clippingAncestorPosition:s.position,overflowX:s.overflowX,overflowY:s.overflowY,sameAsClipAncestor,containingBlockContained,directSVGChild,directSVGParentNonStatic,directSVGParentFallback,proven:sameAsClipAncestor||containingBlockContained||directSVGParentFallback};
     });
     const rejectedClipRelationships=clipRelationships.filter(item=>!item.proven);
     if(rejectedClipRelationships.length)return gap('unproven positioned outline overflow clip relationship',{clipRelationships,rejectedClipRelationships});
@@ -935,16 +936,17 @@ export async function runRequestedStateActions(contract,root,runStep,failureDiag
     try{
       const initial=await read();assert.equal(initial.following,'');assert(initial.bannerHidden);assert.equal(initial.label,'');assert.deepEqual(initial.peers.map(peer=>peer.value),['ada','grace','alan','mae','tim','joan']);assert(initial.peers.every(peer=>peer.pressed==='false'));
       fixtureSource={peers:initial.peers.map(({value,name,hue,title,hidden})=>({value,name,hue,title,hidden})),live:initial.live,sourceText:initial.sourceText,selection:initial.selection,cursors:initial.cursors};
-      for(const [id,kind]of sequences){
-        const click=kind==='follow',expectedFollowing=click?'ada':'',expectedPriorFollowing=click?'':'ada';
+      assert.equal(initial.kind,kind,'The component kind remains distinct from the action-sequence label');
+      for(const [id,actionKind]of sequences){
+        const click=actionKind==='follow',expectedFollowing=click?'ada':'',expectedPriorFollowing=click?'':'ada';
         await runStep(id,async()=>{const current=await read();assert.equal(current.following,expectedPriorFollowing,'Presence action sequence must start from its expected prior local state');return activatePresenceStep(id,{ada,stop});},async(state,before)=>{
           const after=await read(),nativeEvents=await native(),newEvents=nativeEvents.slice(nativeOffset),newActions=state.actions.slice(actionOffset);
           const proof=assertPresenceNativeRequest(id,newEvents,newActions,{id:initial.id,component:identity});nativeOffset+=newEvents.length;actionOffset=state.actions.length;
           assert.equal(after.following,expectedFollowing);assert.deepEqual(after.peers.map(peer=>peer.pressed),after.peers.map(peer=>peer.value===expectedFollowing?'true':'false'));
           assert.equal(after.bannerHidden,!click);assert.equal(after.label,click?'Following Ada Park':'');
           assert.deepEqual({peers:after.peers.map(({value,name,hue,title,hidden})=>({value,name,hue,title,hidden})),live:after.live,sourceText:after.sourceText,selection:after.selection,cursors:after.cursors},fixtureSource,'Only local follow presentation may change; fixture peer/document data remains intact');
-          assert.equal(after.id,initial.id);assert.equal(after.component,identity);assert.equal(after.kind,kind);
-          return {identity,following:after.following,pressed:after.peers.filter(peer=>peer.pressed==='true').map(peer=>peer.value),bannerHidden:after.bannerHidden,label:after.label,...proof,fixtureSourceUnchanged:true};
+          assert.equal(after.id,initial.id);assert.equal(after.component,identity);assert.equal(after.kind,initial.kind);
+          return {identity,actionKind,following:after.following,pressed:after.peers.filter(peer=>peer.pressed==='true').map(peer=>peer.value),bannerHidden:after.bannerHidden,label:after.label,...proof,fixtureSourceUnchanged:true};
         });
       }
     }catch(error){primaryError=error;await retainFailurePayload(failureDiagnostics,'presenceNativeEvents',native);throw error;}
