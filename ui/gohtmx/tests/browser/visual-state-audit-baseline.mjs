@@ -35,10 +35,15 @@ function initialPaintSnapshot(element, caseId) {
   ];
   return {caseId,root:rect(element.getBoundingClientRect()),scroll:{x:scrollX,y:scrollY},required:required.map(([name,node])=>{
     if (!node || !element.contains(node)) return {name,missing:true};
+    const image=node.tagName==='IMG'?{complete:node.complete,naturalWidth:node.naturalWidth,naturalHeight:node.naturalHeight,currentSrc:node.currentSrc}:null;
+    const requiresText=name!=='pattern'&&!image;
     const ranges=[],walker=document.createTreeWalker(node,NodeFilter.SHOW_TEXT);
+    let textNodes=0,unpaintedTextNodes=0;
     let text;while((text=walker.nextNode()))if(text.textContent.trim()){
+      textNodes++;let painted=false;
       const range=document.createRange();range.selectNodeContents(text);
-      for(const r of range.getClientRects())if(r.width>0&&r.height>0)ranges.push(rect(r));
+      for(const r of range.getClientRects())if(r.width>0&&r.height>0){ranges.push(rect(r));painted=true;}
+      if(!painted)unpaintedTextNodes++;
     }
     const ancestors=[];let parent=node;
     while(parent&&ancestors.length<32){
@@ -48,7 +53,7 @@ function initialPaintSnapshot(element, caseId) {
         bounds:rect({left:r.left+parent.clientLeft,top:r.top+parent.clientTop,right:r.left+parent.clientLeft+parent.clientWidth,bottom:r.top+parent.clientTop+parent.clientHeight})});
       parent=parent.parentElement;
     }
-    return {name,bounds:rect(node.getBoundingClientRect()),ranges:ranges.slice(0,64),rangesTruncated:ranges.length>64,ancestors,ancestorsTruncated:Boolean(parent)};
+    return {name,requiresText,textNodes,unpaintedTextNodes,image,bounds:rect(node.getBoundingClientRect()),ranges:ranges.slice(0,64),rangesTruncated:ranges.length>64,ancestors,ancestorsTruncated:Boolean(parent)};
   })};
 }
 function initialPaintFailures(before, after, clip) {
@@ -60,6 +65,8 @@ function initialPaintFailures(before, after, clip) {
   const outside=(r,b,x=true,y=true)=>(x&&(r.left<b.left-epsilon||r.right>b.right+epsilon))||(y&&(r.top<b.top-epsilon||r.bottom>b.bottom+epsilon));
   for(const phase of [before,after])for(const item of phase?.required||[]){
     if(item.missing||item.rangesTruncated||item.ancestorsTruncated){failures.push(`${item.name}: missing or truncated diagnostic`);continue;}
+    if(item.requiresText&&(!item.textNodes||!item.ranges.length||item.unpaintedTextNodes))failures.push(`${item.name}: required text fragment missing`);
+    if(item.image&&(!item.image.complete||item.image.naturalWidth<=0||item.image.naturalHeight<=0||!item.image.currentSrc))failures.push(`${item.name}: required avatar image not loaded`);
     for(const r of [item.bounds,...item.ranges]){
       if(r.right<=r.left||r.bottom<=r.top||outside(r,frame))failures.push(`${item.name}: required bounds outside capture`);
       for(const a of item.ancestors){
@@ -70,6 +77,28 @@ function initialPaintFailures(before, after, clip) {
     }
   }
   return [...new Set(failures)];
+}
+function navigationOwnership() {
+  const documents=[],requests=new WeakMap();let current=null;
+  return {
+    documents,
+    begin(url){current={generation:documents.length+1,url,errors:[],assets:new Map()};documents.push(current);return current;},
+    stamp(request,caseId=null){
+      if(requests.has(request))return requests.get(request);
+      const redirected=request.redirectedFrom?.();
+      let document=redirected&&requests.get(redirected)?.document;
+      if(!document){
+        let frameURL;try{frameURL=request.frame().url();}catch{}
+        document=!request.isNavigationRequest?.()&&frameURL&&frameURL!==current?.url?documents.findLast(d=>d.url===frameURL):null;
+        document ||= current;
+      }
+      const owner={document,caseId};requests.set(request,owner);return owner;
+    },
+    owner(request){return requests.get(request)||this.stamp(request);},
+  };
+}
+function requiredAssetFailures(results, readiness) {
+  return [...results.filter(x=>x.error).map(x=>`${x.path}: ${x.error}`),...readiness.missing.map(x=>`required asset not ready: ${x}`)];
 }
 async function fulfillAsset(route, page, timeout = 30000) {
   const request = route.request(), path = new URL(request.url()).pathname;
@@ -228,10 +257,13 @@ async function assertEmptyOutput(output) {
 const errorsByCase = new Map();
 let activeCaseId = null;
 let familyErrors = [];
-function addPageError(type, text) {
-  if (!activeCaseId) { familyErrors.push({type, text}); return; }
-  if (!errorsByCase.has(activeCaseId)) errorsByCase.set(activeCaseId, []);
-  errorsByCase.get(activeCaseId).push({type, text});
+function addPageError(type, text, owner=null) {
+  const row={type,text,...(owner?{generation:owner.document?.generation,documentURL:owner.document?.url}: {})};
+  const caseId=owner?owner.caseId:activeCaseId;
+  if(owner?.document)owner.document.errors.push(row);
+  if (!caseId) { if(!owner?.document)familyErrors.push(row); return; }
+  if (!errorsByCase.has(caseId)) errorsByCase.set(caseId, []);
+  errorsByCase.get(caseId).push(row);
 }
 
 let child, browser, context, runDir, outputDir, staticHTTPServer, staticDir, buildArtifactSHA256 = null, serverOutput = '';
@@ -240,6 +272,7 @@ let captureStartedAt = 0;
 let captureSuccessCount = 0, captureFailureCount = 0;
 let captureAttemptCount = 0, sourceDrift = null, sourceBase = null, selectedCaseCount = 0, profileRunStartedAt = null;
 const productionAssets = new Map();
+const navigation = navigationOwnership();
 const casesWithErrors = new Set();
 let currentThemeVerification = null;
 
@@ -331,18 +364,21 @@ try {
   const page = context.pages()[0] || await context.newPage();
   page.on('console', message => { if (['error', 'warning'].includes(message.type())) addPageError(`console-${message.type()}`, message.text()); });
   page.on('pageerror', error => addPageError('pageerror', String(error)));
-  page.on('requestfailed', request => addPageError('requestfailed', `${request.failure()?.errorText || 'failed'} ${request.url()}`));
+  page.on('request', request => navigation.stamp(request,activeCaseId));
+  page.on('requestfailed', request => addPageError('requestfailed', `${request.failure()?.errorText || 'failed'} ${request.url()}`,navigation.owner(request)));
   await page.route(/\/assets\/.*\.(?:css|js)(?:\?.*)?$/, route => {
     const path = new URL(route.request().url()).pathname;
+    const owner=navigation.owner(route.request());
     const loaded = fulfillAsset(route, page).catch(async error => {
       await route.abort().catch(() => {});
       return {path, error: String(error)};
     });
-    if (!productionAssets.has(path)) productionAssets.set(path, loaded);
+    owner.document?.assets.set(route.request(),loaded);
+    loaded.then(result=>{if(!result.error&&!productionAssets.has(path))productionAssets.set(path,loaded);});
     return loaded;
   });
   page.on('response', response => {
-    if (response.status() >= 400) addPageError('http', `${response.status()} ${response.url()}`);
+    if (response.status() >= 400) addPageError('http', `${response.status()} ${response.url()}`,navigation.owner(response.request()));
   });
 
   let nextBatch = 1;
@@ -356,7 +392,6 @@ try {
   };
   const familyPage = async family => {
     activeCaseId = null;
-    familyErrors = [];
     console.log(`LOAD_FAMILY ${family}`);
     const url = options.fixture === 'basic' ? new URL(basicFixtureRoute, origin) : options.mode === 'live' ? new URL('/components/audit', origin) : new URL(`/components/audit/${family}/aliases/`, origin);
     if (options.fixture !== 'basic' && options.mode === 'live') { url.searchParams.set('aliases', '1'); url.searchParams.set('family', family); }
@@ -365,8 +400,19 @@ try {
       assert(manifestResponse.ok, 'actual basic manifest must load');
       validateBasicMatrix(matrix, await manifestResponse.json(), currentRevision);
     }
+    const documentOwner=navigation.begin(url.href);
+    familyErrors=documentOwner.errors;
     const response = await page.goto(url.href, {waitUntil: 'domcontentloaded', timeout: 120000});
     assert(response?.ok(), `audit route ${family} returned ${response?.status()}`);
+    await page.waitForLoadState('load',{timeout:30000});
+    const assets=await Promise.all([...documentOwner.assets.values()]);
+    const readiness=await page.evaluate(()=>({missing:[...document.querySelectorAll('link[rel="stylesheet"][href],script[src]')].filter(node=>{
+      const url=new URL(node.href||node.src,location.href);
+      return url.origin===location.origin&&url.pathname.startsWith('/assets/')&&(node.tagName==='LINK'?!node.sheet:!performance.getEntriesByName(url.href).length);
+    }).map(node=>node.href||node.src)}));
+    documentOwner.readiness={results:assets,missing:readiness.missing};
+    assert.deepEqual(requiredAssetFailures(assets,readiness),[],'current document required CSS/JS assets must complete before capture');
+    assert.equal(documentOwner.errors.length,0,'current document navigation errors must not be waived');
     await page.evaluate(() => document.fonts.ready);
     assert.equal(await page.locator('html').getAttribute('lang'), 'en');
     const themeState = await page.evaluate(mode => {
@@ -422,6 +468,7 @@ try {
       capturedCount: batch.filter(item => item.captureStatus === 'captured').length,
       blockedCount: batch.filter(item => item.captureStatus !== 'captured').length,
       observedPeak: {chromiumRSSBytes: chromiumRssPeak || null, nodeRSSBytes: nodeRssPeak, serverRSSBytes: serverRssPeak || null},
+      navigationDiagnostics:navigation.documents.map(({generation,url,errors,readiness})=>({generation,url,errors,readiness})),
       cases: serializableCases,
     };
     await writeFile(join(batchDir, 'receipts.json'), JSON.stringify(receipt, null, 2) + '\n', {flag: 'wx'});
@@ -496,8 +543,13 @@ try {
       }
       await page.evaluate(() => document.fonts.ready);
       await root.evaluate(async node => {
-        await Promise.all([...node.querySelectorAll('img')].map(image => image.decode?.().catch(() => {}) || Promise.resolve()));
+        await Promise.all([...node.querySelectorAll('img')].filter(image=>image.getClientRects().length&&getComputedStyle(image).visibility==='visible').map(async image => {await image.decode();assertImage(image);}));
+        function assertImage(image){if(!image.complete||image.naturalWidth<=0||image.naturalHeight<=0)throw Error(`required component image not loaded: ${image.currentSrc||image.src}`);}
       });
+      const documentOwner=navigation.documents.at(-1);
+      const readyAssets=await Promise.all([...documentOwner.assets.values()]);
+      documentOwner.readiness.results=readyAssets;
+      assert.deepEqual(requiredAssetFailures(readyAssets,{missing:[]}),[],'required current-document modules must finish before component capture');
       await sleepFrame(page);
       await root.scrollIntoViewIfNeeded();
       const metadata = await page.evaluate(({element, caseId}) => {
@@ -682,7 +734,7 @@ try {
   if (!sourceDrift && endingSourceBase.sourceTreeSHA256 !== sourceBase.sourceTreeSHA256) sourceDrift = {checkpoint: 'profile-end', expectedSourceTreeSHA256: sourceBase.sourceTreeSHA256, actualSourceTreeSHA256: endingSourceBase.sourceTreeSHA256, detectedAt: new Date().toISOString(), actualSourceBase: endingSourceBase};
   const profileStatus = sourceDrift ? 'stale' : captureFailureCount ? 'blocked' : captureAttemptCount === selectedCaseCount ? 'complete' : 'partial';
   if (sourceDrift || captureFailureCount || captureAttemptCount !== selectedCaseCount) process.exitCode = 1;
-  await writeFile(join(outputDir, 'profile-summary.json'), JSON.stringify({schemaVersion: 1, status: profileStatus, profile: options.profile, mode: options.mode, sourceBase, endingSourceBase, sourceDrift, selected: selectedCaseCount, attempted: captureAttemptCount, captured: captureSuccessCount, blocked: captureFailureCount, unattempted: selectedCaseCount - captureAttemptCount, startedAt: profileRunStartedAt, completedAt: new Date().toISOString(), noActionsExecuted: true}, null, 2) + '\n', {flag: 'wx'});
+  await writeFile(join(outputDir, 'profile-summary.json'), JSON.stringify({schemaVersion: 1, status: profileStatus, profile: options.profile, mode: options.mode, sourceBase, endingSourceBase, sourceDrift, selected: selectedCaseCount, attempted: captureAttemptCount, captured: captureSuccessCount, blocked: captureFailureCount, unattempted: selectedCaseCount - captureAttemptCount, startedAt: profileRunStartedAt, completedAt: new Date().toISOString(), noActionsExecuted: true, navigationDiagnostics:navigation.documents.map(({generation,url,errors,readiness})=>({generation,url,errors,readiness}))}, null, 2) + '\n', {flag: 'wx'});
   const elapsedSeconds = (Date.now() - captureStartedAt) / 1000;
   const attempted = captureAttemptCount;
   console.log(JSON.stringify({runKind: options.caseIds.length || options.families.length ? 'filtered-profile-capture' : 'profile-capture', status: profileStatus, selected: selectedCaseCount, attempted, captured: captureSuccessCount, blocked: captureFailureCount, unattempted: selectedCaseCount - attempted, sourceTreeSHA256: sourceBase.sourceTreeSHA256, profile: options.profile, elapsedSeconds: Math.round(elapsedSeconds), averageSecondsPerCase: attempted ? +(elapsedSeconds / attempted).toFixed(2) : null, chromiumPeakRSSMiB: +(chromiumRssPeak / 1048576).toFixed(1), nodePeakRSSMiB: +(nodeRssPeak / 1048576).toFixed(1), output: outputDir, noActionsExecuted: true, allVisualStatusesPending: true, casesWithConsoleOrErrors: casesWithErrors.size}, null, 2));

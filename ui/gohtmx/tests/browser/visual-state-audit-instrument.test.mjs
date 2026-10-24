@@ -22,9 +22,17 @@ test('initial paint camera diagnostic pure: exact scope, clipping, movement and 
     assert.deepEqual(Array.from(result.required,x=>x.name),names);assert.ok(result.required.every(x=>x.missing),'missing required caller nodes must not pass');
   }
   const bounds={left:10,top:10,right:30,bottom:30},clip={x:0,y:0,width:100,height:100};
-  const item={name:'flag-x',bounds,ranges:[{left:25,top:12,right:29,bottom:25}],ancestors:[{bounds:{left:0,top:0,right:100,bottom:100},overflowX:'hidden',overflowY:'auto',clip:'auto',clipPath:'none',display:'block',visibility:'visible',opacity:'1',scrollLeft:0,scrollTop:0}]};
+  const item={name:'flag-x',requiresText:true,textNodes:1,unpaintedTextNodes:0,bounds,ranges:[{left:25,top:12,right:29,bottom:25}],ancestors:[{bounds:{left:0,top:0,right:100,bottom:100},overflowX:'hidden',overflowY:'auto',clip:'auto',clipPath:'none',display:'block',visibility:'visible',opacity:'1',scrollLeft:0,scrollTop:0}]};
   const before={root:{left:0,top:0,right:100,bottom:100},scroll:{x:0,y:0},required:[item]};
   assert.deepEqual(failures(before,structuredClone(before),clip),[]);
+  for(const name of ['flag-x','first-text','first-avatar'])for(const fragment of [{ranges:[]},{textNodes:0},{unpaintedTextNodes:1}]){
+    const required=[{...item,name,...fragment}];assert.ok(failures({...before,required},{...before,required},clip).some(x=>x.includes('text fragment missing')),'positive container/checkbox box cannot replace required glyphs');
+  }
+  const avatar={...item,name:'first-avatar',requiresText:false,ranges:[],image:{complete:true,naturalWidth:24,naturalHeight:24,currentSrc:'/avatar.png'}};
+  assert.deepEqual(failures({...before,required:[avatar]},{...before,required:[avatar]},clip),[]);
+  for(const image of [{...avatar.image,complete:false},{...avatar.image,naturalWidth:0},{...avatar.image,naturalHeight:0},{...avatar.image,currentSrc:''}]){
+    const state={...before,required:[{...avatar,image}]};assert.ok(failures(state,state,clip).some(x=>x.includes('image not loaded')));
+  }
   for(const name of ['flag-x','first-text']){
     const clipped=structuredClone(before);clipped.required[0].name=name;clipped.required[0].ranges[0].top=-1;
     assert.ok(failures(clipped,clipped,clip).some(x=>x.includes('outside capture')));
@@ -40,6 +48,31 @@ test('initial paint camera diagnostic pure: exact scope, clipping, movement and 
   assert.ok(failBlock.indexOf('result.png = png')<failBlock.indexOf('assert.fail'),'failed PNG retained before assertion');
   const retained=source.indexOf('initialPaintDiagnostic,{after:paintAfter,failures:paintFailures}');
   assert.ok(retained>=0&&retained<source.indexOf('if (paintFailures.length)'),'metrics retained before assertion');
+});
+
+test('baseline document asset ownership pure: departed abort retained, arriving failures and missing assets block',async()=>{
+  const source=await readFile(new URL('./visual-state-audit-baseline.mjs',import.meta.url),'utf8'),ast=parse(source,{ecmaVersion:'latest',sourceType:'module'});
+  const body=name=>{const fn=ast.body.find(n=>n.type==='FunctionDeclaration'&&n.id.name===name);assert.ok(fn);return source.slice(fn.start,fn.end);};
+  const ledger=compileFunction(`return (${body('navigationOwnership')})();`)();
+  const errorsByCase=new Map(),fallback=[];
+  const add=compileFunction(`return (${body('addPageError')});`,['errorsByCase','familyErrors','activeCaseId'])(errorsByCase,fallback,null);
+  const request=(url,navigation=false)=>({frame:()=>({url:()=>url}),isNavigationRequest:()=>navigation,redirectedFrom:()=>null});
+  const old=ledger.begin('https://fixture/old'),departed=request(old.url);ledger.stamp(departed);
+  const arriving=ledger.begin('https://fixture/new');
+  add('requestfailed','net::ERR_ABORTED /old-module.js',ledger.owner(departed));
+  assert.equal(old.errors.length,1);assert.equal(arriving.errors.length,0,'departed failure cannot contaminate arriving family');
+  const lateOld=request(old.url);assert.equal(ledger.stamp(lateOld).document,old,'old-frame request initiated during navigation retains document owner');
+  const main=request(old.url,true);assert.equal(ledger.stamp(main).document,arriving,'new main request owns the arriving generation');
+  const current=request(arriving.url);ledger.stamp(current,'gallery:devtools/Base64');
+  add('requestfailed','net::ERR_ABORTED /current-module.js',ledger.owner(current));
+  add('http','404 /required.css',ledger.owner(current));
+  assert.equal(arriving.errors.length,2);assert.equal(errorsByCase.get('gallery:devtools/Base64').length,2,'genuine abort and404 remain errors');
+  const check=compileFunction(`return (${body('requiredAssetFailures')});`)();
+  assert.deepEqual(check([{path:'/ok.js'}],{missing:[]}),[]);
+  assert.equal(check([{path:'/bad.js',error:'request failed'}],{missing:['/missing.css']}).length,2);
+  assert.match(source,/page\.on\('request', request => navigation\.stamp/);
+  assert.match(source,/waitForLoadState\('load'/);
+  assert.match(source,/navigationDiagnostics:navigation\.documents/,'ownership evidence must be retained, not ignored');
 });
 
 test('hidden action shim style exits before outline color parsing',()=>{
