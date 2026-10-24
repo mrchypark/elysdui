@@ -3,6 +3,7 @@ import {createServer} from 'node:http';
 import {readFile,mkdir} from 'node:fs/promises';
 import {resolve,extname} from 'node:path';
 import {chromium} from 'playwright';
+import {goBackTo} from './static-page-history.mjs';
 const root=resolve('dist'), siteBase='/elysdui/', base=siteBase+'go-htmx/', errors=[], bad=[];
 const server=createServer(async(req,res)=>{try{let p=decodeURIComponent(new URL(req.url,'http://local').pathname);if(!p.startsWith(siteBase)){res.writeHead(404).end();return;}p=p.slice(siteBase.length);if(!p||p.endsWith('/'))p+='index.html';const file=resolve(root,p);if(!file.startsWith(root+'/'))throw Error('path');const data=await readFile(file);res.setHeader('Content-Type',({'.html':'text/html','.js':'text/javascript','.css':'text/css','.json':'application/json','.wasm':'application/wasm','.svg':'image/svg+xml'})[extname(file)]||'application/octet-stream');res.end(data);}catch{res.writeHead(404).end();}});
 await new Promise(r=>server.listen(0,'127.0.0.1',r));
@@ -61,12 +62,12 @@ try{
  }
  await page.getByRole('link',{name:'Explore the web gallery'}).click();
  assert.equal(page.url(),origin+base);
- await page.goBack();
+ await goBackTo(page,origin+siteBase,'gallery-to-hub history navigation');
+ await page.getByRole('link',{name:'Open playground',exact:false}).waitFor({state:'visible'});
  await page.getByRole('link',{name:'Open playground',exact:false}).click();
  assert.equal(page.url(),origin+base+'playground/');
  await page.waitForFunction(()=>globalThis.elyRendererMetrics,{},{timeout:120000});
- await page.goBack();
- assert.equal(page.url(),origin+siteBase);
+ await goBackTo(page,origin+siteBase,'playground-to-hub history navigation');
  await page.goto(origin+base);assert((await page.locator('a').count())>40,'gallery links rendered');
  const expectedNav=['Components','Form examples','Themes','Playground'];
  const chrome=async()=>page.locator('.site-header').evaluate(el=>({background:getComputedStyle(el).backgroundColor,font:getComputedStyle(el).fontFamily,brand:el.querySelector('.wordmark').textContent.trim()}));
@@ -97,7 +98,7 @@ try{
  assert.equal(await page.locator('.header-nav [aria-current=page]').textContent(),'Form examples');
  assert.equal(await page.locator('html').getAttribute('data-theme'),'dark');
  assert.equal(await page.locator('[data-theme-toggle]').getAttribute('aria-pressed'),'true');
- await page.goBack();await page.waitForFunction(()=>globalThis.elyRendererMetrics,{},{timeout:120000});
+ await goBackTo(page,origin+base+'playground/','usage-to-playground history navigation');await page.waitForFunction(()=>globalThis.elyRendererMetrics,{},{timeout:120000});
  assert.equal(await page.locator('html').getAttribute('data-theme'),'dark');await page.locator('[data-theme-toggle]').click();
  await page.setViewportSize({width:1440,height:1000});
  const screen={version:'1',id:'static-test',root:{id:'layout',type:'stack',children:[{id:'message',type:'text',props:{text:'Static WASM preview'}}]}};
