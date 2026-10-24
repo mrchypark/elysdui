@@ -545,6 +545,14 @@ export function requestedStateContract(identity,trashFixture){
     ];
     return {identity,kind:'SubAgentTree',family:'communication',requestedStateOnly:true,focusedSequence:'communication-subagent-tree-local',mappingGaps:[],fixtureGuards:{component:identity,kind:'SubAgentTree',nestedValue:'code',initiallyOpen:true},steps:steps.map(([id,control,expectedState])=>({id,control,expectedState,event:id==='tree-select-code'?'trusted native Playwright button click; host request only':'trusted native disclosure summary activation',source:{siteId:`focused-state:${identity}:${id}`,sourceAnchor:'internal/gallery/advanced_communication_fixtures.go SubAgentTree; ui/gohtmx/templates/ely-api-communication.html ely-api-agent-tree-node; ui/gohtmx/assets/ely-api-communication.js native details and data-ely-select handling',provenance:'Exact agent/SubAgentTree default nested fixture; native disclosure is local. Selection emits a host request; source caller status/progress is not advanced or persisted.'}})),scope:'Only agent/SubAgentTree default fixture; native Code disclosure collapse/expand and local selection with stable caller status/progress. No agent execution or host fulfillment claim.'};
   }
+  if(identity==='collab/ActivityLog'){
+    const hrefs=['#gamma-space','#lift','#on-lift','#lift'];
+    const steps=hrefs.map((href,index)=>{
+      const entry=index+1,id=`activity-focus-entry-${entry}`;
+      return {id,control:`li[data-ws-activity-entry]:nth-child(${entry}) a[href="${href}"]`,expectedState:`Native Tab traversal focuses ActivityLog entry ${entry}'s existing ${href} target without activating it or emitting a host request.`,event:'trusted native Tab key; no synthetic focus or anchor activation',source:{siteId:`focused-state:${identity}:${id}`,sourceAnchor:'internal/gallery/advanced_workspace_fixtures.go collab/ActivityLog; ui/gohtmx/templates/ely-api-workspace.html ws-activity; ui/gohtmx/assets/ely-api-workspace.css ActivityLog responsive text/time grid',provenance:`Exact default ${identity} fixture link ${entry} in source order; links are native anchors and focus does not fulfill or activate their targets.`}};
+    });
+    return {identity,kind:'ActivityLog',family:'workspace',requestedStateOnly:true,focusedSequence:'workspace-activity-native-link-focus',mappingGaps:[],fixtureGuards:{component:identity,entryHrefs:hrefs},steps,scope:'Only the exact collab/ActivityLog default fixture; native keyboard focus through all four target links in DOM order. No link activation, navigation, host request, or external target fulfillment is claimed.'};
+  }
   if(identity==='misc/IframeEmbed'||identity==='misc/EmbedCard'){
     const stepId=identity==='misc/IframeEmbed'?'iframe-open-host':'embedcard-open-host',url='https://example.com';
     return {identity,kind:'IframeEmbed',family:'native',requestedStateOnly:true,focusedSequence:'native-embed-open-host',mappingGaps:[],fixtureGuards:{component:identity,kind:'IframeEmbed',url,sourceNote:'Web views need macOS for now.'},steps:[{id:stepId,control:'header button[data-ely-action="open"][data-value="https://example.com"]',expectedState:'One trusted native click emits exactly open with this root ID, alias-preserving component identity, and exact URL; the source note and iframe-free local state remain unchanged.',event:'trusted native Playwright button click; one host request only; no navigation',source:{siteId:`native-state:${identity}:${stepId}`,sourceAnchor:'ui/gohtmx/components.json IframeEmbed/EmbedCard; internal/gallery/assets/native-misc-fixtures.json IframeEmbed; ui/gohtmx/templates/ely-api-native.html IframeEmbed; ui/gohtmx/assets/ely-api.js generic click emitter',provenance:`Exact default native identity ${identity}; EmbedCard keeps its own alias identity; the fixture source note and local state are preserved, with no provider or navigation claim`}}],scope:'One default header-button action for each of the two catalogue identities; no external provider, browser navigation, alias-family, or registered-check approval claim'};
@@ -1067,6 +1075,55 @@ export async function runRequestedStateActions(contract,root,runStep,failureDiag
     await runStep('tree-expand-code',async()=>{assert.equal(await details.evaluate(node=>node.open),false);return clickVisibleControl(marker);},async(state,before)=>{assert.deepEqual(state.actions.slice(before.actions.length),[]);const current=await assertStable();assert.equal(current.nodes.find(node=>node.value==='code').open,true);const events=await details.evaluate(node=>node.__visualDisclosureEvents);assert.deepEqual(events,[{trusted:true,open:false},{trusted:true,open:true}]);return {disclosure:'expanded by native summary activation',statusProgress:statusProgress(current),hostRequests:0};});
     await runStep('tree-select-code',()=>clickVisibleControl(code),async(state,before)=>{const current=await assertStable(),actions=state.actions.slice(before.actions.length),id=await root.getAttribute('id');assert.equal(current.nodes.find(node=>node.value==='code').open,true);assert.equal(current.nodes.find(node=>node.value==='code').selected,'true');assert.deepEqual(actions,[{id,component:identity,action:'select',value:'code',itemId:'',laneId:'',date:''}]);return {selected:'code',request:actions[0],statusProgress:statusProgress(current),hostFulfillment:'not supplied'};});
     await details.evaluate(node=>{delete node.__visualDisclosureEvents;});
+    return;
+  }
+  if(contract.focusedSequence==='workspace-activity-native-link-focus'){
+    const identity='collab/ActivityLog',links=root.locator('[data-ws-activity-entry] a[href]'),hrefs=contract.fixtureGuards.entryHrefs;
+    assert.equal(contract.identity,identity);assert.equal(await root.getAttribute('data-ely-component'),identity);assert.equal(await root.getAttribute('data-ely-kind'),'ActivityLog');
+    assert.equal(await links.count(),4,'Exact four-entry ActivityLog fixture required');assert.deepEqual(await links.evaluateAll(nodes=>nodes.map(node=>node.getAttribute('href'))),hrefs,'Default target links and order are pinned');
+    const twin=()=>root.evaluate(node=>node.closest('[data-audit-name]')?.querySelector('[data-audit-twin] > [data-ely-family]')?.innerHTML);
+    const initialTwin=await twin();assert.equal(typeof initialTwin,'string','Independent ActivityLog twin required');
+    await root.evaluate(node=>{
+      node.__visualActivityFocusEvents=[];
+      node.__visualActivityFocusListener=event=>{
+        const anchor=event.target.closest?.('[data-ws-activity-entry] a[href]');
+        if(event.type==='focusin'&&anchor&&node.contains(anchor))node.__visualActivityFocusEvents.push({type:event.type,trusted:event.isTrusted,index:[...node.querySelectorAll('[data-ws-activity-entry] a[href]')].indexOf(anchor),href:anchor.getAttribute('href')});
+        else if(event.type==='keydown'&&event.key==='Tab')node.__visualActivityFocusEvents.push({type:event.type,trusted:event.isTrusted,key:event.key});
+        else if(event.type==='click'&&anchor&&node.contains(anchor))node.__visualActivityFocusEvents.push({type:event.type,trusted:event.isTrusted,index:[...node.querySelectorAll('[data-ws-activity-entry] a[href]')].indexOf(anchor),href:anchor.getAttribute('href')});
+      };
+      for(const type of ['focusin','keydown','click'])node.ownerDocument.addEventListener(type,node.__visualActivityFocusListener,true);
+    });
+    const native=()=>root.evaluate(node=>node.__visualActivityFocusEvents);let nativeOffset=0;
+    try{
+      assert.equal(await root.evaluate(node=>node.ownerDocument.activeElement===node.ownerDocument.body),true,'Native keyboard traversal must start at the untouched document body');
+      for(let index=0;index<4;index++){
+        const step=`activity-focus-entry-${index+1}`;
+        await runStep(step,async()=>{
+          if(index===0){
+            let reached=false;
+            for(let count=0;count<256;count++){
+              await root.page().keyboard.press('Tab');
+              if(await root.evaluate((node,targetIndex)=>node.ownerDocument.activeElement===node.querySelectorAll('[data-ws-activity-entry] a[href]')[targetIndex],index)){reached=true;break;}
+            }
+            assert(reached,'Native Tab traversal must reach the first ActivityLog link within the bounded page tab order');
+          }else await root.page().keyboard.press('Tab');
+          return {method:'trusted native Tab'};
+        },async(state,before)=>{
+          assert.equal(await root.evaluate((node,targetIndex)=>node.ownerDocument.activeElement===node.querySelectorAll('[data-ws-activity-entry] a[href]')[targetIndex],index),true,`Entry ${index+1} target must receive native focus`);
+          assert.equal(await links.nth(index).getAttribute('href'),hrefs[index],'Focus must not alter the target');
+          const events=(await native()).slice(nativeOffset),tabs=events.filter(event=>event.type==='keydown'),focus=events.filter(event=>event.type==='focusin');
+          assert(tabs.length>0&&tabs.every(event=>event.trusted&&event.key==='Tab'),'Every focus transition must come from trusted native Tab input');
+          assert.deepEqual(focus,[{type:'focusin',trusted:true,index,href:hrefs[index]}],'The exact source-order target must receive trusted native focus');
+          assert.equal(events.some(event=>event.type==='click'),false,'Tab traversal must not activate or navigate a link');
+          assert.deepEqual(state.actions.slice(before.actions.length),[],'Link focus must not emit a host request');
+          assert.equal(await twin(),initialTwin,'The independent ActivityLog twin must remain unchanged');
+          nativeOffset+=events.length;
+          return {focusedLink:index+1,href:hrefs[index],nativeTabEvents:tabs.length,activated:false,hostRequests:0,twinUnchanged:true};
+        });
+      }
+    }finally{
+      await root.evaluate(node=>{for(const type of ['focusin','keydown','click'])node.ownerDocument.removeEventListener(type,node.__visualActivityFocusListener,true);delete node.__visualActivityFocusListener;delete node.__visualActivityFocusEvents;});
+    }
     return;
   }
   if(contract.focusedSequence==='workspace-native-presence-follow'){

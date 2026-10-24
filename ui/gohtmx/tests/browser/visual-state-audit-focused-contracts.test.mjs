@@ -47,6 +47,28 @@ test('Input TextField ClearableInput finite native contracts preserve aliases an
   assert.match(branch,/finally\{await root\.evaluate/);
 });
 
+test('ActivityLog contract traverses all four native target links by trusted keyboard focus',async()=>{
+  const identity='collab/ActivityLog',hrefs=['#gamma-space','#lift','#on-lift','#lift'],contract=requestedStateContract(identity);
+  assert.equal(contract.identity,identity);assert.equal(contract.kind,'ActivityLog');assert.equal(contract.family,'workspace');assert.equal(contract.requestedStateOnly,true);assert.equal(contract.focusedSequence,'workspace-activity-native-link-focus');assert.deepEqual(contract.mappingGaps,[]);
+  assert.deepEqual(contract.fixtureGuards,{component:identity,entryHrefs:hrefs});
+  assert.deepEqual(contract.steps.map(step=>step.id),hrefs.map((_,index)=>`activity-focus-entry-${index+1}`));
+  assert.deepEqual(contract.steps.map(step=>step.control),hrefs.map((href,index)=>`li[data-ws-activity-entry]:nth-child(${index+1}) a[href="${href}"]`));
+  assert(contract.steps.every(step=>step.event.includes('trusted native Tab')&&step.expectedState.includes('without activating it')&&step.source.siteId.endsWith(`:${step.id}`)&&step.source.sourceAnchor&&step.source.provenance.includes(identity)));
+  assert.match(contract.scope,/all four target links in DOM order/);assert.match(contract.scope,/No link activation, navigation, host request/);
+  assert.equal(requestedStateContract('collab/CommentThread'),null,'The exact ActivityLog contract does not promote its family peers');
+
+  const [driver,fixture,template]=await Promise.all([read('ui/gohtmx/tests/browser/visual-state-audit-drivers.mjs'),read('internal/gallery/advanced_workspace_fixtures.go'),read('ui/gohtmx/templates/ely-api-workspace.html')]);
+  const start=driver.indexOf("if(contract.focusedSequence==='workspace-activity-native-link-focus')"),end=driver.indexOf("if(contract.focusedSequence==='workspace-native-presence-follow')",start),branch=driver.slice(start,end);
+  assert(start>=0&&end>start);assert.match(branch,/const identity='collab\/ActivityLog'/);assert.match(branch,/links\.count\(\),4/);assert.match(branch,/ownerDocument\.activeElement===node\.ownerDocument\.body/);
+  assert.match(branch,/for\(let count=0;count<256;count\+\+\)[\s\S]*?keyboard\.press\('Tab'\)/,'The first link must be reached through bounded native Tab traversal');
+  assert.match(branch,/else await root\.page\(\)\.keyboard\.press\('Tab'\)/,'The remaining three links advance one native Tab at a time');
+  assert.match(branch,/tabs\.every\(event=>event\.trusted&&event\.key==='Tab'\)/);assert.match(branch,/focusin/);assert.match(branch,/state\.actions\.slice\(before\.actions\.length\),\[\]/);
+  assert.doesNotMatch(branch,/\.focus\(|\.click\(|dispatchEvent\(/,'No programmatic focus, activation, or synthetic DOM event may stand in for keyboard traversal');
+  const activity=fixture.slice(fixture.indexOf('case "collab/ActivityLog":'),fixture.indexOf('case "devtools/QueryEditor"'));
+  for(const href of hrefs)assert(activity.includes(`"URL": "${href}"`),`Default ActivityLog fixture link ${href}`);
+  assert.match(template,/define "ws-activity"[\s\S]*?<a href="\{\{\.URL\}\}">\{\{\.Target\}\}<\/a>[\s\S]*?<time datetime=/);
+});
+
 test('forced scroll source guard rejects assignments without mistaking equality comparisons',()=>{
   const forcedScrollAssignment=/scrollTop\s*=(?!=)/;
   assert.match('node.scrollTop = 12',forcedScrollAssignment,'A direct forced-scroll assignment remains forbidden');
