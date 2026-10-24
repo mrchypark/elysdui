@@ -18,7 +18,10 @@ const copy = structuredClone;
 const sha = value => createHash('sha256').update(value).digest('hex');
 const component = 'navigation/CommandPalette';
 const browserSource = await readFile(new URL('../ui/gohtmx/tests/browser/palette-query-browser-test.mjs', import.meta.url), 'utf8');
-assert.match(browserSource, /const check = current\?\.name, responseURL = response\.url\(\), requestMethod = response\.request\(\)\.method\(\), responseStatus = response\.status\(\), responsePath = new URL\(responseURL\)\.pathname;[\s\S]{0,1200}catch \(error\) \{ report\.transportErrors\.push\(\{check, responseURL, path: responsePath, method: requestMethod, status: responseStatus, message: String\(error\)\}\); \}/, 'transport errors retain response identity and original error text');
+assert.match(browserSource, /page\.on\('request', request => \{\s*const check = current\?\.name \?\? null;\s*requestChecks\.set\(request, check\);[\s\S]{0,1200}const response = await request\.response\(\);[\s\S]{0,500}if \(!response\) \{[\s\S]{0,350}report\.transportErrors\.push\(\{check,[\s\S]{0,180}request\.failure\(\)\?\.errorText \|\| 'browser request ended without a response'/, 'each browser response proof follows its originating request and preserves missing outcomes');
+assert.match(browserSource, /page\.on\('requestfailed', request => report\.requestFailures\.push\(\{check: requestChecks\.get\(request\) \?\? null/,
+  'request failures retain the originating case');
+assert.doesNotMatch(browserSource, /page\.on\('response', response => \{\s*const check = current\?\.name/, 'response evidence is not attributed to mutable current case');
 const baseline = '0a972e071452f7bdb9bc64f6d27d50c042108885';
 const baselineTree = 'c400233c889a6701682ded31429a3ce0127bacf0';
 const pins = {palette: '49ed1f84056fa13347d68801b479a4a5a8e03b53', compatibilityAudit: 'da3fdcaf39f2fa85ce1dd9cad07c3c81cf1dd721'};

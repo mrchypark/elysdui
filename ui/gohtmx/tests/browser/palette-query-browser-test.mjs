@@ -25,6 +25,7 @@ const root = (slot = 'primary') => page.locator(`#palette-${slot} [data-ely-fami
 const settle = () => page.evaluate(() => new Promise(resolve => setTimeout(() => requestAnimationFrame(() => requestAnimationFrame(resolve)), 20)));
 const snap = () => page.evaluate(() => paletteSnapshot());
 const clear = () => page.evaluate(() => paletteClear());
+const requestChecks = new WeakMap();
 async function open() { await page.mouse.move(1, 1); await root().locator('[data-interaction-dialog]').click(); await settle(); }
 async function keyboardEdit(text) { await page.keyboard.press('Control+A'); await page.keyboard.press('Backspace'); await page.keyboard.type(text); await settle(); }
 async function ready(origin) {
@@ -119,23 +120,30 @@ try {
   }
   browser = await chromium.launch({headless: true}); report.browserVersion = browser.version();
   page = await browser.newPage({viewport: {width: 1280, height: 900}}); page.setDefaultTimeout(10000);
-  page.on('response', response => {
-    const check = current?.name, responseURL = response.url(), requestMethod = response.request().method(), responseStatus = response.status(), responsePath = new URL(responseURL).pathname;
+  page.on('request', request => {
+    const check = current?.name ?? null;
+    requestChecks.set(request, check);
+    const responseURL = request.url(), requestMethod = request.method(), responsePath = new URL(responseURL).pathname;
     responses.push((async () => {
       try {
         assert.equal(new URL(responseURL).origin, origin, 'no remote browser assets');
+        const response = await request.response();
+        if (!response) {
+          report.transportErrors.push({check, responseURL, path: responsePath, method: requestMethod, status: null, message: request.failure()?.errorText || 'browser request ended without a response'});
+          return;
+        }
         const path = responsePath, responseFixture = path === '/sdui-action' ? '/sdui-response-primary' : path;
         const wanted = report.assets[path] || report.fixtures[responseFixture]; assert(wanted, 'unexpected browser response');
         const bytes = await response.body();
         const proof = {check, path, ...(path === '/sdui-action' ? {responseFixture} : {}), status: response.status(), expectedSHA256: wanted.servedSHA256, receivedSHA256: sha(bytes), bytes: bytes.length};
         report.browserResponses.push(proof);
         if (proof.status !== 200 || proof.expectedSHA256 !== proof.receivedSHA256 || proof.bytes !== wanted.bytes) report.transportErrors.push(proof);
-      } catch (error) { report.transportErrors.push({check, responseURL, path: responsePath, method: requestMethod, status: responseStatus, message: String(error)}); }
+      } catch (error) { report.transportErrors.push({check, responseURL, path: responsePath, method: requestMethod, status: null, message: String(error)}); }
     })());
   });
   page.on('pageerror', error => report.pageErrors.push({check: current?.name, message: error.message}));
   page.on('console', message => { if (message.type() === 'error') report.consoleErrors.push({check: current?.name, message: message.text()}); });
-  page.on('requestfailed', request => report.requestFailures.push({check: current?.name, url: request.url(), error: request.failure()?.errorText}));
+  page.on('requestfailed', request => report.requestFailures.push({check: requestChecks.get(request) ?? null, url: request.url(), error: request.failure()?.errorText}));
   report.stage = 'checks';
   for (const name of report.caseInventory) {
     current = {name, raw: {}, status: 'running'}; report.checks.push(current);
