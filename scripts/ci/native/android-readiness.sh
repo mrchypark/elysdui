@@ -67,28 +67,28 @@ android_set_avd_home() {
 }
 
 android_create_avd() {
-	local avdmanager=$1 avd_name=$2 system_image=$3 expected_dir actual_dirs config
+	local avdmanager=$1 avd_name=$2 system_image=$3 expected_dir actual_names config
 	[ -n "${ANDROID_AVD_HOME:-}" ] || {
 		echo 'ANDROID_AVD_HOME must be set before creating an Android AVD.' >&2
 		return 1
 	}
-	if ! printf 'no\n' | "$avdmanager" create avd --force --name "$avd_name" --device pixel_2 --package "$system_image"; then
+	expected_dir=${ANDROID_AVD_HOME%/}/$avd_name.avd
+	if ! printf 'no\n' | "$avdmanager" create avd --force --name "$avd_name" --device pixel_2 --package "$system_image" --path "$expected_dir"; then
 		echo "avdmanager failed to create AVD $avd_name." >&2
 		return 1
 	fi
-	if ! actual_dirs=$("$avdmanager" list avd -c); then
-		echo "avdmanager could not report created AVD directories for $avd_name." >&2
+	if ! actual_names=$("$avdmanager" list avd -c); then
+		echo "avdmanager could not report created AVD names for $avd_name." >&2
 		return 1
 	fi
-	expected_dir=${ANDROID_AVD_HOME%/}/$avd_name.avd
 	config=$expected_dir/config.ini
-	if ! printf '%s\n' "$actual_dirs" | grep -Fxq "$expected_dir"; then
-		printf 'avdmanager did not resolve %s at the selected AVD home. Expected: %s\nActual AVD directories:\n%s\n' \
-			"$avd_name" "$expected_dir" "${actual_dirs:-<none>}" >&2
+	if ! printf '%s\n' "$actual_names" | grep -Fxq "$avd_name"; then
+		printf 'avdmanager did not list created AVD name %s. Actual AVD names:\n%s\n' \
+			"$avd_name" "${actual_names:-<none>}" >&2
 		return 1
 	fi
 	[ -f "$config" ] || {
-		printf 'avdmanager listed %s but its config is missing: %s\n' "$expected_dir" "$config" >&2
+		printf 'avdmanager listed %s but its requested config path is missing: %s\n' "$avd_name" "$config" >&2
 		return 1
 	}
 	printf 'Resolved Android AVD directory: %s\n' "$expected_dir"

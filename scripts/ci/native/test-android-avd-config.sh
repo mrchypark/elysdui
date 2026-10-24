@@ -13,27 +13,26 @@ set -euo pipefail
 case "${1:-} ${2:-} ${3:-}" in
 	'create avd --force')
 		[[ "$ANDROID_AVD_HOME" == "$FAKE_EXPECTED_AVD_HOME" ]]
+		[[ " $* " == *" --path $ANDROID_AVD_HOME/ely-profile.avd "* ]]
 		[[ "$(cat)" == no ]]
 		printf '%s\n' 'Auto-selecting single ABI x86_64'
 		if [[ "${FAKE_AVD_MODE:-create}" == create ]]; then
 			mkdir -p "$ANDROID_AVD_HOME/ely-profile.avd"
 			printf '%s\n' 'avd.ini.encoding=UTF-8' 'hw.cpu.ncore=2' 'hw.lcd.width=1080' > "$ANDROID_AVD_HOME/ely-profile.avd/config.ini"
-			printf '%s\n' "$ANDROID_AVD_HOME/ely-profile.avd"
 		elif [[ "${FAKE_AVD_MODE:-create}" == missing ]]; then
-			printf '%s\n' "$ANDROID_AVD_HOME/ely-profile.avd"
+			:
 		else
 			mkdir -p "$FAKE_OTHER_AVD_HOME/ely-profile.avd"
 			printf '%s\n' 'avd.ini.encoding=UTF-8' > "$FAKE_OTHER_AVD_HOME/ely-profile.avd/config.ini"
-			printf '%s\n' "$FAKE_OTHER_AVD_HOME/ely-profile.avd"
 		fi
 		;;
 	'list avd -c')
 		if [[ "${FAKE_AVD_MODE:-create}" == create ]]; then
-			printf '%s\n' "$ANDROID_AVD_HOME/ely-profile.avd"
+			printf '%s\n' 'ely-profile'
 		elif [[ "${FAKE_AVD_MODE:-create}" == missing ]]; then
-			printf '%s\n' "$ANDROID_AVD_HOME/ely-profile.avd"
+			printf '%s\n' 'ely-profile'
 		else
-			printf '%s\n' "$FAKE_OTHER_AVD_HOME/ely-profile.avd"
+			printf '%s\n' 'ely-profile'
 		fi
 		;;
 	*)
@@ -71,7 +70,7 @@ fi
 [[ "$output" == *"$ANDROID_AVD_HOME/ely-profile.avd/config.ini"* ]]
 
 # A successful manager exit that lists the AVD elsewhere must not be treated as
-# a config at the selected home; retain the exact actual path in the diagnostic.
+# proof of the requested config path; compact mode reports its name, not its path.
 export FAKE_AVD_MODE=misdirect
 export FAKE_OTHER_AVD_HOME="$tmp/elsewhere"
 android_set_avd_home "$tmp/expected-but-not-created"
@@ -79,6 +78,6 @@ if output=$(android_create_avd "$manager" ely-profile 'system-images;android-29;
 	echo 'AVD manager path mismatch unexpectedly passed' >&2
 	exit 1
 fi
-[[ "$output" == *"$FAKE_OTHER_AVD_HOME/ely-profile.avd"* ]]
+[[ "$output" == *"$ANDROID_AVD_HOME/ely-profile.avd/config.ini"* ]]
 
 echo 'Android AVD home and config-path checks passed.'
