@@ -118,3 +118,69 @@ func TestWorkspaceCollaborationSafeDefaultsAndSharePermissions(t *testing.T) {
 		t.Fatalf("owner=%v restricted=%v pending=%v", owner, restricted, pending)
 	}
 }
+
+func TestActivityLogMobileLayoutKeepsTimeAndNativeLinkOrder(t *testing.T) {
+	css, err := Files.ReadFile("assets/ely-api-workspace.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, rule := range []string{
+		"@media (max-width:40rem){[data-ely-family='workspace'] [data-ws-activity-entry]>div{min-width:0;grid-template-columns:minmax(0,1fr)}",
+		"[data-ely-family='workspace'] [data-ws-activity-entry]>div>p,[data-ely-family='workspace'] [data-ws-activity-entry]>div>small{min-width:0;overflow-wrap:anywhere}",
+		"[data-ely-family='workspace'] [data-ws-activity-entry]>div>time{grid-column:1;min-width:0;white-space:normal}",
+	} {
+		if !strings.Contains(string(css), rule) {
+			t.Errorf("missing responsive ActivityLog rule: %s", rule)
+		}
+	}
+
+	tpl, err := NewTemplates()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	props := map[string]any{"Activities": []map[string]any{
+		{"Author": "Caller", "Action": "updated", "Time": "4 minutes ago", "DateTime": "2026-10-11T10:40:00+09:00", "Target": "a long but readable target", "URL": "#caller-target"},
+		{"Author": "Second caller", "Action": "reviewed", "Time": "Yesterday", "DateTime": "2026-10-10T10:40:00+09:00", "Target": "second target", "URL": "#second-target"},
+	}}
+	if err := RenderComponent(tpl, &out, Component{Chapter: "collab", Name: "ActivityLog", ID: "caller-activity", Props: props}); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := html.Parse(strings.NewReader(out.String()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	links, times := formNodes(doc, "a"), formNodes(doc, "time")
+	if len(links) != 2 || len(times) != 2 {
+		t.Fatalf("got %d native links and %d times; want two each", len(links), len(times))
+	}
+	for i, want := range []string{"#caller-target", "#second-target"} {
+		if href, ok := formAttr(links[i], "href"); !ok || href != want {
+			t.Fatalf("native target link %d changed: href=%q present=%v", i, href, ok)
+		}
+		if _, ok := formAttr(links[i], "tabindex"); ok {
+			t.Fatal("ActivityLog should preserve native anchor order without tabindex overrides")
+		}
+	}
+	for i, want := range []string{"2026-10-11T10:40:00+09:00", "2026-10-10T10:40:00+09:00"} {
+		if value, ok := formAttr(times[i], "datetime"); !ok || value != want {
+			t.Fatalf("native time %d changed: datetime=%q present=%v", i, value, ok)
+		}
+	}
+	var sequence []string
+	var visit func(*html.Node)
+	visit = func(node *html.Node) {
+		if node.Type == html.ElementNode && node.Data == "a" {
+			sequence = append(sequence, "link")
+		} else if node.Type == html.ElementNode && node.Data == "time" {
+			sequence = append(sequence, "time")
+		}
+		for child := node.FirstChild; child != nil; child = child.NextSibling {
+			visit(child)
+		}
+	}
+	visit(doc)
+	if got, want := strings.Join(sequence, ","), "link,time,link,time"; got != want {
+		t.Fatalf("native target/time DOM order = %q, want %q", got, want)
+	}
+}
