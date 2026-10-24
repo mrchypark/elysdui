@@ -9,7 +9,7 @@ import {setTimeout as delay} from 'node:timers/promises';
 import {isDeepStrictEqual} from 'node:util';
 import {chromium} from 'playwright';
 import {actionModuleNames,prepareActionModule,synchronousTraceInit,registeredOutcomesEqual,registeredOutcomeDifferences,firstDifference,compareActionTrace,traceContractStatus} from './visual-state-audit-instrument.mjs';
-import {caseActionContract, requestedStateContract, runRequestedStateActions, runRegisteredCanvasActions, ownedOverlayInventory, captureTargetPNG, screenshotWithoutCaretMutation, inventoryReceipt, inventoryDrift, unhandledBrowserErrors, visualCaptureGap, persistDirectCaseFailure} from './visual-state-audit-drivers.mjs';
+import {caseActionContract, requestedStateContract, runRequestedStateActions, runRegisteredCanvasActions, ownedOverlayInventory, captureTargetPNG, screenshotWithoutCaretMutation, inventoryReceipt, inventoryDrift, unhandledBrowserErrors, visualCaptureGap, persistDirectCaseFailure, probeFailureStateAndPayload} from './visual-state-audit-drivers.mjs';
 import {basicFixturePackage,basicRootSelector} from './visual-state-audit-basic.mjs';
 import {basicActionContract,validateBasicActionMatrix,runBasicActions,basicActionSurface,selectBasicActionCases,fulfillBasicActionAsset,assertBasicActionAssets,retainBasicFailureEvidence,basicOwnedModal,basicModalCaptureTarget} from './visual-state-audit-basic-actions.mjs';
 
@@ -384,7 +384,7 @@ async function directCaseDriver({item, familyURL, captures, reference, semanticS
         password:password?{value:password.value,type:password.type,valid:password.checkValidity()}:null,
         editor:editor?{name:editor.dataset.name,value:node.querySelector('input[data-ws-content-value]')?.value,invalid:editor.getAttribute('aria-invalid'),error:node.querySelector('[data-ws-edit-error]')?.textContent,cursor:node.querySelector('[data-workspace-cursor]')?.textContent}:null};
     });
-    failureProbe=async()=>({currentState:await observe(),nativePayload:failureDiagnostics.presenceNativeEvents??await root.evaluate(node=>node.__presenceNativeEvents??null),...(failureDiagnostics.presenceNativeEventsError?{diagnosticError:failureDiagnostics.presenceNativeEventsError}:{})});
+    failureProbe=()=>probeFailureStateAndPayload(failureDiagnostics,observe,()=>root.evaluate(node=>node.__presenceNativeEvents??null));
     const step = async (label, action, verify) => {
       const index = receipts.length + 1, siteId = `direct-playwright:${label}`;
       const expected=contract.steps[index-1];assert.equal(expected?.id,label,'Driver order must equal the exact contract');

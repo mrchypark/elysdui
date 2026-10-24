@@ -22,6 +22,20 @@ export async function retainFailurePayload(failureDiagnostics,key,readPayload){
   try{failureDiagnostics[key]=await readPayload();}
   catch(error){failureDiagnostics[`${key}Error`]={name:error?.name??'Error',message:error?.message??String(error),stack:error?.stack??null};}
 }
+export async function cleanupPreservingPrimary(cleanup,primaryError,failureDiagnostics){
+  try{await cleanup();}
+  catch(error){
+    failureDiagnostics.presenceCleanupError={name:error?.name??'Error',message:error?.message??String(error),stack:error?.stack??null};
+    if(!primaryError)throw error;
+  }
+}
+export async function probeFailureStateAndPayload(failureDiagnostics,readState,readNativePayload){
+  let currentState=null,nativePayload=failureDiagnostics.presenceNativeEvents??null;const errors=[];
+  if(failureDiagnostics.presenceCleanupError)errors.push({phase:'cleanup',...failureDiagnostics.presenceCleanupError});
+  try{currentState=await readState();}catch(error){errors.push({phase:'current-state',name:error?.name??'Error',message:error?.message??String(error),stack:error?.stack??null});}
+  if(nativePayload===null)try{nativePayload=await readNativePayload();}catch(error){errors.push({phase:'native-payload',name:error?.name??'Error',message:error?.message??String(error),stack:error?.stack??null});}
+  return {currentState,nativePayload,...(errors.length?{diagnosticError:errors}:{})};
+}
 // No unhandled page error has a verified exception in this audit.
 export const unhandledBrowserErrors=errors=>errors.filter(error=>error.type==='pageerror');
 
@@ -917,6 +931,7 @@ export async function runRequestedStateActions(contract,root,runStep,failureDiag
     const sequences=[
       ['presence-follow-ada','follow'],['presence-stop-button','stop'],['presence-follow-ada-again','follow'],['presence-stop-escape','stop'],
     ];
+    let primaryError;
     try{
       const initial=await read();assert.equal(initial.following,'');assert(initial.bannerHidden);assert.equal(initial.label,'');assert.deepEqual(initial.peers.map(peer=>peer.value),['ada','grace','alan','mae','tim','joan']);assert(initial.peers.every(peer=>peer.pressed==='false'));
       fixtureSource={peers:initial.peers.map(({value,name,hue,title,hidden})=>({value,name,hue,title,hidden})),live:initial.live,sourceText:initial.sourceText,selection:initial.selection,cursors:initial.cursors};
@@ -932,8 +947,8 @@ export async function runRequestedStateActions(contract,root,runStep,failureDiag
           return {identity,following:after.following,pressed:after.peers.filter(peer=>peer.pressed==='true').map(peer=>peer.value),bannerHidden:after.bannerHidden,label:after.label,...proof,fixtureSourceUnchanged:true};
         });
       }
-    }catch(error){await retainFailurePayload(failureDiagnostics,'presenceNativeEvents',native);throw error;}
-    finally{await root.evaluate(node=>{if(node.__presenceNativeListener){document.removeEventListener('click',node.__presenceNativeListener,true);document.removeEventListener('keydown',node.__presenceNativeListener,true);}delete node.__presenceNativeListener;delete node.__presenceNativeEvents;});}
+    }catch(error){primaryError=error;await retainFailurePayload(failureDiagnostics,'presenceNativeEvents',native);throw error;}
+    finally{await cleanupPreservingPrimary(()=>root.evaluate(node=>{if(node.__presenceNativeListener){document.removeEventListener('click',node.__presenceNativeListener,true);document.removeEventListener('keydown',node.__presenceNativeListener,true);}delete node.__presenceNativeListener;delete node.__presenceNativeEvents;}),primaryError,failureDiagnostics);}
     return;
   }
   if(contract.focusedSequence==='native-embed-open-host'){
