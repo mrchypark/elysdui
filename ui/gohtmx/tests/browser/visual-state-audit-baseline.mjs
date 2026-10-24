@@ -48,7 +48,7 @@ function initialPaintSnapshot(element, caseId) {
     const ancestors=[];let parent=node;
     while(parent&&ancestors.length<32){
       const style=getComputedStyle(parent),r=parent.getBoundingClientRect();
-      ancestors.push({tag:parent.tagName,id:parent.id,overflowX:style.overflowX,overflowY:style.overflowY,clip:style.clip,clipPath:style.clipPath,
+      ancestors.push({self:parent===node,tag:parent.tagName,id:parent.id,overflowX:style.overflowX,overflowY:style.overflowY,clip:style.clip,clipPath:style.clipPath,
         scrollLeft:parent.scrollLeft,scrollTop:parent.scrollTop,display:style.display,visibility:style.visibility,opacity:style.opacity,
         bounds:rect({left:r.left+parent.clientLeft,top:r.top+parent.clientTop,right:r.left+parent.clientLeft+parent.clientWidth,bottom:r.top+parent.clientTop+parent.clientHeight})});
       parent=parent.parentElement;
@@ -72,7 +72,8 @@ function initialPaintFailures(before, after, clip) {
       for(const a of item.ancestors){
         if(a.display==='none'||a.visibility!=='visible'||Number(a.opacity)===0)failures.push(`${item.name}: hidden required paint`);
         if(a.clip!=='auto'||a.clipPath!=='none')failures.push(`${item.name}: nonrectangular/legacy clip requires adjudication`);
-        if(outside(r,a.bounds,/hidden|clip|scroll|auto/.test(a.overflowX),/hidden|clip|scroll|auto/.test(a.overflowY)))failures.push(`${item.name}: required bounds outside ancestor clip`);
+        // A node clips its contents, not its own border; required text still uses its self clip.
+        if(!(a.self&&r===item.bounds)&&outside(r,a.bounds,/hidden|clip|scroll|auto/.test(a.overflowX),/hidden|clip|scroll|auto/.test(a.overflowY)))failures.push(`${item.name}: required bounds outside ancestor clip`);
       }
     }
   }

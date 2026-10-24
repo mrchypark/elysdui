@@ -50,6 +50,23 @@ test('initial paint camera diagnostic pure: exact scope, clipping, movement and 
   assert.ok(retained>=0&&retained<source.indexOf('if (paintFailures.length)'),'metrics retained before assertion');
 });
 
+test('initial paint self clip pure: input border is not content but text and outer clipping still fail',async()=>{
+  const source=await readFile(new URL('./visual-state-audit-baseline.mjs',import.meta.url),'utf8'),ast=parse(source,{ecmaVersion:'latest',sourceType:'module'});
+  const fn=ast.body.find(n=>n.type==='FunctionDeclaration'&&n.id.name==='initialPaintFailures');
+  const check=compileFunction(`return (${source.slice(fn.start,fn.end)});`)();
+  const item={name:'pattern',requiresText:false,bounds:{left:41,top:10,right:191.90625,bottom:38},ranges:[],ancestors:[{self:true,bounds:{left:42,top:11,right:191,bottom:37},overflowX:'clip',overflowY:'clip',clip:'auto',clipPath:'none',display:'block',visibility:'visible',opacity:'1'}]};
+  const state={root:{left:41,top:10,right:349,bottom:100},scroll:{x:0,y:0},required:[item]},clip={x:41,y:10,width:308,height:90};
+  assert.deepEqual(check(state,structuredClone(state),clip),[],'retained failed pattern border/client geometry is valid');
+  const external=structuredClone(state);external.required[0].ancestors.push({...item.ancestors[0],self:false});
+  assert.ok(check(external,external,clip).some(x=>x.includes('ancestor clip')),'outer clipping of border remains a failure');
+  const text=structuredClone(state);Object.assign(text.required[0],{name:'flag-x',requiresText:true,textNodes:1,unpaintedTextNodes:0,ranges:[{left:41,top:12,right:48,bottom:26}]});
+  assert.ok(check(text,text,clip).some(x=>x.includes('ancestor clip')),'self-clipped required text must still fail');
+  const hidden=structuredClone(state);hidden.required[0].ancestors[0].opacity='0';
+  assert.ok(check(hidden,hidden,clip).some(x=>x.includes('hidden')),'self visibility checks are not waived');
+  assert.ok(check(state,state,{...clip,width:100}).some(x=>x.includes('outside capture')),'capture boundary still contains the complete border');
+  assert.match(source,/self:parent===node/,'collector identifies self explicitly, not by rectangle equality');
+});
+
 test('baseline document asset ownership pure: departed abort retained, arriving failures and missing assets block',async()=>{
   const source=await readFile(new URL('./visual-state-audit-baseline.mjs',import.meta.url),'utf8'),ast=parse(source,{ecmaVersion:'latest',sourceType:'module'});
   const body=name=>{const fn=ast.body.find(n=>n.type==='FunctionDeclaration'&&n.id.name===name);assert.ok(fn);return source.slice(fn.start,fn.end);};
