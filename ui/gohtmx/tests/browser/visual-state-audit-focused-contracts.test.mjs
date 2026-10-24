@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import test from 'node:test';
+import {assertSpecialInputState} from './visual-state-audit-drivers.mjs';
 import {assertActivityLogScopedAuditPage,assertCommunicationCallerRequest,assertDockCallerAction,assertDockNativeEvents,assertEvalLastColumnGeometry,assertNativeEmbedOpen,activatePresenceStep,assertPresenceNativeRequest,assertFoundationPublicEvents,assertPlainInputNativeEvents,assertFormattedInputState,calendarDraftWheelDecision,requestedStateContract,runRequestedStateActions} from './visual-state-audit-drivers.mjs';
 
 const read=path=>readFile(new URL(`../../../../${path}`,import.meta.url),'utf8');
@@ -42,7 +43,7 @@ test('Input TextField ClearableInput finite native contracts preserve aliases an
   assert.match(actions,/if\(contract\.requestedStateOnly\)\{\s*await runRequestedStateActions\(contract,root,step,failureDiagnostics\);/);
   const driver=runRequestedStateActions.toString(),branch=driver.slice(driver.indexOf("if(contract.focusedSequence==='input-public-edit-clear'"),driver.indexOf("if(['button-public-boundary','textarea-public-multiline']"));
   assert.match(branch,/Exact primary caller input must be unique/);assert.doesNotMatch(branch,/\.first\(|\.nth\(/);
-  assert.match(branch,/initialPeers/);assert.match(branch,/await fresh\(\)/);assert.match(branch,/field\.fill\(value\)/);assert.match(branch,/clear\.click\(\)/);assert.match(branch,/field\.press\('Backspace'\)/);assert.match(branch,/field\.press\('Tab'\)/);
+  assert.match(branch,/initialPeers/);assert.match(branch,/await fresh\(\)/);assert.match(branch,/field\.fill\(/);assert.match(branch,/clear\.click\(\)/);assert.match(branch,/field\.press\('Backspace'\)/);assert.match(branch,/field\.press\('Tab'\)/);
   assert.doesNotMatch(branch,/dispatchEvent|requestSubmit|new Event|\.value\s*=/,'Driver must not synthesize input, mutate fixture values, or submit host work');
   assert.match(branch,/finally\{await root\.evaluate/);
 });
@@ -84,6 +85,44 @@ test('five formatted input contracts retain exact fixture types bounds native va
   const driver=runRequestedStateActions.toString(),branch=driver.slice(driver.indexOf("if(contract.focusedSequence==='input-public-edit-clear'"),driver.indexOf("if(['button-public-boundary','textarea-public-multiline']"));
   assert.match(branch,/assertFormattedInputState/);assert.match(branch,/node\.validity\[key\]/);assert.match(branch,/formatted\?\.initial/);assert.match(branch,/getAttribute\(key\),formatted\[key\]/);assert.match(branch,/initialPeers/);assert.match(branch,/await fresh\(\)/);
   assert.doesNotMatch(branch,/\.first\(|\.nth\(|reportValidity|requestSubmit|dispatchEvent|new Event|\.value\s*=/);
+});
+
+test('Search Password Phone Masked explicit native contracts retain canonical masks public events and toggle trust',async()=>{
+  const fixtures=[
+    ['forms/SearchInput','SearchInput','search',['fill-text','commit-text','clear-text']],
+    ['forms/PasswordInput','PasswordInput','password',['fill-text','commit-text','show-password','hide-password']],
+    ['forms/PhoneInput','PhoneInput','tel',['fill-partial','fill-masked','commit-text']],
+    ['forms/MaskedInput','PhoneInput','text',['fill-partial','fill-masked','commit-text']],
+  ];
+  for(const [identity,kind,type,stages]of fixtures){
+    const contract=requestedStateContract(identity);assert.equal(contract.kind,kind);assert.equal(contract.focusedSequence,'input-public-special');assert.equal(contract.requestedStateOnly,true);assert.deepEqual(contract.steps.map(step=>step.id),stages);assert.deepEqual(contract.mappingGaps,[]);
+    assert(contract.steps.every(step=>step.source.provenance.includes(identity)&&step.source.provenance.includes('not PreviewExamples')));
+    const masked=identity==='forms/PhoneInput'||identity==='forms/MaskedInput';
+    assert.equal(contract.inputFixture.initial,masked?'01012345678':'alpha');
+    if(masked)assert.equal(contract.inputFixture.mask,'###-####-####');
+    for(const stage of stages){
+      const toggle=stage.endsWith('-password'),value=masked?(stage==='fill-partial'?'010':'010-9876-5432'):stage==='clear-text'?'':'Changed caller value';
+      const state={name:'caller_value',type:stage==='show-password'?'text':type,value,valid:true,...(toggle?{label:stage==='show-password'?'Hide':'Show',ariaLabel:stage==='show-password'?'Hide password':'Show password'}:{})};
+      assertSpecialInputState(identity,stage,state);
+      for(const key of Object.keys(state))assert.throws(()=>assertSpecialInputState(identity,stage,{...state,[key]:key==='valid'?false:'wrong'}));
+      if(toggle){const event={type:'click',value,isTrusted:true,defaultPrevented:false};assertPlainInputNativeEvents(stage,[event],{value});for(const bad of [[{...event,isTrusted:false}],[event,event],[event,{...event,type:'change'}]])assert.throws(()=>assertPlainInputNativeEvents(stage,bad,{value}));}
+      if(stage==='commit-text'||stage==='clear-text'){
+        const detail={id:'primary',component:identity,name:'caller_value',value,checked:false,type},events=[{type:'ely:change',detail}];assertFoundationPublicEvents(identity,'primary',events,{value});
+        for(const change of [{id:'twin'},{component:'forms/Other'},{name:'preview'},{type:'wrong'},{value:'stale'},{checked:true}])assert.throws(()=>assertFoundationPublicEvents(identity,'primary',[{type:'ely:change',detail:{...detail,...change}}],{value}));
+        assert.throws(()=>assertFoundationPublicEvents(identity,'primary',[...events,...events],{value}));assert.throws(()=>assertFoundationPublicEvents(identity,'primary',[{type:'ely:action',detail}],{value}));
+      }
+    }
+  }
+  assert.equal(fixtures.reduce((count,row)=>count+row[3].length,0),13);
+  assert.throws(()=>assertSpecialInputState('forms/Other','fill-text',{}));assert.throws(()=>assertSpecialInputState('forms/PhoneInput','show-password',{}));
+  const [fixture,template,controls,forms]=await Promise.all([read('internal/gallery/advanced_forms_fixtures.go'),read('ui/gohtmx/templates/ely-api-forms.html'),read('ui/gohtmx/assets/ely-controls.js'),read('ui/gohtmx/assets/ely-api-forms.js')]);
+  assert.match(fixture,/props\["Value"\], props\["Mask"\] = "01012345678", "###-####-####"/);
+  assert.match(template,/eq \.Variant "MaskedInput"[\s\S]*?\$type = "text"/);assert.match(template,/"Type" "search"/);
+  assert.match(controls,/action === 'password-toggle'[\s\S]*?input\.type = shown \? 'password' : 'text'[\s\S]*?'Show password' : 'Hide password'/);
+  assert.match(forms,/field\.value=fitFormMask\(field\.dataset\.elyMask,field\.value\)/);
+  const driver=runRequestedStateActions.toString(),branch=driver.slice(driver.indexOf("if(contract.focusedSequence==='input-public-edit-clear'"),driver.indexOf("if(['button-public-boundary','textarea-public-multiline']"));
+  assert.match(branch,/a01098765432999b/);assert.match(branch,/toggle\.click\(\)/);assert.match(branch,/assertSpecialInputState/);assert.match(branch,/Last recent search: nothing yet/);assert.match(branch,/Canonical mask fixture has no country selector/);
+  assert.doesNotMatch(branch,/dispatchEvent|new Event|requestSubmit|\.value\s*=|\.first\(|\.nth\(/);
 });
 
 test('ActivityLog contract traverses all four native target links by trusted keyboard focus',async()=>{
@@ -211,7 +250,7 @@ test('focused five-case action contracts stay explicit and source-backed',async(
 });
 
 test('focused driver does not imply neighboring cases or catalog approval',()=>{
-  for(const identity of ['forms/PasswordInput','navigation/EditorTabs','motion/ParticleBackground','account/LoginForm'])
+  for(const identity of ['forms/PinInput','navigation/EditorTabs','motion/ParticleBackground','account/LoginForm'])
     assert.equal(requestedStateContract(identity),null,`${identity} is outside this focused five-case scope`);
 });
 
