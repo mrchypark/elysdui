@@ -7,6 +7,22 @@ import {paletteSourcePaths,paletteErrors,paletteTyping,paletteOptionalBrowserPat
 import {activationSourcePaths} from '../ui/gohtmx/tests/browser/palette-activation-inputs.mjs';
 import {activationCases,activationClassification,activationOracles,activationBrowserPaths,verifyActivationEvidence} from '../ui/gohtmx/tests/browser/palette-activation-evidence.mjs';
 const clone=structuredClone,sha=value=>createHash('sha256').update(value).digest('hex');
+export async function drainResponseCaptures(pending){
+ const failures=[];
+ while(pending.size){
+  const batch=[...pending],outcomes=await Promise.allSettled(batch);
+  for(let i=0;i<batch.length;i++){pending.delete(batch[i]);if(outcomes[i].status==='rejected')failures.push(outcomes[i].reason);}
+ }
+ if(failures.length)throw failures[0];
+}
+async function responseCaptureDrainRegression(){
+ const pending=new Set();let lateCaptureSettled=false;
+ pending.add(Promise.resolve().then(()=>pending.add(new Promise(resolve=>setTimeout(()=>{lateCaptureSettled=true;resolve();},0)))));
+ await drainResponseCaptures(pending);
+ assert.equal(lateCaptureSettled,true,'drain includes capture work admitted while an earlier capture settles');
+ assert.equal(pending.size,0,'drain leaves no in-flight response captures');
+}
+await responseCaptureDrainRegression();
 const owner=(surface,slot='primary')=>surface==='sdui'?'sdui-internal-'+sha(`palette-${slot}-screen\0palette-${slot}-component`):`palette-${slot}-component`;
 const meta=path=>({sourceSHA256:sha(path),servedSHA256:sha(path),bytes:Buffer.byteLength(path)});
 const primary=[['Open','open-file','open-command',false],['Option','option-file','option-command',false],['Other place','other-place','other-command',false],['Open disabled','disabled-open','disabled-command',true],['Zebra','zebra-file','zebra-command',false]];

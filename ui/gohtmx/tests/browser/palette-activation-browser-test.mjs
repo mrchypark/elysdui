@@ -8,17 +8,17 @@ import {loadActivationInputs} from './palette-activation-inputs.mjs';
 import {activationEnvironment} from './palette-activation-policy.mjs';
 import {paletteSHA as sha} from './palette-query-inputs.mjs';
 import {paletteSurfaces,paletteErrors} from './palette-query-evidence.mjs';
+import {drainResponseCaptures} from '../../../../scripts/palette-activation-evidence-test.mjs';
 import {activationCases,activationClassification,activationPage,activationQuery,activationReportName,activationOracles} from './palette-activation-evidence.mjs';
 const base=fileURLToPath(new URL('../../../../',import.meta.url)),surface=process.env.PALETTE_QUERY_SURFACE||'go-qualified';
 const report={suite:'palette-activation',classification:activationClassification,surface,runToken:process.env.PALETTE_ACTIVATION_RUN_TOKEN||null,stage:'startup',status:'running',caseInventory:activationCases,checks:[],requests:[],browserResponses:[],httpAssetProof:[],...Object.fromEntries(paletteErrors.map(k=>[k,[]]))};
-const output=join(base,'test-results/contracts'),pending=[];let inputs,server,browser,page,context,current;
+const output=join(base,'test-results/contracts');let inputs,server,browser,page,context,current;
 const settle=()=>page.evaluate(()=>new Promise(resolve=>setTimeout(()=>requestAnimationFrame(()=>requestAnimationFrame(resolve)),30)));
 const snapshot=()=>page.evaluate(()=>activationSnapshot());
 const option=()=>page.locator('#palette-primary [data-interaction-palette-option][value="option-file"]');
 const open=async()=>{await page.mouse.move(1,1);await page.locator('#palette-primary [data-interaction-dialog]').click();await settle();};
 // The observer's request IDs are joined to server packets at replay. Waiting
 // uses the actual completed bridge events, never an assumed desired zero count.
-const drain=async()=>{await settle();if(surface==='sdui')await page.waitForFunction(()=>activationLog.filter(e=>e.type==='bridge-success').length===activationLog.filter(e=>e.type==='request-start').length);await Promise.all(pending);};
 try{
  assert.equal(process.env.CI,'true','browser execution is restricted to CI');assert(paletteSurfaces.includes(surface));assert(report.runToken);
  inputs=await loadActivationInputs(base,surface,activationEnvironment());const {assetBodies,fixtureBodies,...metadata}=inputs;Object.assign(report,metadata);assert.equal(report.dirty,'','clean committed baseline required');
@@ -42,7 +42,12 @@ try{
   // Fresh browser context per case makes the source-owned full response
   // inventory explicit without disabling or guessing Chromium HTTP caching.
   context=await browser.newContext({viewport:{width:1280,height:900}});page=await context.newPage();page.setDefaultTimeout(10000);
-  page.on('response',response=>{const check=name;pending.push((async()=>{try{const url=new URL(response.url());assert.equal(url.origin,origin);const path=url.pathname,responseFixture=path==='/sdui-action'?'/sdui-response-primary':path,wanted=report.assets[path]||report.fixtures[responseFixture];assert(wanted,'known response');const bytes=await response.body();const proof={check,path,...(path==='/sdui-action'?{responseFixture}:{}),status:response.status(),bytes:bytes.length,expectedSHA256:wanted.servedSHA256,receivedSHA256:sha(bytes)};report.browserResponses.push(proof);if(proof.status!==200||proof.bytes!==wanted.bytes||proof.receivedSHA256!==wanted.servedSHA256)report.transportErrors.push(proof);}catch(error){report.transportErrors.push({check,message:String(error)});}})());});
+  const pending=new Set();
+  const captureResponse=response=>{const check=name;pending.add((async()=>{try{const url=new URL(response.url());assert.equal(url.origin,origin);const path=url.pathname,responseFixture=path==='/sdui-action'?'/sdui-response-primary':path,wanted=report.assets[path]||report.fixtures[responseFixture];assert(wanted,'known response');const bytes=await response.body();const proof={check,path,...(path==='/sdui-action'?{responseFixture}:{}),status:response.status(),bytes:bytes.length,expectedSHA256:wanted.servedSHA256,receivedSHA256:sha(bytes)};report.browserResponses.push(proof);if(proof.status!==200||proof.bytes!==wanted.bytes||proof.receivedSHA256!==wanted.servedSHA256)report.transportErrors.push(proof);}catch(error){report.transportErrors.push({check,message:String(error)});}})());};
+  page.on('response',captureResponse);
+  // Network idle closes the per-case response event boundary; drain every body
+  // capture already admitted before closing this context.
+  const drain=async()=>{await settle();if(surface==='sdui')await page.waitForFunction(()=>activationLog.filter(e=>e.type==='bridge-success').length===activationLog.filter(e=>e.type==='request-start').length);await drainResponseCaptures(pending);};
   page.on('pageerror',error=>report.pageErrors.push({check:name,message:error.message}));page.on('console',message=>{if(message.type()==='error')report.consoleErrors.push({check:name,message:message.text()});});page.on('requestfailed',request=>report.requestFailures.push({check:name,url:request.url(),error:request.failure()?.errorText}));
   try{
    await page.goto(origin+activationPage(name));await page.waitForFunction(()=>document.querySelectorAll('[data-ely-family]').length===2&&[...document.querySelectorAll('[data-ely-family]')].every(root=>root.dataset.elyReady==='true'));
@@ -59,11 +64,14 @@ try{
    current.oracles=activationOracles(current,surface);
   }catch(error){current.error={message:error.message,stack:error.stack};}
   finally{
+   try{await page.waitForLoadState('networkidle');}catch(error){report.transportErrors.push({check:name,message:`response capture boundary: ${String(error)}`});}
+   page.off('response',captureResponse);
+   try{await drainResponseCaptures(pending);}catch(error){report.transportErrors.push({check:name,message:`response capture drain: ${String(error)}`});}
    try{current.finalTrace=await snapshot();report.runtimeErrors.push(...current.finalTrace.baseTrace.errors.map(error=>({check:name,...error})));}catch(error){current.captureError=String(error);}
    current.status=!current.error&&!current.captureError&&current.oracles.every(o=>o.pass)?'passed':'failed';console.log(`${surface}/${name}: ${current.status}`);for(const oracle of current.oracles?.filter(o=>!o.pass)||[])console.error(`${oracle.id}: observed=${JSON.stringify(oracle.observed)} expected=${JSON.stringify(oracle.expected)}`);
-   await Promise.all(pending);await context.close();context=null;
+   await context.close();context=null;
   }
  }
  report.status=report.checks.every(c=>c.status==='passed')&&paletteErrors.every(k=>!report[k].length)?'passed':'failed';
 }catch(error){report.status='failed';report.error={message:error.message,stack:error.stack};}
-finally{await Promise.all(pending);await mkdir(join(output,'palette-activation-fixtures'),{recursive:true});for(const body of inputs?.fixtureBodies.values()||[])await writeFile(join(output,'palette-activation-fixtures/'+sha(body)+'.html'),body);await writeFile(join(output,activationReportName(surface)),JSON.stringify(report,null,2));await context?.close();await browser?.close();if(server?.listening)await new Promise(resolve=>server.close(resolve));if(report.status!=='passed')process.exitCode=1;}
+finally{await mkdir(join(output,'palette-activation-fixtures'),{recursive:true});for(const body of inputs?.fixtureBodies.values()||[])await writeFile(join(output,'palette-activation-fixtures/'+sha(body)+'.html'),body);await writeFile(join(output,activationReportName(surface)),JSON.stringify(report,null,2));await context?.close();await browser?.close();if(server?.listening)await new Promise(resolve=>server.close(resolve));if(report.status!=='passed')process.exitCode=1;}
