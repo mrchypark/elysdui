@@ -17,6 +17,11 @@ assert.throws(() => assertDefinedSemanticColors('var(--info \t )'), /Undefined s
 assertDefinedSemanticColors(styles);
 
 const communicationCSS = readFileSync('ui/gohtmx/assets/ely-api-communication.css', 'utf8');
+const nativeCSS = readFileSync('ui/gohtmx/assets/ely-api-native.css', 'utf8');
+assert(nativeCSS.includes("[data-ely-family='native'] .ely-misc-cookies{max-width:100%}"), 'Cookie panels must retain their preferred width without exceeding their containing block');
+const desktopPromptGrid = nativeCSS.match(/\.ely-native-prompt-workbench\{([^}]*)\}/);
+assert(desktopPromptGrid?.[1].includes('grid-template-columns:minmax(0,2fr) minmax(10rem,1fr)'), 'PromptPlayground keeps its desktop two-column layout');
+assert(nativeCSS.includes("@media(max-width:34rem){[data-ely-family='native'] .ely-native-prompt-workbench{grid-template-columns:minmax(0,1fr);min-width:0}[data-ely-family='native'] .ely-native-prompt-workbench form{min-width:0}[data-ely-family='native'] .ely-native-prompt-workbench textarea{box-sizing:border-box;min-width:0;width:100%}}"), 'PromptPlayground must fit its narrow-screen grid, form, and textarea to the available width');
 const agentTreeSummaryRule = communicationCSS.match(/\[data-ely-family='communication'\] \.ely-agent-tree summary\{([^}]*)\}/);
 const agentTreeButtonRule = communicationCSS.match(/\[data-ely-family='communication'\] \.ely-agent-tree summary button\{([^}]*)\}/);
 const agentTreeStatusRule = communicationCSS.match(/\[data-ely-family='communication'\] \.ely-agent-tree summary small\{([^}]*)\}/);
