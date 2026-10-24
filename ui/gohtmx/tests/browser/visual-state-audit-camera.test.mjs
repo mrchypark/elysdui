@@ -1,9 +1,86 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import {readFile} from 'node:fs/promises';
+import {readFile,mkdtemp,rm} from 'node:fs/promises';
 import {runInNewContext} from 'node:vm';
-import {captureTargetPNG,captureForeignPaint,screenshotWithoutCaretMutation,activeOutlineBounds,visualCaptureGap} from './visual-state-audit-drivers.mjs';
+import {createRequire} from 'node:module';
+import {dirname,resolve,join} from 'node:path';
+import {tmpdir} from 'node:os';
+import {captureTargetPNG,captureForeignPaint,screenshotWithoutCaretMutation,activeOutlineBounds,visualCaptureGap,proveMultiSelectShadowRaster,multiSelectShadowFrame} from './visual-state-audit-drivers.mjs';
 import {captureBounds} from './visual-state-audit-bounds.mjs';
+
+// Synthetic bytes exercise the fail-closed oracle, not actual browser paint evidence.
+function shadowRasterFixture(){
+  const width=12,height=12,data=Buffer.alloc(width*height*4,255);
+  const pixel=(x,y,value)=>{const at=(y*width+x)*4;data[at]=data[at+1]=data[at+2]=value;};
+  pixel(5,5,0);pixel(5,8,240);
+  const sample={eligible:true,ownerID:'primary',panelID:'panel',frame:{x:0,y:0,width,height},documentFrame:{x:0,y:100,width,height},background:[255,255,255,255],rects:[{left:4,top:4,right:8,bottom:8}],shadows:[{id:'panel',css:'rgba(0, 0, 0, 0.133) 0px 1px 2px 0px',left:4,top:4,right:8,bottom:8}],focused:{id:'checkbox',outlineStyle:'none',matchesFocusVisible:false}};
+  return {png:{width,height,data},sample,pixel};
+}
+
+test('MultiSelect shadow raster retains actual halo only inside a clear uniform boundary',()=>{
+  const {png,sample}=shadowRasterFixture(),proof=proveMultiSelectShadowRaster(png,sample);
+  assert.equal(proof.shadowPixels,1);assert.equal(proof.inkPixels,2);assert.equal(proof.status,'bounded-native-raster');
+  for(const css of ['rgba(0, 0, 0, 0.1) 0px 1px 2px 0px inset','rgb(1, 0, 0) 0px 1px 2px 0px','rgba(0, 0, 0, 0.1) 0px 1px 2px 1px','rgba(0, 0, 0, 0.1) 20px 1px 2px 0px',sample.shadows[0].css+', '+sample.shadows[0].css]){
+    assert.throws(()=>proveMultiSelectShadowRaster(png,{...sample,shadows:[{...sample.shadows[0],css}]}));
+  }
+  assert.throws(()=>proveMultiSelectShadowRaster(png,{...sample,panelID:'foreign'}),/panel shadow/);
+  assert.throws(()=>proveMultiSelectShadowRaster(png,{...sample,rects:[{left:-1,top:4,right:8,bottom:8}]}),/escape/);
+  const noHalo=shadowRasterFixture();noHalo.pixel(5,8,255);assert.throws(()=>proveMultiSelectShadowRaster(noHalo.png,noHalo.sample),/shadow pixels/);
+  for(const [x,y] of [[0,5],[11,5],[5,0],[5,11]]){const edge=shadowRasterFixture();edge.pixel(x,y,254);assert.throws(()=>proveMultiSelectShadowRaster(edge.png,edge.sample),/boundary/);}
+});
+
+test('MultiSelect shadow capture rejects foreign paint before screenshot and retains unrelated gaps',async()=>{
+  const {sample}=shadowRasterFixture();let screenshots=0;
+  const root={async scrollIntoViewIfNeeded(){},async evaluate(fn){if(fn===multiSelectShadowFrame)return sample;if(fn===captureForeignPaint)return {foreignDOMIntersections:[{id:'twin'}],occludedForeignPaint:[]};return {clip:{x:0,y:0,width:12,height:12},focusOutline:{status:'unsupported',reason:'unbounded focus-within shadow'}};}};
+  const page={async evaluate(){return {scroll:{x:0,y:0},viewport:{width:100,height:100}};},async screenshot(){screenshots++;const png=Buffer.alloc(24);png.writeUInt32BE(12,16);png.writeUInt32BE(12,20);return png;}};
+  const result=await captureTargetPNG(page,root);
+  assert.equal(screenshots,1,'Only diagnostic fallback may capture foreign paint');
+  assert.equal(result.bounds.focusOutline.status,'unsupported');assert.match(result.bounds.focusOutline.diagnostic.error,/Foreign paint/);
+  assert.equal(result.foreignDOMIntersections[0].id,'twin');
+});
+
+test('MultiSelect shadow capture decodes native bytes and cannot clear unrelated focus or changed foreign paint',async()=>{
+  const require=createRequire(import.meta.url),{PNG}=require(resolve(dirname(require.resolve('playwright-core/package.json')),'lib/utilsBundle.js'));
+  const {png,sample}=shadowRasterFixture(),bytes=PNG.sync.write(png);
+  for(const mode of ['valid','unrelated','changed-owner','changed-geometry','boundary']){
+    let ownerReads=0,sampleReads=0;
+    const root={async scrollIntoViewIfNeeded(){},async evaluate(fn){
+      if(fn===multiSelectShadowFrame){sampleReads++;return mode==='changed-geometry'&&sampleReads>1?{...sample,ownerID:'different'}:sample;}
+      if(fn===captureForeignPaint){ownerReads++;return {foreignDOMIntersections:mode==='changed-owner'&&ownerReads>1?[{id:'twin'}]:[],occludedForeignPaint:[]};}
+      return {clip:{x:0,y:0,width:12,height:12},focusOutline:{status:'unsupported',reason:mode==='unrelated'?'unknown transform':'unbounded focus-within shadow',diagnostic:{active:{id:'panel'}}}};
+    }};
+    const frame=shadowRasterFixture();if(mode==='boundary')frame.pixel(0,5,254);
+    const actualBytes=mode==='boundary'?PNG.sync.write(frame.png):bytes;
+    const page={async evaluate(){return {scroll:{x:0,y:0},viewport:{width:100,height:100}};},async screenshot(){return actualBytes;}};
+    const result=await captureTargetPNG(page,root);
+    assert.deepEqual(result.png,actualBytes);
+    if(mode==='valid'){assert.equal(result.bounds.decorativeShadowProof.shadowPixels,1);assert.equal(result.bounds.focusOutline.status,'not-painted');}
+    else {assert.equal(result.bounds.focusOutline.status,'unsupported');assert.equal(result.bounds.decorativeShadowProof,undefined);}
+  }
+});
+
+test('MultiSelect shadow audit route remains canonical exact-case with strict sampler guards',async()=>{
+  const actions=await readFile(new URL('./visual-state-audit-actions.mjs',import.meta.url),'utf8');
+  assert.match(actions,/contract.identity==='forms\/MultiSelect'&&contract.focusedSequence==='forms-seven-native-local'/);
+  assert.match(actions,/scopedURL.searchParams.set\('case',contract.identity\)/);
+  const sampler=multiSelectShadowFrame.toString();
+  for(const required of ["searchParams.get('case')!=='forms/MultiSelect'","document.querySelectorAll('[data-audit-case]').length!==1","getAttribute('aria-controls')!==panel.id","st.transform!=='none'","st.overflowX!=='visible'","'generated owned shadow-frame paint'","'visible focused outline requires separate proof'"])assert(sampler.includes(required),required);
+});
+
+test('MultiSelect shadow failure preserves candidate PNG without overwriting fallback evidence',async()=>{
+  const require=createRequire(import.meta.url),{PNG}=require(resolve(dirname(require.resolve('playwright-core/package.json')),'lib/utilsBundle.js'));
+  const fixture=shadowRasterFixture();fixture.pixel(0,5,254);const candidate=PNG.sync.write(fixture.png),fallback=Buffer.from(candidate);
+  const scratch=await mkdtemp(join(tmpdir(),'elysdui-shadow-pure-')),path=join(scratch,'component.png');
+  try{
+    const root={async scrollIntoViewIfNeeded(){},async evaluate(fn){if(fn===multiSelectShadowFrame)return fixture.sample;if(fn===captureForeignPaint)return {foreignDOMIntersections:[],occludedForeignPaint:[]};return {clip:{x:0,y:0,width:12,height:12}};}};
+    let captures=0;
+    const page={async evaluate(){return {scroll:{x:0,y:0},viewport:{width:100,height:100}};},async screenshot(options){captures++;assert.equal(options.path,captures===1?undefined:path);return captures===1?candidate:fallback;}};
+    const result=await captureTargetPNG(page,root,path);
+    assert.equal(result.bounds.focusOutline.status,'unsupported');assert.equal(captures,2);
+    assert.equal(result.bounds.focusOutline.diagnostic.retainedPath,path+'.shadow-proof.png');
+    assert.deepEqual(await readFile(path+'.shadow-proof.png'),candidate);
+  }finally{await rm(scratch,{recursive:true,force:true});}
+});
 
 // No Playwright import or browser launch: exercise the real capture function
 // with explicit geometry and a synthetic PNG header, not pixel evidence.

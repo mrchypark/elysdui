@@ -1,8 +1,10 @@
 import {resolveCaseActionSites} from './visual-state-audit-instrument.mjs';
 import assert from 'node:assert/strict';
-import {readFile} from 'node:fs/promises';
+import {readFile,writeFile} from 'node:fs/promises';
 import {createHash} from 'node:crypto';
 import {captureBounds} from './visual-state-audit-bounds.mjs';
+import {createRequire} from 'node:module';
+import {dirname,resolve} from 'node:path';
 
 export async function inventoryReceipt(path){
   const bytes=await readFile(path);
@@ -283,13 +285,88 @@ export function captureForeignPaint(node,{clip,checkedRootID}){
   return {foreignDOMIntersections:intersections,occludedForeignPaint:occluded};
 }
 
+// This is a finite audit-frame proof, not a CSS blur-radius approximation.
+export function multiSelectShadowFrame(node){
+  const root=node.closest('[data-audit-main]>[data-ely-family]');
+  if(root?.dataset.elyComponent!=='forms/MultiSelect')return null;
+  const panel=root.querySelector('[data-ely-multi-source].is-open [data-ui-multi-list][role=group]');
+  if(!panel)return null;
+  const fail=reason=>({eligible:false,reason});
+  if(new URL(location.href).searchParams.get('case')!=='forms/MultiSelect'||document.querySelectorAll('[data-audit-case]').length!==1)return fail('shadow proof requires exact-case audit');
+  const host=root.closest('[data-audit-main]'),record=root.closest('[data-audit-case]'),twin=record?.querySelector('[data-audit-twin]');
+  if(!host||!record||!twin||document.querySelectorAll(`[id="${panel.id}"]`).length!==1)return fail('ambiguous shadow frame owner');
+  const entries=[...root.querySelectorAll('[data-ely-multi-entry][role=combobox]')];
+  if(entries.length!==1||entries[0].getAttribute('aria-expanded')!=='true'||entries[0].getAttribute('aria-controls')!==panel.id)return fail('shadow panel reference mismatch');
+  const r=root.getBoundingClientRect(),h=host.getBoundingClientRect(),box=record.getBoundingClientRect(),s=getComputedStyle(record),p=panel.getBoundingClientRect();
+  const frame={x:Math.ceil(box.left+record.clientLeft),y:Math.floor(r.top),width:Math.floor(box.right-record.clientLeft)-Math.ceil(box.left+record.clientLeft),height:Math.floor(Math.min(h.bottom,innerHeight))-Math.floor(r.top)};
+  const color=s.backgroundColor.match(/^rgb\((\d+),\s*(\d+),\s*(\d+)\)$/);
+  if(!color||s.backgroundImage!=='none'||frame.x<0||frame.y<0||frame.x+frame.width>innerWidth||frame.width<=0||frame.height<=0||twin.getBoundingClientRect().top<frame.y+frame.height)return fail('no isolated uniform viewport shadow frame');
+  for(let a=record;a;a=a.parentElement){const st=getComputedStyle(a);if(st.opacity!=='1'||st.transform!=='none'||st.translate!=='none'||st.rotate!=='none'||st.scale!=='none'||st.perspective!=='none'||st.filter!=='none'||st.backdropFilter!=='none'||st.clipPath!=='none'||st.maskImage!=='none'||st.mixBlendMode!=='normal'||st.overflowX!=='visible'||st.overflowY!=='visible')return fail('unproven shadow frame backdrop/clip');for(const pseudo of ['::before','::after'])if(!['none','normal'].includes(getComputedStyle(a,pseudo).content))return fail('generated audit backdrop paint');}
+  const rects=[],shadows=[];
+  for(const element of [root,...root.querySelectorAll('*')]){
+    if(!element.checkVisibility({checkOpacity:true,checkVisibilityCSS:true}))continue;
+    const st=getComputedStyle(element),b=element.getBoundingClientRect();
+    if(st.transform!=='none'||st.translate!=='none'||st.rotate!=='none'||st.scale!=='none'||st.perspective!=='none'||st.filter!=='none'||st.backdropFilter!=='none'||st.clipPath!=='none'||st.maskImage!=='none'||st.mixBlendMode!=='normal'||st.opacity!=='1'||st.position==='fixed'||st.position==='sticky'||!['none','hidden'].includes(st.outlineStyle)&&parseFloat(st.outlineWidth)!==0)return fail('complex owned shadow-frame paint');
+    for(const pseudo of ['::before','::after'])if(!['none','normal'].includes(getComputedStyle(element,pseudo).content))return fail('generated owned shadow-frame paint');
+    if(b.width>0&&b.height>0)rects.push({left:b.left-frame.x,top:b.top-frame.y,right:b.right-frame.x,bottom:b.bottom-frame.y});
+    if(st.boxShadow!=='none')shadows.push({id:element.id,css:st.boxShadow,left:b.left-frame.x,top:b.top-frame.y,right:b.right-frame.x,bottom:b.bottom-frame.y});
+  }
+  const focused=document.activeElement,fs=focused&&getComputedStyle(focused);
+  if(!focused||!root.contains(focused)||!['none','hidden'].includes(fs.outlineStyle)&&parseFloat(fs.outlineWidth)!==0)return fail('visible focused outline requires separate proof');
+  return {eligible:true,ownerID:root.id,panelID:panel.id,frame,documentFrame:{...frame,x:frame.x+scrollX,y:frame.y+scrollY},background:[...color.slice(1).map(Number),255],rects,shadows,panel:{left:p.left-frame.x,top:p.top-frame.y,right:p.right-frame.x,bottom:p.bottom-frame.y},focused:{id:focused.id,type:focused.type,matchesFocusVisible:focused.matches(':focus-visible'),outlineStyle:fs.outlineStyle,boxShadow:fs.boxShadow}};
+}
+
+export function proveMultiSelectShadowRaster({width,height,data},sample){
+  assert.equal(width,sample.frame.width);assert.equal(height,sample.frame.height);assert.equal(data.length,width*height*4);
+  assert(sample.rects.every(r=>r.left>=0&&r.top>=0&&r.right<=width&&r.bottom<=height),'Owned boxes escape the measured frame');
+  let panelShadow=false;
+  for(const shadow of sample.shadows){
+    const pattern=/rgba?\(0,\s*0,\s*0(?:,\s*([\d.]+))?\) (-?[\d.]+)px (-?[\d.]+)px ([\d.]+)px ([\d.]+)px/g;
+    const parts=[...shadow.css.matchAll(pattern)];assert(parts.length&&shadow.css.replace(pattern,'').replaceAll(',','').trim()==='','Unknown shadow form');
+    const visible=parts.filter(m=>Number(m[1]??1)>0);assert(visible.length<=1,'Multiple visible shadows are unresolved');
+    for(const m of visible){const [alpha,x,y,blur,spread]=[Number(m[1]??1),...m.slice(2).map(Number)];assert([alpha,x,y,blur,spread].every(Number.isFinite)&&alpha<=1&&blur>0&&spread===0,'Only ordinary outer black blur with zero spread is supported');assert(shadow.left+x>0&&shadow.top+y>0&&shadow.right+x<width&&shadow.bottom+y<height,'Shadow origin escapes measured frame');if(shadow.id===sample.panelID)panelShadow=true;}
+  }
+  assert(panelShadow,'Actual visible panel shadow required');
+  let ink=0,shadowPixels=0;
+  for(let y=0;y<height;y++)for(let x=0;x<width;x++){
+    const at=(y*width+x)*4,different=sample.background.some((value,k)=>data[at+k]!==value);
+    if(!different)continue;
+    assert(x>0&&y>0&&x<width-1&&y<height-1,'Shadow/owned paint touches raster boundary');ink++;
+    if(!sample.rects.some(r=>x+.5>=r.left&&x+.5<r.right&&y+.5>=r.top&&y+.5<r.bottom))shadowPixels++;
+  }
+  assert(ink>0&&shadowPixels>0,'Native shadow pixels outside layout boxes must be retained');
+  return {status:'bounded-native-raster',inkPixels:ink,shadowPixels,frame:sample.documentFrame,panelID:sample.panelID,focused:sample.focused};
+}
+
 export async function captureTargetPNG(page,root,path,{checkedRootID}={}){
   // This finite menu fixture otherwise opens across the following audit row.
   // Ordinary scrolling selects its existing upward collision placement; no DOM isolation.
   if(await root.evaluate(node=>node.dataset.elyComponent==='menus/RadioMenuItem'))await root.evaluate(node=>node.scrollIntoView({block:'end',inline:'nearest',behavior:'instant'}));
   else await root.scrollIntoViewIfNeeded();
   await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
-  const bounds=await root.evaluate(actionBounds);
+  let bounds=await root.evaluate(actionBounds);
+  const shadowSample=await root.evaluate(multiSelectShadowFrame);
+  if(shadowSample&&typeof shadowSample.eligible==='boolean'){
+    let candidate;
+    try{
+      assert(shadowSample.eligible,shadowSample.reason);
+      const owner=await root.evaluate(captureForeignPaint,{clip:shadowSample.documentFrame,checkedRootID:shadowSample.ownerID});assert.equal(owner.foreignDOMIntersections.length,0,'Foreign paint in shadow frame');
+      const png=candidate=await screenshotWithoutCaretMutation(page,{fullPage:false,clip:shadowSample.frame,animations:'disabled',scale:'css'});
+      const require=createRequire(import.meta.url),{PNG}=require(resolve(dirname(require.resolve('playwright-core/package.json')),'lib/utilsBundle.js'));
+      const proof=proveMultiSelectShadowRaster(PNG.sync.read(png),shadowSample);
+      assert.deepEqual(await root.evaluate(multiSelectShadowFrame),shadowSample,'Shadow frame/source geometry changed during capture');
+      assert.deepEqual(await root.evaluate(captureForeignPaint,{clip:shadowSample.documentFrame,checkedRootID:shadowSample.ownerID}),owner,'Foreign paint changed during shadow capture');
+      assert(!bounds.focusOutline||bounds.focusOutline.status!=='unsupported'||bounds.focusOutline.reason==='unbounded focus-within shadow'&&bounds.focusOutline.diagnostic.active.id===shadowSample.panelID,'Unrelated focus gap cannot be resolved by a shadow frame');
+      const {scroll,viewport}=await page.evaluate(()=>({scroll:{x:scrollX,y:scrollY},viewport:{width:innerWidth,height:innerHeight}}));
+      if(path)await writeFile(path,png,{flag:'wx'});
+      return {bounds:{...bounds,clip:shadowSample.documentFrame,decorativeShadowProof:proof,focusOutline:{status:'not-painted',diagnostic:bounds.focusOutline?.diagnostic},scroll,viewport,camera:{fullPage:false,clip:shadowSample.frame},coordinateSpace:'document receipt; native authored-audit shadow frame'},png,...owner};
+    }catch(error){
+      const retainedPath=path&&candidate?`${path}.shadow-proof.png`:null;
+      if(retainedPath)await writeFile(retainedPath,candidate,{flag:'wx'});
+      const retainedRaster=candidate?{path:retainedPath,sha256:createHash('sha256').update(candidate).digest('hex'),bytes:candidate.length,width:candidate.readUInt32BE(16),height:candidate.readUInt32BE(20),role:'failed-shadow-proof-context-only'}:null;
+      bounds={...bounds,focusOutline:{status:'unsupported',reason:'unproven MultiSelect shadow raster',diagnostic:{prior:bounds.focusOutline,shadowSample,retainedPath,retainedRaster,error:String(error)}}};
+    }
+  }
   assert(bounds.clip.width>0&&bounds.clip.height>0,'Target painted union must have positive dimensions');
   assert(!bounds.negativePageOverflow,'Target painted content extends beyond capturable document coordinates');
   const {scroll,viewport}=await page.evaluate(()=>({scroll:{x:scrollX,y:scrollY},viewport:{width:innerWidth,height:innerHeight}}));

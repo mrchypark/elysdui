@@ -31,3 +31,14 @@ func TestActionSheetAuditMainReservesViewportFlowSpace(t *testing.T) {
 		t.Fatalf("ActionSheet viewport reservation must be a single case-scoped main-wrapper rule")
 	}
 }
+
+func TestMultiSelectShadowAuditSpacingRequiresSingleExactCase(t *testing.T) {
+	css, err := Files.ReadFile("assets/advanced.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `.advanced-cases>[data-audit-case][data-audit-name="forms/MultiSelect"]:only-child>.advanced-grid>[data-audit-main]{min-block-size:100vh}`
+	if strings.Count(string(css), want) != 1 {
+		t.Fatal("MultiSelect spacing must reserve only the single-case primary, leaving its twin rendered")
+	}
+}

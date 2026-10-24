@@ -6,3 +6,5 @@
 [data-audit-case][data-audit-name="calendar/EventPopover"]>.advanced-grid,[data-audit-case][data-audit-name="calendar/AttendeeList"]>.advanced-grid{row-gap:180px}
 /* Native modal sheets stay viewport-anchored; reserve flow space after the main audit specimen. */
 [data-audit-case][data-audit-name="buttons/ActionSheet"]>.advanced-grid>[data-audit-main]{min-block-size:100vh}
+/* Exact-case MultiSelect diagnostics retain the twin outside the primary paint frame. */
+.advanced-cases>[data-audit-case][data-audit-name="forms/MultiSelect"]:only-child>.advanced-grid>[data-audit-main]{min-block-size:100vh}
