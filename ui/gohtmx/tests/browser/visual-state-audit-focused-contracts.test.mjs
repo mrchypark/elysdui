@@ -520,3 +520,30 @@ test('ResizeHandle, Notification identities, local scroll sync, and RTL host loc
   assert.doesNotMatch(branch,/scrollTop\s*=|\.dispatchEvent\(new (?:PointerEvent|MouseEvent|KeyboardEvent)/,'Scroll/resize inputs cannot be replaced by forced scroll assignment or synthetic native input');
   assert.match(branch,/finally\{await root\.evaluate/,'Temporary event observers must be removed even when a checkpoint fails');
 });
+
+test('Seven exact forms roots have finite native local-state contracts without PreviewName promotion',async()=>{
+  const expected=[
+    ['forms/DatePicker','DatePicker',['date-edit','date-commit']],
+    ['forms/CodeInput','CodeInput',['code-edit','code-commit']],
+    ['forms/ColorPicker','ColorPicker',['color-palette','color-hue-key']],
+    ['forms/CronEditor','CronEditor',['cron-edit','cron-preset']],
+    ['forms/ExpressionInput','ExpressionInput',['expression-edit','expression-invalid']],
+    ['forms/Form','Form',['form-edit','form-add-array-row']],
+    ['forms/MultiSelect','MultiSelect',['multi-filter','multi-select-beta','multi-remove-last']],
+  ];
+  for(const [identity,kind,steps]of expected){
+    const contract=requestedStateContract(identity);assert.equal(contract?.identity,identity);assert.equal(contract.kind,kind);assert.equal(contract.family,'forms');assert.equal(contract.requestedStateOnly,true);assert.equal(contract.focusedSequence,'forms-seven-native-local');assert.deepEqual(contract.mappingGaps,[]);assert.deepEqual(contract.steps.map(step=>step.id),steps);assert(contract.steps.every(step=>step.source.siteId===`forms-state:${identity}:${step.id}`&&step.source.sourceAnchor.includes('advanced_forms_fixtures.go')&&step.source.provenance.includes(`Exact canonical gallery identity ${identity}`)&&step.expectedState.length>0));
+  }
+  assert.equal(expected.reduce((count,row)=>count+row[2].length,0),15,'Seven exact canonical cases have fifteen finite checkpoints per live profile');
+  for(const identity of ['forms/DateRangePicker','forms/DateTimePicker','forms/TimePicker','forms/JsonInput','forms/CountrySelect','forms/CurrencySelect','forms/Dial','forms/Stepper','forms/DurationPicker'])assert.equal(requestedStateContract(identity),null,`${identity} is not promoted from this root contract`);
+  assert.equal(requestedStateContract('forms/TextArea').focusedSequence,'textarea-public-multiline','TextArea retains its separate owner contract');
+  const [fixture,template,forms,expressions,driver,actions]=await Promise.all([
+    read('internal/gallery/advanced_forms_fixtures.go'),read('ui/gohtmx/templates/ely-api-forms.html'),read('ui/gohtmx/assets/ely-api-forms.js'),read('ui/gohtmx/assets/ely-expressions.js'),read('ui/gohtmx/tests/browser/visual-state-audit-drivers.mjs'),read('ui/gohtmx/tests/browser/visual-state-audit-actions.mjs'),
+  ]);
+  assert.match(fixture,/PreviewName": "DateRangePicker"/);assert.match(fixture,/case "CodeInput":\s*props\["PreviewExamples"\].*PreviewName.*JsonInput/);assert.match(fixture,/case "ColorPicker":\s*props\["Label"\], props\["Value"\] = "", "#3772bb"/);assert.match(fixture,/case "CronEditor":\s*props\["Value"\], props\["Now"\] = "\*\/5 \* \* \* \*", "2026-09-25T12:00:00Z"/);assert.match(fixture,/case "ExpressionInput":\s*props\["Value"\], props\["Variables"\] = "price \* quantity", map\[string\]any\{"price": 8, "quantity": 3\}/);assert.match(fixture,/case "Form":\s*props\["Label"\], props\["Description"\], props\["ResetLabel"\], props\["ActionLabel"\] = "Profile"/);assert.match(fixture,/case "MultiSelect":\s*props\["Options"\] = append\(options, map\[string\]any\{"Value": "locked"/);
+  assert.match(template,/eq \.Kind "DatePicker"[\s\S]*?Type" \(or \.Type "date"\)/);assert.match(template,/eq \.Kind "CodeInput"[\s\S]*?data-ely-code-input/);assert.match(template,/eq \.Kind "ColorPicker"[\s\S]*?data-ely-color-choice/);assert.match(template,/eq \.Kind "CronEditor"[\s\S]*?data-ely-cron-runs/);assert.match(template,/eq \.Kind "ExpressionInput"[\s\S]*?data-ely-evaluation/);assert.match(template,/eq \.Kind "Form"[\s\S]*?template "ely-api-field-array"/);assert.match(template,/data-ely-array-add/);assert.match(template,/eq \.Kind "MultiSelect"[\s\S]*?data-ely-multi-source/);
+  assert.match(forms,/if\(field\.matches\('\[data-ely-expression\]'\)\)\{if\(root\.dataset\.elyKind==='ExpressionInput'\)evaluate\(\)/);assert.match(forms,/if\(button\.matches\('\[data-ely-array-add\]'\)\)[\s\S]*?arrayChanged\(array\)/);assert.match(forms,/if\(event\.target\.matches\('\[data-ely-multi-entry\]'\)\)[\s\S]*?selected\.at\(-1\)\?\.click\(\)/);assert.match(expressions,/export function evaluateExpression/);
+  const execution=runRequestedStateActions.toString(),branch=execution.slice(execution.indexOf("if(contract.focusedSequence==='forms-seven-native-local')"),execution.indexOf("if(contract.focusedSequence==='native-cookie-owner-boundary')"));
+  assert.match(branch,/Only the seven exact canonical forms identities/);assert.match(branch,/state\.actions\.slice\(before\.actions\.length\)/);for(const token of ['date-edit','code-edit','color-palette','cron-edit','expression-edit','form-edit','multi-filter','multi-remove-last'])assert(branch.includes(token),`Missing exact forms execution stage ${token}`);assert.match(branch,/schedulerExecuted:false/);assert.match(branch,/persistence:'not supplied'/);assert.doesNotMatch(branch,/dispatchEvent|requestSubmit|new Event|new KeyboardEvent|\.evaluate\(node=>node\.click/,'Driver actions do not synthesize native input or submit host work');
+  assert.match(actions,/if\(contract\.requestedStateOnly\)\{\s*await runRequestedStateActions\(contract,root,step,failureDiagnostics\);/,'The existing requested-state route executes the seven exact contracts without a new runner whitelist');
+});
