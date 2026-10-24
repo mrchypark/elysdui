@@ -126,6 +126,8 @@ func TestActivityLogMobileLayoutKeepsTimeAndNativeLinkOrder(t *testing.T) {
 	}
 	for _, rule := range []string{
 		"@media (max-width:40rem){[data-ely-family='workspace'] [data-ws-activity]{width:100%;min-width:0}",
+		"[data-ely-family='workspace'] [data-ws-activity] ol{min-width:0;grid-template-columns:minmax(0,1fr)}",
+		"[data-ely-family='workspace'] [data-ws-activity-entry]{min-width:0}",
 		"[data-ely-family='workspace'] [data-ws-activity-entry]>div{min-width:0;grid-template-columns:minmax(0,1fr)}",
 		"[data-ely-family='workspace'] [data-ws-activity-entry]>div>p,[data-ely-family='workspace'] [data-ws-activity-entry]>div>small{min-width:0;overflow-wrap:anywhere}",
 		"[data-ely-family='workspace'] [data-ws-activity-entry]>div>time{grid-column:1;min-width:0;white-space:normal}",
