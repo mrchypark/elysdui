@@ -133,6 +133,36 @@ test('source-only active owned outline union respects axis clips and fails close
   assert.match(driver,/captureForeignPaint,\{clip:bounds\.clip,checkedRootID\}/,'Foreign ownership must use the expanded clip');
 });
 
+test('fragmented native inline anchor outline measures every fragment and retains clipping and foreign ownership gates',async()=>{
+  const family={},base={display:'block',position:'static',visibility:'visible',opacity:'1',contentVisibility:'visible',outlineStyle:'none',outlineWidth:'0px',outlineOffset:'0px',outlineColor:'rgb(0,95,204)',boxShadow:'none',transform:'none',translate:'none',rotate:'none',scale:'none',perspective:'none',filter:'none',clipPath:'none',clip:'auto',maskImage:'none',contain:'none',zoom:'1',overflowX:'visible',overflowY:'visible',overflowClipMargin:'0px'};
+  const rect=(left,top,right,bottom)=>({left,top,right,bottom,width:right-left,height:bottom-top});
+  let fragments=[rect(120,100,200,116),rect(100,120,150,136)];
+  const parent={style:{...base},parentElement:null,getBoundingClientRect:()=>rect(95,95,205,140)};
+  const active={localName:'a',namespaceURI:'http://www.w3.org/1999/xhtml',style:{...base,display:'inline',outlineStyle:'solid',outlineWidth:'2px',outlineOffset:'2px'},parentElement:parent,closest:()=>family,hasAttribute:name=>name==='href',getClientRects:()=>fragments,getBoundingClientRect:()=>rect(100,100,200,136)};
+  const node={contains:value=>value===active,closest:()=>family},bounds={clip:{x:100,y:1100,width:100,height:36},root:rect(100,100,200,136),extendsRoot:false,viewportTruncated:false};
+  const context={document:{activeElement:active},getComputedStyle:element=>element.style,node,bounds,scrollX:0,scrollY:1000,innerWidth:1440,innerHeight:1000};
+  const run=()=>JSON.parse(JSON.stringify(runInNewContext(`(${activeOutlineBounds.toString()})(node,bounds)`,context)));
+  const measured=run();assert.equal(measured.focusOutline.status,'bounded');
+  assert.deepEqual(measured.focusOutline.fragments,[{left:116,top:96,right:204,bottom:120},{left:96,top:116,right:154,bottom:140}]);
+  assert.deepEqual(measured.focusOutline.paint,{left:96,top:96,right:204,bottom:140});assert.deepEqual(measured.clip,{x:96,y:1096,width:108,height:44});assert.equal(measured.extendsRoot,true);
+  parent.style.overflowX='hidden';parent.style.overflowY='hidden';
+  assert.deepEqual(run().focusOutline.clippedFragments,[{left:116,top:96,right:204,bottom:120},{left:96,top:116,right:154,bottom:140}]);
+  parent.getBoundingClientRect=()=>rect(110,95,195,140);
+  assert.deepEqual(run().focusOutline.clippedFragments,[{left:116,top:96,right:195,bottom:120},{left:110,top:116,right:154,bottom:140}],'Each fragment is clipped separately before the envelope is united');
+  parent.getBoundingClientRect=()=>rect(155,95,205,140);
+  assert.equal(run().focusOutline.reason,'inline outline fragment fully clipped','One visible fragment cannot approve a missing second fragment');
+  parent.style={...base};
+  for(const bad of [[...fragments,rect(0,0,0,0)],[...fragments,rect(NaN,0,10,10)]]){const old=fragments;fragments=bad;assert.equal(run().focusOutline.reason,'invalid inline outline fragment');fragments=old;}
+  for(const change of [{display:'inline-block'},{position:'absolute'},{outlineStyle:'auto'},{transform:'matrix(2,0,0,1,0,0)'},{clipPath:'inset(1px)'},{maskImage:'url(mask)'},{rotate:'1deg'}]){const old=active.style;active.style={...old,...change};assert.equal(run().focusOutline.status,'unsupported');active.style=old;}
+  active.closest=()=>({});assert.equal(run().focusOutline.reason,'nested component focus ownership');active.closest=()=>family;
+  active.hasAttribute=()=>false;assert.equal(run().focusOutline.reason,'fragmented focus outline');active.hasAttribute=name=>name==='href';
+  active.style.boxShadow='0px 0px 4px blue';assert.equal(run().focusOutline.reason,'unbounded inline focus shadow');active.style.boxShadow='none';
+  active.style.outlineColor='transparent';assert.deepEqual(run(),bounds,'Invisible outline paint cannot establish a fragment envelope');active.style.outlineColor=base.outlineColor;
+  context.innerWidth=190;assert.equal(run().viewportTruncated,true,'Measured offscreen outline cannot silently become full-viewport evidence');context.innerWidth=1440;
+  // The normal capture path still checks foreign paint against this expanded document clip.
+  await capture(measured.clip,{x:0,y:1000},{width:1440,height:1000});
+});
+
 test('currency focus-within ancestor outline expands the camera beyond its own overflow clip without waiving ownership',async()=>{
   const family={},base={display:'block',visibility:'visible',opacity:'1',contentVisibility:'visible',outlineStyle:'none',outlineWidth:'0px',outlineOffset:'0px',outlineColor:'rgb(55,114,187)',boxShadow:'none',transform:'none',translate:'none',rotate:'none',scale:'none',perspective:'none',filter:'none',clipPath:'none',clip:'auto',maskImage:'none',contain:'none',zoom:'1',overflowX:'visible',overflowY:'visible',overflowClipMargin:'0px',position:'static'};
   const contains=function(candidate){for(let current=candidate;current;current=current.parentElement)if(current===this)return true;return false;};

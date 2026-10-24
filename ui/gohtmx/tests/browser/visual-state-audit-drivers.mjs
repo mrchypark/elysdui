@@ -93,9 +93,13 @@ export function activeOutlineBounds(node,bounds){
   if(active!==focused&&style.boxShadow&&style.boxShadow!=='none')return gap('unbounded focus-within shadow');
   if(style.outlineStyle==='none'||style.outlineStyle==='hidden'||width===0||style.outlineColor==='transparent'||(alpha!==undefined&&parseFloat(alpha)===0))return bounds;
   if(style.outlineStyle==='auto'||!Number.isFinite(width)||!Number.isFinite(offset))return gap('unbounded outline style');
-  if(active.getClientRects().length!==1)return gap('fragmented focus outline');
-  const margin=Math.max(0,width+offset),r=active.getBoundingClientRect();
-  const paint={left:r.left-margin,top:r.top-margin,right:r.right+margin,bottom:r.bottom+margin};
+  const rects=[...active.getClientRects()],fragmented=rects.length>1;
+  if(rects.length!==1&&!(fragmented&&active===focused&&active.localName==='a'&&active.namespaceURI==='http://www.w3.org/1999/xhtml'&&active.hasAttribute('href')&&style.display==='inline'&&style.position==='static'))return gap('fragmented focus outline');
+  if(fragmented&&style.boxShadow!=='none')return gap('unbounded inline focus shadow');
+  const margin=Math.max(0,width+offset);
+  if(fragmented&&rects.some(r=>![r.left,r.top,r.right,r.bottom].every(Number.isFinite)||r.right<=r.left||r.bottom<=r.top))return gap('invalid inline outline fragment');
+  const fragments=(fragmented?rects:[active.getBoundingClientRect()]).map(r=>({left:r.left-margin,top:r.top-margin,right:r.right+margin,bottom:r.bottom+margin}));
+  const paints=fragments.map(rect=>({...rect}));
   for(let ancestor=active;ancestor;ancestor=ancestor.parentElement){
     const s=getComputedStyle(ancestor);
     if(['absolute','fixed'].includes(s.position))positioned.push({node:ancestor,containingBlock:s.position==='absolute'?ancestor.offsetParent:null});
@@ -122,9 +126,13 @@ export function activeOutlineBounds(node,bounds){
     if((s.overflowX==='clip'||s.overflowY==='clip')&&s.overflowClipMargin!=='0px')return gap('nonzero overflow clip margin');
     // The border box over-approximates the padding and rounded overflow clip.
     const box=ancestor.getBoundingClientRect();
-    if(clipX){paint.left=Math.max(paint.left,box.left);paint.right=Math.min(paint.right,box.right);}
-    if(clipY){paint.top=Math.max(paint.top,box.top);paint.bottom=Math.min(paint.bottom,box.bottom);}
+    for(const paint of paints){
+      if(clipX){paint.left=Math.max(paint.left,box.left);paint.right=Math.min(paint.right,box.right);}
+      if(clipY){paint.top=Math.max(paint.top,box.top);paint.bottom=Math.min(paint.bottom,box.bottom);}
+    }
   }
+  if(fragmented&&paints.some(paint=>paint.right<=paint.left||paint.bottom<=paint.top))return gap('inline outline fragment fully clipped',{fragments,clippedFragments:paints});
+  const paint={left:Math.min(...paints.map(p=>p.left)),top:Math.min(...paints.map(p=>p.top)),right:Math.max(...paints.map(p=>p.right)),bottom:Math.max(...paints.map(p=>p.bottom))};
   if(paint.right<=paint.left||paint.bottom<=paint.top)return bounds;
   if(paint.left+scrollX<0||paint.top+scrollY<0)return gap('outline extends outside document camera');
   const left=Math.min(bounds.clip.x,Math.floor(paint.left+scrollX)),top=Math.min(bounds.clip.y,Math.floor(paint.top+scrollY));
@@ -132,7 +140,7 @@ export function activeOutlineBounds(node,bounds){
   return {...bounds,clip:{x:left,y:top,width:right-left,height:bottom-top},
     extendsRoot:bounds.extendsRoot||paint.left<bounds.root.left||paint.right>bounds.root.right||paint.top<bounds.root.top||paint.bottom>bounds.root.bottom,
     viewportTruncated:bounds.viewportTruncated||paint.left<0||paint.top<0||paint.right>innerWidth||paint.bottom>innerHeight,
-    focusOutline:{status:'bounded',width,offset,paint}};
+    focusOutline:{status:'bounded',width,offset,paint,...(fragmented?{fragments,clippedFragments:paints}:{})}};
   }
 }
 
