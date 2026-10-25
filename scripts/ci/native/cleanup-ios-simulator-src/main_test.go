@@ -115,16 +115,84 @@ func TestFailClosedInventory(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			dir := state(t)
+			calls := 0
 			err := cleanup(context.Background(), dir, func(_ context.Context, args ...string) result {
+				calls++
 				if strings.Join(args, " ") != "simctl list devices --json" {
 					t.Fatalf("mutated despite invalid inventory: %v", args)
 				}
 				return tt.response
 			}, noPause)
-			if err == nil || !owned(t, dir) {
-				t.Fatalf("did not fail closed: %v", err)
+			if err == nil || !owned(t, dir) || calls != 1 {
+				t.Fatalf("did not fail closed after one read-only query: err=%v owned=%t calls=%d", err, owned(t, dir), calls)
 			}
 		})
+	}
+}
+
+func TestInitialInventoryRetriesOnlyWithBoundedTimeout(t *testing.T) {
+	dir := state(t)
+	listCalls, pauses := 0, 0
+	var commands []string
+	run := func(ctx context.Context, args ...string) result {
+		command := strings.Join(args, " ")
+		commands = append(commands, command)
+		if command == "simctl list devices --json" {
+			listCalls++
+			deadline, ok := ctx.Deadline()
+			if !ok {
+				t.Fatal("inventory command has no deadline")
+			}
+			bound := time.Until(deadline)
+			if listCalls <= 2 && (bound > 15*time.Second || bound < 14*time.Second) {
+				t.Fatalf("initial inventory bound = %s", bound)
+			}
+			if listCalls == 1 {
+				return result{err: context.DeadlineExceeded}
+			}
+			if listCalls == 2 {
+				return result{output: inventory(testOwner)}
+			}
+			if listCalls < 4 {
+				return result{output: inventory(testOwner)}
+			}
+			return result{output: []byte(`{"devices":{}}`)}
+		}
+		if command != "simctl shutdown "+testOwner.UDID && command != "simctl delete "+testOwner.UDID {
+			t.Fatalf("unexpected command: %s", command)
+		}
+		return result{}
+	}
+	err := cleanup(context.Background(), dir, run, func(context.Context) error {
+		pauses++
+		return nil
+	})
+	if err != nil || owned(t, dir) || pauses != 1 || listCalls != 4 {
+		t.Fatalf("cleanup=%v owned=%t pauses=%d inventory calls=%d", err, owned(t, dir), pauses, listCalls)
+	}
+	if len(commands) != 6 || commands[0] != "simctl list devices --json" || commands[1] != commands[0] || commands[2] != "simctl shutdown "+testOwner.UDID || commands[3] != commands[0] || commands[4] != "simctl delete "+testOwner.UDID || commands[5] != commands[0] {
+		t.Fatalf("unexpected retry/mutation sequence: %v", commands)
+	}
+}
+
+func TestSecondInitialInventoryTimeoutRetainsOwnership(t *testing.T) {
+	dir := state(t)
+	listCalls, pauses := 0, 0
+	err := cleanup(context.Background(), dir, func(ctx context.Context, args ...string) result {
+		if strings.Join(args, " ") != "simctl list devices --json" {
+			t.Fatalf("mutated without a valid inventory: %v", args)
+		}
+		if deadline, ok := ctx.Deadline(); !ok || time.Until(deadline) > 15*time.Second {
+			t.Fatal("inventory retry was not bounded")
+		}
+		listCalls++
+		return result{err: context.DeadlineExceeded}
+	}, func(context.Context) error {
+		pauses++
+		return nil
+	})
+	if !errors.Is(err, context.DeadlineExceeded) || !owned(t, dir) || listCalls != 2 || pauses != 1 {
+		t.Fatalf("cleanup=%v owned=%t pauses=%d inventory calls=%d", err, owned(t, dir), pauses, listCalls)
 	}
 }
 

@@ -114,8 +114,8 @@ func cleanup(ctx context.Context, dir string, run runCommand, pause func(context
 		defer cancel()
 		return run(commandCtx, args...)
 	}
-	check := func() (bool, error) {
-		response := call(5*time.Second, "simctl", "list", "devices", "--json")
+	check := func(limit time.Duration) (bool, error) {
+		response := call(limit, "simctl", "list", "devices", "--json")
 		if response.err != nil {
 			return false, fmt.Errorf("inventory failed: %w", response.err)
 		}
@@ -138,9 +138,15 @@ func cleanup(ctx context.Context, dir string, run runCommand, pause func(context
 		owner.Owned = false
 		return saveOwner(path, owner)
 	}
-	exists, err := check()
+	exists, err := check(15 * time.Second)
+	if errors.Is(err, context.DeadlineExceeded) {
+		if err = pause(ctx); err != nil {
+			return fmt.Errorf("initial inventory retry wait: %w", err)
+		}
+		exists, err = check(15 * time.Second)
+	}
 	if err != nil {
-		return err
+		return fmt.Errorf("initial inventory: %w", err)
 	}
 	if !exists {
 		return finish()
@@ -155,7 +161,7 @@ func cleanup(ctx context.Context, dir string, run runCommand, pause func(context
 		return response.err
 	}
 	for attempt := 0; attempt < 2; attempt++ {
-		exists, err = check()
+		exists, err = check(5 * time.Second)
 		if err != nil {
 			return err
 		}
@@ -173,7 +179,7 @@ func cleanup(ctx context.Context, dir string, run runCommand, pause func(context
 			return response.err
 		}
 		for poll := 0; poll < 3; poll++ {
-			exists, err = check()
+			exists, err = check(5 * time.Second)
 			if err != nil {
 				return err
 			}
