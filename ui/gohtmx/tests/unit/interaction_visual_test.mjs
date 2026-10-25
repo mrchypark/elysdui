@@ -55,8 +55,13 @@ test('interaction common and sheet dispatch use faithful HTMLElement family mock
     generic({target: button, preventDefault() {}});
     assert.equal(calls.length, 0);
     // Only forms-owned non-submit buttons delegate; generic links/submits retain core dispatch.
+    for(const flag of ['interactionCopy','interactionMenuAction','interactionPaletteAction','interactionSheetAction'])delete button.dataset[flag];
+    assert.deepEqual(button.dataset,{elyAction:action},'No earlier owner flag may bypass the forms guard');
     button.disabled=false;root.dataset.elyFamily='forms';calls.length=0;
     generic({target:button,preventDefault(){}});assert.equal(calls.length,0);
+    root.dataset.elyFamily='interaction';
+    generic({target:button,preventDefault(){}});assert.deepEqual(calls,[{owner:root,name:action,value:'caller-value'}],'Identical nonforms button must emit once through core');
+    root.dataset.elyFamily='forms';calls.length=0;
     button.type='submit';generic({target:button,preventDefault(){}});assert.equal(calls.length,1);
     calls.length=0;button.type='';button.tagName='A';generic({target:button,preventDefault(){}});assert.equal(calls.length,1);
   }
