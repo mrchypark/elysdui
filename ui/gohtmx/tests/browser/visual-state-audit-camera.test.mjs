@@ -114,6 +114,9 @@ test('MultiSelect shadow audit route remains canonical exact-case with strict sa
   assert.match(actions,/contract.identity==='forms\/MultiSelect'&&contract.focusedSequence==='forms-seven-native-local'/);
   assert.match(actions,/scopedURL.searchParams.set\('case',contract.identity\)/);
   const sampler=multiSelectShadowFrame.toString();
+  // Adjacent negation must not become an important utility during automatic CSS scanning.
+  assert(!sampler.includes('st.filter'+'!'));
+  assert.equal(sampler.split("st.filter !== 'none'").length-1,2);
   for(const required of ["searchParams.get('case')!=='forms/MultiSelect'","document.querySelectorAll('[data-audit-case]').length!==1","getAttribute('aria-controls')!==panel.id","st.transform!=='none'","st.overflowX!=='visible'","'generated owned shadow-frame paint'","'visible focused outline requires separate proof'"])assert(sampler.includes(required),required);
 });
 

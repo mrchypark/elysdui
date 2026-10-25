@@ -320,7 +320,7 @@ export function multiSelectShadowFrame(node){
   let reachedRecord=false;
   for(let a=root;a;a=a.parentElement){
     const st=getComputedStyle(a);
-    if(st.opacity!=='1'||st.transform!=='none'||st.translate!=='none'||st.rotate!=='none'||st.scale!=='none'||st.perspective!=='none'||st.filter!=='none'||st.backdropFilter!=='none'||st.clipPath!=='none'||st.clip!=='auto'||st.contain!=='none'||st.maskImage!=='none'||st.mixBlendMode!=='normal'||st.overflowX!=='visible'||st.overflowY!=='visible')return fail('unproven shadow frame backdrop/clip');
+    if(st.opacity!=='1'||st.transform!=='none'||st.translate!=='none'||st.rotate!=='none'||st.scale!=='none'||st.perspective!=='none'||st.filter !== 'none'||st.backdropFilter!=='none'||st.clipPath!=='none'||st.clip!=='auto'||st.contain!=='none'||st.maskImage!=='none'||st.mixBlendMode!=='normal'||st.overflowX!=='visible'||st.overflowY!=='visible')return fail('unproven shadow frame backdrop/clip');
     if(a===record)reachedRecord=true;
     // The record supplies the opaque backdrop; intervening wrappers must add no paint.
     if(a!==root&&!reachedRecord&&(st.backgroundColor!=='rgba(0, 0, 0, 0)'||st.backgroundImage!=='none'||st.boxShadow!=='none'||!['none','hidden'].includes(st.outlineStyle)&&parseFloat(st.outlineWidth)!==0||['Top','Right','Bottom','Left'].some(side=>parseFloat(st[`border${side}Width`])!==0)))return fail('ambiguous intervening audit backdrop paint');
@@ -331,7 +331,7 @@ export function multiSelectShadowFrame(node){
   for(const element of [root,...root.querySelectorAll('*')]){
     if(!element.checkVisibility({checkOpacity:true,checkVisibilityCSS:true}))continue;
     const st=getComputedStyle(element),b=element.getBoundingClientRect();
-    if(st.transform!=='none'||st.translate!=='none'||st.rotate!=='none'||st.scale!=='none'||st.perspective!=='none'||st.filter!=='none'||st.backdropFilter!=='none'||st.clipPath!=='none'||st.maskImage!=='none'||st.mixBlendMode!=='normal'||st.opacity!=='1'||st.position==='fixed'||st.position==='sticky'||!['none','hidden'].includes(st.outlineStyle)&&parseFloat(st.outlineWidth)!==0){
+    if(st.transform!=='none'||st.translate!=='none'||st.rotate!=='none'||st.scale!=='none'||st.perspective!=='none'||st.filter !== 'none'||st.backdropFilter!=='none'||st.clipPath!=='none'||st.maskImage!=='none'||st.mixBlendMode!=='normal'||st.opacity!=='1'||st.position==='fixed'||st.position==='sticky'||!['none','hidden'].includes(st.outlineStyle)&&parseFloat(st.outlineWidth)!==0){
       // Diagnostic only: preserve the exact rejecting predicate and its DOM provenance.
       const selectorFor=target=>{
         if(target.id)return `[id=${JSON.stringify(target.id)}]`;
