@@ -33,7 +33,8 @@ test('finite Button and TextArea contracts preserve actual fixture states and ev
   for(const contract of [button,textarea]){assert.equal(contract.requestedStateOnly,true);assert.deepEqual(contract.mappingGaps,[]);assert.match(contract.scope,/separate from registered-check coverage/);assert(contract.steps.every(step=>step.source.provenance.includes('ely-api.js')));}
   assert.equal(requestedStateContract('forms/Input')?.focusedSequence,'input-public-edit-clear','Input has an explicit focused contract');
   assert.equal(requestedStateContract('forms/CurrencyInput')?.focusedSequence,'input-public-validity','CurrencyInput now has an explicit fixture-bound contract');
-  for(const identity of ['buttons/Sizes','buttons/With icons','forms/TagInput'])assert.equal(requestedStateContract(identity),null,'No generic alias promotion');
+  const tag=requestedStateContract('forms/TagInput');assert.equal(tag.focusedSequence,'forms-complex-eight-native');assert.equal(tag.fixtureGuards.component,'forms/TagInput');assert.equal(tag.nativeFormTwinWitness,true);assert.deepEqual(tag.mappingGaps,[]);assert.deepEqual(tag.steps.map(step=>step.id),['tag-edit','tag-add','tag-remove']);
+  for(const identity of ['buttons/Sizes','buttons/With icons','forms/UnknownTagAlias'])assert.equal(requestedStateContract(identity),null,'No generic alias promotion');
   const [buttons,forms,template]=await Promise.all([source('internal/gallery/advanced_interaction_fixtures.go'),source('internal/gallery/advanced_forms_fixtures.go'),source('ui/gohtmx/templates/ely-api-interaction.html')]);
   const fixture=buttons.slice(buttons.indexOf('if name == "Button" {'),buttons.indexOf('if name == "ShortcutHint"'));
   for(const value of ['primary','secondary','outline','ghost','subtle','danger','link']){assert(fixture.includes(`"Value": "${value}", "Action": "${value}"`));assert(fixture.includes(`"Value": "${value}-disabled"`));}

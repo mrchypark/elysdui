@@ -964,8 +964,11 @@ test('direct action runner keeps private scratch under OS temp while evidence st
   assert.doesNotMatch(source,/mkdtemp\(resolve\(options\.output/,'Private scratch must not consume the evidence-output filesystem');
   assert.match(source,/const captures = resolve\(options\.output, 'captures'\)/,'Captures remain in the requested evidence directory');
   assert.match(source,/resolve\(options\.output, 'resources\.json'\)/,'Resource receipts remain in the requested evidence directory');
-  assert.match(source,/await rm\(runDir, \{recursive: true, force: true\}\)/,'The exact owned scratch directory is still removed in finally');
-  assert.match(source,/temporaryDirectoryRemoved: true/,'Cleanup continues to be recorded in the resource receipt');
+  assert.match(source,/finally \{\s*await cleanupOwnedActionResources\(\{browser,staticServer,child,runDir,output:options.output,primaryError:primaryRunError,cleanupErrors,ledgerErrors:cleanupLedgerErrors\}\)/,'Finally delegates the same owned resources and error channels');
+  const cleanup=source.slice(source.indexOf('async function cleanupOwnedActionResources('),source.indexOf('function parseArgs('));
+  const close=cleanup.indexOf("phase('browser.close'"),remove=cleanup.indexOf("phase('temporaryDirectory.remove',()=>rm(runDir,{recursive:true,force:true}))"),pending=cleanup.indexOf("phase('resources.write'"),ready=cleanup.indexOf("marker('cleanup','ready-to-commit')"),final=cleanup.indexOf("state:'cleaned'");
+  assert(close>=0&&remove>close&&pending>remove&&ready>pending&&final>ready,'Owned removal and nonfinal resource observation precede final commit');
+  assert.match(cleanup,/resolve\(output,'cleanup-phases.jsonl'\)/);assert.match(cleanup,/if\(!ledgerErrors.length\)try/);assert.match(cleanup,/temporaryDirectoryRemoved:true/);assert.match(cleanup,/if\(primaryError\)throw primaryError/);assert.match(cleanup,/AggregateError/);
   const output=await mkdtemp(join(tmpdir(),'elysdui-audit-output-')),runDir=await mkdtemp(resolve(tmpdir(),'elysdui-visual-action-'));
   try{assert(!runDir.startsWith(output+sep),'The private run directory is not nested in this evidence output directory');}
   finally{await rm(runDir,{recursive:true,force:true});await rm(output,{recursive:true,force:true});}

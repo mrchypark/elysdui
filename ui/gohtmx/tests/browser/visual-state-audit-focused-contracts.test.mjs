@@ -20,6 +20,9 @@ import {assertEightFormStep,assertDurationNativeProof,probeFailureStateAndPayloa
 import {assertActivityLogScopedAuditPage,assertCommunicationCallerRequest,assertDockCallerAction,assertDockNativeEvents,assertEvalLastColumnGeometry,assertNativeEmbedOpen,activatePresenceStep,assertPresenceNativeRequest,assertFoundationPublicEvents,assertPlainInputNativeEvents,assertFormattedInputState,calendarDraftWheelDecision,requestedStateContract,runRequestedStateActions} from './visual-state-audit-drivers.mjs';
 
 const read=path=>readFile(new URL(`../../../../${path}`,import.meta.url),'utf8');
+function explicitLaterForm(identity,sequence,steps){
+  const contract=requestedStateContract(identity);assert.equal(contract.identity,identity);assert.equal(contract.focusedSequence,sequence);assert.equal(contract.nativeFormTwinWitness,true);assert.equal(contract.fixtureGuards.component,identity);assert.deepEqual(contract.mappingGaps,[]);assert.deepEqual(contract.steps.map(step=>step.id),steps);assert(contract.steps.every(step=>step.source.sourceAnchor&&step.source.provenance));
+}
 
 test('local studio two execute nine exact state and complete ordered event windows',()=>{
   const n=(type,control,value,key=null,trusted=true)=>({type,control,value,key,trusted});let count=0;
@@ -787,7 +790,7 @@ test('eight exact forms contracts execute 28 native checkpoint oracles with stri
     }
   }
   assert.equal(count,28);assert.equal(count*4,112);
-  assert.equal(requestedStateContract('forms/TokenInput'),null);assert.equal(requestedStateContract('forms/Stepper'),null);
+  explicitLaterForm('forms/TokenInput','forms-complex-eight-native',['tag-edit','tag-add','tag-remove']);explicitLaterForm('forms/Stepper','forms-range-native',['stepper-up','stepper-down']);assert.equal(requestedStateContract('forms/UnknownInputAlias'),null);
   const [fixtures,aliases,template,controls,forms,actions]=await Promise.all(['internal/gallery/advanced_forms_fixtures.go','internal/gallery/advanced.go','ui/gohtmx/templates/ely-api-forms.html','ui/gohtmx/assets/ely-controls.js','ui/gohtmx/assets/ely-api-forms.js','ui/gohtmx/tests/browser/visual-state-audit-actions.mjs'].map(read));
   assert.match(fixtures,/story.Name == "NumberInput"[\s\S]*?= "Seats", "4", "1", 99, true, "220"/);
   assert.match(fixtures,/story.Name == "ScrubInput"[\s\S]*?= "X", "120", "-2000", 2000, "260"/);
@@ -870,7 +873,7 @@ test('Input TextField ClearableInput finite native contracts preserve aliases an
     assert.throws(()=>assertFoundationPublicEvents(identity,id,[{type:'ely:action',detail}],{value}));
   }
   assert.equal(identities.length*4*4,48,'Three identities, four live profiles, four checkpoints; no alias receipt promotion');
-  assert.equal(requestedStateContract('forms/TokenInput'),null,'No generic input-family expansion');
+  explicitLaterForm('forms/TokenInput','forms-complex-eight-native',['tag-edit','tag-add','tag-remove']);assert.equal(requestedStateContract('forms/UnknownInputAlias'),null,'No generic input-family expansion');
   const event=(type,value,isTrusted)=>({type,value,isTrusted,defaultPrevented:false});
   for(const stage of ['fill-text','commit-text','clear-text','commit-empty']){
     const value=stage==='fill-text'||stage==='commit-text'?'Changed caller value':'',type=stage.startsWith('commit')?'change':'input',events=[event(type,value,true)];
@@ -923,7 +926,7 @@ test('five formatted input contracts retain exact fixture types bounds native va
     }
   }
   assert.equal(expected.length*4*4,80,'Five exact IDs by four checkpoints by four live profiles; no shared alias receipts');
-  for(const identity of ['forms/TagInput','forms/RegexInput'])assert.equal(requestedStateContract(identity),null);
+  explicitLaterForm('forms/TagInput','forms-complex-eight-native',['tag-edit','tag-add','tag-remove']);assert.equal(requestedStateContract('forms/RegexInput'),null);
   assert.throws(()=>assertFormattedInputState('forms/Other',{},{}),/No generic/);
   const [fixtures,aliases,template]=await Promise.all([read('internal/gallery/advanced_forms_fixtures.go'),read('internal/gallery/advanced.go'),read('ui/gohtmx/templates/ely-api-forms.html')]);
   assert.match(fixtures,/case "NumberInput", "ScrubInput", "CurrencyInput":\s*props\["Value"\], props\["Min"\], props\["Max"\], props\["Step"\] = "3", "0", 10, "1"/);
@@ -1107,7 +1110,8 @@ test('focused five-case action contracts stay explicit and source-backed',async(
 });
 
 test('focused driver does not imply neighboring cases or catalog approval',()=>{
-  for(const identity of ['forms/TagInput','navigation/EditorTabs','motion/ParticleBackground','account/LoginForm'])
+  explicitLaterForm('forms/TagInput','forms-complex-eight-native',['tag-edit','tag-add','tag-remove']);
+  for(const identity of ['forms/UnknownTagAlias','navigation/EditorTabs','motion/ParticleBackground','account/LoginForm'])
     assert.equal(requestedStateContract(identity),null,`${identity} is outside this focused five-case scope`);
 });
 
@@ -1425,7 +1429,14 @@ test('Seven exact forms roots have finite native local-state contracts without P
     const contract=requestedStateContract(identity);assert.equal(contract?.identity,identity);assert.equal(contract.kind,kind);assert.equal(contract.family,'forms');assert.equal(contract.requestedStateOnly,true);assert.equal(contract.focusedSequence,'forms-seven-native-local');assert.deepEqual(contract.mappingGaps,[]);assert.deepEqual(contract.steps.map(step=>step.id),steps);assert(contract.steps.every(step=>step.source.siteId===`forms-state:${identity}:${step.id}`&&step.source.sourceAnchor.includes('advanced_forms_fixtures.go')&&step.source.provenance.includes(`Exact canonical gallery identity ${identity}`)&&step.expectedState.length>0));
   }
   assert.equal(expected.reduce((count,row)=>count+row[2].length,0),15,'Seven exact canonical cases have fifteen finite checkpoints per live profile');
-  for(const identity of ['forms/DateRangePicker','forms/TimePicker','forms/CountrySelect','forms/CurrencySelect','forms/Dial','forms/Stepper'])assert.equal(requestedStateContract(identity),null,`${identity} is not promoted from this root contract`);
+  for(const [identity,sequence,steps]of [
+    ['forms/DateRangePicker','forms-temporal-ax-native',['date-range-open','date-range-start','date-range-invalid','date-range-repair','date-range-close','date-range-reopen','date-range-escape']],
+    ['forms/TimePicker','forms-temporal-ax-native',['period-edit','period-commit']],
+    ['forms/CountrySelect','forms-regional-native',['regional-search','regional-select','regional-unmatched','regional-escape']],
+    ['forms/CurrencySelect','forms-regional-native',['regional-search','regional-select','regional-unmatched','regional-escape']],
+    ['forms/Dial','forms-range-native',['knob-up','knob-down']],['forms/Stepper','forms-range-native',['stepper-up','stepper-down']],
+  ])explicitLaterForm(identity,sequence,steps);
+  for(const identity of ['forms/UnknownDateAlias','forms/UnknownRegionalAlias','forms/UnknownRangeAlias'])assert.equal(requestedStateContract(identity),null);
   assert.equal(requestedStateContract('forms/TextArea').focusedSequence,'textarea-public-multiline','TextArea retains its separate owner contract');
   const [fixture,template,forms,expressions,driver,actions]=await Promise.all([
     read('internal/gallery/advanced_forms_fixtures.go'),read('ui/gohtmx/templates/ely-api-forms.html'),read('ui/gohtmx/assets/ely-api-forms.js'),read('ui/gohtmx/assets/ely-expressions.js'),read('ui/gohtmx/tests/browser/visual-state-audit-drivers.mjs'),read('ui/gohtmx/tests/browser/visual-state-audit-actions.mjs'),
