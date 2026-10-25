@@ -4,6 +4,7 @@ import test from 'node:test';
 import {assertSpecialInputState} from './visual-state-audit-drivers.mjs';
 import {assertCronNativePreview} from './visual-state-audit-drivers.mjs';
 import {assertJsonHighlight} from './visual-state-audit-drivers.mjs';
+import {assertFormTwinWitness} from './visual-state-audit-drivers.mjs';
 import {assertActivityLogScopedAuditPage,assertCommunicationCallerRequest,assertDockCallerAction,assertDockNativeEvents,assertEvalLastColumnGeometry,assertNativeEmbedOpen,activatePresenceStep,assertPresenceNativeRequest,assertFoundationPublicEvents,assertPlainInputNativeEvents,assertFormattedInputState,calendarDraftWheelDecision,requestedStateContract,runRequestedStateActions} from './visual-state-audit-drivers.mjs';
 
 const read=path=>readFile(new URL(`../../../../${path}`,import.meta.url),'utf8');
@@ -589,6 +590,17 @@ test('Seven exact forms roots have finite native local-state contracts without P
   const execution=runRequestedStateActions.toString(),branch=execution.slice(execution.indexOf("if(contract.focusedSequence==='forms-seven-native-local')"),execution.indexOf("if(contract.focusedSequence==='forms-six-qualified-native-local')"));
   assert.match(branch,/Only the seven exact canonical forms identities/);assert.match(branch,/state\.actions\.slice\(before\.actions\.length\)/);for(const token of ['date-edit','code-edit','color-palette','cron-edit','expression-edit','form-edit','multi-filter','multi-remove-last'])assert(branch.includes(token),`Missing exact forms execution stage ${token}`);assert.match(branch,/schedulerExecuted:false/);assert.match(branch,/persistence:'not supplied'/);assert.doesNotMatch(branch,/dispatchEvent|requestSubmit|new Event|new KeyboardEvent|\.evaluate\(node=>node\.click/,'Driver actions do not synthesize native input or submit host work');
   assert.match(actions,/if\(contract\.requestedStateOnly\)\{\s*await runRequestedStateActions\(contract,root,step,failureDiagnostics\);/,'The existing requested-state route executes the seven exact contracts without a new runner whitelist');
+});
+
+test('Form native actions retain before/after twin witnesses and reject twin mutation without claiming equivalence',async()=>{
+  const before={snapshot:{id:'form-twin',component:'forms/Form',text:'Profile',controls:[{name:'name',value:'source'}]},focusWithin:false,events:[]};
+  assert.equal(assertFormTwinWitness(before,{snapshot:{...before.snapshot,controls:[...before.snapshot.controls]},focusWithin:false,events:[]}),true);
+  assert.throws(()=>assertFormTwinWitness(before,{snapshot:{...before.snapshot,text:'mutated'},focusWithin:false,events:[]}),/preserve the independent twin snapshot/,'A changed twin must fail the executable witness');
+  assert.throws(()=>assertFormTwinWitness(before,{snapshot:before.snapshot,focusWithin:true,events:[]}),/move focus into or out of the independent twin/,'Twin focus movement must fail the executable witness');
+  assert.throws(()=>assertFormTwinWitness(before,{snapshot:before.snapshot,focusWithin:false,events:[{type:'input',isTrusted:true,target:'name'}]}),/dispatch events in the independent twin/,'Any native or public twin event must fail the executable witness');
+  const actions=await read('ui/gohtmx/tests/browser/visual-state-audit-actions.mjs');
+  assert.match(actions,/const formTwinWitness=contract\.identity==='forms\/Form'/);assert.match(actions,/node\.__visualFormTwinEvents=\[\]/);assert.match(actions,/focusWithin:await twin\.evaluate\(node=>node\.contains\(document\.activeElement\)\)/);assert.match(actions,/snapshot:await snapshot\(twin\)/);assert.match(actions,/const twinBefore=formTwinWitness\?await readFormTwinWitness\(\):null/);assert.match(actions,/receipt\.twinWitness=\{before:twinBefore\}/);assert.match(actions,/receipt\.twinWitness\.after=twinAfter;receipt\.twinWitness\.unchanged=assertFormTwinWitness\(twinBefore,twinAfter\)/);
+  assert.match(actions,/comparison:\{classification:proof\.status==='passed'\?'target-state-contract-passed':'harness-error-target-state-driver',equivalent:null/,'Direct target-state proof remains separate from registered semantic equivalence');
 });
 
 test('Six exact qualified form aliases keep bounded local native contracts and explicit focus-leave commits',async()=>{

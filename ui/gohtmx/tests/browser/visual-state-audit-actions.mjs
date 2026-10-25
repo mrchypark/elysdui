@@ -10,7 +10,7 @@ import {setTimeout as delay} from 'node:timers/promises';
 import {isDeepStrictEqual} from 'node:util';
 import {chromium} from 'playwright';
 import {actionModuleNames,prepareActionModule,synchronousTraceInit,registeredOutcomesEqual,registeredOutcomeDifferences,firstDifference,compareActionTrace,traceContractStatus} from './visual-state-audit-instrument.mjs';
-import {caseActionContract, requestedStateContract, runRequestedStateActions, runRegisteredCanvasActions, ownedOverlayInventory, captureTargetPNG, screenshotWithoutCaretMutation, inventoryReceipt, inventoryDrift, unhandledBrowserErrors, visualCaptureGap, persistDirectCaseFailure, probeFailureStateAndPayload, deliverDirectActionVerification} from './visual-state-audit-drivers.mjs';
+import {caseActionContract, requestedStateContract, runRequestedStateActions, runRegisteredCanvasActions, ownedOverlayInventory, captureTargetPNG, screenshotWithoutCaretMutation, inventoryReceipt, inventoryDrift, unhandledBrowserErrors, visualCaptureGap, persistDirectCaseFailure, probeFailureStateAndPayload, deliverDirectActionVerification, assertFormTwinWitness} from './visual-state-audit-drivers.mjs';
 import {basicFixturePackage,basicRootSelector} from './visual-state-audit-basic.mjs';
 import {basicActionContract,validateBasicActionMatrix,runBasicActions,basicActionSurface,selectBasicActionCases,fulfillBasicActionAsset,assertBasicActionAssets,retainBasicFailureEvidence,basicOwnedModal,basicModalCaptureTarget} from './visual-state-audit-basic-actions.mjs';
 
@@ -371,6 +371,13 @@ async function directCaseDriver({item, familyURL, captures, reference, semanticS
     const twin = record.locator('[data-audit-twin] > [data-ely-family]');
     await page.waitForFunction(node => node.dataset.elyReady === 'true', await root.elementHandle());
     const initialTwin=await snapshot(twin);
+    const formTwinWitness=contract.identity==='forms/Form';
+    if(formTwinWitness){
+      assert.equal(await twin.count(),1,'Form requires its exact independent twin');
+      assert.equal(await twin.getAttribute('data-ely-component'),contract.identity,'Form twin must retain the same canonical component identity');
+      await twin.evaluate(node=>{node.__visualFormTwinEvents=[];for(const type of ['beforeinput','input','change','click','submit','focusin','focusout','ely:change','ely:action'])node.addEventListener(type,event=>node.__visualFormTwinEvents.push({type:event.type,isTrusted:event.isTrusted,target:event.target?.name||event.target?.dataset?.name||event.target?.getAttribute?.('data-ui-action')||event.target?.tagName||null}),true);});
+    }
+    const readFormTwinWitness=async()=>({snapshot:await snapshot(twin),focusWithin:await twin.evaluate(node=>node.contains(document.activeElement)),events:await twin.evaluate(node=>node.__visualFormTwinEvents.map(event=>({...event})))});
     assert.deepEqual(contract.mappingGaps, [], 'Exact source action contract must resolve');
     assert.equal(await root.getAttribute('data-ely-component'), contract.identity, 'Exact selected component');
     assert.equal(await root.getAttribute('data-ely-kind'), contract.kind, 'Exact selected kind');
@@ -402,8 +409,10 @@ async function directCaseDriver({item, familyURL, captures, reference, semanticS
       const index = receipts.length + 1, siteId = `direct-playwright:${label}`;
       const expected=contract.steps[index-1];assert.equal(expected?.id,label,'Driver order must equal the exact contract');
       assert.equal(typeof verify,'function','Each action requires an observable state assertion');
+      const twinBefore=formTwinWitness?await readFormTwinWitness():null;
       const receipt = {siteId, fixture:fixtureProof, executionMode: 'direct-playwright', action: label, sourceSiteId:expected.source.siteId, sourceAnchor:expected.source.sourceAnchor,
         control:expected.control,event:expected.event,expectedState:expected.expectedState,beforeState:await observe()};
+      if(twinBefore)receipt.twinWitness={before:twinBefore};
       receipts.push(receipt);
       for (const phase of ['before', 'after']) {
         if (phase === 'after') receipt.actionActivation=await action();
@@ -411,6 +420,7 @@ async function directCaseDriver({item, familyURL, captures, reference, semanticS
         receipt[`${phase}CaptureOwnership`] = await captureOwnedState({page, record, root, caseId: `${item.caseId}-direct`, siteId, checkpointIndex: index, phase, captures, state: await state()});
       }
       receipt.afterState=await observe();
+      if(twinBefore){const twinAfter=await readFormTwinWitness();receipt.twinWitness.after=twinAfter;receipt.twinWitness.unchanged=assertFormTwinWitness(twinBefore,twinAfter);}
       for(const event of receipt.afterState.actions.slice(receipt.beforeState.actions.length)){
         assert.equal(event.component,contract.identity,'Public action retains the actual alias identity');
         assert.equal(event.id,await root.getAttribute('id'),'Public action retains the actual instance ID');

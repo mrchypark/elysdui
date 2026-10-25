@@ -15,6 +15,13 @@ export function assertJsonHighlight(source,highlight){
   return expected;
 }
 
+export function assertFormTwinWitness(before,after){
+  assert.deepEqual(after.snapshot,before.snapshot,'Form native action must preserve the independent twin snapshot');
+  assert.equal(after.focusWithin,before.focusWithin,'Form native action must not move focus into or out of the independent twin');
+  assert.deepEqual(after.events,before.events,'Form native action must not dispatch events in the independent twin');
+  return true;
+}
+
 export async function inventoryReceipt(path){
   const bytes=await readFile(path);
   return {path,sha256:createHash('sha256').update(bytes).digest('hex'),data:JSON.parse(bytes)};
