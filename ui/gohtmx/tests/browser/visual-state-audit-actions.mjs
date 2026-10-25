@@ -65,11 +65,11 @@ async function cleanupOwnedActionResources({browser,staticServer,child,runDir,ou
     // Keep resources non-final until the post-write observation is durable.
     await phase('resources.write',()=>writeFile(resolve(output,'resources.json'),JSON.stringify({...identity,runDir,state:'cleanup-unwitnessed',cleanupErrors:cleanupErrors.map(describe),ledgerErrors:ledgerErrors.map(describe)})+'\n'));
     if(!cleanupErrors.length&&!ledgerErrors.length){
-      await phase('resources.finalize',()=>writeFile(resolve(output,'resources.json'),JSON.stringify({...identity,runDir,state:'cleaned',browserClosed:true,serverClosed:true,temporaryDirectoryRemoved:true})+'\n'));
-      if(cleanupErrors.length||ledgerErrors.length){
-        try{await writeFile(resolve(output,'resources.json'),JSON.stringify({...identity,runDir,state:'cleanup-unwitnessed',cleanupErrors:cleanupErrors.map(describe),ledgerErrors:ledgerErrors.map(describe)})+'\n');}
-        catch(error){ledgerErrors.push(error);console.error('cleanup invalidation write failed: '+describe(error));}
-      }
+      await marker('cleanup','ready-to-commit');
+      // This final receipt is the commit, not an operation requiring a later marker.
+      // A failed observation can never publish cleaned, even if a repair write would fail.
+      if(!ledgerErrors.length)try{await writeFile(resolve(output,'resources.json'),JSON.stringify({...identity,runDir,state:'cleaned',browserClosed:true,serverClosed:true,temporaryDirectoryRemoved:true})+'\n');}
+      catch(error){cleanupErrors.push(error);console.error('cleanup final commit failed: '+describe(error));}
     }
   }
   if(primaryError)throw primaryError;

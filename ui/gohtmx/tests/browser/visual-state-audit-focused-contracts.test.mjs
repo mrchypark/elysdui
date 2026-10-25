@@ -30,7 +30,7 @@ test('owned cleanup phase ledger preserves order errors and pending await eviden
   };
   const options={output:'/evidence',runDir:'/owned-private',browser:{close:async()=>{}}};
   const success=make();await success.run(options);
-  assert.deepEqual(success.records.map(x=>x.phase+':'+x.state),['browser.close:before','browser.close:after','temporaryDirectory.remove:before','temporaryDirectory.remove:after','resources.write:before','resources.write:after','resources.finalize:before','resources.finalize:after']);
+  assert.deepEqual(success.records.map(x=>x.phase+':'+x.state),['browser.close:before','browser.close:after','temporaryDirectory.remove:before','temporaryDirectory.remove:after','resources.write:before','resources.write:after','cleanup:ready-to-commit']);
   assert(success.records.every(x=>x.runnerPID===123&&x.galleryPID===null&&typeof x.timestamp==='string'));
   assert.equal(success.writes.at(-1).state,'cleaned');
   const rejected=Error('browser close rejected'),failed=make();
@@ -43,9 +43,14 @@ test('owned cleanup phase ledger preserves order errors and pending await eviden
   const primary=Error('original assertion');
   await assert.rejects(marker.run({...options,primaryError:primary}),error=>error===primary);
   await assert.rejects(failed.run({...options,primaryError:primary,browser:{close:async()=>{throw rejected;}}}),error=>error===primary);
-  const finalMarker=make({appendFile:async(path,text)=>{const record=JSON.parse(text);if(record.phase==='resources.finalize'&&record.state==='after')throw markerError;}});
+  const finalMarker=make({appendFile:async(path,text)=>{const record=JSON.parse(text);if(record.phase==='resources.write'&&record.state==='after')throw markerError;}});
   await assert.rejects(finalMarker.run(options),error=>error.errors.includes(markerError));
   assert.equal(finalMarker.writes.at(-1).state,'cleanup-unwitnessed');
+  const published=[],doubleFailure=make({appendFile:async(path,text)=>{const record=JSON.parse(text);if(record.phase==='resources.write'&&record.state==='after')throw markerError;},writeFile:async(path,text)=>{const record=JSON.parse(text);if(published.length)throw Error('invalidation/final write unavailable');published.push(record);}});
+  await assert.rejects(doubleFailure.run(options),error=>error.errors.includes(markerError));
+  assert.deepEqual(published.map(x=>x.state),['cleanup-unwitnessed'],'Failed observation never attempts to publish cleaned or depends on rollback');
+  const chronology=[],valid=make({appendFile:async(path,text)=>chronology.push(JSON.parse(text).phase+':'+JSON.parse(text).state),writeFile:async(path,text)=>chronology.push('resource:'+JSON.parse(text).state)});
+  await valid.run(options);assert.deepEqual(chronology.slice(-3),['resources.write:after','cleanup:ready-to-commit','resource:cleaned']);
   const writeError=Error('resources rejected'),writeFailure=make({writeFile:async()=>{throw writeError;}});
   await assert.rejects(writeFailure.run(options),error=>error.errors.includes(writeError));
   assert(writeFailure.records.some(x=>x.phase==='resources.write'&&x.state==='error'));
