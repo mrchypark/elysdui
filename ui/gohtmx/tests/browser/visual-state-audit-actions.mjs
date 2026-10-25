@@ -11,6 +11,7 @@ import {isDeepStrictEqual} from 'node:util';
 import {chromium} from 'playwright';
 import {actionModuleNames,prepareActionModule,synchronousTraceInit,registeredOutcomesEqual,registeredOutcomeDifferences,firstDifference,compareActionTrace,traceContractStatus} from './visual-state-audit-instrument.mjs';
 import {caseActionContract, requestedStateContract, runRequestedStateActions, runRegisteredCanvasActions, ownedOverlayInventory, captureTargetPNG, screenshotWithoutCaretMutation, inventoryReceipt, inventoryDrift, unhandledBrowserErrors, visualCaptureGap, persistDirectCaseFailure, probeFailureStateAndPayload, deliverDirectActionVerification, assertFormTwinWitness, isDurationOwnUnitCommit} from './visual-state-audit-drivers.mjs';
+import {requestedStateProofSafe} from './visual-state-audit-drivers.mjs';
 import {basicFixturePackage,basicRootSelector} from './visual-state-audit-basic.mjs';
 import {basicActionContract,validateBasicActionMatrix,runBasicActions,basicActionSurface,selectBasicActionCases,fulfillBasicActionAsset,assertBasicActionAssets,retainBasicFailureEvidence,basicOwnedModal,basicModalCaptureTarget} from './visual-state-audit-basic-actions.mjs';
 
@@ -612,6 +613,7 @@ try {
   const byFamily = new Map();
   for (const item of cases) { if (!byFamily.has(item.family)) byFamily.set(item.family, []); byFamily.get(item.family).push(item); }
   const reports = [], transformReports = {}, browserErrors = [];
+  let requestedStateStopped=false;
   for (const [family, familyCases] of byFamily) {
     const preparedModules=preparedByFamily.get(family),primary=preparedModules[0];
     const {filename}=primary;
@@ -736,6 +738,7 @@ try {
           actionSites:[],directFallback:null,requestedStateEvidence:proof,originalError:null,instrumentedError:proof.error||null,namedUnsupportedActionSites:[],
           actionCoverage:{incompleteCoverage:proof.status!=='passed',runtimeCheckpointCountForCase:proof.receipts.length,coverageStatus:proof.status==='passed'?'requested-state-captured-and-asserted':'requested-state-failed',staticallyNamedUnsupportedSiteIds:[],unsupportedActionsReachedAtRuntime:[],staticSafeSitesNotReachedForCase:[],captureFailureSiteIds:[],unknownReachedSiteIds:[],missingRuntimeOccurrences:[],exactContract:contract}});
         console.log(`${item.caseId}: ${proof.status}; requested-state-receipts=${proof.receipts.length}`);
+        if(!requestedStateProofSafe(proof)||unhandledBrowserErrors(browserErrors).length){requestedStateStopped=true;break;}
         continue;
       }
       // Fresh documents give untouched, sync-traced and captured runs the same
@@ -892,6 +895,7 @@ try {
     }
     await Promise.all(contexts.map(context => context.close()));
     assert(interceptCount > 0, `interception count ${filename}`);
+    if(requestedStateStopped)break;
   }
 
   const files = await (await import('node:fs/promises')).readdir(captures);
@@ -913,7 +917,7 @@ try {
     cases: reports, browserErrors};
   report.directFallbacks = reports.filter(item => item.directFallback).map(item => ({caseId: item.caseId, status: item.directFallback.status, receiptCount: item.directFallback.receipts.length, differences: item.directFallback.differences, error: item.directFallback.error}));
   report.unhandledBrowserErrors=unhandledBrowserErrors(browserErrors);
-  report.requestedStateGate={safe:reports.some(item=>item.requestedStateEvidence)&&report.sourceStableDuringRun&&inventoryChecks.every(check=>check.stable)&&!report.unhandledBrowserErrors.length&&reports.filter(item=>item.requestedStateEvidence).every(item=>item.requestedStateEvidence.status==='passed'&&!item.requestedStateEvidence.visualActionabilityGaps?.length),
+  report.requestedStateGate={safe:reports.some(item=>item.requestedStateEvidence)&&report.sourceStableDuringRun&&inventoryChecks.every(check=>check.stable)&&!report.unhandledBrowserErrors.length&&reports.filter(item=>item.requestedStateEvidence).every(item=>requestedStateProofSafe(item.requestedStateEvidence)),
     caseCount:reports.filter(item=>item.requestedStateEvidence).length,receiptCount:reports.reduce((sum,item)=>sum+(item.requestedStateEvidence?.receipts.length||0),0)};
   report.fullRunGate = {safe: !options.statesOnly && report.sourceStableDuringRun && inventoryChecks.every(check=>check.stable) && !report.unhandledBrowserErrors.length && !report.harnessErrors.length && !report.unsupportedCases.length && reports.every(item => item.comparison.equivalent && (!item.directFallback || item.directFallback.status === 'passed') && (!item.requestedStateEvidence||item.requestedStateEvidence.status==='passed'&&!item.requestedStateEvidence.visualActionabilityGaps?.length)),
     scope:'Selected finite fixture actions only; safe is an expansion guard, not an all-property or publication claim',selectedCaseCount:reports.length,inventoryCaseCount:matrix.auditCases.length,
@@ -935,6 +939,7 @@ try {
   await writeFile(resolve(options.output, 'report.json'), JSON.stringify(report, null, 2) + '\n', {flag: 'wx'});
   await writeFile(resolve(options.output, 'blockers.json'), JSON.stringify({runtime: report.runtime, caseCount: report.caseCount, checkpointCount: report.checkpointCount, equivalentWithCheckpoints: report.equivalentWithCheckpoints, fullRunGate: report.fullRunGate}, null, 2) + '\n', {flag: 'wx'});
   console.log(`Evidence: ${resolve(options.output, 'report.json')}; cases=${report.caseCount}; checkpoints=${report.checkpointCount}; captures=${report.imageCount}; ${(report.captureBytes / 1048576).toFixed(2)} MiB`);
+  if(options.statesOnly&&!report.requestedStateGate.safe)process.exitCode=1;
   }
 } catch (error) {
   if (runDir) await writeFile(resolve(options.output, 'failure.json'), JSON.stringify({runtime: process.version, error: String(error), stack: error.stack, runnerPID: process.pid, galleryPID: child?.pid, runDir, serverOutput}, null, 2) + '\n', {flag: 'wx'});

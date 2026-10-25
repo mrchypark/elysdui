@@ -7,6 +7,10 @@ import {createRequire} from 'node:module';
 import {dirname,resolve} from 'node:path';
 import {codeSpans} from '../../assets/ely-code.js';
 
+export function requestedStateProofSafe(proof){
+  return proof?.status==='passed'&&Array.isArray(proof.receipts)&&proof.receipts.length>0&&Array.isArray(proof.visualActionabilityGaps)&&proof.visualActionabilityGaps.length===0;
+}
+
 // Chromium143 retained cause diagnostic090dd21e…71fc41: observed AX names, not locale-position guesses.
 const nativeDateTargets={
   'forms/DateTimePicker':{initial:'2026-10-20T12:30',target:'2026-10-21T13:45',edits:[['Day Day',1],['Hours Hours',1],['Minutes Minutes',15]]},

@@ -9,6 +9,7 @@ import {assertRangeFormStep} from './visual-state-audit-drivers.mjs';
 import {assertComplexFormStep} from './visual-state-audit-drivers.mjs';
 import {assertRelativeDateFixture} from './visual-state-audit-drivers.mjs';
 import {temporalAXKeyboardRoute,assertTemporalAXStep} from './visual-state-audit-drivers.mjs';
+import {requestedStateProofSafe} from './visual-state-audit-drivers.mjs';
 import {assertCronNativePreview} from './visual-state-audit-drivers.mjs';
 import {assertJsonHighlight} from './visual-state-audit-drivers.mjs';
 import {nativeDateFocusedSegment,nativeDateKeyboardRoute,assertNativeDateResult} from './visual-state-audit-drivers.mjs';
@@ -17,6 +18,20 @@ import {assertEightFormStep,assertDurationNativeProof,probeFailureStateAndPayloa
 import {assertActivityLogScopedAuditPage,assertCommunicationCallerRequest,assertDockCallerAction,assertDockNativeEvents,assertEvalLastColumnGeometry,assertNativeEmbedOpen,activatePresenceStep,assertPresenceNativeRequest,assertFoundationPublicEvents,assertPlainInputNativeEvents,assertFormattedInputState,calendarDraftWheelDecision,requestedStateContract,runRequestedStateActions} from './visual-state-audit-drivers.mjs';
 
 const read=path=>readFile(new URL(`../../../../${path}`,import.meta.url),'utf8');
+
+test('requested-state execution stops unsafe proof before next case and ignores intentional full gate limit',async()=>{
+  const source=await read('ui/gohtmx/tests/browser/visual-state-audit-actions.mjs');
+  const start=source.indexOf('if(options.statesOnly){',source.indexOf('for (const item of familyCases)')),end=source.indexOf('// Fresh documents',start),branch=source.slice(start,end);assert(start>=0&&end>start);
+  const safe={status:'passed',receipts:[{assertionsPassed:true}],visualActionabilityGaps:[]},unsafe={...safe,visualActionabilityGaps:[{reason:'foreign painted twin'}]};
+  const execute=async first=>{const seen=[];const batch=runInNewContext(`async(items)=>{const reports=[];let requestedStateStopped=false;for(const item of items){${branch}}return {reports,requestedStateStopped};}`,{options:{statesOnly:true,output:'/not-written'},requestedStateContract:()=>({}),requestedStateProofSafe,unhandledBrowserErrors:()=>[],browserErrors:[],familyURL:'unused',captures:'unused',semanticSnapshotInit:()=>{},resolve:(...p)=>p.join('/'),slug:v=>v,console:{log(){}},directCaseDriver:async({item})=>{seen.push(item.caseId);return item.caseId==='first'?first:safe;}});const result=await batch([{caseId:'first',componentIdentity:'forms/CountrySelect'},{caseId:'next',componentIdentity:'forms/PathInput'}]);return {seen,...result};};
+  assert.deepEqual((await execute(unsafe)).seen,['first']);assert.equal((await execute(unsafe)).requestedStateStopped,true);
+  assert.deepEqual((await execute(safe)).seen,['first','next']);assert.equal((await execute(safe)).requestedStateStopped,false);
+  for(const proof of [{...safe,status:'failed'},{...safe,receipts:[]},{...safe,visualActionabilityGaps:undefined}])assert.equal(requestedStateProofSafe(proof),false);
+  const exitLine=source.split('\n').find(line=>line.includes('if(options.statesOnly&&!report.requestedStateGate.safe)process.exitCode=1;'));assert(exitLine);
+  const status=report=>{const process={exitCode:0};runInNewContext(exitLine,{process,options:{statesOnly:true},report});return process.exitCode;};
+  assert.equal(status({requestedStateGate:{safe:false},fullRunGate:{safe:false}}),1);assert.equal(status({requestedStateGate:{safe:true},fullRunGate:{safe:false}}),0);
+  assert(source.indexOf("'report.json'), JSON.stringify(report")<source.indexOf(exitLine));assert(source.includes('if(requestedStateStopped)break;'));
+});
 
 test('temporal AX three exact routes preserve every intermediate and stop ambiguous or wrong input',async()=>{
   const cases=[['forms/MonthPicker','period-edit','2026-10',['2026-11'],'Month Month'],['forms/TimePicker','period-edit','12:30',['13:30'],'Hours Hours'],['forms/DateRangePicker','date-range-start','2026-10-20',['2026-10-21'],'Day Day'],['forms/DateRangePicker','date-range-invalid','2026-10-22',['2026-10-21','2026-10-20'],'Day Day'],['forms/DateRangePicker','date-range-repair','2026-10-20',['2026-10-21','2026-10-22','2026-10-23'],'Day Day']];
