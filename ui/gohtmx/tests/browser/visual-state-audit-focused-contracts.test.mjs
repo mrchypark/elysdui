@@ -4,6 +4,7 @@ import test from 'node:test';
 import {runInNewContext} from 'node:vm';
 import {assertSpecialInputState} from './visual-state-audit-drivers.mjs';
 import {assertRegionalFormStep} from './visual-state-audit-drivers.mjs';
+import {assertPathNativeStep} from './visual-state-audit-drivers.mjs';
 import {assertCronNativePreview} from './visual-state-audit-drivers.mjs';
 import {assertJsonHighlight} from './visual-state-audit-drivers.mjs';
 import {nativeDateFocusedSegment,nativeDateKeyboardRoute,assertNativeDateResult} from './visual-state-audit-drivers.mjs';
@@ -12,6 +13,24 @@ import {assertEightFormStep,assertDurationNativeProof,probeFailureStateAndPayloa
 import {assertActivityLogScopedAuditPage,assertCommunicationCallerRequest,assertDockCallerAction,assertDockNativeEvents,assertEvalLastColumnGeometry,assertNativeEmbedOpen,activatePresenceStep,assertPresenceNativeRequest,assertFoundationPublicEvents,assertPlainInputNativeEvents,assertFormattedInputState,calendarDraftWheelDecision,requestedStateContract,runRequestedStateActions} from './visual-state-audit-drivers.mjs';
 
 const read=path=>readFile(new URL(`../../../../${path}`,import.meta.url),'utf8');
+
+test('PathInput native contract requires exact edit commit request and rejects duplicates',async()=>{
+  const contract=requestedStateContract('forms/PathInput');assert.equal(contract.nativeFormTwinWitness,true);assert.deepEqual(contract.steps.map(s=>s.id),['path-edit','path-commit','path-request']);assert.equal(contract.steps[1].nativeTabCommit,true);
+  for(const stage of contract.steps.map(s=>s.id)){
+    const proof={identity:'forms/PathInput',rootID:'primary',fieldID:'primary-control',truncated:false,value:'~/Projects/ely',valid:true,focusLeft:stage!=='path-edit',nativeEvents:[],publicEvents:[]};
+    const event=(type,control,key=null)=>({type,control,key,targetID:control==='field'?proof.fieldID:null,trusted:true,value:control==='field'?proof.value:''});
+    proof.nativeEvents=stage==='path-edit'?[event('input','field')]:stage==='path-commit'?[event('keydown','field','Tab'),event('change','field'),event('blur','field')]:[event('click','button')];
+    if(stage==='path-commit')proof.publicEvents=[{type:'ely:change',detail:{id:proof.rootID,component:proof.identity,name:'caller_value',value:proof.value,checked:false,type:'text'}}];
+    if(stage==='path-request')proof.publicEvents=[{type:'ely:action',detail:{id:proof.rootID,component:proof.identity,action:'choose-path',value:proof.value}}];
+    assertPathNativeStep(stage,proof);
+    for(const mutate of [p=>p.identity='forms/InputGroup',p=>p.value='stale',p=>p.truncated=true,p=>p.nativeEvents[0].trusted=false,p=>p.publicEvents.push({type:'ely:action',detail:{action:'choose-path',value:''}})]){const bad=structuredClone(proof);mutate(bad);assert.throws(()=>assertPathNativeStep(stage,bad));}
+    if(stage==='path-commit')assert.throws(()=>assertPathNativeStep(stage,{...proof,focusLeft:false}));
+  }
+  const fixtures=await read('internal/gallery/advanced_forms_fixtures.go');assert(fixtures.includes('case "PathInput":'));assert(fixtures.includes('"Value": "alpha"'));
+  const driver=await read('ui/gohtmx/tests/browser/visual-state-audit-drivers.mjs'),branch=driver.slice(driver.indexOf("if(contract.focusedSequence==='forms-path-native'){"),driver.indexOf("if(contract.focusedSequence==='forms-regional-native'){"));
+  for(const text of ["field.fill('~/Projects/ely')","field.press('Tab')",'button.click()','receipt.nativeFormProof=proof','retainFailurePayload','cleanupPreservingPrimary'])assert(branch.includes(text));
+  assert(!branch.includes('dispatchEvent('));assert(!/\.value\s*=/.test(branch));
+});
 
 test('forms action ownership production listeners emit exactly once in actual registration order',async()=>{
   const api=await read('ui/gohtmx/assets/ely-api.js'),forms=await read('ui/gohtmx/assets/ely-api-forms.js');

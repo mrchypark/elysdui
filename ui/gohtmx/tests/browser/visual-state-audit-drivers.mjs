@@ -811,6 +811,7 @@ export function activatePresenceStep(step,{ada,stop}){
 }
 
 export function requestedStateContract(identity,trashFixture){
+  if(identity==='forms/PathInput')return {identity,kind:'PathInput',family:'forms',requestedStateOnly:true,focusedSequence:'forms-path-native',nativeFormTwinWitness:true,twinFocusSelector:'input[data-ely-path]',mappingGaps:[],fixtureGuards:{component:identity,initial:'alpha',changed:'~/Projects/ely',name:'caller_value',action:'choose-path'},steps:['path-edit','path-commit','path-request'].map(id=>({id,control:id==='path-request'?'.ely-api-path-input button[data-ely-action="choose-path"]':'input[data-ely-path]',nativeTabCommit:id==='path-commit',event:'trusted native input, Tab departure or button activation',expectedState:`Exact ${id}; retain current typed path and emit only the documented local change/request`,source:{siteId:`path-native:${id}`,sourceAnchor:'advanced_forms_fixtures.go PathInput; ely-api-forms.html PathInput; ely-api-forms.js generic action owner; ely-api.js change',provenance:'Exact advanced PathInput alpha root, not Browse preview'}})),scope:'Native path edit/commit and one choose-path request only; no OS chooser, filesystem change or provider fulfillment'};
   if(regionalFormIDs.includes(identity))return {identity,kind:'LanguageSelect',family:'forms',requestedStateOnly:true,focusedSequence:'forms-regional-native',nativeFormTwinWitness:true,mappingGaps:[],fixtureGuards:{component:identity,initial:'alpha',name:'caller_value',options:[['alpha','Caller Alpha'],['beta','Caller Beta']]},steps:['regional-search','regional-select','regional-unmatched','regional-escape'].map(id=>({id,control:'[data-ui-combobox-input]',event:id==='regional-search'||id==='regional-unmatched'?'trusted native text input':'trusted native keyboard; production hidden selection notifications are synthetic',expectedState:`Exact ${identity} ${id}; beta selection, unmatched filtering or Escape restore; no host request`,source:{siteId:`regional:${identity}:${id}`,sourceAnchor:'advanced_forms_fixtures.go; ely-api-forms.html LanguageSelect; ely-controls.html combobox; ely-controls.js selectCombo; ely-api.js change',provenance:'Exact root alpha/Caller Alpha,Beta fixture only; no preview catalogue or alias receipt transfer'}})),scope:'Exact regional root search, keyboard selection, unmatched query and Escape label restoration only; no provider, locale change, arbitrary options or registered equivalence'};
   const eight=nextEightFormCases[identity];
   if(eight)return {identity,kind:eight.kind,family:'forms',requestedStateOnly:true,focusedSequence:'forms-eight-explicit-native',nativeFormTwinWitness:true,twinFocusSelector:eight.mode==='number'?'input[data-ely-number]':eight.mode==='group'?'input:not([type="hidden"])':null,fixtureGuards:{component:identity,...eight},mappingGaps:[],steps:eight.steps.map(id=>({id,control:eight.mode==='pin'?`input[data-ui-pin-slot][id$="-pin-${id==='pin-replace-first'?0:1}"]`:eight.mode==='inline'?(id==='inline-open'||id==='inline-reopen'?'[data-ely-inline-open]':id==='inline-cancel'?'[data-ely-inline-cancel]':id==='inline-save'?'[data-ely-inline-save]':eight.selector):eight.selector,event:id.startsWith('commit-')?'trusted native Tab/change/blur':eight.mode==='scrub'?'trusted native arrow key; production input/change are synthetic':eight.mode==='pin'?'trusted native slot input; named hidden notifications are synthetic':'trusted native input or pointer activation',expectedState:`Exact ${identity} ${id} transition; per-action native/public payload and independent twin witness required`,nativeTabCommit:id.startsWith('commit-'),source:{siteId:`forms-eight:${identity}:${id}`,sourceAnchor:'internal/gallery/advanced_forms_fixtures.go; internal/gallery/advanced.go aliasFixtureProps; ely-api-forms.html; ely-controls.html; ely-api-forms.js; ely-controls.js; ely-api.js',provenance:`Exact ${identity} root fixture, not PreviewExamples; no host fulfillment or persistence`}})),scope:'Finite explicit native root sequence only; Scrub pointer drag, OTP authentication, clipboard paste, arbitrary props and host fulfillment are not covered'};
@@ -1193,6 +1194,18 @@ export function assertEventLoggerPublicState(stage,observation){
 
 const regionalFormIDs=['forms/CountrySelect','forms/CurrencySelect','forms/LanguageSelect'];
 
+export function assertPathNativeStep(stage,proof){
+  assert(['path-edit','path-commit','path-request'].includes(stage));assert.equal(proof.identity,'forms/PathInput');
+  assert(proof.rootID&&proof.fieldID&&proof.rootID!==proof.fieldID);assert.equal(proof.truncated,false);
+  assert.equal(proof.value,'~/Projects/ely');assert.equal(proof.valid,true);
+  const shape=proof.nativeEvents.map(e=>[e.type,e.control,e.trusted,e.value,e.key]);
+  assert.deepEqual(shape,stage==='path-edit'?[['input','field',true,'~/Projects/ely',null]]:stage==='path-commit'?[['keydown','field',true,'~/Projects/ely','Tab'],['change','field',true,'~/Projects/ely',null],['blur','field',true,'~/Projects/ely',null]]:[['click','button',true,'',null]]);
+  for(const e of proof.nativeEvents)if(e.control==='field')assert.equal(e.targetID,proof.fieldID);
+  if(stage==='path-commit')assert.equal(proof.focusLeft,true,'Native Tab must actually leave the path field');
+  assert.deepEqual(proof.publicEvents,stage==='path-edit'?[]:stage==='path-commit'?[{type:'ely:change',detail:{id:proof.rootID,component:proof.identity,name:'caller_value',value:'~/Projects/ely',checked:false,type:'text'}}]:[{type:'ely:action',detail:{id:proof.rootID,component:proof.identity,action:'choose-path',value:'~/Projects/ely'}}],'One exact local payload; no empty duplicate request');
+  return proof;
+}
+
 export function assertRegionalFormStep(identity,stage,proof){
   assert(regionalFormIDs.includes(identity),'Exact regional identity required');
   assert(['regional-search','regional-select','regional-unmatched','regional-escape'].includes(stage),'Unknown regional stage');
@@ -1522,6 +1535,37 @@ export function assertCronNativePreview(expression,now,runs){
 }
 
 export async function runRequestedStateActions(contract,root,runStep,failureDiagnostics){
+  if(contract.focusedSequence==='forms-path-native'){
+    assert.equal(contract.identity,'forms/PathInput');assert.equal(contract.nativeFormTwinWitness,true);
+    assert.equal(await root.getAttribute('data-ely-component'),contract.identity);assert.equal(await root.getAttribute('data-ely-kind'),'PathInput');
+    const field=root.locator(':scope > .ely-api-path-input input[data-ely-path][name="caller_value"]'),button=root.locator(':scope > .ely-api-path-input button[data-ely-action="choose-path"]');
+    assert.equal(await field.count(),1);assert.equal(await button.count(),1);assert.equal(await field.inputValue(),'alpha');
+    assert.deepEqual(await field.evaluate(n=>({type:n.type,disabled:n.disabled,readOnly:n.readOnly,required:n.required})),{type:'text',disabled:false,readOnly:false,required:false});assert.equal(await button.isEnabled(),true);
+    const fieldID=await field.getAttribute('id');assert(fieldID);assert.equal(await root.page().locator(`[id="${fieldID}"]`).count(),1);
+    await root.evaluate(node=>{
+      const field=node.querySelector('[data-ely-path]'),button=node.querySelector('.ely-api-path-input button[data-ely-action]');
+      node.__pathNative=[];node.__pathPublic=[];node.__pathTruncated=false;
+      const push=(list,value)=>{if(list.length>=32){node.__pathTruncated=true;return;}list.push(value);};
+      node.__pathObserver=e=>push(node.__pathNative,{type:e.type,control:e.target===field?'field':e.target.closest?.('button')===button?'button':'foreign',targetID:e.target.id||null,trusted:e.isTrusted,value:e.target.closest?.('button')===button?button.value:e.target.value??null,key:e.key??null});
+      node.__pathPublicObserver=e=>push(node.__pathPublic,{type:e.type,detail:{...e.detail}});
+      for(const type of ['input','change','keydown','blur','click'])node.addEventListener(type,node.__pathObserver,true);
+      for(const type of ['ely:change','ely:action'])node.addEventListener(type,node.__pathPublicObserver);
+    });
+    let primaryError=null,nativeCursor=0,publicCursor=0;
+    try{
+      for(const stage of ['path-edit','path-commit','path-request'])await runStep(stage,async()=>{
+        assert.deepEqual(await root.evaluate(n=>[n.__pathNative.length,n.__pathPublic.length]),[nativeCursor,publicCursor]);
+        if(stage==='path-edit')await field.fill('~/Projects/ely');
+        else if(stage==='path-commit'){assert.equal(await field.evaluate(n=>n===document.activeElement),true);await field.press('Tab');}
+        else await button.click();
+      },async(_state,_before,receipt)=>{
+        const proof=await root.evaluate((node,cursor)=>{const field=node.querySelector('[data-ely-path]');return {identity:node.dataset.elyComponent,rootID:node.id,fieldID:field.id,value:field.value,valid:field.checkValidity(),focusLeft:field!==document.activeElement,truncated:node.__pathTruncated,nativeEvents:node.__pathNative.slice(cursor.native),publicEvents:node.__pathPublic.slice(cursor.public)};},{native:nativeCursor,public:publicCursor});
+        receipt.nativeFormProof=proof;assertPathNativeStep(stage,proof);nativeCursor+=proof.nativeEvents.length;publicCursor+=proof.publicEvents.length;return proof;
+      });
+    }catch(error){primaryError=error;if(failureDiagnostics)await retainFailurePayload(failureDiagnostics,'pathNative',()=>root.evaluate(n=>({nativeEvents:n.__pathNative,publicEvents:n.__pathPublic,truncated:n.__pathTruncated})));throw error;}
+    finally{await cleanupPreservingPrimary(()=>root.evaluate(node=>{for(const type of ['input','change','keydown','blur','click'])node.removeEventListener(type,node.__pathObserver,true);for(const type of ['ely:change','ely:action'])node.removeEventListener(type,node.__pathPublicObserver);for(const key of ['__pathNative','__pathPublic','__pathTruncated','__pathObserver','__pathPublicObserver'])delete node[key];}),primaryError,failureDiagnostics??{},'pathCleanupError');}
+    return;
+  }
   if(contract.focusedSequence==='forms-regional-native'){
     const identity=contract.identity;assert(regionalFormIDs.includes(identity));assert.equal(contract.nativeFormTwinWitness,true);
     assert.equal(await root.getAttribute('data-ely-component'),identity);assert.equal(await root.getAttribute('data-ely-kind'),'LanguageSelect');
