@@ -259,8 +259,14 @@ test('requested-state execution stops unsafe proof before next case and ignores 
 test('mixed requested proof stops after recorded evidence closes contexts and rejects missing read or cleanup failures',async()=>{
   const source=await read('ui/gohtmx/tests/browser/visual-state-audit-actions.mjs');
   const guard=source.split('\n').find(line=>line.includes('if(targetContract&&(!requestedStateProofSafe(requestedStateEvidence)'));
-  assert(guard);const record=source.indexOf('reports.push({caseId: item.caseId'),stop=source.indexOf(guard),close=source.indexOf('await Promise.all(contexts.map(context => context.close()));',stop);
-  assert(record>=0&&record<stop&&stop<close&&close<source.indexOf('if(requestedStateStopped)break;',close));
+  assert(guard);
+  const assertMixedOrder=text=>{
+    const mixed=text.indexOf('const targetContract=requestedStateContract(item.componentIdentity);'),record=text.indexOf('reports.push({caseId: item.caseId',mixed),stop=text.indexOf(guard),close=text.indexOf('await Promise.all(contexts.map(context => context.close()));',mixed);
+    assert(mixed>=0&&record>mixed&&record<stop&&stop<close&&close<text.indexOf('if(requestedStateStopped)break;',close));
+  };
+  assertMixedOrder(source);
+  const withoutGuard=source.replace(guard,'');const mixedStart=withoutGuard.indexOf('const targetContract=requestedStateContract(item.componentIdentity);');
+  assert.throws(()=>assertMixedOrder(withoutGuard.slice(0,mixedStart)+guard+'\n'+withoutGuard.slice(mixedStart)),'A guard before the mixed evidence append must be rejected');
   const safe={status:'passed',receipts:[{assertionsPassed:true}],visualActionabilityGaps:[]};
   const execute=async(proof,{readError=false,cleanupError=false}={})=>{
     const order=[],reports=[];let stopped;
