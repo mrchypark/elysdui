@@ -19,6 +19,14 @@ import {assertActivityLogScopedAuditPage,assertCommunicationCallerRequest,assert
 
 const read=path=>readFile(new URL(`../../../../${path}`,import.meta.url),'utf8');
 
+test('activation candidate preflight follows dependency install and precedes browser install',async()=>{
+  const workflow=await read('.github/workflows/palette-activation.yml');
+  const dependencies=workflow.indexOf('      - run: npm ci\n');
+  const preflight=workflow.indexOf('      - name: Validate current candidate source and exact reversal pins\n');
+  const browser=workflow.indexOf('      - run: npx playwright install --with-deps chromium\n');
+  assert(dependencies>=0&&preflight>dependencies&&browser>preflight,'dependencies < candidate pin preflight < browser installation');
+});
+
 test('activation candidate current reviewed source and exact reversal pins fail closed',async()=>{
   const {activationMutations,activationMutants,activationMutationMetadata,activationSHA256}=await import('./palette-activation-mutants.mjs');
   const {applyActivationAuditCandidateMutation}=await import('./palette-activation-audit-candidate.mjs');

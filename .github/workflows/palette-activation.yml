@@ -42,9 +42,9 @@ jobs:
         with:
           node-version: '24'
           cache: npm
+      - run: npm ci
       - name: Validate current candidate source and exact reversal pins
         run: node --test --test-name-pattern='^activation candidate current reviewed source and exact reversal pins fail closed$' ui/gohtmx/tests/browser/visual-state-audit-focused-contracts.test.mjs
-      - run: npm ci
       - run: npx playwright install --with-deps chromium
       - name: Validate synthetic replay and corruption controls
         run: node scripts/palette-activation-evidence-test.mjs
