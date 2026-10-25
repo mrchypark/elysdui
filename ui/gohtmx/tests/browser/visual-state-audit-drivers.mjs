@@ -811,6 +811,7 @@ export function activatePresenceStep(step,{ada,stop}){
 }
 
 export function requestedStateContract(identity,trashFixture){
+  if(regionalFormIDs.includes(identity))return {identity,kind:'LanguageSelect',family:'forms',requestedStateOnly:true,focusedSequence:'forms-regional-native',nativeFormTwinWitness:true,mappingGaps:[],fixtureGuards:{component:identity,initial:'alpha',name:'caller_value',options:[['alpha','Caller Alpha'],['beta','Caller Beta']]},steps:['regional-search','regional-select'].map(id=>({id,control:'[data-ui-combobox-input]',event:id==='regional-search'?'trusted native text input':'trusted native Enter; production hidden notifications are synthetic',expectedState:`Exact ${identity} ${id}; beta selection, no host request`,source:{siteId:`regional:${identity}:${id}`,sourceAnchor:'advanced_forms_fixtures.go; ely-api-forms.html LanguageSelect; ely-controls.html combobox; ely-controls.js selectCombo; ely-api.js change',provenance:'Exact root alpha/Caller Alpha,Beta fixture only; no preview catalogue or alias receipt transfer'}})),scope:'Exact regional root search and keyboard selection only; no provider, locale change, arbitrary options or registered equivalence'};
   const eight=nextEightFormCases[identity];
   if(eight)return {identity,kind:eight.kind,family:'forms',requestedStateOnly:true,focusedSequence:'forms-eight-explicit-native',nativeFormTwinWitness:true,twinFocusSelector:eight.mode==='number'?'input[data-ely-number]':eight.mode==='group'?'input:not([type="hidden"])':null,fixtureGuards:{component:identity,...eight},mappingGaps:[],steps:eight.steps.map(id=>({id,control:eight.mode==='pin'?`input[data-ui-pin-slot][id$="-pin-${id==='pin-replace-first'?0:1}"]`:eight.mode==='inline'?(id==='inline-open'||id==='inline-reopen'?'[data-ely-inline-open]':id==='inline-cancel'?'[data-ely-inline-cancel]':id==='inline-save'?'[data-ely-inline-save]':eight.selector):eight.selector,event:id.startsWith('commit-')?'trusted native Tab/change/blur':eight.mode==='scrub'?'trusted native arrow key; production input/change are synthetic':eight.mode==='pin'?'trusted native slot input; named hidden notifications are synthetic':'trusted native input or pointer activation',expectedState:`Exact ${identity} ${id} transition; per-action native/public payload and independent twin witness required`,nativeTabCommit:id.startsWith('commit-'),source:{siteId:`forms-eight:${identity}:${id}`,sourceAnchor:'internal/gallery/advanced_forms_fixtures.go; internal/gallery/advanced.go aliasFixtureProps; ely-api-forms.html; ely-controls.html; ely-api-forms.js; ely-controls.js; ely-api.js',provenance:`Exact ${identity} root fixture, not PreviewExamples; no host fulfillment or persistence`}})),scope:'Finite explicit native root sequence only; Scrub pointer drag, OTP authentication, clipboard paste, arbitrary props and host fulfillment are not covered'};
   const nativeFormCases={
@@ -1190,6 +1191,24 @@ export function assertEventLoggerPublicState(stage,observation){
   return {...observation,timestampOrigin:rawEvents[0].timeStamp,timestampRule:'first accepted public event.timeStamp; exact two-decimal elapsed seconds',eventProvenance:'Synthetic public DOM events through actual component listeners; trusted physical input is not established'};
 }
 
+const regionalFormIDs=['forms/CountrySelect','forms/CurrencySelect','forms/LanguageSelect'];
+
+export function assertRegionalFormStep(identity,stage,proof){
+  assert(regionalFormIDs.includes(identity),'Exact regional identity required');
+  assert(['regional-search','regional-select'].includes(stage),'Unknown regional stage');
+  const selected=stage==='regional-select';
+  assert.equal(proof.identity,identity);assert(proof.rootID&&proof.searchID&&proof.hiddenID);
+  assert.equal(new Set([proof.rootID,proof.searchID,proof.hiddenID]).size,3,'Distinct primary IDs required');
+  assert.equal(proof.truncated,false,'Truncated event proof cannot pass');
+  assert.deepEqual(proof.state,{name:'caller_value',value:selected?'beta':'alpha',search:selected?'Caller Beta':'beta',preview:selected?'beta':'alpha',expanded:!selected,listHidden:selected,activeValue:selected?null:'beta',selected:[selected?'beta':'alpha'],visible:['beta'],disabled:false,readOnly:false,valid:true});
+  assert.deepEqual(proof.nativeEvents.map(e=>[e.type,e.control,e.trusted,e.value,e.key]),selected?[
+    ['keydown','search',true,'beta','Enter'],['input','hidden',false,'beta',null],['change','hidden',false,'beta',null],
+  ]:[['input','search',true,'beta',null]],'Exact native initiation and synthetic production notifications');
+  for(const e of proof.nativeEvents)assert.equal(e.targetID,e.control==='search'?proof.searchID:proof.hiddenID,'Exact primary event target');
+  assert.deepEqual(proof.publicEvents,selected?[{type:'ely:change',detail:{id:proof.rootID,component:identity,name:'caller_value',value:'beta',checked:false,type:'hidden'}}]:[],'Exact public payload; no host requests');
+  return proof;
+}
+
 const nextInputCases={
   'forms/SearchInput':{kind:'SearchInput',type:'search',initial:'alpha',selector:':scope > .ely-api-search input[name="caller_value"][type="search"]',stages:['fill-text','commit-text','clear-text']},
   'forms/PasswordInput':{kind:'PasswordInput',type:'password',initial:'alpha',selector:':scope > .ely-api-password input[name="caller_value"]',stages:['fill-text','commit-text','show-password','hide-password']},
@@ -1503,6 +1522,48 @@ export function assertCronNativePreview(expression,now,runs){
 }
 
 export async function runRequestedStateActions(contract,root,runStep,failureDiagnostics){
+  if(contract.focusedSequence==='forms-regional-native'){
+    const identity=contract.identity;assert(regionalFormIDs.includes(identity));assert.equal(contract.nativeFormTwinWitness,true);
+    assert.equal(await root.getAttribute('data-ely-component'),identity);assert.equal(await root.getAttribute('data-ely-kind'),'LanguageSelect');
+    const selector=':scope > .ely-api-region-picker > [data-ui-component="combobox"]';
+    const combo=root.locator(selector),search=combo.locator('[data-ui-combobox-input]'),hidden=combo.locator('input[type="hidden"][name="caller_value"]');
+    assert.equal(await combo.count(),1);assert.equal(await search.count(),1);assert.equal(await hidden.count(),1);
+    assert.equal(await search.inputValue(),'Caller Alpha');assert.equal(await hidden.inputValue(),'alpha');
+    assert.deepEqual(await combo.locator('[data-ui-option]').evaluateAll(ns=>ns.map(n=>[n.dataset.value,n.dataset.uiLabel])),[['alpha','Caller Alpha'],['beta','Caller Beta']]);
+    for(const control of [root,search,hidden]){const id=await control.getAttribute('id');assert(id);assert.equal(await root.page().locator(`[id="${id}"]`).count(),1,'Unique primary IDs required');}
+    assert.equal(await search.getAttribute('aria-expanded'),'false');
+    await root.evaluate((node,selector)=>{
+      const combo=node.querySelector(selector),search=combo.querySelector('[data-ui-combobox-input]'),hidden=combo.querySelector('input[type="hidden"]');
+      node.__regionalNative=[];node.__regionalPublic=[];node.__regionalTruncated=false;
+      const push=(list,value)=>{if(list.length>=32){node.__regionalTruncated=true;return;}list.push(value);};
+      node.__regionalObserver=e=>push(node.__regionalNative,{type:e.type,control:e.target===search?'search':e.target===hidden?'hidden':'foreign',targetID:e.target.id||null,trusted:e.isTrusted,value:e.target.value??null,key:e.key??null});
+      node.__regionalPublicObserver=e=>push(node.__regionalPublic,{type:e.type,detail:{...e.detail}});
+      for(const type of ['input','change','keydown'])node.addEventListener(type,node.__regionalObserver,true);
+      for(const type of ['ely:change','ely:action'])node.addEventListener(type,node.__regionalPublicObserver);
+    },selector);
+    let primaryError=null,nativeCursor=0,publicCursor=0;
+    try{
+      for(const stage of ['regional-search','regional-select'])await runStep(stage,async()=>{
+        assert.deepEqual(await root.evaluate(n=>[n.__regionalNative.length,n.__regionalPublic.length]),[nativeCursor,publicCursor],'No unaccounted input between actions');
+        if(stage==='regional-search')await search.fill('beta');
+        else{
+          assert.equal(await search.evaluate(n=>n===document.activeElement),true);
+          const active=await search.getAttribute('aria-activedescendant');assert(active);
+          assert.equal(await combo.locator('[data-ui-option][data-value="beta"]').getAttribute('id'),active,'Enter must target active beta');
+          await search.press('Enter');
+        }
+      },async(_state,_before,receipt)=>{
+        const proof=await root.evaluate((node,args)=>{
+          const combo=node.querySelector(args.selector),search=combo.querySelector('[data-ui-combobox-input]'),hidden=combo.querySelector('input[type="hidden"]'),list=combo.querySelector('[data-ui-combobox-list]'),options=[...combo.querySelectorAll('[data-ui-option]')],active=search.getAttribute('aria-activedescendant');
+          return {identity:node.dataset.elyComponent,rootID:node.id,searchID:search.id,hiddenID:hidden.id,truncated:node.__regionalTruncated,nativeEvents:node.__regionalNative.slice(args.nativeCursor),publicEvents:node.__regionalPublic.slice(args.publicCursor),state:{name:hidden.name,value:hidden.value,search:search.value,preview:node.querySelector('[data-ely-picker-preview]').value,expanded:search.getAttribute('aria-expanded')==='true',listHidden:list.hidden,activeValue:options.find(n=>n.id===active)?.dataset.value??null,selected:options.filter(n=>n.getAttribute('aria-selected')==='true').map(n=>n.dataset.value),visible:options.filter(n=>!n.hidden).map(n=>n.dataset.value),disabled:hidden.disabled||search.disabled,readOnly:search.readOnly,valid:search.checkValidity()}};
+        },{selector,nativeCursor,publicCursor});
+        receipt.nativeFormProof=proof;assertRegionalFormStep(identity,stage,proof);
+        nativeCursor+=proof.nativeEvents.length;publicCursor+=proof.publicEvents.length;return proof;
+      });
+    }catch(error){primaryError=error;if(failureDiagnostics)await retainFailurePayload(failureDiagnostics,'regionalForms',()=>root.evaluate(n=>({nativeEvents:n.__regionalNative,publicEvents:n.__regionalPublic,truncated:n.__regionalTruncated})));throw error;}
+    finally{await cleanupPreservingPrimary(()=>root.evaluate(node=>{for(const type of ['input','change','keydown'])node.removeEventListener(type,node.__regionalObserver,true);for(const type of ['ely:change','ely:action'])node.removeEventListener(type,node.__regionalPublicObserver);for(const key of ['__regionalNative','__regionalPublic','__regionalTruncated','__regionalObserver','__regionalPublicObserver'])delete node[key];}),primaryError,failureDiagnostics??{},'regionalCleanupError');}
+    return;
+  }
   if(contract.focusedSequence==='forms-eight-explicit-native'){
     const identity=contract.identity,fixture=nextEightFormCases[identity];assert(fixture,'Exact eight-form identity required');
     assert.equal(await root.getAttribute('data-ely-component'),identity);assert.equal(await root.getAttribute('data-ely-kind'),fixture.kind);

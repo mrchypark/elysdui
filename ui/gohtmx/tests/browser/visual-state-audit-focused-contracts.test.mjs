@@ -3,6 +3,7 @@ import {readFile} from 'node:fs/promises';
 import test from 'node:test';
 import {runInNewContext} from 'node:vm';
 import {assertSpecialInputState} from './visual-state-audit-drivers.mjs';
+import {assertRegionalFormStep} from './visual-state-audit-drivers.mjs';
 import {assertCronNativePreview} from './visual-state-audit-drivers.mjs';
 import {assertJsonHighlight} from './visual-state-audit-drivers.mjs';
 import {nativeDateFocusedSegment,nativeDateKeyboardRoute,assertNativeDateResult} from './visual-state-audit-drivers.mjs';
@@ -11,6 +12,57 @@ import {assertEightFormStep,assertDurationNativeProof,probeFailureStateAndPayloa
 import {assertActivityLogScopedAuditPage,assertCommunicationCallerRequest,assertDockCallerAction,assertDockNativeEvents,assertEvalLastColumnGeometry,assertNativeEmbedOpen,activatePresenceStep,assertPresenceNativeRequest,assertFoundationPublicEvents,assertPlainInputNativeEvents,assertFormattedInputState,calendarDraftWheelDecision,requestedStateContract,runRequestedStateActions} from './visual-state-audit-drivers.mjs';
 
 const read=path=>readFile(new URL(`../../../../${path}`,import.meta.url),'utf8');
+
+const regionalProof=(identity,selected)=>({identity,rootID:'primary',searchID:'primary-control-input',hiddenID:'primary-control-value',truncated:false,
+  state:{name:'caller_value',value:selected?'beta':'alpha',search:selected?'Caller Beta':'beta',preview:selected?'beta':'alpha',expanded:!selected,listHidden:selected,activeValue:selected?null:'beta',selected:[selected?'beta':'alpha'],visible:['beta'],disabled:false,readOnly:false,valid:true},
+  nativeEvents:selected?[
+    {type:'keydown',control:'search',targetID:'primary-control-input',trusted:true,value:'beta',key:'Enter'},
+    {type:'input',control:'hidden',targetID:'primary-control-value',trusted:false,value:'beta',key:null},
+    {type:'change',control:'hidden',targetID:'primary-control-value',trusted:false,value:'beta',key:null},
+  ]:[{type:'input',control:'search',targetID:'primary-control-input',trusted:true,value:'beta',key:null}],
+  publicEvents:selected?[{type:'ely:change',detail:{id:'primary',component:identity,name:'caller_value',value:'beta',checked:false,type:'hidden'}}]:[],
+});
+
+test('regional forms exact aliases require native search selection payload and strict negatives',()=>{
+  for(const identity of ['forms/LanguageSelect','forms/CountrySelect','forms/CurrencySelect']){
+    const contract=requestedStateContract(identity);assert.equal(contract.kind,'LanguageSelect');assert.equal(contract.nativeFormTwinWitness,true);
+    assert.deepEqual(contract.steps.map(s=>s.id),['regional-search','regional-select']);assert.deepEqual(contract.fixtureGuards.options,[['alpha','Caller Alpha'],['beta','Caller Beta']]);
+    for(const selected of [false,true]){
+      const stage=selected?'regional-select':'regional-search',proof=regionalProof(identity,selected);assertRegionalFormStep(identity,stage,proof);
+      for(const mutation of [p=>p.identity='forms/Select',p=>p.truncated=true,p=>p.state.value='stale',p=>p.state.preview='stale',p=>p.state.disabled=true,p=>p.state.activeValue='foreign',p=>p.nativeEvents[0].trusted=false,p=>p.nativeEvents[0].targetID='twin',p=>p.publicEvents.push({type:'ely:action',detail:{action:'save'}})]){const bad=structuredClone(proof);mutation(bad);assert.throws(()=>assertRegionalFormStep(identity,stage,bad));}
+      if(selected)for(const mutation of [p=>p.nativeEvents[1].trusted=true,p=>p.publicEvents[0].detail.component='forms/Select',p=>p.publicEvents[0].detail.name='preview',p=>p.nativeEvents.pop()]){const bad=structuredClone(proof);mutation(bad);assert.throws(()=>assertRegionalFormStep(identity,stage,bad));}
+    }
+  }
+  assert.throws(()=>assertRegionalFormStep('forms/Select','regional-select',regionalProof('forms/Select',true)));
+  assert.throws(()=>assertRegionalFormStep('forms/LanguageSelect','unknown',regionalProof('forms/LanguageSelect',true)));
+});
+
+test('regional forms source fixture and connected handler guards do not transfer previews',async()=>{
+  const fixtures=await read('internal/gallery/advanced_forms_fixtures.go'),templates=await read('ui/gohtmx/templates/ely-api-forms.html'),controls=await read('ui/gohtmx/assets/ely-controls.js');
+  assert(fixtures.includes('{"Value": "alpha", "Label": "Caller Alpha"}'));assert(fixtures.includes('{"Value": "beta", "Label": "Caller Beta"}'));
+  assert(templates.includes('{{else if eq .Kind "LanguageSelect"}}'));assert(templates.includes('data-ely-picker-preview'));
+  const handler=controls.slice(controls.indexOf('const selectCombo ='),controls.indexOf('const addKeyValue ='));
+  assert(handler.includes("hidden.dispatchEvent(new Event('input', { bubbles: true }))"));assert(handler.includes("hidden.dispatchEvent(new Event('change', { bubbles: true }))"));assert(handler.includes('input.focus()'));assert(handler.includes('closeCombo(component)'));
+  const driver=await read('ui/gohtmx/tests/browser/visual-state-audit-drivers.mjs');
+  const branch=driver.slice(driver.indexOf("if(contract.focusedSequence==='forms-regional-native'){"),driver.indexOf("if(contract.focusedSequence==='forms-eight-explicit-native'){"));
+  assert(branch.includes("search.press('Enter')"));assert(branch.includes("search.fill('beta')"));assert(branch.includes('receipt.nativeFormProof=proof'));assert(branch.includes('retainFailurePayload'));assert(branch.includes('cleanupPreservingPrimary'));
+  assert(!branch.includes('dispatchEvent('));assert(!/\.value\s*=/.test(branch));assert(!branch.includes('PreviewExamples'));
+});
+
+test('regional forms execute production selection helper without fabricating trusted notifications',async()=>{
+  const source=await read('ui/gohtmx/assets/ely-controls.js');
+  const helper=source.slice(source.indexOf('const selectCombo ='),source.indexOf('const addKeyValue ='));
+  const options=['alpha','beta'].map(value=>({dataset:{value,uiLabel:`Caller ${value==='alpha'?'Alpha':'Beta'}`},selected:value==='alpha',getAttribute(){return null;},setAttribute(name,value){assert.equal(name,'aria-selected');this.selected=value==='true';}}));
+  const events=[],hidden={value:'alpha',dispatchEvent(event){events.push({type:event.type,bubbles:event.bubbles,trusted:event.isTrusted,value:this.value});}},input={value:'beta',disabled:false,readOnly:false,focus(){this.focused=true;}};
+  const component={querySelector(selector){assert.equal(selector,'[data-ui-combobox-input]');return input;},querySelectorAll(selector){assert.equal(selector,'[data-ui-option]');return options;}};
+  let closed=0;
+  const select=runInNewContext(`${helper};selectCombo`,{Event,hiddenValue:node=>{assert.equal(node,component);return hidden;},closeCombo:node=>{assert.equal(node,component);closed++;}});
+  select(component,options[1]);
+  assert.equal(hidden.value,'beta');assert.equal(input.value,'Caller Beta');assert.equal(input.focused,true);assert.equal(closed,1);assert.deepEqual(options.map(n=>n.selected),[false,true]);
+  assert.deepEqual(events,[{type:'input',bubbles:true,trusted:false,value:'beta'},{type:'change',bubbles:true,trusted:false,value:'beta'}]);
+  for(const property of ['disabled','readOnly']){input[property]=true;select(component,options[0]);assert.equal(hidden.value,'beta');assert.equal(events.length,2);input[property]=false;}
+  options[0].getAttribute=()=> 'true';select(component,options[0]);assert.equal(hidden.value,'beta');assert.equal(events.length,2);
+});
 
 test('exact DateTime Week AX keyboard routes preserve targets trust and bounded actual departure',async()=>{
   for(const identity of ['forms/DateTimePicker','forms/WeekPicker']){
