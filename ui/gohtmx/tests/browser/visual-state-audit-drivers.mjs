@@ -327,11 +327,36 @@ export function multiSelectShadowFrame(node){
     for(const pseudo of ['::before','::after'])if(!['none','normal'].includes(getComputedStyle(a,pseudo).content))return fail('generated audit backdrop paint');
   }
   if(!reachedRecord)return fail('shadow frame record is not an ancestor');
-  const rects=[],shadows=[];
+  const rects=[],shadows=[],compositedDisabledLeaves=[];
+  const containedDisabledLeaf=(element,st,b)=>{
+    if(st.opacity!=='0.55'||element.localName!=='input'||element.type!=='checkbox'||!element.disabled||!element.matches(':disabled')||element.children.length||!element.id||element.closest('[data-ui-multi-list]')!==panel)return false;
+    const matchingIDs=document.querySelectorAll(`[id="${element.id}"]`);
+    if(matchingIDs.length!==1||matchingIDs[0]!==element)return false;
+    const option=element.closest('[data-ui-multi-option]');
+    if(!option||!panel.contains(option)||!panel.contains(element))return false;
+    const ps=getComputedStyle(panel);
+    if(ps.opacity!=='1'||!/^rgb\(\d+,\s*\d+,\s*\d+\)$/.test(ps.backgroundColor)||ps.backgroundImage!=='none')return false;
+    const radii=['borderTopLeftRadius','borderTopRightRadius','borderBottomLeftRadius','borderBottomRightRadius'].map(property=>ps[property].split(' '));
+    if(radii.some(pair=>pair.length>2||pair.some(value=>!/^\d*\.?\d+px$/.test(value))))return false;
+    const rx=Math.max(...radii.map(pair=>parseFloat(pair[0]))),ry=Math.max(...radii.map(pair=>parseFloat(pair[1]??pair[0])));
+    const interior={left:p.left+panel.clientLeft,top:p.top+panel.clientTop,right:p.left+panel.clientLeft+panel.clientWidth,bottom:p.top+panel.clientTop+panel.clientHeight};
+    if(!(b.width>0&&b.height>0&&b.left>=interior.left&&b.top>=interior.top&&b.right<=interior.right&&b.bottom<=interior.bottom&&(b.left>=interior.left+rx&&b.right<=interior.right-rx||b.top>=interior.top+ry&&b.bottom<=interior.bottom-ry)))return false;
+    const ancestors=[];let reachedPanel=false,reachedRecord=false;
+    for(let a=element.parentElement;a;a=a.parentElement){
+      const as=getComputedStyle(a);if(as.opacity!=='1')return false;
+      if(a===panel)reachedPanel=true;
+      if(!reachedPanel&&(as.overflowX!=='visible'||as.overflowY!=='visible'||as.clip!=='auto'||as.contain!=='none'))return false;
+      ancestors.push({id:a.id||null,opacity:as.opacity});if(a===record){reachedRecord=true;break;}
+    }
+    if(!reachedPanel||!reachedRecord)return false;
+    compositedDisabledLeaves.push({id:element.id,type:element.type,disabled:element.disabled,opacity:st.opacity,panelID:panel.id,panelBackground:ps.backgroundColor,clientInterior:interior,cornerRadii:{x:rx,y:ry},rect:{left:b.left,top:b.top,right:b.right,bottom:b.bottom},ancestors});
+    return true;
+  };
   for(const element of [root,...root.querySelectorAll('*')]){
     if(!element.checkVisibility({checkOpacity:true,checkVisibilityCSS:true}))continue;
     const st=getComputedStyle(element),b=element.getBoundingClientRect();
-    if(st.transform!=='none'||st.translate!=='none'||st.rotate!=='none'||st.scale!=='none'||st.perspective!=='none'||st.filter !== 'none'||st.backdropFilter!=='none'||st.clipPath!=='none'||st.maskImage!=='none'||st.mixBlendMode!=='normal'||st.opacity!=='1'||st.position==='fixed'||st.position==='sticky'||!['none','hidden'].includes(st.outlineStyle)&&parseFloat(st.outlineWidth)!==0){
+    const containedAlpha=st.opacity!=='1'&&containedDisabledLeaf(element,st,b);
+    if(st.transform!=='none'||st.translate!=='none'||st.rotate!=='none'||st.scale!=='none'||st.perspective!=='none'||st.filter !== 'none'||st.backdropFilter!=='none'||st.clipPath!=='none'||st.maskImage!=='none'||st.mixBlendMode!=='normal'||st.opacity!=='1'&&!containedAlpha||st.position==='fixed'||st.position==='sticky'||!['none','hidden'].includes(st.outlineStyle)&&parseFloat(st.outlineWidth)!==0){
       // Diagnostic only: preserve the exact rejecting predicate and its DOM provenance.
       const selectorFor=target=>{
         if(target.id)return `[id=${JSON.stringify(target.id)}]`;
@@ -343,7 +368,7 @@ export function multiSelectShadowFrame(node){
         return segments.join(' > ');
       };
       const properties=['transform','translate','rotate','scale','perspective','filter','backdropFilter','clipPath','maskImage','mixBlendMode','opacity','position','outlineStyle','outlineWidth'];
-      const styleRejections=properties.filter(property=>property==='position'?['fixed','sticky'].includes(st[property]):property==='outlineStyle'||property==='outlineWidth'?!['none','hidden'].includes(st.outlineStyle)&&parseFloat(st.outlineWidth)!==0:st[property]!==({mixBlendMode:'normal',opacity:'1'}[property]??'none')).map(property=>({property,value:st[property]}));
+      const styleRejections=properties.filter(property=>property==='position'?['fixed','sticky'].includes(st[property]):property==='opacity'?st.opacity!=='1'&&!containedAlpha:property==='outlineStyle'||property==='outlineWidth'?!['none','hidden'].includes(st.outlineStyle)&&parseFloat(st.outlineWidth)!==0:st[property]!==({mixBlendMode:'normal'}[property]??'none')).map(property=>({property,value:st[property]}));
       const ancestorPath=[];
       for(let a=element;a;a=a.parentElement){const computed=getComputedStyle(a);ancestorPath.push({selector:selectorFor(a),id:a.id||null,tag:a.localName,style:Object.fromEntries(properties.map(property=>[property,computed[property]]))});if(a===record)break;}
       return {...fail('complex owned shadow-frame paint'),rejectionWitness:{selector:selectorFor(element),ownerID:root.id,ownerComponent:root.dataset.elyComponent,panelID:panel.id,styleRejections,ancestorPath}};
@@ -354,7 +379,7 @@ export function multiSelectShadowFrame(node){
   }
   const focused=document.activeElement,fs=focused&&getComputedStyle(focused);
   if(!focused||!root.contains(focused)||!['none','hidden'].includes(fs.outlineStyle)&&parseFloat(fs.outlineWidth)!==0)return fail('visible focused outline requires separate proof');
-  return {eligible:true,ownerID:root.id,panelID:panel.id,frame,documentFrame:{...frame,x:frame.x+scrollX,y:frame.y+scrollY},background:[...color.slice(1).map(Number),255],rects,shadows,panel:{left:p.left-frame.x,top:p.top-frame.y,right:p.right-frame.x,bottom:p.bottom-frame.y},focused:{id:focused.id,type:focused.type,matchesFocusVisible:focused.matches(':focus-visible'),outlineStyle:fs.outlineStyle,boxShadow:fs.boxShadow}};
+  return {eligible:true,ownerID:root.id,panelID:panel.id,frame,documentFrame:{...frame,x:frame.x+scrollX,y:frame.y+scrollY},background:[...color.slice(1).map(Number),255],rects,shadows,compositedDisabledLeaves,panel:{left:p.left-frame.x,top:p.top-frame.y,right:p.right-frame.x,bottom:p.bottom-frame.y},focused:{id:focused.id,type:focused.type,matchesFocusVisible:focused.matches(':focus-visible'),outlineStyle:fs.outlineStyle,boxShadow:fs.boxShadow}};
 }
 
 export function proveMultiSelectShadowRaster({width,height,data},sample){
@@ -376,7 +401,7 @@ export function proveMultiSelectShadowRaster({width,height,data},sample){
     if(!sample.rects.some(r=>x+.5>=r.left&&x+.5<r.right&&y+.5>=r.top&&y+.5<r.bottom))shadowPixels++;
   }
   assert(ink>0&&shadowPixels>0,'Native shadow pixels outside layout boxes must be retained');
-  return {status:'bounded-native-raster',inkPixels:ink,shadowPixels,frame:sample.documentFrame,panelID:sample.panelID,focused:sample.focused};
+  return {status:'bounded-native-raster',inkPixels:ink,shadowPixels,frame:sample.documentFrame,panelID:sample.panelID,focused:sample.focused,compositedDisabledLeaves:sample.compositedDisabledLeaves??[]};
 }
 
 export async function captureTargetPNG(page,root,path,{checkedRootID}={}){

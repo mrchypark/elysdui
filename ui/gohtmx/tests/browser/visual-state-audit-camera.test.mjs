@@ -17,20 +17,25 @@ function shadowRasterFixture(){
   return {png:{width,height,data},sample,pixel};
 }
 
-test('MultiSelect shadow sampler validates intervening main and grid clips and backdrop paint',()=>{
+function multiSelectSamplerFixture(){
   const style={opacity:'1',transform:'none',translate:'none',rotate:'none',scale:'none',perspective:'none',filter:'none',backdropFilter:'none',clipPath:'none',clip:'auto',contain:'none',maskImage:'none',mixBlendMode:'normal',overflowX:'visible',overflowY:'visible',backgroundColor:'rgba(0, 0, 0, 0)',backgroundImage:'none',boxShadow:'none',outlineStyle:'none',outlineWidth:'0px',position:'static',borderTopWidth:'0px',borderRightWidth:'0px',borderBottomWidth:'0px',borderLeftWidth:'0px'};
   const rect=(left,top,right,bottom)=>({left,top,right,bottom,width:right-left,height:bottom-top});
-  const make=(id,parent,box)=>{const node={id,localName:'div',children:[],parentElement:parent,style:{...style},pseudos:{},clientLeft:0,dataset:{},getBoundingClientRect:()=>box,checkVisibility:()=>true,matches:()=>false};parent?.children.push(node);return node;};
+  const make=(id,parent,box)=>{const node={id,localName:'div',children:[],parentElement:parent,style:{...style},pseudos:{},clientLeft:0,dataset:{},getBoundingClientRect:()=>box,checkVisibility:()=>true,matches:()=>false,contains(target){for(let a=target;a;a=a.parentElement)if(a===this)return true;return false;}};parent?.children.push(node);return node;};
   const record=make('record',null,rect(0,0,100,120));record.style.backgroundColor='rgb(255, 255, 255)';
   const grid=make('grid',record,rect(0,0,100,120)),host=make('host',grid,rect(0,10,100,90)),root=make('root',host,rect(10,10,70,40));root.dataset.elyComponent='forms/MultiSelect';
   const twin=make('twin',grid,rect(0,100,100,120)),panel=make('panel',root,rect(10,40,70,60)),entry=make('entry',root,rect(10,10,70,30)),focused=make('checkbox',panel,rect(20,45,30,55));
   panel.style.boxShadow='rgba(0, 0, 0, 0.133) 0px 8px 16px 0px';
   root.closest=selector=>selector==='[data-audit-main]'?host:selector==='[data-audit-case]'?record:root;
-  root.querySelector=()=>panel;root.querySelectorAll=selector=>selector==='*'?[panel,entry,focused]:[entry];root.contains=node=>node===focused;
+  root.querySelector=()=>panel;root.querySelectorAll=selector=>selector==='*'?[panel,entry,focused]:[entry];
   entry.getAttribute=name=>name==='aria-expanded'?'true':panel.id;
   record.querySelector=()=>twin;
-  const document={activeElement:focused,querySelectorAll:selector=>selector==='[data-audit-case]'?[record]:[panel]};
+  const document={activeElement:focused,querySelectorAll:selector=>selector==='[data-audit-case]'?[record]:[panel,focused].filter(node=>selector===`[id="${node.id}"]`)};
   const sample=()=>JSON.parse(JSON.stringify(runInNewContext(`(${multiSelectShadowFrame.toString()})(node)`,{node:root,document,URL,location:{href:'http://127.0.0.1/components/audit?family=forms&case=forms%2FMultiSelect'},getComputedStyle:(node,pseudo)=>pseudo?{content:node.pseudos[pseudo]??'none'}:node.style,innerWidth:100,innerHeight:100,scrollX:0,scrollY:0})));
+  return {style,rect,make,record,grid,host,root,twin,panel,entry,focused,document,sample};
+}
+
+test('MultiSelect shadow sampler validates intervening main and grid clips and backdrop paint',()=>{
+  const {style,host,grid,focused,sample}=multiSelectSamplerFixture();
   assert.equal(sample().eligible,true,'Transparent untransformed wrappers permit the finite sampler');
   for(const wrapper of [host,grid]){
     for(const change of [{overflowX:'hidden'},{overflowY:'auto'},{transform:'matrix(1, 0, 0, 1, 1, 0)'},{clipPath:'inset(1px)'},{contain:'paint'},{backgroundColor:'rgb(255, 255, 255)'},{backgroundColor:'rgba(0, 0, 0, 0.5)'},{backgroundImage:'linear-gradient(white, black)'},{boxShadow:'rgb(0, 0, 0) 0px 1px 2px 0px'},{borderLeftWidth:'1px'}]){
@@ -54,6 +59,57 @@ test('MultiSelect shadow sampler validates intervening main and grid clips and b
   assert.equal(outlined.rejectionWitness.selector,'[id="panel"] > div:nth-child(1)');
   assert.deepEqual(outlined.rejectionWitness.styleRejections,[{property:'outlineStyle',value:'solid'},{property:'outlineWidth',value:'3px'}]);
   focused.style={...style};focused.id='checkbox';assert.equal(sample().eligible,true,'Diagnostics do not relax or expand eligibility');
+});
+
+test('MultiSelect shadow contains only exact disabled leaf alpha and retains opaque owner ancestry',async()=>{
+  const make=()=>{
+    const f=multiSelectSamplerFixture(),{panel,focused,root,entry}=f;
+    panel.style.backgroundColor='rgb(255, 255, 255)';
+    Object.assign(panel,{clientLeft:1,clientTop:1,clientWidth:58,clientHeight:18});
+    for(const corner of ['TopLeft','TopRight','BottomLeft','BottomRight'])panel.style[`border${corner}Radius`]='4px';
+    const label=f.make('label',panel,f.rect(12,42,68,58));label.localName='label';
+    panel.children=panel.children.filter(node=>node!==focused);focused.parentElement=label;label.children.push(focused);
+    Object.assign(focused,{localName:'input',type:'checkbox',disabled:true,matches:selector=>selector===':disabled',closest:selector=>selector==='[data-ui-multi-list]'?panel:label});
+    focused.style.opacity='0.55';focused.style.boxShadow='rgba(0, 0, 0, 0.05) 0px 1px 2px 0px';
+    root.querySelectorAll=selector=>selector==='*'?[panel,entry,label,focused]:[entry];
+    f.document.activeElement=entry;return {...f,label};
+  };
+  const valid=make(),sample=valid.sample();assert.equal(sample.eligible,true);
+  assert.equal(sample.compositedDisabledLeaves.length,1);
+  assert.equal(sample.compositedDisabledLeaves[0].opacity,'0.55');assert.equal(sample.compositedDisabledLeaves[0].disabled,true);
+  assert.equal(sample.compositedDisabledLeaves[0].panelBackground,'rgb(255, 255, 255)');
+  assert(sample.rects.some(r=>r.left===20&&r.top===35&&r.right===30&&r.bottom===45),'Leaf remains in measured geometry');
+  assert(sample.shadows.some(s=>s.id==='checkbox'),'Leaf shadow remains parsed, never skipped');
+  for(const mutate of [
+    f=>f.focused.disabled=false,
+    f=>f.focused.type='text',
+    f=>f.focused.style.opacity='0.5',
+    f=>f.focused.children.push({}),
+    f=>f.focused.closest=()=>null,
+    f=>f.label.style.opacity='0.55',
+    f=>f.panel.style.opacity='0.55',
+    f=>f.root.style.opacity='0.55',
+    f=>f.record.style.opacity='0.55',
+    f=>f.panel.style.backgroundColor='rgba(255, 255, 255, 0.5)',
+    f=>f.panel.style.backgroundImage='linear-gradient(white, black)',
+    f=>f.label.style.overflowX='hidden',
+    f=>f.panel.style.borderTopLeftRadius='50%',
+    f=>f.focused.getBoundingClientRect=()=>f.rect(9,45,30,55),
+    f=>f.focused.getBoundingClientRect=()=>f.rect(11,41,14,44),
+    f=>f.document.querySelectorAll=selector=>selector.includes('checkbox')?[f.focused,f.focused]:selector==='[data-audit-case]'?[f.record]:[f.panel],
+    f=>f.document.querySelectorAll=selector=>selector.includes('checkbox')?[f.panel]:selector==='[data-audit-case]'?[f.record]:[f.panel],
+    f=>f.focused.style.transform='matrix(2, 0, 0, 2, 0, 0)',
+  ]){const fixture=make();mutate(fixture);assert.equal(fixture.sample().eligible,false,mutate.toString());}
+  const raster=shadowRasterFixture();raster.sample.compositedDisabledLeaves=sample.compositedDisabledLeaves;
+  assert.deepEqual(proveMultiSelectShadowRaster(raster.png,raster.sample).compositedDisabledLeaves,sample.compositedDisabledLeaves);
+  raster.pixel(0,5,254);assert.throws(()=>proveMultiSelectShadowRaster(raster.png,raster.sample),/boundary/);
+  const root={async scrollIntoViewIfNeeded(){},async evaluate(fn){if(fn===multiSelectShadowFrame)return sample;if(fn===captureForeignPaint)return {foreignDOMIntersections:[{id:'foreign-twin'}],occludedForeignPaint:[]};return {clip:{x:0,y:0,width:12,height:12}};}};
+  let captures=0;
+  const page={async evaluate(){return {scroll:{x:0,y:0},viewport:{width:100,height:100}};},async screenshot(){captures++;const png=Buffer.alloc(24);png.writeUInt32BE(12,16);png.writeUInt32BE(12,20);return png;}};
+  const captured=await captureTargetPNG(page,root);
+  assert.equal(captures,1,'Contained alpha never bypasses foreign-paint denial before raster proof');
+  assert.equal(captured.bounds.focusOutline.status,'unsupported');assert.match(captured.bounds.focusOutline.diagnostic.error,/Foreign paint/);
+  assert.equal(captured.foreignDOMIntersections[0].id,'foreign-twin');
 });
 
 test('MultiSelect shadow rejection witness survives capture diagnostic fallback unchanged',async()=>{
