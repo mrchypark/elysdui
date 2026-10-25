@@ -1269,11 +1269,13 @@ export function assertLocalStudioStep(identity,stage,proof){
   const generic=(name,value,type)=>p({name,value,...(type==='textarea'?{}:{checked:false}),type});
   let events;
   if(identity==='forms/SignaturePad'){
-    const typed='Caller native signature',drawn=stage==='signature-draw',value=drawn?proof.state.value:stage==='signature-type'?typed:'';
+    const typed='Caller native signature',drawn=stage==='signature-draw',value=drawn?proof.canvasDataURL:stage==='signature-type'?typed:'';
     assert.equal(typeof value,'string');assert(value.length<=131072,'Signature data URL cap');
+    assert.equal(proof.state.value,value,'Observed hidden signature must equal independently expected typed/empty value or actual canvas serialization');
     if(drawn){assert.match(value,/^data:image\/png;base64,[A-Za-z0-9+/]+=*$/);assert.equal(proof.state.canvasMatchesValue,true);assert(proof.state.inkPixels>0);}
     else assert.equal(proof.state.inkPixels,0);
-    assert.deepEqual({...proof.state,value,inkPixels:0,canvasMatchesValue:true},{value,fallback:stage==='signature-type'?typed:'',strokes:drawn?'1 stroke':'0 strokes',inkPixels:0,canvasMatchesValue:true,valid:true,hiddenEnabled:true,fallbackName:'',guideHidden:stage!=='signature-clear'});
+    const {inkPixels,...observedState}=proof.state;
+    assert.deepEqual(observedState,{value,fallback:stage==='signature-type'?typed:'',strokes:drawn?'1 stroke':'0 strokes',canvasMatchesValue:true,valid:true,hiddenEnabled:true,fallbackName:'',guideHidden:stage!=='signature-clear'});
     const notification=[n('change','hidden',value,null,false),generic('caller_value',value,'hidden')];
     events=stage==='signature-type'?[n('input','fallback',typed),...notification]:stage==='signature-clear'?[n('click','clear',''),...notification]:[
       n('pointermove','canvas',null),n('pointerdown','canvas',null),n('change','fallback',typed),generic('',typed,'textarea'),n('blur','fallback',typed),
@@ -1846,18 +1848,19 @@ export async function runRequestedStateActions(contract,root,runStep,failureDiag
       else await root.locator(`button[data-ely-gradient-stop][value="${stage==='gradient-stop-right'?'50':'51'}"]`).press(stage==='gradient-stop-right'?'ArrowRight':'Delete');
     },async(_state,_before,receipt)=>{
       const proof=await root.evaluate((node,{cursor,signature})=>{
-        const q=selector=>node.querySelector(selector);let state;
+        const q=selector=>node.querySelector(selector);let state,canvasDataURL;
         if(signature){
           const canvas=q('[data-ui-signature]'),hidden=q('[data-ui-signature-value]'),fallback=q('textarea');
           if(canvas.width*canvas.height>1048576||hidden.value.length>131072)throw Error('Signature bounded raster/data URL limit');
           const pixels=canvas.getContext('2d').getImageData(0,0,canvas.width,canvas.height).data;let inkPixels=0;for(let index=3;index<pixels.length;index+=4)if(pixels[index])inkPixels++;
-          state={value:hidden.value,fallback:fallback.value,strokes:q('[data-ui-signature-count]').textContent,inkPixels,canvasMatchesValue:hidden.value.startsWith('data:')?canvas.toDataURL()===hidden.value:true,valid:fallback.checkValidity(),hiddenEnabled:!hidden.disabled,fallbackName:fallback.name,guideHidden:q('.ui-signature-guide').hidden};
+          canvasDataURL=canvas.toDataURL();if(canvasDataURL.length>131072)throw Error('Signature canvas serialization cap');
+          state={value:hidden.value,fallback:fallback.value,strokes:q('[data-ui-signature-count]').textContent,inkPixels,canvasMatchesValue:hidden.value.startsWith('data:')?canvasDataURL===hidden.value:true,valid:fallback.checkValidity(),hiddenEnabled:!hidden.disabled,fallbackName:fallback.name,guideHidden:q('.ui-signature-guide').hidden};
         }else{
           const value=q('[data-ely-gradient-value]').value,preview=q('[data-ely-gradient-preview]'),expected=document.createElement('output');expected.style.background=value;
           state={value,angle:q('[data-ely-gradient-angle]').value,stops:[...node.querySelectorAll('[data-ely-gradient-stop]')].map(n=>({at:Number(n.dataset.elyGradientAt),color:n.querySelector('[data-ely-gradient-color]').dataset.elyGradientColor,alpha:Number(n.dataset.elyGradientAlpha),selected:n.getAttribute('aria-pressed')==='true'})),hex:q('[data-ely-color-hex]').value,alpha:q('[data-ely-color-alpha]').value,start:q('[data-ely-gradient-start]').value,end:q('[data-ely-gradient-end]').value,previewMatches:!!expected.style.background&&expected.style.background===preview.style.background};
         }
         const raw=node.__studioEvents.slice(cursor),pointerButtons=raw.filter(e=>e.type.startsWith('pointer')).map(e=>e.buttons),events=raw.map(({buttons,...event})=>event);
-        return {identity:node.dataset.elyComponent,rootID:node.id,state,events,pointerButtons,truncated:node.__studioTruncated,foreign:node.__studioForeign};
+        return {identity:node.dataset.elyComponent,rootID:node.id,state,events,pointerButtons,...(signature?{canvasDataURL}:{}),truncated:node.__studioTruncated,foreign:node.__studioForeign};
       },{cursor,signature});
       receipt.nativeFormProof=proof;assertLocalStudioStep(identity,stage,proof);cursor+=proof.events.length;return proof;
     });}catch(error){primaryError=error;if(failureDiagnostics)await retainFailurePayload(failureDiagnostics,'localStudio',()=>root.evaluate(n=>({events:n.__studioEvents,truncated:n.__studioTruncated,foreign:n.__studioForeign,bytes:n.__studioBytes})));throw error;}

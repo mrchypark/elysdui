@@ -50,7 +50,8 @@ test('local studio two execute nine exact state and complete ordered event windo
         else if(stage==='gradient-stop-right')events=[n('blur','alpha','50'),n('keydown','stop','50','ArrowRight'),agg(stops(.51,'#ff0000',50))];
         else events=[n('keydown','stop','51','Delete'),agg(stops())];
       }
-      const proof={identity,rootID:'root',state,events,pointerButtons,truncated:false,foreign:false};assertLocalStudioStep(identity,stage,proof);count++;
+      const proof={identity,rootID:'root',state,events,pointerButtons,...(stage==='signature-draw'?{canvasDataURL:'data:image/png;base64,YWJj'}:{}),truncated:false,foreign:false};assertLocalStudioStep(identity,stage,proof);count++;
+      if(stage==='signature-type'||stage==='signature-clear')assert.throws(()=>assertLocalStudioStep(identity,stage,{...proof,state:{...state,value:'wrong hidden value'}}),'Wrong observed hidden value must fail with otherwise valid state and events');
       assert.throws(()=>assertLocalStudioStep(identity,stage,{...proof,truncated:true}));assert.throws(()=>assertLocalStudioStep(identity,stage,{...proof,foreign:true}));
       assert.throws(()=>assertLocalStudioStep(identity,stage,{...proof,events:events.slice(1)}));assert.throws(()=>assertLocalStudioStep(identity,stage,{...proof,events:[...events,p({value:'extra'})]}));
       const wrong=structuredClone(proof);wrong.events.find(e=>'trusted'in e).trusted=false;assert.throws(()=>assertLocalStudioStep(identity,stage,wrong));
@@ -63,7 +64,7 @@ test('local studio two execute nine exact state and complete ordered event windo
 
 test('local studio two native route caps fail closed and preserve bounded stroke and fifty alpha events',async()=>{
   const source=await read('ui/gohtmx/tests/browser/visual-state-audit-drivers.mjs'),start=source.indexOf("if(contract.focusedSequence==='forms-local-studio-native')"),branch=source.slice(start,source.indexOf("if(contract.focusedSequence==='forms-local-picker-native')",start));
-  for(const text of ['mouse.down()','mouse.up()','for(let index=0;index<50;index++)',".press('ArrowLeft')",'receipt.nativeFormProof=proof','retainFailurePayload','cleanupPreservingPrimary','getImageData','canvas.toDataURL()===hidden.value'])assert(branch.includes(text),text);
+  for(const text of ['mouse.down()','mouse.up()','for(let index=0;index<50;index++)',".press('ArrowLeft')",'receipt.nativeFormProof=proof','retainFailurePayload','cleanupPreservingPrimary','getImageData','canvasDataURL=canvas.toDataURL()','canvasDataURL===hidden.value'])assert(branch.includes(text),text);
   assert.doesNotMatch(branch,/dispatchEvent|new Event|\.value\s*=(?!=|>)/);
   const installer=branch.slice(branch.indexOf('await root.evaluate((node,{controls,signature})=>{')+'await root.evaluate((node,{controls,signature})=>{'.length,branch.indexOf('},{controls,signature});'));
   const listeners={},field={value:'180',matches:()=>false,closest:()=>node},node={querySelector:()=>field,addEventListener:(type,fn)=>listeners[type]=fn};
