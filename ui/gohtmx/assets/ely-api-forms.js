@@ -205,7 +205,7 @@ register('forms', root => {
   const mentionActiveOption=()=>{const options=mentionOptions();return mentionActiveIndex>=0&&mentionActiveIndex<options.length?options[mentionActiveIndex]:null;};
   const setMentionActive=index=>{const options=mentionOptions(),input=q('[data-ely-mention]'),active=options[index];mentionActiveIndex=active?index:-1;all('[data-ely-mention-value]').forEach(option=>{if(option===active)option.setAttribute('aria-selected','true');else option.removeAttribute('aria-selected');});if(input){if(active?.id)input.setAttribute('aria-activedescendant',active.id);else input.removeAttribute('aria-activedescendant');}};
   const click = event => {
-    const button=event.target.closest('button');if(!button||button.disabled||button.getAttribute('aria-disabled')==='true'||button.closest('fieldset:disabled')||root.dataset.elyDisabled==='true'||button.closest('[data-ely-family]')!==root)return;
+    const button=event.target.closest('button');if(!button||button.matches(':disabled')||button.getAttribute('aria-disabled')==='true'||root.dataset.elyDisabled==='true'||button.closest('[data-ely-family]')!==root)return;
     if(button.matches('[data-ely-unit]')){const units=all('[data-ely-unit-option]').map(option=>option.dataset.elyUnitOption),unit=units[(units.indexOf(button.dataset.elyUnit)+1)%units.length];if(unit){button.dataset.elyUnit=unit;button.textContent=unit;changed(root,{value:q('input').value,unit});}return;}
     if(button.matches('[data-ely-pick-screen-color]')){if(!emit(root,'sample-color',{value:q('[data-ely-color]').value}))event.preventDefault();return;}
     if(button.matches('[data-ely-cron-preset]')){const field=q('[data-ely-cron]');field.value=button.value;notify(field);return;}
