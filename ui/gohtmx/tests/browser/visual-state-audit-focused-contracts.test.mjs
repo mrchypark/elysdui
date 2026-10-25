@@ -159,6 +159,20 @@ test('retained picker temporal range path and regional buffers survive cleanup p
   }
 });
 
+test('all already retained native families suppress post-cleanup fallback and persist exact read failures',async()=>{
+  const families=[['localPicker','local-picker-payload'],['temporalAX','temporal-ax-payload'],['rangeNative','range-native-payload'],['pathNative','path-native-payload'],['regionalForms','regional-forms-payload'],['presenceNativeEvents','presence-native-payload'],['eightFormsNative','eight-forms-native-payload'],['durationNative','duration-native-payload'],['localStudio','local-studio-payload'],['complexForms','complex-forms-payload']];
+  for(const [key,phase]of families){
+    const diagnostics={},failure=Error('read failed: '+key),primary=Error('original assertion');let persisted,reads=0;
+    await retainFailurePayload(diagnostics,key,async()=>{throw failure;});
+    const probe=await probeFailureStateAndPayload(diagnostics,async()=>({cleaned:true}),async()=>{reads++;throw Error('deleted buffer');});
+    assert.equal(reads,0);assert.equal(probe.nativePayload,null);assert.equal(probe.diagnosticError.length,1);assert.equal(probe.diagnosticError[0].phase,phase);assert.equal(probe.diagnosticError[0].message,failure.message);
+    await persistDirectCaseFailure({caseId:key,error:primary,receipts:[],...probe},async receipt=>{persisted=JSON.parse(JSON.stringify(receipt));});assert.equal(persisted.error.message,primary.message);assert.deepEqual(persisted.diagnosticError,probe.diagnosticError);
+  }
+  // NativeDate keeps the live proof directly, not via a retained read callback.
+  const source=await read('ui/gohtmx/tests/browser/visual-state-audit-drivers.mjs');assert(source.includes('failureDiagnostics.nativeDate=proof'));
+  const nativeDate={events:[{type:'keydown',key:'ArrowUp',trusted:true}],trace:[],truncated:false};const retained=await probeFailureStateAndPayload({nativeDate},async()=>({}),async()=>assert.fail('No reread of the directly retained native date proof'));assert.equal(retained.nativePayload,nativeDate);
+});
+
 test('owned cleanup phase ledger preserves order errors and pending await evidence',async()=>{
   const source=await read('ui/gohtmx/tests/browser/visual-state-audit-actions.mjs');
   const body=source.slice(source.indexOf('async function cleanupOwnedActionResources('),source.indexOf('function parseArgs('));
@@ -1100,7 +1114,7 @@ test('DurationPicker failure payload survives failed verification and listener c
   assert.deepEqual(retained.diagnosticError,undefined);
   const failedRead={};await retainFailurePayload(failedRead,'durationNative',async()=>{throw Error('duration listener read failed');});
   const readFailure=await probeFailureStateAndPayload(failedRead,async()=>({}),async()=>{throw Error('no fallback payload');});
-  assert.deepEqual(readFailure.diagnosticError.map(error=>error.phase),['duration-native-payload','native-payload']);
+  assert.deepEqual(readFailure.diagnosticError.map(error=>error.phase),['duration-native-payload']);
   const cleanupError=Error('duration listener cleanup failed');await cleanupPreservingPrimary(async()=>{throw cleanupError;},Error('original proof failure'),failedRead,'durationNativeCleanupError');
   const cleanupFailure=await probeFailureStateAndPayload(failedRead,async()=>({}),async()=>null);
   assert(cleanupFailure.diagnosticError.some(error=>error.phase==='duration-native-cleanup'&&error.message===cleanupError.message));

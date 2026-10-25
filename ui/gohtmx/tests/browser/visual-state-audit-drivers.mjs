@@ -230,12 +230,13 @@ export async function probeFailureStateAndPayload(failureDiagnostics,readState,r
   if(failureDiagnostics.complexFormsError)errors.push({phase:'complex-forms-payload',...failureDiagnostics.complexFormsError});
   if(failureDiagnostics.complexCleanupError)errors.push({phase:'complex-forms-cleanup',...failureDiagnostics.complexCleanupError});
   if(failureDiagnostics.presenceCleanupError)errors.push({phase:'cleanup',...failureDiagnostics.presenceCleanupError});
+  if(failureDiagnostics.presenceNativeEventsError)errors.push({phase:'presence-native-payload',...failureDiagnostics.presenceNativeEventsError});
   if(failureDiagnostics.eightFormsNativeError)errors.push({phase:'eight-forms-native-payload',...failureDiagnostics.eightFormsNativeError});
   if(failureDiagnostics.eightFormsCleanupError)errors.push({phase:'eight-forms-cleanup',...failureDiagnostics.eightFormsCleanupError});
   if(failureDiagnostics.durationNativeError)errors.push({phase:'duration-native-payload',...failureDiagnostics.durationNativeError});
   if(failureDiagnostics.durationNativeCleanupError)errors.push({phase:'duration-native-cleanup',...failureDiagnostics.durationNativeCleanupError});
   try{currentState=await readState();}catch(error){errors.push({phase:'current-state',name:error?.name??'Error',message:error?.message??String(error),stack:error?.stack??null});}
-  if(nativePayload===null&&!failureDiagnostics.complexFormsError&&!failureDiagnostics.localStudioError&&!failureDiagnostics.localPickerError&&!failureDiagnostics.temporalAXError&&!failureDiagnostics.rangeNativeError&&!failureDiagnostics.pathNativeError&&!failureDiagnostics.regionalFormsError)try{nativePayload=await readNativePayload();}catch(error){errors.push({phase:'native-payload',name:error?.name??'Error',message:error?.message??String(error),stack:error?.stack??null});}
+  if(nativePayload===null&&!['complexForms','localStudio','localPicker','temporalAX','rangeNative','pathNative','regionalForms','presenceNativeEvents','eightFormsNative','durationNative'].some(key=>failureDiagnostics[key+'Error']))try{nativePayload=await readNativePayload();}catch(error){errors.push({phase:'native-payload',name:error?.name??'Error',message:error?.message??String(error),stack:error?.stack??null});}
   return {currentState,nativePayload,...(errors.length?{diagnosticError:errors}:{})};
 }
 // No unhandled page error has a verified exception in this audit.
