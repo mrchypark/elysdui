@@ -10,7 +10,7 @@ import {setTimeout as delay} from 'node:timers/promises';
 import {isDeepStrictEqual} from 'node:util';
 import {chromium} from 'playwright';
 import {actionModuleNames,prepareActionModule,synchronousTraceInit,registeredOutcomesEqual,registeredOutcomeDifferences,firstDifference,compareActionTrace,traceContractStatus} from './visual-state-audit-instrument.mjs';
-import {caseActionContract, requestedStateContract, runRequestedStateActions, runRegisteredCanvasActions, ownedOverlayInventory, captureTargetPNG, screenshotWithoutCaretMutation, inventoryReceipt, inventoryDrift, unhandledBrowserErrors, visualCaptureGap, persistDirectCaseFailure, probeFailureStateAndPayload, deliverDirectActionVerification, assertFormTwinWitness} from './visual-state-audit-drivers.mjs';
+import {caseActionContract, requestedStateContract, runRequestedStateActions, runRegisteredCanvasActions, ownedOverlayInventory, captureTargetPNG, screenshotWithoutCaretMutation, inventoryReceipt, inventoryDrift, unhandledBrowserErrors, visualCaptureGap, persistDirectCaseFailure, probeFailureStateAndPayload, deliverDirectActionVerification, assertFormTwinWitness, isDurationOwnUnitCommit} from './visual-state-audit-drivers.mjs';
 import {basicFixturePackage,basicRootSelector} from './visual-state-audit-basic.mjs';
 import {basicActionContract,validateBasicActionMatrix,runBasicActions,basicActionSurface,selectBasicActionCases,fulfillBasicActionAsset,assertBasicActionAssets,retainBasicFailureEvidence,basicOwnedModal,basicModalCaptureTarget} from './visual-state-audit-basic-actions.mjs';
 
@@ -371,14 +371,15 @@ async function directCaseDriver({item, familyURL, captures, reference, semanticS
     const twin = record.locator('[data-audit-twin] > [data-ely-family]');
     await page.waitForFunction(node => node.dataset.elyReady === 'true', await root.elementHandle());
     const initialTwin=await snapshot(twin);
-    const formTwinWitness=contract.identity==='forms/Form'||contract.focusedSequence==='forms-six-qualified-native-local';
+    const formTwinWitness=contract.identity==='forms/Form'||contract.focusedSequence==='forms-six-qualified-native-local'||contract.nativeFormTwinWitness===true;
     if(formTwinWitness){
       assert.equal(await twin.count(),1,'Native form case requires its exact independent twin');
       assert.equal(await twin.getAttribute('data-ely-component'),contract.identity,'Native form twin must retain the same exact component identity');
       await twin.evaluate(node=>{node.__visualFormTwinEvents=[];for(const type of ['beforeinput','input','change','click','submit','focusin','focusout','ely:change','ely:action','ely:result'])node.addEventListener(type,event=>node.__visualFormTwinEvents.push({type:event.type,isTrusted:event.isTrusted,target:event.target?.name||event.target?.dataset?.name||event.target?.getAttribute?.('data-ui-action')||event.target?.tagName||null,targetId:event.target?.id||null}),true);});
     }
-    const twinFocusSelector=contract.focusedSequence==='forms-six-qualified-native-local'?contract.steps.at(-1)?.control:null;
-    const readFormTwinWitness=async()=>({snapshot:await snapshot(twin),focusWithin:await twin.evaluate(node=>node.contains(document.activeElement)),focusTarget:await twin.evaluate((node,selector)=>{const target=document.activeElement;if(!node.contains(target))return null;return {id:target.id||null,name:target.name||'',tag:target.tagName,eventTarget:target.name||target.dataset.name||target.getAttribute('data-ui-action')||target.tagName,matchesExpectedControl:!!selector&&target.matches(selector),matchingControlCount:selector?node.querySelectorAll(selector).length:0};},twinFocusSelector),outsideFocusTarget:contract.identity==='forms/DurationPicker'?await root.evaluate(node=>{const target=document.activeElement,selector='select[name$="_unit"]';if(!node.contains(target))return null;return {id:target.id||null,name:target.name||'',tag:target.tagName,matchesExpectedControl:target.matches(selector),matchingControlCount:node.querySelectorAll(selector).length};}):null,events:await twin.evaluate(node=>node.__visualFormTwinEvents.map(event=>({...event})))});
+    let twinEventCursor=0,pairedFocusAuthorization=null;
+    const twinFocusSelector=contract.nativeFormTwinWitness?contract.twinFocusSelector:contract.focusedSequence==='forms-six-qualified-native-local'?contract.steps.at(-1)?.control:null;
+    const readFormTwinWitness=async()=>({snapshot:await snapshot(twin),focusWithin:await twin.evaluate(node=>node.contains(document.activeElement)),focusTarget:await twin.evaluate((node,selector)=>{const target=document.activeElement;if(!node.contains(target))return null;return {id:target.id||null,name:target.name||'',tag:target.tagName,eventTarget:target.name||target.dataset.name||target.getAttribute('data-ui-action')||target.tagName,matchesExpectedControl:!!selector&&target.matches(selector),matchingControlCount:selector?node.querySelectorAll(selector).length:0};},twinFocusSelector),outsideFocusTarget:contract.identity==='forms/DurationPicker'?await root.evaluate(node=>{const target=document.activeElement,selector='select[name$="_unit"]';if(!node.contains(target))return null;return {id:target.id||null,name:target.name||'',tag:target.tagName,matchesExpectedControl:target.matches(selector),matchingControlCount:node.querySelectorAll(selector).length};}):null,events:await twin.evaluate((node,cursor)=>node.__visualFormTwinEvents.slice(cursor).map(event=>({...event})),twinEventCursor)});
     assert.deepEqual(contract.mappingGaps, [], 'Exact source action contract must resolve');
     assert.equal(await root.getAttribute('data-ely-component'), contract.identity, 'Exact selected component');
     assert.equal(await root.getAttribute('data-ely-kind'), contract.kind, 'Exact selected kind');
@@ -421,7 +422,22 @@ async function directCaseDriver({item, familyURL, captures, reference, semanticS
         receipt[`${phase}CaptureOwnership`] = await captureOwnedState({page, record, root, caseId: `${item.caseId}-direct`, siteId, checkpointIndex: index, phase, captures, state: await state()});
       }
       receipt.afterState=await observe();
-      if(twinBefore){const twinAfter=await readFormTwinWitness();receipt.twinWitness.after=twinAfter;const nativeCommit=contract.focusedSequence==='forms-six-qualified-native-local'&&expected.id.endsWith('-commit');const durationOwnUnitCommit=contract.identity==='forms/DurationPicker'&&expected.id==='duration-commit';receipt.twinWitness.unchanged=assertFormTwinWitness(twinBefore,twinAfter,{allowPairedNativeCommitFocus:nativeCommit,allowOwnUnitSelectCommitFocus:durationOwnUnitCommit});}
+      if(twinBefore){
+        const twinAfter=await readFormTwinWitness();receipt.twinWitness.after=twinAfter;
+        const allowPairedNativeCommitFocus=contract.focusedSequence==='forms-six-qualified-native-local'&&expected.id.endsWith('-commit');
+        if(contract.nativeFormTwinWitness){
+          const returning=twinBefore.focusWithin;
+          if(returning)assert.equal(twinBefore.focusTarget?.id,pairedFocusAuthorization,'Only the preceding authorized paired Tab target may return');
+          const entering=expected.nativeTabCommit===true&&twinAfter.focusWithin;
+          receipt.twinWitness.policy={allowPairedNativeCommitFocus:entering,allowPairedNativeCommitReturn:returning};
+          receipt.twinWitness.unchanged=assertFormTwinWitness(twinBefore,twinAfter,receipt.twinWitness.policy);
+          pairedFocusAuthorization=entering?twinAfter.focusTarget.id:null;twinEventCursor+=twinAfter.events.length;
+        }else{
+          const allowOwnUnitSelectCommitFocus=isDurationOwnUnitCommit(contract.identity,expected.id);
+          receipt.twinWitness.policy={allowPairedNativeCommitFocus,allowOwnUnitSelectCommitFocus};
+          receipt.twinWitness.unchanged=assertFormTwinWitness(twinBefore,twinAfter,receipt.twinWitness.policy);
+        }
+      }
       for(const event of receipt.afterState.actions.slice(receipt.beforeState.actions.length)){
         assert.equal(event.component,contract.identity,'Public action retains the actual alias identity');
         assert.equal(event.id,await root.getAttribute('id'),'Public action retains the actual instance ID');

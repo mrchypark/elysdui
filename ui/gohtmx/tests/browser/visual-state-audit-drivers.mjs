@@ -15,7 +15,9 @@ export function assertJsonHighlight(source,highlight){
   return expected;
 }
 
-export function assertFormTwinWitness(before,after,{allowPairedNativeCommitFocus=false,allowOwnUnitSelectCommitFocus=false}={}){
+export const isDurationOwnUnitCommit=(identity,stepId)=>identity==='forms/DurationPicker'&&stepId==='duration-commit';
+
+export function assertFormTwinWitness(before,after,{allowPairedNativeCommitFocus=false,allowPairedNativeCommitReturn=false,allowOwnUnitSelectCommitFocus=false}={}){
   assert(before&&typeof before==='object'&&after&&typeof after==='object','Native form twin witness is required');
   assert(before.snapshot&&typeof before.snapshot==='object'&&after.snapshot&&typeof after.snapshot==='object','Native form twin snapshot is required');
   assert.equal(typeof before.focusWithin,'boolean','Native form twin before-focus state is required');
@@ -23,6 +25,16 @@ export function assertFormTwinWitness(before,after,{allowPairedNativeCommitFocus
   assert(Array.isArray(before.events),'Native form twin before-event list is required');
   assert(Array.isArray(after.events),'Native form twin after-event list is required');
   assert.deepEqual(after.snapshot,before.snapshot,'Native form action must preserve the independent twin snapshot');
+  if(allowPairedNativeCommitReturn){
+    assert.equal(allowPairedNativeCommitFocus,false,'Paired focus entry and return cannot be combined');
+    assert.equal(before.focusWithin,true);assert.equal(after.focusWithin,false);
+    const focus=before.focusTarget;
+    assert(Array.isArray(before.snapshot.controls),'Paired return requires the exact twin control inventory');
+    assert(focus?.id&&focus.matchesExpectedControl&&focus.matchingControlCount===1&&before.snapshot.controls.some(control=>control.id===focus.id),'Return requires the previously authorized exact paired control');
+    assert.deepEqual(before.events,[]);
+    assert.deepEqual(after.events,[{type:'focusout',isTrusted:true,target:focus.eventTarget,targetId:focus.id}],'Returning from paired native Tab may emit only its trusted focusout');
+    return true;
+  }
   assert.equal(before.focusWithin,false,'Native form action must start outside the independent twin');
   assert.deepEqual(before.events,[],'Native form twin must have no pre-action events');
   if(allowPairedNativeCommitFocus){
@@ -68,16 +80,18 @@ export async function retainFailurePayload(failureDiagnostics,key,readPayload){
   try{failureDiagnostics[key]=await readPayload();}
   catch(error){failureDiagnostics[`${key}Error`]={name:error?.name??'Error',message:error?.message??String(error),stack:error?.stack??null};}
 }
-export async function cleanupPreservingPrimary(cleanup,primaryError,failureDiagnostics){
+export async function cleanupPreservingPrimary(cleanup,primaryError,failureDiagnostics,key='presenceCleanupError'){
   try{await cleanup();}
   catch(error){
-    failureDiagnostics.presenceCleanupError={name:error?.name??'Error',message:error?.message??String(error),stack:error?.stack??null};
+    failureDiagnostics[key]={name:error?.name??'Error',message:error?.message??String(error),stack:error?.stack??null};
     if(!primaryError)throw error;
   }
 }
 export async function probeFailureStateAndPayload(failureDiagnostics,readState,readNativePayload){
-  let currentState=null,nativePayload=failureDiagnostics.presenceNativeEvents??null;const errors=[];
+  let currentState=null,nativePayload=failureDiagnostics.presenceNativeEvents??failureDiagnostics.eightFormsNative??null;const errors=[];
   if(failureDiagnostics.presenceCleanupError)errors.push({phase:'cleanup',...failureDiagnostics.presenceCleanupError});
+  if(failureDiagnostics.eightFormsNativeError)errors.push({phase:'eight-forms-native-payload',...failureDiagnostics.eightFormsNativeError});
+  if(failureDiagnostics.eightFormsCleanupError)errors.push({phase:'eight-forms-cleanup',...failureDiagnostics.eightFormsCleanupError});
   try{currentState=await readState();}catch(error){errors.push({phase:'current-state',name:error?.name??'Error',message:error?.message??String(error),stack:error?.stack??null});}
   if(nativePayload===null)try{nativePayload=await readNativePayload();}catch(error){errors.push({phase:'native-payload',name:error?.name??'Error',message:error?.message??String(error),stack:error?.stack??null});}
   return {currentState,nativePayload,...(errors.length?{diagnosticError:errors}:{})};
@@ -717,6 +731,8 @@ export function activatePresenceStep(step,{ada,stop}){
 }
 
 export function requestedStateContract(identity,trashFixture){
+  const eight=nextEightFormCases[identity];
+  if(eight)return {identity,kind:eight.kind,family:'forms',requestedStateOnly:true,focusedSequence:'forms-eight-explicit-native',nativeFormTwinWitness:true,twinFocusSelector:eight.mode==='number'?'input[data-ely-number]':eight.mode==='group'?'input:not([type="hidden"])':null,fixtureGuards:{component:identity,...eight},mappingGaps:[],steps:eight.steps.map(id=>({id,control:eight.mode==='pin'?`input[data-ui-pin-slot][id$="-pin-${id==='pin-replace-first'?0:1}"]`:eight.mode==='inline'?(id==='inline-open'||id==='inline-reopen'?'[data-ely-inline-open]':id==='inline-cancel'?'[data-ely-inline-cancel]':id==='inline-save'?'[data-ely-inline-save]':eight.selector):eight.selector,event:id.startsWith('commit-')?'trusted native Tab/change/blur':eight.mode==='scrub'?'trusted native arrow key; production input/change are synthetic':eight.mode==='pin'?'trusted native slot input; named hidden notifications are synthetic':'trusted native input or pointer activation',expectedState:`Exact ${identity} ${id} transition; per-action native/public payload and independent twin witness required`,nativeTabCommit:id.startsWith('commit-'),source:{siteId:`forms-eight:${identity}:${id}`,sourceAnchor:'internal/gallery/advanced_forms_fixtures.go; internal/gallery/advanced.go aliasFixtureProps; ely-api-forms.html; ely-controls.html; ely-api-forms.js; ely-controls.js; ely-api.js',provenance:`Exact ${identity} root fixture, not PreviewExamples; no host fulfillment or persistence`}})),scope:'Finite explicit native root sequence only; Scrub pointer drag, OTP authentication, clipboard paste, arbitrary props and host fulfillment are not covered'};
   const nativeFormCases={
     'forms/DatePicker':{kind:'DatePicker',fixture:{type:'date',initial:'2026-10-20',changed:'2026-10-21'},steps:[['date-edit','input[type="date"]','Native date entry changes only the canonical single-date field; no range alias or host result'],['date-commit','input[type="date"]','Native Tab commits the same date value; no host request or persistence claim']]},
     'forms/CodeInput':{kind:'CodeInput',fixture:{type:'text',initial:'alpha',changed:'const x = "<img>";'},steps:[['code-edit','[data-ely-code-input]','Native caller text is retained exactly and highlighted as text; no markup is created'],['code-commit','[data-ely-code-input]','Native Tab leaves the exact source text and highlight synchronized; no host result']]},
@@ -1109,6 +1125,72 @@ export function assertSpecialInputState(identity,stage,state){
   return state;
 }
 
+const nextEightFormCases={
+  'forms/NumberInput':{kind:'NumberInput',mode:'number',selector:':scope > .ely-api-number input[data-ely-number]',initial:'4',min:'1',max:'99',step:'1',valid:'5',invalid:'100',steps:['fill-valid','commit-valid','fill-invalid','commit-invalid']},
+  'forms/ScrubInput':{kind:'ScrubInput',mode:'scrub',selector:':scope > .ely-api-number [data-ely-scrub]',initial:'120',min:'-2000',max:'2000',step:'1',steps:['scrub-right','scrub-left']},
+  ...Object.fromEntries(['PinInput','OTPInput'].map(name=>['forms/'+name,{kind:'PinInput',mode:'pin',selector:':scope > [data-ui-component="pin-input"] [data-ui-pin-slot]',initial:'123456',steps:['pin-replace-first','pin-reject-nondigit','pin-repair-second']}])),
+  ...Object.fromEntries(['InlineEdit','EditableText'].map(name=>['forms/'+name,{kind:'InlineEdit',mode:'inline',selector:'[data-ely-inline-value]',initial:'alpha',steps:['inline-open','inline-edit','inline-cancel','inline-reopen','inline-reedit','inline-save']}])),
+  ...Object.fromEntries(['InputGroup','InputAddon'].map(name=>['forms/'+name,{kind:'InputGroup',mode:'group',selector:':scope > .ely-api-input-group input[name="caller_value"]',initial:'alpha',prefix:name==='InputAddon'?'@':null,steps:['fill-text','commit-text']}])),
+};
+
+// Executed pure oracle for the eight finite branches; native payloads are retained, not inferred.
+export function assertEightFormStep(identity,stage,proof){
+  const fixture=nextEightFormCases[identity];assert(fixture&&fixture.steps.includes(stage),'No generic eight-form expansion');
+  const {id,value,nativeEvents,publicEvents}=proof;assert(id&&typeof id==='string');
+  assert(proof.fieldID&&typeof proof.fieldID==='string','Exact field ID is required');
+  for(const event of nativeEvents??[])if(event.control==='field'||event.control==='hidden')assert.equal(event.targetId,proof.fieldID,'Native field event must target the measured primary control');
+  const expectedValue=fixture.mode==='number'?(stage.endsWith('invalid')?'100':'5'):fixture.mode==='scrub'?(stage==='scrub-right'?'121':'120'):fixture.mode==='pin'?({'pin-replace-first':'923456','pin-reject-nondigit':'93456','pin-repair-second':'983456'}[stage]):fixture.mode==='group'?'beta':stage==='inline-edit'?'draft':stage==='inline-reedit'||stage==='inline-save'?'beta':'alpha';
+  assert.equal(value,expectedValue,'Exact finite value transition');
+  const generic=(value,type)=>({type:'ely:change',detail:{id,component:identity,name:'caller_value',value,checked:false,type}});
+  let expectedPublic=[];
+  if(fixture.mode==='number'&&stage.startsWith('commit-'))expectedPublic=[generic(value,'number')];
+  if(fixture.mode==='group'&&stage==='commit-text')expectedPublic=[generic(value,'text')];
+  if(fixture.mode==='scrub')expectedPublic=[generic(value,'number')];
+  if(fixture.mode==='pin')expectedPublic=[generic(value,'hidden')];
+  if(fixture.mode==='inline'&&stage==='inline-cancel')expectedPublic=[generic('draft','text')];
+  if(fixture.mode==='inline'&&stage==='inline-save')expectedPublic=[generic('beta','text'),{type:'ely:change',detail:{id,component:identity,name:'caller_value',value:'beta'}},{type:'ely:action',detail:{id,component:identity,action:'save',name:'caller_value',value:'beta'}}];
+  assert.deepEqual(publicEvents,expectedPublic,'Exact public payload and order; no host fulfillment');
+  assert(Array.isArray(nativeEvents)&&nativeEvents.length,'Every action requires actual native event evidence');
+  const inputs=nativeEvents.filter(event=>event.type==='input'),changes=nativeEvents.filter(event=>event.type==='change'),clicks=nativeEvents.filter(event=>event.type==='click'),keys=nativeEvents.filter(event=>event.type==='keydown');
+  const controls=fixture.mode==='pin'?['hidden',...Array.from({length:6},(_,i)=>`slot-${i}`)]:fixture.mode==='inline'?['field','open','cancel','save']:fixture.mode==='scrub'?['field','scrub']:['field'];
+  assert(nativeEvents.every(event=>controls.includes(event.control)),'Native evidence cannot come from another control');
+  assert(nativeEvents.every(event=>event.type==='input'||event.type==='change'||event.trusted===true),'Only production input/change may be synthetic');
+  if(fixture.mode==='number'||fixture.mode==='group'){
+    const commit=stage.startsWith('commit-');assert.equal(clicks.length,0);
+    assert.deepEqual(inputs.map(event=>[event.control,event.trusted]),commit?[]:[['field',true]]);
+    assert.deepEqual(changes.map(event=>[event.control,event.trusted,event.value]),commit?[['field',true,value]]:[]);
+    assert.deepEqual(keys.map(event=>[event.control,event.key,event.trusted]),commit?[['field','Tab',true]]:[]);
+    if(commit){assert.equal(proof.focusLeft,true);assert(nativeEvents.some(event=>event.type==='blur'&&event.control==='field'&&event.trusted));}
+    if(fixture.mode==='number'){
+      assert.deepEqual(proof.bounds,{min:'1',max:'99',step:'1'});
+      assert.deepEqual(proof.validity,Object.fromEntries(['badInput','customError','patternMismatch','rangeOverflow','rangeUnderflow','stepMismatch','tooLong','tooShort','typeMismatch','valueMissing','valid'].map(key=>[key,key==='valid'?!stage.endsWith('invalid'):key==='rangeOverflow'&&stage.endsWith('invalid')])));
+    }
+  }else if(fixture.mode==='scrub'){
+    assert.deepEqual(keys.map(e=>[e.control,e.key,e.trusted]),[['scrub',stage==='scrub-right'?'ArrowRight':'ArrowLeft',true]]);assert.equal(clicks.length,0);
+    assert.deepEqual(inputs.map(e=>[e.control,e.value,e.trusted]),[['field',value,false]]);assert.deepEqual(changes.map(e=>[e.control,e.value,e.trusted]),[['field',value,false]]);
+    assert.equal(proof.ariaValue,value);assert.deepEqual(proof.bounds,{min:'-2000',max:'2000',step:'1'});
+  }else if(fixture.mode==='pin'){
+    assert.equal(keys.length,0);
+    assert.equal(proof.slotIDs?.length,6);assert.equal(new Set(proof.slotIDs).size,6);assert(proof.slotIDs.every(Boolean));
+    for(const event of nativeEvents)if(event.control.startsWith('slot-'))assert.equal(event.targetId,proof.slotIDs[Number(event.control.slice(5))],'Native PIN event must target the exact slot ID');
+    const index=stage==='pin-replace-first'?0:1;
+    assert.deepEqual(inputs.map(e=>[e.control,e.trusted,e.value]),[[`slot-${index}`,true,stage==='pin-replace-first'?'9':stage==='pin-reject-nondigit'?'x':'8'],['hidden',false,value]]);
+    assert.deepEqual(changes.filter(e=>e.control==='hidden').map(e=>[e.trusted,e.value]),[[false,value]]);
+    assert(changes.filter(e=>e.control!=='hidden').every(e=>e.control.startsWith('slot-')&&e.trusted),'Slot blur commits stay native and unnamed');
+    assert.deepEqual(proof.slots,stage==='pin-replace-first'?['9','2','3','4','5','6']:stage==='pin-reject-nondigit'?['9','','3','4','5','6']:['9','8','3','4','5','6']);
+    assert.equal(proof.focusedSlot,stage==='pin-repair-second'?2:1);assert.equal(clicks.length,0);
+  }else{
+    assert.equal(keys.length,0);
+    const edit=stage==='inline-edit'||stage==='inline-reedit';
+    assert.deepEqual(inputs.map(e=>[e.control,e.trusted,e.value]),edit?[['field',true,value]]:[]);
+    assert.deepEqual(clicks.map(e=>[e.control,e.trusted]),edit?[]:[[stage==='inline-cancel'?'cancel':stage==='inline-save'?'save':'open',true]]);
+    assert.deepEqual(changes.map(e=>[e.control,e.trusted,e.value]),stage==='inline-cancel'?[['field',true,'draft']]:stage==='inline-save'?[['field',true,'beta']]:[]);
+    assert.equal(proof.editorHidden,stage==='inline-cancel'||stage==='inline-save');assert.equal(proof.openerHidden,!proof.editorHidden);
+    assert.equal(proof.openerText,stage==='inline-save'?'beta':'alpha');assert.equal(proof.focusedControl,proof.editorHidden?'open':'field');
+  }
+  return proof;
+}
+
 const formattedInputCases={
   'forms/EmailInput':{kind:'EmailInput',type:'email',initial:'caller@example.test',valid:'changed@example.test',invalid:'not-an-email',invalidFlag:'typeMismatch'},
   'forms/UrlInput':{kind:'EmailInput',type:'url',initial:'https://example.test/source',valid:'https://example.test/changed',invalid:'not-a-url',invalidFlag:'typeMismatch'},
@@ -1326,6 +1408,56 @@ export function assertCronNativePreview(expression,now,runs){
 }
 
 export async function runRequestedStateActions(contract,root,runStep,failureDiagnostics){
+  if(contract.focusedSequence==='forms-eight-explicit-native'){
+    const identity=contract.identity,fixture=nextEightFormCases[identity];assert(fixture,'Exact eight-form identity required');
+    assert.equal(await root.getAttribute('data-ely-component'),identity);assert.equal(await root.getAttribute('data-ely-kind'),fixture.kind);
+    assert.equal(contract.nativeFormTwinWitness,true,'Every new step requires the runner upfront twin witness');
+    const id=await root.getAttribute('id');assert(id);assert.equal(await root.page().locator(`[id="${id}"]`).count(),1);
+    const field=root.locator(fixture.mode==='pin'?':scope > [data-ui-component="pin-input"] input[type="hidden"]':fixture.mode==='scrub'?':scope > .ely-api-number input[data-ely-number]':fixture.selector);
+    assert.equal(await field.count(),1,'Exact primary field must be unique');assert.equal(await field.getAttribute('name'),'caller_value');assert.equal(await field.inputValue(),fixture.initial);
+    const fieldID=await field.getAttribute('id');assert(fieldID);assert.equal(await root.page().locator(`[id="${fieldID}"]`).count(),1);
+    const initial=await field.evaluate(n=>({type:n.type,disabled:n.disabled,readOnly:n.readOnly,required:n.required}));
+    assert.deepEqual(initial,{type:fixture.mode==='pin'?'hidden':fixture.mode==='number'||fixture.mode==='scrub'?'number':'text',disabled:false,readOnly:false,required:false});
+    if(fixture.mode==='number'||fixture.mode==='scrub')for(const key of ['min','max','step'])assert.equal(await field.getAttribute(key),fixture[key]);
+    const slots=root.locator('[data-ui-pin-slot]'),scrub=root.locator(fixture.selector),open=root.locator('[data-ely-inline-open]'),editor=root.locator('[data-ely-inline-editor]');
+    if(fixture.mode==='pin'){
+      assert.equal(await slots.count(),6);assert.deepEqual(await slots.evaluateAll(nodes=>nodes.map(n=>n.value)),['1','2','3','4','5','6']);
+      assert.deepEqual(await slots.evaluateAll(nodes=>nodes.map(n=>({type:n.type,name:n.name,maxLength:n.maxLength,required:n.required,disabled:n.disabled}))),Array.from({length:6},()=>({type:'tel',name:'',maxLength:1,required:false,disabled:false})));
+    }
+    if(fixture.mode==='scrub'){assert.equal(await scrub.count(),1);assert.equal(await scrub.getAttribute('aria-valuenow'),'120');}
+    if(fixture.mode==='inline'){assert.equal(await open.count(),1);assert.equal(await open.textContent(),'alpha');assert.equal(await editor.count(),1);assert.equal(await editor.getAttribute('hidden'),'');}
+    if(fixture.mode==='group')assert.deepEqual(await root.locator('.ely-api-input-addon').allTextContents(),fixture.prefix?[fixture.prefix]:[],'Qualified prefix only, never PreviewExamples');
+    await root.evaluate((node,selector)=>{
+      const field=node.querySelector(selector),slots=[...node.querySelectorAll('[data-ui-pin-slot]')];
+      const control=target=>{if(target===field)return slots.length?'hidden':'field';const index=slots.indexOf(target);if(index>=0)return `slot-${index}`;for(const [name,sel] of [['scrub','[data-ely-scrub]'],['open','[data-ely-inline-open]'],['cancel','[data-ely-inline-cancel]'],['save','[data-ely-inline-save]']])if(target.closest?.(sel))return name;return 'other';};
+      node.__eightFormsNative=[];node.__eightFormsPublic=[];
+      node.__eightFormsObserver=event=>node.__eightFormsNative.push({type:event.type,control:control(event.target),targetId:event.target.id||null,trusted:event.isTrusted,value:event.target.value??null,key:event.key??null});
+      node.__eightFormsPublicObserver=event=>{if(event.target===node)node.__eightFormsPublic.push({type:event.type,detail:{...event.detail}});};
+      for(const type of ['input','change','click','keydown','blur','focusin','focusout'])node.addEventListener(type,node.__eightFormsObserver,true);
+      for(const type of ['ely:change','ely:action'])node.addEventListener(type,node.__eightFormsPublicObserver);
+    },fixture.mode==='pin'?':scope > [data-ui-component="pin-input"] input[type="hidden"]':fixture.mode==='scrub'?':scope > .ely-api-number input[data-ely-number]':fixture.selector);
+    let primaryError=null,nativeCursor=0,publicCursor=0;
+    try{
+      for(const stage of fixture.steps)await runStep(stage,async()=>{
+        await root.evaluate((node,cursors)=>{if(node.__eightFormsNative.length!==cursors.native||node.__eightFormsPublic.length!==cursors.public)throw Error('Unaccounted native/public event before this action');},{native:nativeCursor,public:publicCursor});
+        if(stage.startsWith('commit-')){assert.equal(await field.evaluate(n=>n===document.activeElement),true);await field.press('Tab');}
+        else if(fixture.mode==='number')await field.fill(stage==='fill-invalid'?'100':'5');
+        else if(fixture.mode==='group')await field.fill('beta');
+        else if(fixture.mode==='scrub')await scrub.press(stage==='scrub-right'?'ArrowRight':'ArrowLeft');
+        else if(fixture.mode==='pin'){const slot=root.locator(contract.steps.find(step=>step.id===stage).control);assert.equal(await slot.count(),1);await slot.fill(stage==='pin-replace-first'?'9':stage==='pin-reject-nondigit'?'x':'8');}
+        else if(stage==='inline-open'||stage==='inline-reopen')await open.click();
+        else if(stage==='inline-edit'||stage==='inline-reedit')await field.fill(stage==='inline-edit'?'draft':'beta');
+        else await root.locator(stage==='inline-cancel'?'[data-ely-inline-cancel]':'[data-ely-inline-save]').click();
+      },async(_state,_before,receipt)=>{
+        const proof=await field.evaluate(n=>({value:n.value,bounds:{min:n.min,max:n.max,step:n.step},validity:Object.fromEntries(['badInput','customError','patternMismatch','rangeOverflow','rangeUnderflow','stepMismatch','tooLong','tooShort','typeMismatch','valueMissing','valid'].map(key=>[key,n.validity[key]])),focusLeft:n!==document.activeElement}));
+        Object.assign(proof,await root.evaluate((node,cursors)=>({nativeEvents:node.__eightFormsNative.slice(cursors.native),publicEvents:node.__eightFormsPublic.slice(cursors.public),ariaValue:node.querySelector('[data-ely-scrub]')?.getAttribute('aria-valuenow'),slots:[...node.querySelectorAll('[data-ui-pin-slot]')].map(n=>n.value),slotIDs:[...node.querySelectorAll('[data-ui-pin-slot]')].map(n=>n.id),focusedSlot:[...node.querySelectorAll('[data-ui-pin-slot]')].indexOf(document.activeElement),editorHidden:node.querySelector('[data-ely-inline-editor]')?.hidden,openerHidden:node.querySelector('[data-ely-inline-open]')?.hidden,openerText:node.querySelector('[data-ely-inline-open]')?.textContent,focusedControl:document.activeElement===node.querySelector('[data-ely-inline-open]')?'open':document.activeElement===node.querySelector('[data-ely-inline-value]')?'field':null}),{native:nativeCursor,public:publicCursor}),{id,fieldID,eventWindow:{nativeBefore:nativeCursor,publicBefore:publicCursor}});
+        receipt.nativeFormProof=proof;
+        assertEightFormStep(identity,stage,proof);nativeCursor+=proof.nativeEvents.length;publicCursor+=proof.publicEvents.length;return proof;
+      });
+    }catch(error){primaryError=error;if(failureDiagnostics)await retainFailurePayload(failureDiagnostics,'eightFormsNative',()=>root.evaluate(node=>({nativeEvents:node.__eightFormsNative,publicEvents:node.__eightFormsPublic})));throw error;}
+    finally{await cleanupPreservingPrimary(()=>root.evaluate(node=>{for(const type of ['input','change','click','keydown','blur','focusin','focusout'])node.removeEventListener(type,node.__eightFormsObserver,true);for(const type of ['ely:change','ely:action'])node.removeEventListener(type,node.__eightFormsPublicObserver);delete node.__eightFormsObserver;delete node.__eightFormsPublicObserver;delete node.__eightFormsNative;delete node.__eightFormsPublic;}),primaryError,failureDiagnostics??{},'eightFormsCleanupError');}
+    return;
+  }
   if(contract.focusedSequence==='forms-seven-native-local'){
     const identity=contract.identity,allowed=['forms/DatePicker','forms/CodeInput','forms/ColorPicker','forms/CronEditor','forms/ExpressionInput','forms/Form','forms/MultiSelect'];
     assert(allowed.includes(identity),'Only the seven exact canonical forms identities use this local contract');

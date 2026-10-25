@@ -1,13 +1,95 @@
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import test from 'node:test';
+import {runInNewContext} from 'node:vm';
 import {assertSpecialInputState} from './visual-state-audit-drivers.mjs';
 import {assertCronNativePreview} from './visual-state-audit-drivers.mjs';
 import {assertJsonHighlight} from './visual-state-audit-drivers.mjs';
 import {assertFormTwinWitness} from './visual-state-audit-drivers.mjs';
+import {assertEightFormStep,probeFailureStateAndPayload,retainFailurePayload,cleanupPreservingPrimary} from './visual-state-audit-drivers.mjs';
 import {assertActivityLogScopedAuditPage,assertCommunicationCallerRequest,assertDockCallerAction,assertDockNativeEvents,assertEvalLastColumnGeometry,assertNativeEmbedOpen,activatePresenceStep,assertPresenceNativeRequest,assertFoundationPublicEvents,assertPlainInputNativeEvents,assertFormattedInputState,calendarDraftWheelDecision,requestedStateContract,runRequestedStateActions} from './visual-state-audit-drivers.mjs';
 
 const read=path=>readFile(new URL(`../../../../${path}`,import.meta.url),'utf8');
+
+test('eight exact forms contracts execute 28 native checkpoint oracles with strict payload trust and source fixtures',async()=>{
+  const rows=[['NumberInput','NumberInput',4],['ScrubInput','ScrubInput',2],['PinInput','PinInput',3],['OTPInput','PinInput',3],['InlineEdit','InlineEdit',6],['EditableText','InlineEdit',6],['InputGroup','InputGroup',2],['InputAddon','InputGroup',2]];
+  const event=(type,control,value,trusted=true,key=null)=>({type,control,value,trusted,key,targetId:control==='field'||control==='hidden'?'primary-field':control.startsWith('slot-')?'primary-'+control:null});
+  const change=(identity,value,type)=>({type:'ely:change',detail:{id:'primary',component:identity,name:'caller_value',value,checked:false,type}});
+  let count=0;
+  for(const [name,kind,cp] of rows){
+    const identity='forms/'+name,contract=requestedStateContract(identity),fixture=contract.fixtureGuards;
+    assert.equal(contract.kind,kind);assert.equal(contract.focusedSequence,'forms-eight-explicit-native');assert.equal(contract.nativeFormTwinWitness,true);assert.equal(contract.steps.length,cp);
+    assert(contract.steps.every(step=>step.source.provenance.includes(identity)&&step.source.provenance.includes('not PreviewExamples')));
+    assert.deepEqual(contract.steps.map(s=>s.nativeTabCommit),fixture.steps.map(s=>s.startsWith('commit-')));
+    for(const stage of fixture.steps){
+      const proof={id:'primary',fieldID:'primary-field',nativeEvents:[],publicEvents:[]};
+      if(fixture.mode==='number'||fixture.mode==='group'){
+        const commit=stage.startsWith('commit-'),invalid=stage.endsWith('invalid');proof.value=fixture.mode==='number'?(invalid?'100':'5'):'beta';
+        proof.nativeEvents=commit?[event('keydown','field',proof.value,true,'Tab'),event('change','field',proof.value),event('blur','field',proof.value)]:[event('input','field',proof.value)];
+        proof.publicEvents=commit?[change(identity,proof.value,fixture.mode==='number'?'number':'text')]:[];proof.focusLeft=commit;
+        proof.bounds={min:'1',max:'99',step:'1'};proof.validity=Object.fromEntries(['badInput','customError','patternMismatch','rangeOverflow','rangeUnderflow','stepMismatch','tooLong','tooShort','typeMismatch','valueMissing','valid'].map(key=>[key,key==='valid'?!invalid:key==='rangeOverflow'&&invalid]));
+      }else if(fixture.mode==='scrub'){
+        proof.value=stage==='scrub-right'?'121':'120';proof.ariaValue=proof.value;proof.bounds={min:'-2000',max:'2000',step:'1'};
+        proof.nativeEvents=[event('keydown','scrub',null,true,stage==='scrub-right'?'ArrowRight':'ArrowLeft'),event('input','field',proof.value,false),event('change','field',proof.value,false)];proof.publicEvents=[change(identity,proof.value,'number')];
+      }else if(fixture.mode==='pin'){
+        const first=stage==='pin-replace-first',invalid=stage==='pin-reject-nondigit';proof.value=first?'923456':invalid?'93456':'983456';
+        proof.slots=first?['9','2','3','4','5','6']:invalid?['9','','3','4','5','6']:['9','8','3','4','5','6'];proof.slotIDs=Array.from({length:6},(_,i)=>'primary-slot-'+i);proof.focusedSlot=stage==='pin-repair-second'?2:1;
+        proof.nativeEvents=[event('input',first?'slot-0':'slot-1',first?'9':invalid?'x':'8'),event('input','hidden',proof.value,false),event('change','hidden',proof.value,false)];proof.publicEvents=[change(identity,proof.value,'hidden')];
+      }else{
+        const edit=stage==='inline-edit'||stage==='inline-reedit',save=stage==='inline-save',cancel=stage==='inline-cancel';proof.value=save||stage==='inline-reedit'?'beta':stage==='inline-edit'?'draft':'alpha';
+        proof.editorHidden=save||cancel;proof.openerHidden=!proof.editorHidden;proof.openerText=save?'beta':'alpha';proof.focusedControl=proof.editorHidden?'open':'field';
+        proof.nativeEvents=edit?[event('input','field',proof.value)]:[...(cancel||save?[event('change','field',cancel?'draft':'beta')]:[]),event('click',cancel?'cancel':save?'save':'open','')];
+        proof.publicEvents=cancel?[change(identity,'draft','text')]:save?[change(identity,'beta','text'),{type:'ely:change',detail:{id:'primary',component:identity,name:'caller_value',value:'beta'}},{type:'ely:action',detail:{id:'primary',component:identity,action:'save',name:'caller_value',value:'beta'}}]:[];
+      }
+      assert.equal(assertEightFormStep(identity,stage,proof),proof);count++;
+      if(proof.nativeEvents.some(e=>['field','hidden'].includes(e.control)||e.control.startsWith('slot-'))){const bad=structuredClone(proof);bad.nativeEvents.find(e=>['field','hidden'].includes(e.control)||e.control.startsWith('slot-')).targetId='foreign-field';assert.throws(()=>assertEightFormStep(identity,stage,bad));}
+      for(const mutate of [p=>p.value='wrong',p=>p.nativeEvents=[],p=>p.nativeEvents[0].trusted=false,p=>p.nativeEvents[0].control='twin',p=>p.publicEvents.push({type:'ely:action',detail:{id:'primary',component:identity,action:'unexpected'}})]){const bad=structuredClone(proof);mutate(bad);assert.throws(()=>assertEightFormStep(identity,stage,bad),`${identity} ${stage}: ${mutate}`);}
+      for(const key of ['id','component','name','value'])if(proof.publicEvents.length){const bad=structuredClone(proof);bad.publicEvents[0].detail[key]='wrong';assert.throws(()=>assertEightFormStep(identity,stage,bad));}
+      if(proof.publicEvents.length){assert.throws(()=>assertEightFormStep(identity,stage,{...proof,publicEvents:[]}));assert.throws(()=>assertEightFormStep(identity,stage,{...proof,publicEvents:[...proof.publicEvents,...proof.publicEvents]}));}
+      if(fixture.mode==='scrub'||fixture.mode==='pin'){const bad=structuredClone(proof);bad.nativeEvents.filter(e=>!e.trusted).forEach(e=>e.trusted=true);assert.throws(()=>assertEightFormStep(identity,stage,bad),'Production synthetic events may not become trusted');}
+      if(fixture.mode==='pin'){for(const mutate of [p=>p.focusedSlot=5,p=>p.slots[0]='0']){const bad=structuredClone(proof);mutate(bad);assert.throws(()=>assertEightFormStep(identity,stage,bad));}}
+      if(fixture.mode==='number')for(const key of Object.keys(proof.validity)){const bad=structuredClone(proof);bad.validity[key]=!bad.validity[key];assert.throws(()=>assertEightFormStep(identity,stage,bad));}
+    }
+  }
+  assert.equal(count,28);assert.equal(count*4,112);
+  assert.equal(requestedStateContract('forms/TokenInput'),null);assert.equal(requestedStateContract('forms/Stepper'),null);
+  const [fixtures,aliases,template,controls,forms,actions]=await Promise.all(['internal/gallery/advanced_forms_fixtures.go','internal/gallery/advanced.go','ui/gohtmx/templates/ely-api-forms.html','ui/gohtmx/assets/ely-controls.js','ui/gohtmx/assets/ely-api-forms.js','ui/gohtmx/tests/browser/visual-state-audit-actions.mjs'].map(read));
+  assert.match(fixtures,/story.Name == "NumberInput"[\s\S]*?= "Seats", "4", "1", 99, true, "220"/);
+  assert.match(fixtures,/story.Name == "ScrubInput"[\s\S]*?= "X", "120", "-2000", 2000, "260"/);
+  assert.match(fixtures,/props\["Items"\], props\["Value"\] = \[\]int\{1, 2, 3, 4, 5, 6\}, "123456"/);
+  assert.match(aliases,/case "forms\/InputAddon":\s*props\["Prefix"\] = "@"/);
+  assert.match(template,/eq \.Kind "InlineEdit"[\s\S]*?data-ely-inline-cancel/);
+  assert.match(controls,/hidden.value = slots.map\(\(slot\) => slot.value\).join\(''\)/);
+  assert.match(controls,/value.replace\(\/\\D\/g, ''\).slice\(-1\)/);
+  assert.match(forms,/inlineClose = save[\s\S]*?if\(!save\)input.value=inlinePrevious;else[\s\S]*?changed\(root,\{name:input.name,value:input.value\}\);emit\(root,'save'/);
+  assert.match(actions,/contract.nativeFormTwinWitness===true/);assert.match(actions,/Only the preceding authorized paired Tab target may return/);
+  assert(actions.indexOf('receipt.twinWitness={before:twinBefore}')<actions.indexOf('receipt.actionActivation=await action()'),'Twin witness exists before any native action');
+  const branch=runRequestedStateActions.toString().split("if(contract.focusedSequence==='forms-eight-explicit-native')")[1].split("if(contract.focusedSequence==='forms-seven-native-local')")[0];
+  assert.match(branch,/receipt.nativeFormProof=proof;\s*assertEightFormStep/);assert.match(branch,/retainFailurePayload\(failureDiagnostics,'eightFormsNative'/);assert.match(branch,/finally\{await cleanupPreservingPrimary/);assert.doesNotMatch(branch,/dispatchEvent|new Event|requestSubmit|\.value\s*=/);
+  const guard=branch.match(/root\.evaluate\((\(node,cursors\)=>\{if\(node\.__eightFormsNative\.length[^\n]+?\}),\{native:nativeCursor/)[1];
+  const node={__eightFormsNative:[{}],__eightFormsPublic:[{}]},cursors={native:1,public:1};
+  runInNewContext(`(${guard})(node,cursors)`,{node,cursors});
+  for(const bad of [{native:0,public:1},{native:1,public:0},{native:2,public:1}])assert.throws(()=>runInNewContext(`(${guard})(node,cursors)`,{node,cursors:bad}),/Unaccounted native\/public event/);
+});
+
+test('eight forms paired Tab return preserves exact twin events and failure payload without waiver',async()=>{
+  const focus={id:'paired',eventTarget:'caller_value_twin',matchesExpectedControl:true,matchingControlCount:1};
+  const before={snapshot:{controls:[{id:'paired',value:'4'}]},focusWithin:true,focusTarget:focus,events:[]};
+  const after={snapshot:before.snapshot,focusWithin:false,events:[{type:'focusout',isTrusted:true,target:'caller_value_twin',targetId:'paired'}]};
+  assert.equal(assertFormTwinWitness(before,after,{allowPairedNativeCommitReturn:true}),true);
+  for(const mutate of [p=>p.events=[],p=>p.events[0].isTrusted=false,p=>p.events[0].targetId='foreign',p=>p.events.push({type:'input',isTrusted:true}),p=>p.snapshot.controls[0].value='changed',p=>p.focusWithin=true]){const bad=structuredClone(after);mutate(bad);assert.throws(()=>assertFormTwinWitness(before,bad,{allowPairedNativeCommitReturn:true}));}
+  assert.throws(()=>assertFormTwinWitness({...before,focusTarget:{...focus,matchesExpectedControl:false}},after,{allowPairedNativeCommitReturn:true}));
+  assert.throws(()=>assertFormTwinWitness(before,after,{allowPairedNativeCommitReturn:true,allowPairedNativeCommitFocus:true}));
+  const payload={nativeEvents:[{type:'input',trusted:false}],publicEvents:[]};
+  const failure=await probeFailureStateAndPayload({eightFormsNative:payload},async()=>({value:'diagnostic'}),async()=>{throw Error('Must retain already collected payload');});
+  assert.deepEqual(failure.nativePayload,payload);
+  const failedRead={};await retainFailurePayload(failedRead,'eightFormsNative',async()=>{throw Error('closed diagnostic context');});
+  const retained=await probeFailureStateAndPayload(failedRead,async()=>({}),async()=>null);
+  assert.equal(retained.diagnosticError[0].phase,'eight-forms-native-payload');assert.equal(retained.diagnosticError[0].message,'closed diagnostic context');
+  const cleanupError=Error('closed cleanup context');await cleanupPreservingPrimary(async()=>{throw cleanupError;},Error('original assertion'),failedRead,'eightFormsCleanupError');
+  const withCleanup=await probeFailureStateAndPayload(failedRead,async()=>({}),async()=>null);assert.equal(withCleanup.diagnosticError[1].phase,'eight-forms-cleanup');
+  await assert.rejects(cleanupPreservingPrimary(async()=>{throw cleanupError;},null,{},'eightFormsCleanupError'),error=>error===cleanupError);
+});
 
 test('Input TextField ClearableInput finite native contracts preserve aliases and distinguish production clear events',async()=>{
   const identities=['forms/Input','forms/TextField','forms/ClearableInput'];
@@ -24,7 +106,7 @@ test('Input TextField ClearableInput finite native contracts preserve aliases an
     assert.throws(()=>assertFoundationPublicEvents(identity,id,[{type:'ely:action',detail}],{value}));
   }
   assert.equal(identities.length*4*4,48,'Three identities, four live profiles, four checkpoints; no alias receipt promotion');
-  assert.equal(requestedStateContract('forms/NumberInput'),null,'No generic input-family expansion');
+  assert.equal(requestedStateContract('forms/TokenInput'),null,'No generic input-family expansion');
   const event=(type,value,isTrusted)=>({type,value,isTrusted,defaultPrevented:false});
   for(const stage of ['fill-text','commit-text','clear-text','commit-empty']){
     const value=stage==='fill-text'||stage==='commit-text'?'Changed caller value':'',type=stage.startsWith('commit')?'change':'input',events=[event(type,value,true)];
@@ -77,7 +159,7 @@ test('five formatted input contracts retain exact fixture types bounds native va
     }
   }
   assert.equal(expected.length*4*4,80,'Five exact IDs by four checkpoints by four live profiles; no shared alias receipts');
-  for(const identity of ['forms/NumberInput','forms/ScrubInput'])assert.equal(requestedStateContract(identity),null);
+  for(const identity of ['forms/TagInput','forms/RegexInput'])assert.equal(requestedStateContract(identity),null);
   assert.throws(()=>assertFormattedInputState('forms/Other',{},{}),/No generic/);
   const [fixtures,aliases,template]=await Promise.all([read('internal/gallery/advanced_forms_fixtures.go'),read('internal/gallery/advanced.go'),read('ui/gohtmx/templates/ely-api-forms.html')]);
   assert.match(fixtures,/case "NumberInput", "ScrubInput", "CurrencyInput":\s*props\["Value"\], props\["Min"\], props\["Max"\], props\["Step"\] = "3", "0", 10, "1"/);
@@ -261,7 +343,7 @@ test('focused five-case action contracts stay explicit and source-backed',async(
 });
 
 test('focused driver does not imply neighboring cases or catalog approval',()=>{
-  for(const identity of ['forms/PinInput','navigation/EditorTabs','motion/ParticleBackground','account/LoginForm'])
+  for(const identity of ['forms/TagInput','navigation/EditorTabs','motion/ParticleBackground','account/LoginForm'])
     assert.equal(requestedStateContract(identity),null,`${identity} is outside this focused five-case scope`);
 });
 
@@ -624,7 +706,7 @@ test('Form and six qualified native aliases retain per-action twin witnesses and
   assert.throws(()=>assertFormTwinWitness(before,{...afterFocus,snapshot:{...before.snapshot,text:'mutated'}},{allowPairedNativeCommitFocus:true}),/preserve the independent twin snapshot/,'Allowed focus cannot hide twin state changes');
   assert.throws(()=>assertFormTwinWitness(before,{...afterFocus,events:[{...expectedTwinFocus,targetId:'wrong-control'}]},{allowPairedNativeCommitFocus:true}),/only one trusted focusin/,'The focus event must target the exact paired control');
   const actions=await read('ui/gohtmx/tests/browser/visual-state-audit-actions.mjs');
-  assert.match(actions,/const formTwinWitness=contract\.identity==='forms\/Form'\|\|contract\.focusedSequence==='forms-six-qualified-native-local'/,'All six qualified native aliases enter the shared Form witness path');assert.match(actions,/assert\.equal\(await twin\.count\(\),1,'Native form case requires its exact independent twin'\)/);assert.match(actions,/node\.__visualFormTwinEvents=\[\]/);assert.match(actions,/targetId:event\.target\?\.id\|\|null/);assert.match(actions,/\['beforeinput','input','change','click','submit','focusin','focusout','ely:change','ely:action','ely:result'\]/);assert.match(actions,/focusWithin:await twin\.evaluate\(node=>node\.contains\(document\.activeElement\)\)/);assert.match(actions,/snapshot:await snapshot\(twin\)/);assert.match(actions,/const twinBefore=formTwinWitness\?await readFormTwinWitness\(\):null/);assert.match(actions,/receipt\.twinWitness=\{before:twinBefore\}/);assert.match(actions,/contract\.focusedSequence==='forms-six-qualified-native-local'&&expected\.id\.endsWith\('-commit'\)/,'Only commits in the six exact aliases opt into a native focus route');assert.match(actions,/select\[name\$="_unit"\]/,'Duration own-unit destination is observed against its exact native selector');assert.match(actions,/contract\.identity==='forms\/DurationPicker'\?await root\.evaluate/,'Only the exact DurationPicker contract reads its own unit focus destination');assert.match(actions,/allowOwnUnitSelectCommitFocus:durationOwnUnitCommit/,'Only the DurationPicker commit opts into the no-twin-focus route');assert.match(actions,/assertFormTwinWitness\(twinBefore,twinAfter,\{allowPairedNativeCommitFocus:nativeCommit,allowOwnUnitSelectCommitFocus:durationOwnUnitCommit\}\)/);
+  assert.ok(actions.includes("contract.nativeFormTwinWitness===true"),'Eight-form witness path is retained');assert.match(actions,/assert\.equal\(await twin\.count\(\),1,'Native form case requires its exact independent twin'\)/);assert.match(actions,/node\.__visualFormTwinEvents=\[\]/);assert.match(actions,/targetId:event\.target\?\.id\|\|null/);assert.match(actions,/\['beforeinput','input','change','click','submit','focusin','focusout','ely:change','ely:action','ely:result'\]/);assert.match(actions,/focusWithin:await twin\.evaluate\(node=>node\.contains\(document\.activeElement\)\)/);assert.match(actions,/snapshot:await snapshot\(twin\)/);assert.match(actions,/const twinBefore=formTwinWitness\?await readFormTwinWitness\(\):null/);assert.match(actions,/receipt\.twinWitness=\{before:twinBefore\}/);assert.match(actions,/contract\.focusedSequence==='forms-six-qualified-native-local'&&expected\.id\.endsWith\('-commit'\)/,'Only commits in the six exact aliases opt into a native focus route');assert.match(actions,/select\[name\$="_unit"\]/,'Duration own-unit destination is observed against its exact native selector');assert.match(actions,/contract\.identity==='forms\/DurationPicker'\?await root\.evaluate/,'Only the exact DurationPicker contract reads its own unit focus destination');assert.ok(actions.includes("isDurationOwnUnitCommit(contract.identity,expected.id)"),'Only exact DurationPicker duration-commit opts into the no-twin-focus route');assert.ok(actions.includes("assertFormTwinWitness(twinBefore,twinAfter,receipt.twinWitness.policy)"));
   assert.match(actions,/comparison:\{classification:proof\.status==='passed'\?'target-state-contract-passed':'harness-error-target-state-driver',equivalent:null/,'Direct target-state proof remains separate from registered semantic equivalence');
 });
 
