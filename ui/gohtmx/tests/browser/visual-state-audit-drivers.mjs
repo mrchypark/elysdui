@@ -811,7 +811,7 @@ export function activatePresenceStep(step,{ada,stop}){
 }
 
 export function requestedStateContract(identity,trashFixture){
-  if(regionalFormIDs.includes(identity))return {identity,kind:'LanguageSelect',family:'forms',requestedStateOnly:true,focusedSequence:'forms-regional-native',nativeFormTwinWitness:true,mappingGaps:[],fixtureGuards:{component:identity,initial:'alpha',name:'caller_value',options:[['alpha','Caller Alpha'],['beta','Caller Beta']]},steps:['regional-search','regional-select'].map(id=>({id,control:'[data-ui-combobox-input]',event:id==='regional-search'?'trusted native text input':'trusted native Enter; production hidden notifications are synthetic',expectedState:`Exact ${identity} ${id}; beta selection, no host request`,source:{siteId:`regional:${identity}:${id}`,sourceAnchor:'advanced_forms_fixtures.go; ely-api-forms.html LanguageSelect; ely-controls.html combobox; ely-controls.js selectCombo; ely-api.js change',provenance:'Exact root alpha/Caller Alpha,Beta fixture only; no preview catalogue or alias receipt transfer'}})),scope:'Exact regional root search and keyboard selection only; no provider, locale change, arbitrary options or registered equivalence'};
+  if(regionalFormIDs.includes(identity))return {identity,kind:'LanguageSelect',family:'forms',requestedStateOnly:true,focusedSequence:'forms-regional-native',nativeFormTwinWitness:true,mappingGaps:[],fixtureGuards:{component:identity,initial:'alpha',name:'caller_value',options:[['alpha','Caller Alpha'],['beta','Caller Beta']]},steps:['regional-search','regional-select','regional-unmatched','regional-escape'].map(id=>({id,control:'[data-ui-combobox-input]',event:id==='regional-search'||id==='regional-unmatched'?'trusted native text input':'trusted native keyboard; production hidden selection notifications are synthetic',expectedState:`Exact ${identity} ${id}; beta selection, unmatched filtering or Escape restore; no host request`,source:{siteId:`regional:${identity}:${id}`,sourceAnchor:'advanced_forms_fixtures.go; ely-api-forms.html LanguageSelect; ely-controls.html combobox; ely-controls.js selectCombo; ely-api.js change',provenance:'Exact root alpha/Caller Alpha,Beta fixture only; no preview catalogue or alias receipt transfer'}})),scope:'Exact regional root search, keyboard selection, unmatched query and Escape label restoration only; no provider, locale change, arbitrary options or registered equivalence'};
   const eight=nextEightFormCases[identity];
   if(eight)return {identity,kind:eight.kind,family:'forms',requestedStateOnly:true,focusedSequence:'forms-eight-explicit-native',nativeFormTwinWitness:true,twinFocusSelector:eight.mode==='number'?'input[data-ely-number]':eight.mode==='group'?'input:not([type="hidden"])':null,fixtureGuards:{component:identity,...eight},mappingGaps:[],steps:eight.steps.map(id=>({id,control:eight.mode==='pin'?`input[data-ui-pin-slot][id$="-pin-${id==='pin-replace-first'?0:1}"]`:eight.mode==='inline'?(id==='inline-open'||id==='inline-reopen'?'[data-ely-inline-open]':id==='inline-cancel'?'[data-ely-inline-cancel]':id==='inline-save'?'[data-ely-inline-save]':eight.selector):eight.selector,event:id.startsWith('commit-')?'trusted native Tab/change/blur':eight.mode==='scrub'?'trusted native arrow key; production input/change are synthetic':eight.mode==='pin'?'trusted native slot input; named hidden notifications are synthetic':'trusted native input or pointer activation',expectedState:`Exact ${identity} ${id} transition; per-action native/public payload and independent twin witness required`,nativeTabCommit:id.startsWith('commit-'),source:{siteId:`forms-eight:${identity}:${id}`,sourceAnchor:'internal/gallery/advanced_forms_fixtures.go; internal/gallery/advanced.go aliasFixtureProps; ely-api-forms.html; ely-controls.html; ely-api-forms.js; ely-controls.js; ely-api.js',provenance:`Exact ${identity} root fixture, not PreviewExamples; no host fulfillment or persistence`}})),scope:'Finite explicit native root sequence only; Scrub pointer drag, OTP authentication, clipboard paste, arbitrary props and host fulfillment are not covered'};
   const nativeFormCases={
@@ -1195,17 +1195,17 @@ const regionalFormIDs=['forms/CountrySelect','forms/CurrencySelect','forms/Langu
 
 export function assertRegionalFormStep(identity,stage,proof){
   assert(regionalFormIDs.includes(identity),'Exact regional identity required');
-  assert(['regional-search','regional-select'].includes(stage),'Unknown regional stage');
-  const selected=stage==='regional-select';
+  assert(['regional-search','regional-select','regional-unmatched','regional-escape'].includes(stage),'Unknown regional stage');
+  const selected=stage!=='regional-search',unmatched=stage==='regional-unmatched',escape=stage==='regional-escape';
   assert.equal(proof.identity,identity);assert(proof.rootID&&proof.searchID&&proof.hiddenID);
   assert.equal(new Set([proof.rootID,proof.searchID,proof.hiddenID]).size,3,'Distinct primary IDs required');
   assert.equal(proof.truncated,false,'Truncated event proof cannot pass');
-  assert.deepEqual(proof.state,{name:'caller_value',value:selected?'beta':'alpha',search:selected?'Caller Beta':'beta',preview:selected?'beta':'alpha',expanded:!selected,listHidden:selected,activeValue:selected?null:'beta',selected:[selected?'beta':'alpha'],visible:['beta'],disabled:false,readOnly:false,valid:true});
-  assert.deepEqual(proof.nativeEvents.map(e=>[e.type,e.control,e.trusted,e.value,e.key]),selected?[
+  assert.deepEqual(proof.state,{name:'caller_value',value:selected?'beta':'alpha',search:unmatched?'no-matching-region':selected?'Caller Beta':'beta',preview:selected?'beta':'alpha',expanded:!selected||unmatched,listHidden:selected&&!unmatched,activeValue:selected?null:'beta',selected:[selected?'beta':'alpha'],visible:unmatched||escape?[]:['beta'],disabled:false,readOnly:false,valid:true});
+  assert.deepEqual(proof.nativeEvents.map(e=>[e.type,e.control,e.trusted,e.value,e.key]),unmatched?[['input','search',true,'no-matching-region',null]]:escape?[['keydown','search',true,'no-matching-region','Escape']]:selected?[
     ['keydown','search',true,'beta','Enter'],['input','hidden',false,'beta',null],['change','hidden',false,'beta',null],
   ]:[['input','search',true,'beta',null]],'Exact native initiation and synthetic production notifications');
   for(const e of proof.nativeEvents)assert.equal(e.targetID,e.control==='search'?proof.searchID:proof.hiddenID,'Exact primary event target');
-  assert.deepEqual(proof.publicEvents,selected?[{type:'ely:change',detail:{id:proof.rootID,component:identity,name:'caller_value',value:'beta',checked:false,type:'hidden'}}]:[],'Exact public payload; no host requests');
+  assert.deepEqual(proof.publicEvents,stage==='regional-select'?[{type:'ely:change',detail:{id:proof.rootID,component:identity,name:'caller_value',value:'beta',checked:false,type:'hidden'}}]:[],'Exact public payload; no host requests');
   return proof;
 }
 
@@ -1543,9 +1543,11 @@ export async function runRequestedStateActions(contract,root,runStep,failureDiag
     },selector);
     let primaryError=null,nativeCursor=0,publicCursor=0;
     try{
-      for(const stage of ['regional-search','regional-select'])await runStep(stage,async()=>{
+      for(const stage of ['regional-search','regional-select','regional-unmatched','regional-escape'])await runStep(stage,async()=>{
         assert.deepEqual(await root.evaluate(n=>[n.__regionalNative.length,n.__regionalPublic.length]),[nativeCursor,publicCursor],'No unaccounted input between actions');
-        if(stage==='regional-search')await search.fill('beta');
+        if(stage==='regional-unmatched')await search.fill('no-matching-region');
+        else if(stage==='regional-escape'){assert.equal(await search.evaluate(n=>n===document.activeElement),true);await search.press('Escape');}
+        else if(stage==='regional-search')await search.fill('beta');
         else{
           assert.equal(await search.evaluate(n=>n===document.activeElement),true);
           const active=await search.getAttribute('aria-activedescendant');assert(active);

@@ -69,7 +69,7 @@ const regionalProof=(identity,selected)=>({identity,rootID:'primary',searchID:'p
 test('regional forms exact aliases require native search selection payload and strict negatives',()=>{
   for(const identity of ['forms/LanguageSelect','forms/CountrySelect','forms/CurrencySelect']){
     const contract=requestedStateContract(identity);assert.equal(contract.kind,'LanguageSelect');assert.equal(contract.nativeFormTwinWitness,true);
-    assert.deepEqual(contract.steps.map(s=>s.id),['regional-search','regional-select']);assert.deepEqual(contract.fixtureGuards.options,[['alpha','Caller Alpha'],['beta','Caller Beta']]);
+    assert.deepEqual(contract.steps.map(s=>s.id),['regional-search','regional-select','regional-unmatched','regional-escape']);assert.deepEqual(contract.fixtureGuards.options,[['alpha','Caller Alpha'],['beta','Caller Beta']]);
     for(const selected of [false,true]){
       const stage=selected?'regional-select':'regional-search',proof=regionalProof(identity,selected);assertRegionalFormStep(identity,stage,proof);
       for(const mutation of [p=>p.identity='forms/Select',p=>p.truncated=true,p=>p.state.value='stale',p=>p.state.preview='stale',p=>p.state.disabled=true,p=>p.state.activeValue='foreign',p=>p.nativeEvents[0].trusted=false,p=>p.nativeEvents[0].targetID='twin',p=>p.publicEvents.push({type:'ely:action',detail:{action:'save'}})]){const bad=structuredClone(proof);mutation(bad);assert.throws(()=>assertRegionalFormStep(identity,stage,bad));}
@@ -78,6 +78,16 @@ test('regional forms exact aliases require native search selection payload and s
   }
   assert.throws(()=>assertRegionalFormStep('forms/Select','regional-select',regionalProof('forms/Select',true)));
   assert.throws(()=>assertRegionalFormStep('forms/LanguageSelect','unknown',regionalProof('forms/LanguageSelect',true)));
+});
+
+test('regional forms unmatched and Escape preserve selected beta without extra public changes',()=>{
+  for(const identity of ['forms/LanguageSelect','forms/CountrySelect','forms/CurrencySelect'])for(const stage of ['regional-unmatched','regional-escape']){
+    const escape=stage==='regional-escape',proof=regionalProof(identity,true);
+    Object.assign(proof.state,{search:escape?'Caller Beta':'no-matching-region',expanded:!escape,listHidden:escape,activeValue:null,visible:[]});proof.publicEvents=[];
+    proof.nativeEvents=[{type:escape?'keydown':'input',control:'search',targetID:proof.searchID,trusted:true,value:'no-matching-region',key:escape?'Escape':null}];
+    assertRegionalFormStep(identity,stage,proof);
+    for(const mutate of [p=>p.state.value='',p=>p.state.search='unrestored',p=>p.state.preview='alpha',p=>p.state.visible=['alpha'],p=>p.publicEvents=[{type:'ely:change',detail:{value:'beta'}}],p=>p.nativeEvents[0].trusted=false]){const bad=structuredClone(proof);mutate(bad);assert.throws(()=>assertRegionalFormStep(identity,stage,bad));}
+  }
 });
 
 test('regional forms source fixture and connected handler guards do not transfer previews',async()=>{
