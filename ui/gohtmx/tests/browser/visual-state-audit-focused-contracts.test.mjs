@@ -54,6 +54,7 @@ test('forms action ownership production listeners emit exactly once in actual re
   click();assert.equal(requests.length,3,'Second activation adds exactly one request');
   cancel=true;assert.equal(click().defaultPrevented,true);assert.equal(requests.length,4,'Cancellation must not trigger fallback emission');cancel=false;
   disabled=true;click();assert.equal(requests.length,4);disabled=false;ariaDisabled=true;click();assert.equal(requests.length,4);ariaDisabled=false;fieldsetDisabled=true;click();assert.equal(requests.length,4);fieldsetDisabled=false;owner=foreign;click();assert.equal(requests.length,4);owner=root;
+  fieldsetDisabled=true;legend='second';click();assert.equal(requests.length,4,'Later legend is effectively disabled');legend='first';click();assert.equal(requests.length,5,'Native enabled first-legend control emits exactly once');assert.deepEqual(requests.pop(),{action:'browse-custom',payload:{value:'/new/path'}});legend=null;fieldsetDisabled=false;
   root.dataset.elyDisabled='true';click();assert.equal(requests.length,4);delete root.dataset.elyDisabled;
   pathMode=false;action='ordinary';click();assert.deepEqual(requests.at(-1),{action:'ordinary',payload:{value:''}});assert.equal(requests.length,5);
   groupMode=true;action='copy';click(nested);assert.deepEqual(requests.at(-1),{action:'copy',payload:{value:'group-value'}});assert.equal(requests.length,6);cancel=true;assert.equal(click().defaultPrevented,true);assert.equal(requests.length,7);cancel=false;groupMode=false;
@@ -90,7 +91,6 @@ test('regional forms exact aliases require native search selection payload and s
   for(const identity of ['forms/LanguageSelect','forms/CountrySelect','forms/CurrencySelect']){
     const contract=requestedStateContract(identity);assert.equal(contract.kind,'LanguageSelect');assert.equal(contract.nativeFormTwinWitness,true);
     assert.deepEqual(contract.steps.map(s=>s.id),['regional-search','regional-select','regional-unmatched','regional-escape']);assert.deepEqual(contract.fixtureGuards.options,[['alpha','Caller Alpha'],['beta','Caller Beta']]);
-  fieldsetDisabled=true;legend='second';click();assert.equal(requests.length,4,'Later legend is effectively disabled');legend='first';click();assert.equal(requests.length,5,'Native enabled first-legend control emits exactly once');assert.deepEqual(requests.pop(),{action:'browse-custom',payload:{value:'/new/path'}});legend=null;fieldsetDisabled=false;
     for(const selected of [false,true]){
       const stage=selected?'regional-select':'regional-search',proof=regionalProof(identity,selected);assertRegionalFormStep(identity,stage,proof);
       for(const mutation of [p=>p.identity='forms/Select',p=>p.truncated=true,p=>p.state.value='stale',p=>p.state.preview='stale',p=>p.state.disabled=true,p=>p.state.activeValue='foreign',p=>p.nativeEvents[0].trusted=false,p=>p.nativeEvents[0].targetID='twin',p=>p.publicEvents.push({type:'ely:action',detail:{action:'save'}})]){const bad=structuredClone(proof);mutation(bad);assert.throws(()=>assertRegionalFormStep(identity,stage,bad));}
