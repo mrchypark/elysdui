@@ -220,7 +220,11 @@ export async function cleanupPreservingPrimary(cleanup,primaryError,failureDiagn
   }
 }
 export async function probeFailureStateAndPayload(failureDiagnostics,readState,readNativePayload){
-  let currentState=null,nativePayload=failureDiagnostics.localStudio??failureDiagnostics.complexForms??failureDiagnostics.presenceNativeEvents??failureDiagnostics.eightFormsNative??failureDiagnostics.nativeDate??failureDiagnostics.durationNative??null;const errors=[];
+  let currentState=null,nativePayload=failureDiagnostics.localPicker??failureDiagnostics.temporalAX??failureDiagnostics.rangeNative??failureDiagnostics.pathNative??failureDiagnostics.regionalForms??failureDiagnostics.localStudio??failureDiagnostics.complexForms??failureDiagnostics.presenceNativeEvents??failureDiagnostics.eightFormsNative??failureDiagnostics.nativeDate??failureDiagnostics.durationNative??null;const errors=[];
+  for(const [key,cleanup,phase] of [['localPicker','localPickerCleanupError','local-picker'],['temporalAX','temporalAXCleanupError','temporal-ax'],['rangeNative','rangeCleanupError','range-native'],['pathNative','pathCleanupError','path-native'],['regionalForms','regionalCleanupError','regional-forms']]){
+    if(failureDiagnostics[key+'Error'])errors.push({phase:phase+'-payload',...failureDiagnostics[key+'Error']});
+    if(failureDiagnostics[cleanup])errors.push({phase:phase+'-cleanup',...failureDiagnostics[cleanup]});
+  }
   if(failureDiagnostics.localStudioError)errors.push({phase:'local-studio-payload',...failureDiagnostics.localStudioError});
   if(failureDiagnostics.localStudioCleanupError)errors.push({phase:'local-studio-cleanup',...failureDiagnostics.localStudioCleanupError});
   if(failureDiagnostics.complexFormsError)errors.push({phase:'complex-forms-payload',...failureDiagnostics.complexFormsError});
@@ -231,7 +235,7 @@ export async function probeFailureStateAndPayload(failureDiagnostics,readState,r
   if(failureDiagnostics.durationNativeError)errors.push({phase:'duration-native-payload',...failureDiagnostics.durationNativeError});
   if(failureDiagnostics.durationNativeCleanupError)errors.push({phase:'duration-native-cleanup',...failureDiagnostics.durationNativeCleanupError});
   try{currentState=await readState();}catch(error){errors.push({phase:'current-state',name:error?.name??'Error',message:error?.message??String(error),stack:error?.stack??null});}
-  if(nativePayload===null&&!failureDiagnostics.complexFormsError&&!failureDiagnostics.localStudioError)try{nativePayload=await readNativePayload();}catch(error){errors.push({phase:'native-payload',name:error?.name??'Error',message:error?.message??String(error),stack:error?.stack??null});}
+  if(nativePayload===null&&!failureDiagnostics.complexFormsError&&!failureDiagnostics.localStudioError&&!failureDiagnostics.localPickerError&&!failureDiagnostics.temporalAXError&&!failureDiagnostics.rangeNativeError&&!failureDiagnostics.pathNativeError&&!failureDiagnostics.regionalFormsError)try{nativePayload=await readNativePayload();}catch(error){errors.push({phase:'native-payload',name:error?.name??'Error',message:error?.message??String(error),stack:error?.stack??null});}
   return {currentState,nativePayload,...(errors.length?{diagnosticError:errors}:{})};
 }
 // No unhandled page error has a verified exception in this audit.

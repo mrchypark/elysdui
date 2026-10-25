@@ -139,6 +139,26 @@ test('local picker three routes actual qualified fixture selectors and preserves
   assert.doesNotMatch(branch,/dispatchEvent|new Event|\.value\s*=(?!=|>)/);
 });
 
+test('retained picker temporal range path and regional buffers survive cleanup probe and failure persistence',async()=>{
+  const source=await read('ui/gohtmx/tests/browser/visual-state-audit-drivers.mjs');
+  for(const [key,cleanup,phase]of [['localPicker','localPickerCleanupError','local-picker'],['temporalAX','temporalAXCleanupError','temporal-ax'],['rangeNative','rangeCleanupError','range-native'],['pathNative','pathCleanupError','path-native'],['regionalForms','regionalCleanupError','regional-forms']]){
+    assert(source.includes("retainFailurePayload(failureDiagnostics,'"+key+"'"));assert(source.includes("'"+cleanup+"'"));
+    for(const rejectCleanup of [false,true]){
+      const diagnostics={},primary=Error('original '+key+' assertion'),payload={events:[{type:'keydown',key:'Delete',trusted:true,value:'no-matching-picker-option'},{type:'input',value:'',trusted:true}],truncated:false};let live=payload,persisted;
+      await retainFailurePayload(diagnostics,key,async()=>live);
+      await cleanupPreservingPrimary(async()=>{live=null;if(rejectCleanup)throw Error('cleanup rejected');},primary,diagnostics,cleanup);
+      const probe=await probeFailureStateAndPayload(diagnostics,async()=>({closed:true}),async()=>assert.fail('Deleted observer must not be read again'));
+      await persistDirectCaseFailure({caseId:key,error:primary,receipts:[],...probe},async receipt=>{persisted=JSON.parse(JSON.stringify(receipt));});
+      assert.deepEqual(persisted.nativePayload,payload);assert.equal(persisted.error.message,primary.message);
+      if(rejectCleanup)assert.equal(persisted.diagnosticError[0].phase,phase+'-cleanup');else assert.equal(persisted.diagnosticError,undefined);
+    }
+    const failed={};await retainFailurePayload(failed,key,async()=>{throw Error('retained buffer read rejected');});
+    const probe=await probeFailureStateAndPayload(failed,async()=>({}),async()=>assert.fail('No unrelated presence fallback after retained read failure'));
+    assert.equal(probe.nativePayload,null);assert.equal(probe.diagnosticError[0].phase,phase+'-payload');
+    const cleanupFailure=Error('cleanup only failure');await assert.rejects(()=>cleanupPreservingPrimary(async()=>{throw cleanupFailure;},null,{},cleanup),error=>error===cleanupFailure);
+  }
+});
+
 test('owned cleanup phase ledger preserves order errors and pending await evidence',async()=>{
   const source=await read('ui/gohtmx/tests/browser/visual-state-audit-actions.mjs');
   const body=source.slice(source.indexOf('async function cleanupOwnedActionResources('),source.indexOf('function parseArgs('));
