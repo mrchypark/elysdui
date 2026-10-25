@@ -13,7 +13,7 @@ import {assertActivityLogScopedAuditPage,assertCommunicationCallerRequest,assert
 
 const read=path=>readFile(new URL(`../../../../${path}`,import.meta.url),'utf8');
 
-test('PathInput production listeners emit exactly once in actual registration order',async()=>{
+test('forms action ownership production listeners emit exactly once in actual registration order',async()=>{
   const api=await read('ui/gohtmx/assets/ely-api.js'),forms=await read('ui/gohtmx/assets/ely-api-forms.js');
   const coreRegistration=api.indexOf("root.addEventListener('click', click)"),familyInitialization=api.indexOf('registerCleanup(initialize(root');
   assert(coreRegistration>=0&&familyInitialization>coreRegistration);
@@ -21,22 +21,39 @@ test('PathInput production listeners emit exactly once in actual registration or
   const start=forms.indexOf('const click = event => {',forms.indexOf("register('forms', root =>"));
   const family=forms.slice(start,forms.indexOf('const input = event => {',start));
   assert(forms.includes("root.addEventListener('click',click);"),'Forms installs its own bubble listener after core');
-  const root={dataset:{elyFamily:'forms'}},foreign={},requests=[];let cancel=false,pathMode=true,groupMode=false,disabled=false,owner=root,action='choose-path';
+  const root={dataset:{elyFamily:'forms'}},foreign={},requests=[];let cancel=false,pathMode=true,groupMode=false,disabled=false,ariaDisabled=false,fieldsetDisabled=false,owner=root,action='choose-path',screen=false;
   const field={value:'~/Projects/ely'},groupField={value:'group-value'};
-  const button={value:'',type:'button',form:null,get disabled(){return disabled;},get dataset(){return {elyAction:action};},getAttribute(){return null;},matches(){return false;},closest(selector){if(selector==='[data-ely-family]')return owner;if(selector==='[data-ely-action]'||selector==='button')return this;if(selector==='.ely-api-path-input')return pathMode?{querySelector:()=>field}:null;if(selector==='.ely-api-input-group')return groupMode?{querySelector:()=>groupField}:null;return null;}};
+  const button={tagName:'BUTTON',value:'',type:'button',form:null,get disabled(){return disabled;},get dataset(){return {elyAction:action};},getAttribute(name){return name==='aria-disabled'&&ariaDisabled?'true':null;},matches(selector){return selector==='[data-ely-pick-screen-color]'&&screen;},closest(selector){if(selector==='[data-ely-family]')return owner;if(selector==='[data-ely-action]')return this;if(selector==='button')return this.tagName==='BUTTON'?this:null;if(selector==='fieldset:disabled')return fieldsetDisabled?{}:null;if(selector==='.ely-api-path-input')return pathMode?{querySelector:()=>field}:null;if(selector==='.ely-api-input-group')return groupMode?{querySelector:()=>groupField}:null;return null;}};
   const nested={closest:selector=>button.closest(selector)};
   const emit=(_root,action,payload)=>{requests.push({action,payload:JSON.parse(JSON.stringify(payload))});return !cancel;};
-  const context={root,emit,belongs:(_root,target)=>target.closest('[data-ely-family]')===_root};
+  const context={root,emit,q:selector=>{assert.equal(selector,'[data-ely-color]');return {value:'#228855'};},belongs:(_root,target)=>target.closest('[data-ely-family]')===_root};
   const listeners=[runInNewContext(core+';click',{...context}),runInNewContext(family+';click',{...context})];
   const click=(target=button)=>{const event={target,defaultPrevented:false,preventDefault(){this.defaultPrevented=true;}};for(const listener of listeners)listener(event);return event;};
   click();assert.deepEqual(requests,[{action:'choose-path',payload:{value:'~/Projects/ely'}}]);
   action='browse-custom';field.value='/new/path';click(nested);assert.deepEqual(requests.at(-1),{action:'browse-custom',payload:{value:'/new/path'}});assert.equal(requests.length,2);
   click();assert.equal(requests.length,3,'Second activation adds exactly one request');
   cancel=true;assert.equal(click().defaultPrevented,true);assert.equal(requests.length,4,'Cancellation must not trigger fallback emission');cancel=false;
-  disabled=true;click();assert.equal(requests.length,4);disabled=false;owner=foreign;click();assert.equal(requests.length,4);owner=root;
-  pathMode=false;action='ordinary';click();assert.deepEqual(requests.slice(-2),[{action:'ordinary',payload:{value:'',formData:null,values:[]}},{action:'ordinary',payload:{value:''}}],'Unrelated existing generic forms behavior is unchanged by this narrow repair');
-  groupMode=true;click();assert.deepEqual(requests.slice(-2),[{action:'ordinary',payload:{value:'',formData:null,values:[]}},{action:'ordinary',payload:{value:'group-value'}}],'InputGroup behavior remains outside the PathInput fix');
+  disabled=true;click();assert.equal(requests.length,4);disabled=false;ariaDisabled=true;click();assert.equal(requests.length,4);ariaDisabled=false;fieldsetDisabled=true;click();assert.equal(requests.length,4);fieldsetDisabled=false;owner=foreign;click();assert.equal(requests.length,4);owner=root;
+  root.dataset.elyDisabled='true';click();assert.equal(requests.length,4);delete root.dataset.elyDisabled;
+  pathMode=false;action='ordinary';click();assert.deepEqual(requests.at(-1),{action:'ordinary',payload:{value:''}});assert.equal(requests.length,5);
+  groupMode=true;action='copy';click(nested);assert.deepEqual(requests.at(-1),{action:'copy',payload:{value:'group-value'}});assert.equal(requests.length,6);cancel=true;assert.equal(click().defaultPrevented,true);assert.equal(requests.length,7);cancel=false;groupMode=false;
+  for(const [name,value] of [['sample-color',''],['search',''],['share',''],['try-feature',''],['open-help','help-key'],['footer-custom','footer-value']]){action=name;button.value=value;const before=requests.length;click(nested);assert.equal(requests.length,before+1);assert.deepEqual(requests.at(-1),{action:name,payload:{value}});}
+  action='sample-color';screen=true;const beforeScreen=requests.length;click();assert.equal(requests.length,beforeScreen+1);assert.deepEqual(requests.at(-1),{action:'sample-color',payload:{value:'#228855'}});cancel=true;assert.equal(click().defaultPrevented,true);cancel=false;screen=false;
+  button.tagName='A';action='link-action';const beforeLink=requests.length;click();assert.equal(requests.length,beforeLink+1);assert.equal(requests.at(-1).action,'link-action');button.tagName='BUTTON';
+  button.type='submit';button.form={matches:()=>true};const beforeSubmit=requests.length;click();assert.equal(requests.length,beforeSubmit,'data-ely-submit form retains submit-event ownership');button.form=null;click();assert.equal(requests.length,beforeSubmit+1,'Ordinary submit action retains core ownership');button.type='button';
   root.dataset.elyFamily='native';pathMode=true;const before=requests.length;listeners[0]({target:button,preventDefault(){}});assert.equal(requests.length,before+1,'Non-forms families retain generic ownership');
+});
+
+test('forms action ownership preserves actual suite capture confirmation before core bubble',async()=>{
+  const forms=await read('ui/gohtmx/assets/ely-api-forms.js'),api=await read('ui/gohtmx/assets/ely-api.js');
+  assert(forms.includes("root.addEventListener('click',click,{...options,capture:true})"));
+  const start=forms.indexOf('const click=event=>'),end=forms.indexOf('const submit=event=>',start),suite=forms.slice(start,end);
+  const root={dataset:{elyFamily:'forms'}},requests=[],data={elyAction:'revoke-custom',suiteConfirm:'Confirm revoke?'};
+  const button={dataset:data,textContent:'Revoke',value:'key-1',disabled:false,form:null,matches:()=>false,closest(selector){return selector==='button'?this:selector==='[data-ely-family]'?root:null;},setAttribute(){},removeAttribute(){}};
+  const capture=runInNewContext(suite+';click',{root,disabled:()=>false,all:()=>[],action:(action,payload)=>requests.push({action,value:payload.value}),status:()=>{}});
+  const core=runInNewContext(api.slice(api.indexOf('const click = event => {'),api.indexOf('const submit = event => {'))+';click',{root,belongs:()=>true,emit:()=>assert.fail('Stopped suite click must never reach core')});
+  const click=()=>{const event={target:button,preventDefault(){this.defaultPrevented=true;},stopImmediatePropagation(){this.stopped=true;}};capture(event);if(!event.stopped)core(event);assert.equal(event.defaultPrevented,true);assert.equal(event.stopped,true);};
+  click();assert.equal(data.suiteArmed,'true');assert.deepEqual(requests,[]);click();assert.deepEqual(requests,[{action:'revoke-custom',value:'key-1'}]);assert.equal(data.suiteArmed,undefined);assert.equal(button.textContent,'Revoke');
 });
 
 const regionalProof=(identity,selected)=>({identity,rootID:'primary',searchID:'primary-control-input',hiddenID:'primary-control-value',truncated:false,

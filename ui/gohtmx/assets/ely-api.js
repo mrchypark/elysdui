@@ -101,8 +101,8 @@ function start(scope = document) {
       if (button.dataset.interactionPaletteAction !== undefined) return;
       // ActionSheet owns item dispatch and native dialog close.
       if (button.dataset.interactionSheetAction !== undefined) return;
-      // The forms owner supplies the current path, not the action button's value.
-      if (root.dataset.elyFamily === 'forms' && button.closest('.ely-api-path-input')?.querySelector('[data-ely-path]')) return;
+      // Forms owns non-submit action buttons, including composite input values.
+      if (root.dataset.elyFamily === 'forms' && button.tagName === 'BUTTON' && button.type !== 'submit') return;
       if (button.type === 'submit' && button.form?.matches('[data-ely-submit]')) return;
       const formData = button.form ? new FormData(button.form) : null;
       const accepted = emit(root, button.dataset.elyAction, { value: button.value || button.dataset.value || '', formData, values: formData ? [...formData] : [] });
