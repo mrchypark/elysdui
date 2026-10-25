@@ -13,6 +13,32 @@ import {assertActivityLogScopedAuditPage,assertCommunicationCallerRequest,assert
 
 const read=path=>readFile(new URL(`../../../../${path}`,import.meta.url),'utf8');
 
+test('PathInput production listeners emit exactly once in actual registration order',async()=>{
+  const api=await read('ui/gohtmx/assets/ely-api.js'),forms=await read('ui/gohtmx/assets/ely-api-forms.js');
+  const coreRegistration=api.indexOf("root.addEventListener('click', click)"),familyInitialization=api.indexOf('registerCleanup(initialize(root');
+  assert(coreRegistration>=0&&familyInitialization>coreRegistration);
+  const core=api.slice(api.indexOf('const click = event => {'),api.indexOf('const submit = event => {'));
+  const start=forms.indexOf('const click = event => {',forms.indexOf("register('forms', root =>"));
+  const family=forms.slice(start,forms.indexOf('const input = event => {',start));
+  assert(forms.includes("root.addEventListener('click',click);"),'Forms installs its own bubble listener after core');
+  const root={dataset:{elyFamily:'forms'}},foreign={},requests=[];let cancel=false,pathMode=true,groupMode=false,disabled=false,owner=root,action='choose-path';
+  const field={value:'~/Projects/ely'},groupField={value:'group-value'};
+  const button={value:'',type:'button',form:null,get disabled(){return disabled;},get dataset(){return {elyAction:action};},getAttribute(){return null;},matches(){return false;},closest(selector){if(selector==='[data-ely-family]')return owner;if(selector==='[data-ely-action]'||selector==='button')return this;if(selector==='.ely-api-path-input')return pathMode?{querySelector:()=>field}:null;if(selector==='.ely-api-input-group')return groupMode?{querySelector:()=>groupField}:null;return null;}};
+  const nested={closest:selector=>button.closest(selector)};
+  const emit=(_root,action,payload)=>{requests.push({action,payload:JSON.parse(JSON.stringify(payload))});return !cancel;};
+  const context={root,emit,belongs:(_root,target)=>target.closest('[data-ely-family]')===_root};
+  const listeners=[runInNewContext(core+';click',{...context}),runInNewContext(family+';click',{...context})];
+  const click=(target=button)=>{const event={target,defaultPrevented:false,preventDefault(){this.defaultPrevented=true;}};for(const listener of listeners)listener(event);return event;};
+  click();assert.deepEqual(requests,[{action:'choose-path',payload:{value:'~/Projects/ely'}}]);
+  action='browse-custom';field.value='/new/path';click(nested);assert.deepEqual(requests.at(-1),{action:'browse-custom',payload:{value:'/new/path'}});assert.equal(requests.length,2);
+  click();assert.equal(requests.length,3,'Second activation adds exactly one request');
+  cancel=true;assert.equal(click().defaultPrevented,true);assert.equal(requests.length,4,'Cancellation must not trigger fallback emission');cancel=false;
+  disabled=true;click();assert.equal(requests.length,4);disabled=false;owner=foreign;click();assert.equal(requests.length,4);owner=root;
+  pathMode=false;action='ordinary';click();assert.deepEqual(requests.slice(-2),[{action:'ordinary',payload:{value:'',formData:null,values:[]}},{action:'ordinary',payload:{value:''}}],'Unrelated existing generic forms behavior is unchanged by this narrow repair');
+  groupMode=true;click();assert.deepEqual(requests.slice(-2),[{action:'ordinary',payload:{value:'',formData:null,values:[]}},{action:'ordinary',payload:{value:'group-value'}}],'InputGroup behavior remains outside the PathInput fix');
+  root.dataset.elyFamily='native';pathMode=true;const before=requests.length;listeners[0]({target:button,preventDefault(){}});assert.equal(requests.length,before+1,'Non-forms families retain generic ownership');
+});
+
 const regionalProof=(identity,selected)=>({identity,rootID:'primary',searchID:'primary-control-input',hiddenID:'primary-control-value',truncated:false,
   state:{name:'caller_value',value:selected?'beta':'alpha',search:selected?'Caller Beta':'beta',preview:selected?'beta':'alpha',expanded:!selected,listHidden:selected,activeValue:selected?null:'beta',selected:[selected?'beta':'alpha'],visible:['beta'],disabled:false,readOnly:false,valid:true},
   nativeEvents:selected?[

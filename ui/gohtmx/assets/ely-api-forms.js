@@ -246,7 +246,7 @@ register('forms', root => {
     if(button.matches('[data-ely-settings-tab]')){showSettingsPanel(button.dataset.elySettingsTab);return;}
     if(button.matches('[data-ely-color-choice]')){color(button.dataset.elyColorChoice);return;}
     if(button.matches('[data-ely-icon-option]')){q('[data-ely-icon-value]').value=button.value;all('[data-ely-icon-option]').forEach(item=>{item.setAttribute('aria-selected',String(item===button));item.tabIndex=item===button?0:-1;});q('[data-ely-picker-preview]').value=button.value;changed(root,{value:button.value});return;}
-    if(button.dataset.elyAction){const path=button.closest('.ely-api-path-input')?.querySelector('[data-ely-path]'),groupValue=button.closest('.ely-api-input-group')?.querySelector('input');emit(root,button.dataset.elyAction,{value:path?.value??groupValue?.value??button.value});return;}
+    if(button.dataset.elyAction){const path=button.closest('.ely-api-path-input')?.querySelector('[data-ely-path]');if(path){if(!emit(root,button.dataset.elyAction,{value:path.value}))event.preventDefault();return;}const groupValue=button.closest('.ely-api-input-group')?.querySelector('input');emit(root,button.dataset.elyAction,{value:groupValue?.value??button.value});return;}
   };
   const input = event => {
     const field=event.target;if(field.closest('[data-ely-family]')!==root)return;
