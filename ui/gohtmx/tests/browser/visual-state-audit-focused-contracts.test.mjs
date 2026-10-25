@@ -11,6 +11,55 @@ import {assertActivityLogScopedAuditPage,assertCommunicationCallerRequest,assert
 
 const read=path=>readFile(new URL(`../../../../${path}`,import.meta.url),'utf8');
 
+const segmentDiagnosticMaxBytes=1024*1024;
+function boundedSegmentJSON(value,maxBytes=segmentDiagnosticMaxBytes){
+  let units=0;
+  const check=(item,depth=0)=>{
+    assert(depth<=24&&++units<=50000,'Diagnostic collection limit exceeded');
+    if(typeof item==='string')assert(item.length<=8192,'Diagnostic string limit exceeded');
+    else if(item&&typeof item==='object'){
+      const keys=Object.keys(item);assert(keys.length<=256,'Diagnostic member limit exceeded');
+      for(const key of keys){assert(key.length<=256);check(item[key],depth+1);}
+    }
+  };
+  check(value);const json=JSON.stringify(value);assert(Buffer.byteLength(json)<=maxBytes,'Diagnostic JSON byte cap exceeded');return json;
+}
+function segmentDiagnosticOutput(proof,maxBytes=segmentDiagnosticMaxBytes){
+  try{return boundedSegmentJSON(proof,maxBytes);}
+  catch(error){return boundedSegmentJSON({kind:'native-segment-diagnostic-not-contract-approval',truncated:true,failed:true,reason:String(error.message).slice(0,256),cleanup:proof.cleanup,source:proof.source,retainedCaseCount:proof.cases.length},maxBytes);}
+}
+
+test('native segment diagnostic caps bytes unicode raw strings and member allocation fail closed',()=>{
+  const proof={source:'a'.repeat(40),cases:[],cleanup:true};
+  assert.equal(JSON.parse(segmentDiagnosticOutput(proof)).cleanup,true);
+  for(const extra of [{text:'x'.repeat(8193)},{items:Array(257).fill(0)},{text:'界'.repeat(500)}]){
+    const json=segmentDiagnosticOutput({...proof,...extra},512),result=JSON.parse(json);
+    assert(Buffer.byteLength(json)<=512);assert.equal(result.truncated,true);assert.equal(result.failed,true);assert.equal(result.mechanicsObserved,undefined);
+  }
+  assert.throws(()=>boundedSegmentJSON({text:'界'.repeat(200)},512));
+});
+
+// This function runs in Chromium before nodes are transferred over CDP.
+function boundedSegmentDOMNodes(){
+  const nodes=[],queue=[this];
+  while(queue.length){const node=queue.shift();if(nodes.length>=64||node.childNodes.length>64||nodes.length+queue.length+node.childNodes.length>64)throw Error('Diagnostic DOM collection truncated');nodes.push(node);for(const child of node.childNodes)queue.push(child);}
+  return nodes;
+}
+
+test('native segment diagnostic bounds DOM traversal before transferring raw nodes',()=>{
+  const leaf={childNodes:[]};assert.equal(boundedSegmentDOMNodes.call({childNodes:[leaf]}).length,2);
+  assert.throws(()=>boundedSegmentDOMNodes.call({childNodes:Array(65).fill(leaf)}),/truncated/);
+  assert.throws(()=>boundedSegmentDOMNodes.call({childNodes:Array(8).fill({childNodes:Array(8).fill(leaf)})}),/truncated/);
+});
+
+test('native segment diagnostic source retains scoped CDP and fail closed capped output',async()=>{
+  const source=await readFile(new URL(import.meta.url),'utf8');
+  const entry=source.slice(source.lastIndexOf("test('opt-in DateTime Week DL native segment cause diagnostic only'"),source.lastIndexOf("test('eight exact forms contracts execute"));
+  assert(!entry.includes('getFullAXTree'));assert(!entry.includes('depth:-1'));assert(!entry.includes('.innerHTML'));assert(!entry.includes('.outerHTML'));
+  assert(entry.includes('fetchRelatives:false'));assert(entry.includes('boundedSegmentDOMNodes.toString()'));assert(entry.includes('segmentDiagnosticOutput(proof)'));
+  assert(entry.includes("assert(!JSON.parse(text).failed,'Diagnostic output truncated')"));
+});
+
 function observedNativeSegment(dom,ax){
   const ids=new Set();
   const visit=node=>{if(node.backendNodeId)ids.add(node.backendNodeId);for(const child of [...(node.children||[]),...(node.shadowRoots||[])])visit(child);};visit(dom);
@@ -37,7 +86,7 @@ test('opt-in DateTime Week DL native segment cause diagnostic only',{skip:proces
   const base=process.env.ELY_NATIVE_SEGMENT_URL,output=process.env.ELY_NATIVE_SEGMENT_OUTPUT;
   assert(base&&output&&process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH&&/^[a-f0-9]{40}$/.test(process.env.ELY_NATIVE_SEGMENT_SOURCE||''),'Explicit existing gallery URL, source pin, immutable output and browser executable required');
   const url=new URL(base);assert(['127.0.0.1','localhost'].includes(url.hostname),'Local owned gallery only');
-  const proof={kind:'native-segment-diagnostic-not-contract-approval',source:process.env.ELY_NATIVE_SEGMENT_SOURCE,sourcePinIsCallerSupplied:true,cases:[],runtime:{node:process.version},cleanup:false};
+  const proof={kind:'native-segment-diagnostic-not-contract-approval',maxBytes:segmentDiagnosticMaxBytes,source:process.env.ELY_NATIVE_SEGMENT_SOURCE,sourcePinIsCallerSupplied:true,cases:[],runtime:{node:process.version},cleanup:false,truncated:false};
   let browser;
   try{
     browser=await chromium.launch({executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH});proof.runtime.browser=browser.version();
@@ -52,15 +101,43 @@ test('opt-in DateTime Week DL native segment cause diagnostic only',{skip:proces
       assert.equal(await main.count(),1);assert.equal(await twin.count(),1);
       const field=main.locator(`input[type="${type}"]`);assert.equal(await field.count(),1);assert.equal(await field.inputValue(),initial);
       const id=await field.getAttribute('id');assert(id,'Exact field ID required');
-      await page.evaluate(()=>{window.__segmentDiagnosticEvents=[];for(const type of ['keydown','input','change','focusin','focusout','ely:change','ely:action'])document.addEventListener(type,event=>window.__segmentDiagnosticEvents.push({type:event.type,trusted:event.isTrusted,key:event.key||null,targetId:event.target?.id||null,value:event.target?.value??null,detail:event.type.startsWith('ely:')?event.detail:null}),true);});
-      const twinBefore=await twin.innerHTML();
+      await page.evaluate(()=>{window.__segmentDiagnosticEvents=[];window.__segmentDiagnosticTruncated=false;for(const type of ['keydown','input','change','focusin','focusout','ely:change','ely:action'])document.addEventListener(type,event=>{
+        const bounded=value=>{if(typeof value==='string'&&value.length>256){window.__segmentDiagnosticTruncated=true;return value.slice(0,256);}return value;};
+        if(window.__segmentDiagnosticEvents.length>=128){window.__segmentDiagnosticTruncated=true;return;}
+        const detail={};if(event.type.startsWith('ely:')){let count=0;for(const key in event.detail||{}){if(++count>16){window.__segmentDiagnosticTruncated=true;break;}const value=event.detail[key];if(value!==null&&!['string','boolean','number'].includes(typeof value)){window.__segmentDiagnosticTruncated=true;continue;}detail[bounded(key)]=bounded(value);}}
+        window.__segmentDiagnosticEvents.push({type:event.type,trusted:event.isTrusted,key:bounded(event.key||null),targetId:bounded(event.target?.id||null),value:bounded(event.target?.value??null),detail});
+      },true);});
+      const twinSnapshot=()=>twin.evaluate(root=>{
+        const queue=[root],snapshot=[];
+        while(queue.length){const node=queue.shift();if(snapshot.length+queue.length+node.childNodes.length>=128||node.attributes?.length>32)throw Error('Diagnostic twin snapshot truncated');
+          const text=node.nodeType===Node.TEXT_NODE?node.nodeValue:null;if(text?.length>256||node.value?.length>256)throw Error('Diagnostic twin text truncated');
+          const attributes=[];for(const attr of node.attributes||[]){if(attr.name.length>256||attr.value.length>256)throw Error('Diagnostic twin attribute truncated');attributes.push([attr.name,attr.value]);}
+          snapshot.push({tag:node.nodeName,text,attributes,value:node.value??null,checked:node.checked??null});for(const child of node.childNodes)queue.push(child);
+        }return snapshot;
+      });
+      const twinBefore=await twinSnapshot();
       const observe=async stage=>{
-        const {root}=await cdp.send('DOM.getDocument',{depth:-1,pierce:true});
+        const {root}=await cdp.send('DOM.getDocument',{depth:0});
         const {nodeId}=await cdp.send('DOM.querySelector',{nodeId:root.nodeId,selector:`#${await field.evaluate(node=>CSS.escape(node.id))}`});assert(nodeId);
-        const {node}=await cdp.send('DOM.describeNode',{nodeId,depth:-1,pierce:true});
-        const {nodes}=await cdp.send('Accessibility.getFullAXTree');
+        const {node}=await cdp.send('DOM.describeNode',{nodeId,depth:0});
+        assert((node.shadowRoots||[]).length<=2,'Diagnostic shadow root collection truncated');
+        const ids=new Set(),nodes=[];
+        for(const backendNodeId of [node.backendNodeId,...(node.shadowRoots||[]).map(root=>root.backendNodeId)]){
+          const {object}=await cdp.send('DOM.resolveNode',{backendNodeId});assert(object.objectId);
+          try{
+            const result=await cdp.send('Runtime.callFunctionOn',{objectId:object.objectId,functionDeclaration:boundedSegmentDOMNodes.toString()});assert(!result.exceptionDetails,'Diagnostic DOM collection truncated');assert(result.result.objectId);
+            try{
+              const properties=await cdp.send('Runtime.getProperties',{objectId:result.result.objectId,ownProperties:true});assert(properties.result.length<=66,'Diagnostic DOM properties truncated');
+              for(const property of properties.result.filter(p=>/^\d+$/.test(p.name))){
+                const {node:child}=await cdp.send('DOM.describeNode',{objectId:property.value.objectId,depth:0});ids.add(child.backendNodeId);assert(ids.size<=64,'Diagnostic DOM collection truncated');
+              }
+            }finally{await cdp.send('Runtime.releaseObject',{objectId:result.result.objectId});}
+          }finally{await cdp.send('Runtime.releaseObject',{objectId:object.objectId});}
+        }
+        for(const backendNodeId of ids){const partial=await cdp.send('Accessibility.getPartialAXTree',{backendNodeId,fetchRelatives:false});assert(partial.nodes.length<=1,'Diagnostic AX collection truncated');for(const ax of partial.nodes){boundedSegmentJSON(ax,32768);nodes.push(ax);}}
         const state=await field.evaluate(node=>({value:node.value,active:document.activeElement===node,valid:node.validity.valid}));
-        const raw={stage,dom:node,ax:nodes,state,events:await page.evaluate(()=>window.__segmentDiagnosticEvents)};row.observations.push(raw);return raw;
+        const events=await page.evaluate(()=>({events:window.__segmentDiagnosticEvents,truncated:window.__segmentDiagnosticTruncated}));assert(!events.truncated,'Diagnostic native event collection truncated');
+        const raw={stage,dom:{backendNodeId:node.backendNodeId,children:[...ids].map(backendNodeId=>({backendNodeId}))},ax:nodes,state,events:events.events};row.observations.push(raw);boundedSegmentJSON(proof,segmentDiagnosticMaxBytes-8192);return raw;
       };
       await field.click();const before=await observe('clicked');assert(before.state.active);const observed=observedNativeSegment(before.dom,before.ax);
       await page.keyboard.press('ArrowUp');const after=await observe('one-arrow-up');assert(after.state.active);observedNativeSegment(after.dom,after.ax);assert.notEqual(after.state.value,before.state.value);assert(after.state.valid);
@@ -69,11 +146,11 @@ test('opt-in DateTime Week DL native segment cause diagnostic only',{skip:proces
       assert(last.events.some(e=>e.type==='keydown'&&e.key==='ArrowUp'&&e.targetId===id&&e.trusted));
       assert(last.events.some(e=>e.type==='input'&&e.targetId===id&&e.trusted));
       assert(last.events.filter(e=>['keydown','input','change'].includes(e.type)&&e.targetId===id).every(e=>e.trusted),'Native events must remain trusted');
-      assert.equal(await twin.innerHTML(),twinBefore);assert(!last.events.some(e=>e.targetId&&e.targetId!==id&&['input','change'].includes(e.type)),'No neighboring control input');
+      assert.deepEqual(await twinSnapshot(),twinBefore);assert(!last.events.some(e=>e.targetId&&e.targetId!==id&&['input','change'].includes(e.type)),'No neighboring control input');
       row.mechanicsObserved=true;
     }
-  }catch(error){proof.error={name:error.name,message:error.message,stack:error.stack};throw error;}
-  finally{try{if(browser)await browser.close();proof.cleanup=true;}finally{await writeFile(output,JSON.stringify(proof,null,2),{flag:'wx'});}}
+  }catch(error){proof.failed=true;proof.truncated=/truncated|limit|byte cap/.test(error.message);proof.error={name:error.name,message:error.message.slice(0,1024),stack:error.stack?.slice(0,4096)};throw error;}
+  finally{try{if(browser)await browser.close();proof.cleanup=true;}finally{const text=segmentDiagnosticOutput(proof);await writeFile(output,text,{flag:'wx'});if(!proof.failed)assert(!JSON.parse(text).failed,'Diagnostic output truncated');}}
 });
 
 test('eight exact forms contracts execute 28 native checkpoint oracles with strict payload trust and source fixtures',async()=>{
