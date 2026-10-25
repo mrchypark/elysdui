@@ -710,6 +710,13 @@ test('Form and six qualified native aliases retain per-action twin witnesses and
   assert.match(actions,/comparison:\{classification:proof\.status==='passed'\?'target-state-contract-passed':'harness-error-target-state-driver',equivalent:null/,'Direct target-state proof remains separate from registered semantic equivalence');
 });
 
+test('Duration own-unit no-twin route is wired only to its exact commit step',async()=>{
+  assert.equal(isDurationOwnUnitCommit('forms/DurationPicker','duration-commit'),true);
+  for(const [identity,step] of [['forms/DurationPicker','duration-edit'],['forms/DateTimePicker','duration-commit'],['forms/WeekPicker','duration-commit'],['forms/YearPicker','year-commit'],['forms/JsonInput','json-commit'],['forms/AutoResizeInput','autoresize-commit'],['forms/DurationPicker','duration-other']])assert.equal(isDurationOwnUnitCommit(identity,step),false,`${identity} ${step} must not receive the Duration exception`);
+  const actions=await read('ui/gohtmx/tests/browser/visual-state-audit-actions.mjs');
+  assert.match(actions,/const allowOwnUnitSelectCommitFocus=isDurationOwnUnitCommit\(contract\.identity,expected\.id\)/,'The runtime gate uses the same exact identity and step predicate');
+});
+
 test('Six exact qualified form aliases keep bounded local native contracts and explicit focus-leave commits',async()=>{
   const expected=[
     ['forms/AutoResizeInput','TextArea',['autoresize-edit','autoresize-commit']],
