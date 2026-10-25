@@ -19,6 +19,15 @@ import {assertActivityLogScopedAuditPage,assertCommunicationCallerRequest,assert
 
 const read=path=>readFile(new URL(`../../../../${path}`,import.meta.url),'utf8');
 
+test('VerticalSlider product flow grows for output while native track geometry stays unchanged',async()=>{
+  const css=await read('ui/gohtmx/assets/ely-api-forms.css');
+  const wrapper=css.match(/\.ely-api-slider\.is-vertical\{([^}]+)\}/)?.[1],track=css.match(/\.ely-api-slider\.is-vertical input\[type=range\]\{([^}]+)\}/)?.[1];assert(wrapper&&track);
+  assert.equal(wrapper,'inline-size:2.25rem;min-block-size:8.75rem;align-items:center');
+  assert.equal(track,'writing-mode:vertical-lr;direction:rtl;inline-size:8.75rem;block-size:2.25rem');
+  assert(!wrapper.split(';').some(value=>value.startsWith('block-size:')),'Wrapper must not constrain input plus output to track height');
+  assert(css.includes('.ely-api-slider{display:grid;gap:.35rem;max-inline-size:20rem}'));
+});
+
 test('regional audit route scopes exact aliases only and retains complete painted-union camera guards',async()=>{
   const source=await read('ui/gohtmx/tests/browser/visual-state-audit-actions.mjs'),start=source.indexOf("if(contract.identity==='forms/MultiSelect'"),end=source.indexOf("if(contract.focusedSequence==='workspace-activity-native-link-focus')",start),branch=source.slice(start,end);assert(start>=0&&end>start);
   const route=runInNewContext('(contract,familyURL)=>{'+branch+'return familyURL;}',{URL,assert});
@@ -176,11 +185,13 @@ test('seven range forms require eighteen exact native transitions with independe
       const field={id:controlIDs.field,name:'caller_value',type,value:start,min:'',max:mode==='relative'?'':finish??'5',step:'',disabled:false,valid:true};
       const changed=end?'end':'field',proof={identity,rootID:'primary',fieldID:field.id,controlIDs,truncated:false,fields:[field,...(finish===null?[]:[{id:controlIDs.end,name:'caller_value_end',type:'range',value:finish,min:start,max:'5',step:'',disabled:false,valid:true}])],nativeEvents:[{type:key?'keydown':'click',control,targetID:controlIDs[control],trusted:true,key,value:null},...['input','change'].map(type=>({type,control:changed,targetID:controlIDs[changed],trusted:!synthetic,key:null,value}))],publicEvents:[{type:'ely:change',detail:{id:'primary',component:identity,name:end?'caller_value_end':'caller_value',value,...(type==='select-one'?{}:{checked:false}),type}}],output:mode==='range'?`${start}–${finish}`:value,knob:mode==='knob'?{value,output:value,angle:String(-135+Number(value)/5*270),sweep:`${Number(value)/5*270}deg`}:null,orientation:{writingMode:'vertical-lr',direction:'rtl',width:36,height:140}};
       if(mode==='relative')proof.relativeOptions=relativeOptions(value);
+      if(name==='VerticalSlider')proof.flow={wrapper:{left:0,top:40,right:36,bottom:205},root:{left:0,top:0,right:308,bottom:205},field:{left:0,top:40,right:36,bottom:180},output:{left:0,top:186,right:12,bottom:205}};
       assertRangeFormStep(identity,stage,proof);count++;
       for(const mutate of [p=>p.identity='forms/Unknown',p=>p.truncated=true,p=>p.fields[0].value='stale',p=>p.fields[0].max='100',p=>p.nativeEvents[0].trusted=false,p=>p.nativeEvents[1].trusted=synthetic,p=>p.nativeEvents[1].targetID='twin',p=>p.publicEvents[0].detail.component='forms/SliderOther',p=>p.publicEvents.push(p.publicEvents[0])]){const bad=structuredClone(proof);mutate(bad);assert.throws(()=>assertRangeFormStep(identity,stage,bad));}
       if(mode==='range'){const bad=structuredClone(proof);bad.fields[1].min='0';if(start!=='0')assert.throws(()=>assertRangeFormStep(identity,stage,bad));}
       if(mode==='knob')assert.throws(()=>assertRangeFormStep(identity,stage,{...proof,knob:{...proof.knob,output:'stale'}}));
       if(name==='VerticalSlider')assert.throws(()=>assertRangeFormStep(identity,stage,{...proof,orientation:{...proof.orientation,height:20}}));
+      if(name==='VerticalSlider'){const bad=structuredClone(proof);bad.flow.wrapper.bottom=180;bad.flow.root.bottom=180;assert.throws(()=>assertRangeFormStep(identity,stage,bad),/flow/);}
     });
   }
   assert.equal(count,18);assert.equal(requestedStateContract('forms/DateRangePicker').focusedSequence,'forms-temporal-ax-native');

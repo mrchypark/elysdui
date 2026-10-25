@@ -1321,7 +1321,12 @@ export function assertRangeFormStep(identity,stage,proof){
   if(fixture.mode==='knob')assert.deepEqual(proof.knob,{value,output:value,angle:String(-135+Number(value)/5*270),sweep:`${Number(value)/5*270}deg`});
   if(fixture.mode==='stepper')assert.equal(proof.output,value);
   if(fixture.mode==='relative')assertRelativeDateFixture(proof.relativeOptions,value);
-  if(identity==='forms/VerticalSlider'){assert.equal(proof.orientation.writingMode,'vertical-lr');assert.equal(proof.orientation.direction,'rtl');assert(proof.orientation.height>proof.orientation.width,'Actual range control must be physically vertical');}
+  if(identity==='forms/VerticalSlider'){
+    assert.equal(proof.orientation.writingMode,'vertical-lr');assert.equal(proof.orientation.direction,'rtl');assert.equal(proof.orientation.height,140);assert.equal(proof.orientation.width,36);
+    const {wrapper,root,field,output}=proof.flow;for(const rect of [wrapper,root,field,output]){for(const key of ['left','top','right','bottom'])assert(Number.isFinite(rect[key]));assert(rect.right>rect.left&&rect.bottom>rect.top);}
+    for(const rect of [field,output]){assert(rect.left>=wrapper.left&&rect.right<=wrapper.right&&rect.top>=wrapper.top&&rect.bottom<=wrapper.bottom,'Vertical range and output must occupy their wrapper flow box');assert(rect.left>=root.left&&rect.right<=root.right&&rect.top>=root.top&&rect.bottom<=root.bottom,'Vertical range and output must occupy component flow bounds');}
+    assert(output.top>=field.bottom,'Output must follow the complete vertical range');
+  }
   return proof;
 }
 
@@ -1797,7 +1802,8 @@ export async function runRequestedStateActions(contract,root,runStep,failureDiag
       },async(_state,_before,receipt)=>{
         const proof=await root.evaluate((node,args)=>{
           const fields=['field','end'].filter(name=>node.__rangeControls[name]).map(name=>{const n=node.__rangeControls[name];return {id:n.id,name:n.name,type:n.type,value:n.value,min:n.min??'',max:n.max??'',step:n.step??'',disabled:n.disabled,valid:n.checkValidity()};}),knob=node.querySelector('[data-ely-knob]'),range=node.__rangeControls.field,style=getComputedStyle(range),rect=range.getBoundingClientRect();
-          return {identity:node.dataset.elyComponent,rootID:node.id,fieldID:range.id,controlIDs:args.controlIDs,truncated:node.__rangeTruncated,fields,nativeEvents:node.__rangeNative.slice(args.nativeCursor),publicEvents:node.__rangePublic.slice(args.publicCursor),relativeOptions:range.tagName==='SELECT'?{value:range.value,selectedIndex:range.selectedIndex,disabled:range.disabled,options:[...range.options].map(o=>({value:o.value,label:o.label,selected:o.selected,disabled:o.disabled}))}:null,output:node.querySelector('[data-ely-range-value],[data-ely-stepper-value]')?.value??null,knob:knob?{value:knob.getAttribute('aria-valuenow'),output:node.querySelector('[data-ely-knob-value]').value,angle:knob.style.getPropertyValue('--ely-knob-angle'),sweep:knob.style.getPropertyValue('--ely-knob-sweep')}:null,orientation:{writingMode:style.writingMode,direction:style.direction,width:rect.width,height:rect.height}};
+          const box=n=>{const r=n.getBoundingClientRect();return {left:r.left,top:r.top,right:r.right,bottom:r.bottom};};
+          return {identity:node.dataset.elyComponent,rootID:node.id,fieldID:range.id,controlIDs:args.controlIDs,truncated:node.__rangeTruncated,fields,nativeEvents:node.__rangeNative.slice(args.nativeCursor),publicEvents:node.__rangePublic.slice(args.publicCursor),relativeOptions:range.tagName==='SELECT'?{value:range.value,selectedIndex:range.selectedIndex,disabled:range.disabled,options:[...range.options].map(o=>({value:o.value,label:o.label,selected:o.selected,disabled:o.disabled}))}:null,output:node.querySelector('[data-ely-range-value],[data-ely-stepper-value]')?.value??null,flow:node.dataset.elyComponent==='forms/VerticalSlider'?{wrapper:box(node.querySelector('.ely-api-slider.is-vertical')),root:box(node),field:box(range),output:box(node.querySelector('[data-ely-range-value]'))}:null,knob:knob?{value:knob.getAttribute('aria-valuenow'),output:node.querySelector('[data-ely-knob-value]').value,angle:knob.style.getPropertyValue('--ely-knob-angle'),sweep:knob.style.getPropertyValue('--ely-knob-sweep')}:null,orientation:{writingMode:style.writingMode,direction:style.direction,width:rect.width,height:rect.height}};
         },{controlIDs,nativeCursor,publicCursor});
         receipt.nativeFormProof=proof;assertRangeFormStep(identity,stage,proof);nativeCursor+=proof.nativeEvents.length;publicCursor+=proof.publicEvents.length;return proof;
       });
