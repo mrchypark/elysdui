@@ -15,7 +15,7 @@ export function assertJsonHighlight(source,highlight){
   return expected;
 }
 
-export function assertFormTwinWitness(before,after){
+export function assertFormTwinWitness(before,after,{allowPairedNativeCommitFocus=false}={}){
   assert(before&&typeof before==='object'&&after&&typeof after==='object','Native form twin witness is required');
   assert(before.snapshot&&typeof before.snapshot==='object'&&after.snapshot&&typeof after.snapshot==='object','Native form twin snapshot is required');
   assert.equal(typeof before.focusWithin,'boolean','Native form twin before-focus state is required');
@@ -24,9 +24,19 @@ export function assertFormTwinWitness(before,after){
   assert(Array.isArray(after.events),'Native form twin after-event list is required');
   assert.deepEqual(after.snapshot,before.snapshot,'Native form action must preserve the independent twin snapshot');
   assert.equal(before.focusWithin,false,'Native form action must start outside the independent twin');
-  assert.equal(after.focusWithin,false,'Native form action must not move focus into the independent twin');
   assert.deepEqual(before.events,[],'Native form twin must have no pre-action events');
-  assert.deepEqual(after.events,before.events,'Native form action must not dispatch events in the independent twin');
+  if(allowPairedNativeCommitFocus){
+    assert.equal(after.focusWithin,true,'Native commit Tab must focus the paired control in the independent twin');
+    assert(Array.isArray(before.snapshot.controls),'Native commit requires the exact twin control inventory');
+    const focus=after.focusTarget;
+    assert(focus&&focus.id&&before.snapshot.controls.some(control=>control.id===focus.id),'Native commit focus must target a control in the exact independent twin');
+    assert.equal(focus.matchesExpectedControl,true,'Native commit focus must target the paired form control');
+    assert.equal(focus.matchingControlCount,1,'The paired form control must be unique in the independent twin');
+    assert.deepEqual(after.events,[{type:'focusin',isTrusted:true,target:focus.eventTarget,targetId:focus.id}],'Native commit may dispatch only one trusted focusin on the paired twin control');
+  }else{
+    assert.equal(after.focusWithin,false,'Native form action must not move focus into the independent twin');
+    assert.deepEqual(after.events,before.events,'Native form action must not dispatch events in the independent twin');
+  }
   return true;
 }
 

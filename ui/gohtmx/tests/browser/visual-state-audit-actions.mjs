@@ -375,9 +375,10 @@ async function directCaseDriver({item, familyURL, captures, reference, semanticS
     if(formTwinWitness){
       assert.equal(await twin.count(),1,'Native form case requires its exact independent twin');
       assert.equal(await twin.getAttribute('data-ely-component'),contract.identity,'Native form twin must retain the same exact component identity');
-      await twin.evaluate(node=>{node.__visualFormTwinEvents=[];for(const type of ['beforeinput','input','change','click','submit','focusin','focusout','ely:change','ely:action'])node.addEventListener(type,event=>node.__visualFormTwinEvents.push({type:event.type,isTrusted:event.isTrusted,target:event.target?.name||event.target?.dataset?.name||event.target?.getAttribute?.('data-ui-action')||event.target?.tagName||null}),true);});
+      await twin.evaluate(node=>{node.__visualFormTwinEvents=[];for(const type of ['beforeinput','input','change','click','submit','focusin','focusout','ely:change','ely:action','ely:result'])node.addEventListener(type,event=>node.__visualFormTwinEvents.push({type:event.type,isTrusted:event.isTrusted,target:event.target?.name||event.target?.dataset?.name||event.target?.getAttribute?.('data-ui-action')||event.target?.tagName||null,targetId:event.target?.id||null}),true);});
     }
-    const readFormTwinWitness=async()=>({snapshot:await snapshot(twin),focusWithin:await twin.evaluate(node=>node.contains(document.activeElement)),events:await twin.evaluate(node=>node.__visualFormTwinEvents.map(event=>({...event})))});
+    const twinFocusSelector=contract.focusedSequence==='forms-six-qualified-native-local'?contract.steps.at(-1)?.control:null;
+    const readFormTwinWitness=async()=>({snapshot:await snapshot(twin),focusWithin:await twin.evaluate(node=>node.contains(document.activeElement)),focusTarget:await twin.evaluate((node,selector)=>{const target=document.activeElement;if(!node.contains(target))return null;return {id:target.id||null,name:target.name||'',tag:target.tagName,eventTarget:target.name||target.dataset.name||target.getAttribute('data-ui-action')||target.tagName,matchesExpectedControl:!!selector&&target.matches(selector),matchingControlCount:selector?node.querySelectorAll(selector).length:0};},twinFocusSelector),events:await twin.evaluate(node=>node.__visualFormTwinEvents.map(event=>({...event})))});
     assert.deepEqual(contract.mappingGaps, [], 'Exact source action contract must resolve');
     assert.equal(await root.getAttribute('data-ely-component'), contract.identity, 'Exact selected component');
     assert.equal(await root.getAttribute('data-ely-kind'), contract.kind, 'Exact selected kind');
@@ -420,7 +421,7 @@ async function directCaseDriver({item, familyURL, captures, reference, semanticS
         receipt[`${phase}CaptureOwnership`] = await captureOwnedState({page, record, root, caseId: `${item.caseId}-direct`, siteId, checkpointIndex: index, phase, captures, state: await state()});
       }
       receipt.afterState=await observe();
-      if(twinBefore){const twinAfter=await readFormTwinWitness();receipt.twinWitness.after=twinAfter;receipt.twinWitness.unchanged=assertFormTwinWitness(twinBefore,twinAfter);}
+      if(twinBefore){const twinAfter=await readFormTwinWitness();receipt.twinWitness.after=twinAfter;const allowPairedNativeCommitFocus=contract.focusedSequence==='forms-six-qualified-native-local'&&expected.id.endsWith('-commit');receipt.twinWitness.unchanged=assertFormTwinWitness(twinBefore,twinAfter,{allowPairedNativeCommitFocus});}
       for(const event of receipt.afterState.actions.slice(receipt.beforeState.actions.length)){
         assert.equal(event.component,contract.identity,'Public action retains the actual alias identity');
         assert.equal(event.id,await root.getAttribute('id'),'Public action retains the actual instance ID');
