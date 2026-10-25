@@ -322,9 +322,12 @@ export function multiSelectShadowFrame(node){
   const entries=[...root.querySelectorAll('[data-ely-multi-entry][role=combobox]')];
   if(entries.length!==1||entries[0].getAttribute('aria-expanded')!=='true'||entries[0].getAttribute('aria-controls')!==panel.id)return fail('shadow panel reference mismatch');
   const r=root.getBoundingClientRect(),h=host.getBoundingClientRect(),box=record.getBoundingClientRect(),s=getComputedStyle(record),p=panel.getBoundingClientRect();
-  const frame={x:Math.ceil(box.left+record.clientLeft),y:Math.floor(r.top),width:Math.floor(box.right-record.clientLeft)-Math.ceil(box.left+record.clientLeft),height:Math.floor(Math.min(h.bottom,innerHeight))-Math.floor(r.top)};
+  const frame={x:Math.ceil(box.left+record.clientLeft),y:Math.floor(r.top),width:Math.floor(box.right-record.clientLeft)-Math.ceil(box.left+record.clientLeft),height:Math.floor(h.bottom)-Math.floor(r.top)};
+  const documentFrame={...frame,x:frame.x+scrollX,y:frame.y+scrollY};
+  const fits=frame.x>=0&&frame.y>=0&&frame.x+frame.width<=innerWidth&&frame.y+frame.height<=innerHeight;
+  const camera={fullPage:!fits,clip:fits?frame:documentFrame};
   const color=s.backgroundColor.match(/^rgb\((\d+),\s*(\d+),\s*(\d+)\)$/);
-  if(!color||s.backgroundImage!=='none'||frame.x<0||frame.y<0||frame.x+frame.width>innerWidth||frame.width<=0||frame.height<=0||twin.getBoundingClientRect().top<frame.y+frame.height)return fail('no isolated uniform viewport shadow frame');
+  if(!color||s.backgroundImage!=='none'||documentFrame.x<0||documentFrame.y<0||frame.x+frame.width>innerWidth||frame.width<=0||frame.height<=0||twin.getBoundingClientRect().top<frame.y+frame.height)return fail('no isolated uniform authored shadow frame');
   let reachedRecord=false;
   for(let a=root;a;a=a.parentElement){
     const st=getComputedStyle(a);
@@ -387,7 +390,7 @@ export function multiSelectShadowFrame(node){
   }
   const focused=document.activeElement,fs=focused&&getComputedStyle(focused);
   if(!focused||!root.contains(focused)||!['none','hidden'].includes(fs.outlineStyle)&&parseFloat(fs.outlineWidth)!==0)return fail('visible focused outline requires separate proof');
-  return {eligible:true,ownerID:root.id,panelID:panel.id,frame,documentFrame:{...frame,x:frame.x+scrollX,y:frame.y+scrollY},background:[...color.slice(1).map(Number),255],rects,shadows,compositedDisabledLeaves,panel:{left:p.left-frame.x,top:p.top-frame.y,right:p.right-frame.x,bottom:p.bottom-frame.y},focused:{id:focused.id,type:focused.type,matchesFocusVisible:focused.matches(':focus-visible'),outlineStyle:fs.outlineStyle,boxShadow:fs.boxShadow}};
+  return {eligible:true,ownerID:root.id,panelID:panel.id,frame,documentFrame,camera,background:[...color.slice(1).map(Number),255],rects,shadows,compositedDisabledLeaves,panel:{left:p.left-frame.x,top:p.top-frame.y,right:p.right-frame.x,bottom:p.bottom-frame.y},focused:{id:focused.id,type:focused.type,matchesFocusVisible:focused.matches(':focus-visible'),outlineStyle:fs.outlineStyle,boxShadow:fs.boxShadow}};
 }
 
 export function proveMultiSelectShadowRaster({width,height,data},sample){
@@ -425,7 +428,7 @@ export async function captureTargetPNG(page,root,path,{checkedRootID}={}){
     try{
       assert(shadowSample.eligible,shadowSample.reason);
       const owner=await root.evaluate(captureForeignPaint,{clip:shadowSample.documentFrame,checkedRootID:shadowSample.ownerID});assert.equal(owner.foreignDOMIntersections.length,0,'Foreign paint in shadow frame');
-      const png=candidate=await screenshotWithoutCaretMutation(page,{fullPage:false,clip:shadowSample.frame,animations:'disabled',scale:'css'});
+      const png=candidate=await screenshotWithoutCaretMutation(page,{...shadowSample.camera,animations:'disabled',scale:'css'});
       const require=createRequire(import.meta.url),{PNG}=require(resolve(dirname(require.resolve('playwright-core/package.json')),'lib/utilsBundle.js'));
       const proof=proveMultiSelectShadowRaster(PNG.sync.read(png),shadowSample);
       assert.deepEqual(await root.evaluate(multiSelectShadowFrame),shadowSample,'Shadow frame/source geometry changed during capture');
@@ -433,7 +436,7 @@ export async function captureTargetPNG(page,root,path,{checkedRootID}={}){
       assert(!bounds.focusOutline||bounds.focusOutline.status!=='unsupported'||bounds.focusOutline.reason==='unbounded focus-within shadow'&&bounds.focusOutline.diagnostic.active.id===shadowSample.panelID,'Unrelated focus gap cannot be resolved by a shadow frame');
       const {scroll,viewport}=await page.evaluate(()=>({scroll:{x:scrollX,y:scrollY},viewport:{width:innerWidth,height:innerHeight}}));
       if(path)await writeFile(path,png,{flag:'wx'});
-      return {bounds:{...bounds,clip:shadowSample.documentFrame,decorativeShadowProof:proof,focusOutline:{status:'not-painted',diagnostic:bounds.focusOutline?.diagnostic},scroll,viewport,camera:{fullPage:false,clip:shadowSample.frame},coordinateSpace:'document receipt; native authored-audit shadow frame'},png,...owner};
+      return {bounds:{...bounds,clip:shadowSample.documentFrame,decorativeShadowProof:proof,focusOutline:{status:'not-painted',diagnostic:bounds.focusOutline?.diagnostic},scroll,viewport,camera:shadowSample.camera,coordinateSpace:'document receipt; native authored-audit shadow frame'},png,...owner};
     }catch(error){
       const retainedPath=path&&candidate?`${path}.shadow-proof.png`:null;
       if(retainedPath)await writeFile(retainedPath,candidate,{flag:'wx'});

@@ -13,11 +13,11 @@ function shadowRasterFixture(){
   const width=12,height=12,data=Buffer.alloc(width*height*4,255);
   const pixel=(x,y,value)=>{const at=(y*width+x)*4;data[at]=data[at+1]=data[at+2]=value;};
   pixel(5,5,0);pixel(5,8,240);
-  const sample={eligible:true,ownerID:'primary',panelID:'panel',frame:{x:0,y:0,width,height},documentFrame:{x:0,y:100,width,height},background:[255,255,255,255],rects:[{left:4,top:4,right:8,bottom:8}],shadows:[{id:'panel',css:'rgba(0, 0, 0, 0.133) 0px 1px 2px 0px',left:4,top:4,right:8,bottom:8}],focused:{id:'checkbox',outlineStyle:'none',matchesFocusVisible:false}};
+  const sample={eligible:true,ownerID:'primary',panelID:'panel',frame:{x:0,y:0,width,height},documentFrame:{x:0,y:100,width,height},camera:{fullPage:false,clip:{x:0,y:0,width,height}},background:[255,255,255,255],rects:[{left:4,top:4,right:8,bottom:8}],shadows:[{id:'panel',css:'rgba(0, 0, 0, 0.133) 0px 1px 2px 0px',left:4,top:4,right:8,bottom:8}],focused:{id:'checkbox',outlineStyle:'none',matchesFocusVisible:false}};
   return {png:{width,height,data},sample,pixel};
 }
 
-function multiSelectSamplerFixture(){
+function multiSelectSamplerFixture({viewport={width:100,height:100},scroll={x:0,y:0}}={}){
   const style={opacity:'1',transform:'none',translate:'none',rotate:'none',scale:'none',perspective:'none',filter:'none',backdropFilter:'none',clipPath:'none',clip:'auto',contain:'none',maskImage:'none',mixBlendMode:'normal',overflowX:'visible',overflowY:'visible',backgroundColor:'rgba(0, 0, 0, 0)',backgroundImage:'none',boxShadow:'none',outlineStyle:'none',outlineWidth:'0px',position:'static',borderTopWidth:'0px',borderRightWidth:'0px',borderBottomWidth:'0px',borderLeftWidth:'0px'};
   const rect=(left,top,right,bottom)=>({left,top,right,bottom,width:right-left,height:bottom-top});
   const make=(id,parent,box)=>{const node={id,localName:'div',children:[],parentElement:parent,style:{...style},pseudos:{},clientLeft:0,dataset:{},getBoundingClientRect:()=>box,checkVisibility:()=>true,matches:()=>false,contains(target){for(let a=target;a;a=a.parentElement)if(a===this)return true;return false;}};parent?.children.push(node);return node;};
@@ -30,9 +30,36 @@ function multiSelectSamplerFixture(){
   entry.getAttribute=name=>name==='aria-expanded'?'true':panel.id;
   record.querySelector=()=>twin;
   const document={activeElement:focused,querySelectorAll:selector=>selector==='[data-audit-case]'?[record]:[panel,focused].filter(node=>selector===`[id="${node.id}"]`)};
-  const sample=()=>JSON.parse(JSON.stringify(runInNewContext(`(${multiSelectShadowFrame.toString()})(node)`,{node:root,document,URL,location:{href:'http://127.0.0.1/components/audit?family=forms&case=forms%2FMultiSelect'},getComputedStyle:(node,pseudo)=>pseudo?{content:node.pseudos[pseudo]??'none'}:node.style,innerWidth:100,innerHeight:100,scrollX:0,scrollY:0})));
+  const sample=()=>JSON.parse(JSON.stringify(runInNewContext(`(${multiSelectShadowFrame.toString()})(node)`,{node:root,document,URL,location:{href:'http://127.0.0.1/components/audit?family=forms&case=forms%2FMultiSelect'},getComputedStyle:(node,pseudo)=>pseudo?{content:node.pseudos[pseudo]??'none'}:node.style,innerWidth:viewport.width,innerHeight:viewport.height,scrollX:scroll.x,scrollY:scroll.y})));
   return {style,rect,make,record,grid,host,root,twin,panel,entry,focused,document,sample};
 }
+
+test('MultiSelect shadow camera retains full authored frame when current popup extends below viewport',async()=>{
+  const f=multiSelectSamplerFixture({viewport:{width:100,height:84},scroll:{x:0,y:200}});
+  f.root.getBoundingClientRect=()=>f.rect(10,71.59375,70,84.1875);
+  f.host.getBoundingClientRect=()=>f.rect(0,71.59375,100,150);
+  f.panel.getBoundingClientRect=()=>f.rect(10,85,70,110);
+  f.entry.getBoundingClientRect=()=>f.rect(10,72,70,80);
+  f.focused.getBoundingClientRect=()=>f.rect(20,90,30,100);
+  f.twin.getBoundingClientRect=()=>f.rect(0,160,100,190);
+  const sample=f.sample();assert.equal(sample.eligible,true);
+  assert.deepEqual(sample.frame,{x:0,y:71,width:100,height:79});
+  assert.equal(sample.panel.bottom,39,'Fresh open panel remains included, not capped to 13 viewport pixels');
+  assert(sample.rects.every(r=>r.top>=0&&r.bottom<=79));
+  assert.deepEqual(sample.camera,{fullPage:true,clip:{x:0,y:271,width:100,height:79}});
+  const require=createRequire(import.meta.url),{PNG}=require(resolve(dirname(require.resolve('playwright-core/package.json')),'lib/utilsBundle.js'));
+  const data=Buffer.alloc(100*79*4,255);for(const [x,y] of [[20,5],[20,40]]){const at=(y*100+x)*4;data[at]=data[at+1]=data[at+2]=200;}
+  const bytes=PNG.sync.write({width:100,height:79,data});let options;
+  const root={async scrollIntoViewIfNeeded(){},async evaluate(fn,arg){if(fn===multiSelectShadowFrame)return sample;if(fn===captureForeignPaint){assert.deepEqual(arg.clip,sample.documentFrame);return {foreignDOMIntersections:[],occludedForeignPaint:[]};}return {clip:sample.documentFrame};}};
+  const page={async evaluate(){return {scroll:{x:0,y:200},viewport:{width:100,height:84}};},async screenshot(value){options=value;return bytes;}};
+  const result=await captureTargetPNG(page,root);
+  assert.equal(options.fullPage,true);assert.deepEqual(options.clip,sample.documentFrame);assert.deepEqual(result.bounds.camera,sample.camera);
+  assert.equal(result.bounds.decorativeShadowProof.status,'bounded-native-raster');
+  const escaped={...sample,rects:[...sample.rects,{left:10,top:85,right:70,bottom:90}]};
+  assert.throws(()=>proveMultiSelectShadowRaster({width:100,height:79,data},escaped),/escape/);
+  data[(78*100+20)*4]=200;assert.throws(()=>proveMultiSelectShadowRaster({width:100,height:79,data},sample),/boundary/);
+  f.twin.getBoundingClientRect=()=>f.rect(0,140,100,190);assert.equal(f.sample().eligible,false,'Document fallback cannot include the twin');
+});
 
 test('MultiSelect shadow sampler validates intervening main and grid clips and backdrop paint',()=>{
   const {style,host,grid,focused,sample}=multiSelectSamplerFixture();
