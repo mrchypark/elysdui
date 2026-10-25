@@ -8,6 +8,7 @@ import {assertPathNativeStep} from './visual-state-audit-drivers.mjs';
 import {assertRangeFormStep} from './visual-state-audit-drivers.mjs';
 import {assertComplexFormStep} from './visual-state-audit-drivers.mjs';
 import {assertRelativeDateFixture} from './visual-state-audit-drivers.mjs';
+import {temporalAXKeyboardRoute,assertTemporalAXStep} from './visual-state-audit-drivers.mjs';
 import {assertCronNativePreview} from './visual-state-audit-drivers.mjs';
 import {assertJsonHighlight} from './visual-state-audit-drivers.mjs';
 import {nativeDateFocusedSegment,nativeDateKeyboardRoute,assertNativeDateResult} from './visual-state-audit-drivers.mjs';
@@ -16,6 +17,54 @@ import {assertEightFormStep,assertDurationNativeProof,probeFailureStateAndPayloa
 import {assertActivityLogScopedAuditPage,assertCommunicationCallerRequest,assertDockCallerAction,assertDockNativeEvents,assertEvalLastColumnGeometry,assertNativeEmbedOpen,activatePresenceStep,assertPresenceNativeRequest,assertFoundationPublicEvents,assertPlainInputNativeEvents,assertFormattedInputState,calendarDraftWheelDecision,requestedStateContract,runRequestedStateActions} from './visual-state-audit-drivers.mjs';
 
 const read=path=>readFile(new URL(`../../../../${path}`,import.meta.url),'utf8');
+
+test('temporal AX three exact routes preserve every intermediate and stop ambiguous or wrong input',async()=>{
+  const cases=[['forms/MonthPicker','period-edit','2026-10',['2026-11'],'Month Month'],['forms/TimePicker','period-edit','12:30',['13:30'],'Hours Hours'],['forms/DateRangePicker','date-range-start','2026-10-20',['2026-10-21'],'Day Day'],['forms/DateRangePicker','date-range-invalid','2026-10-22',['2026-10-21','2026-10-20'],'Day Day'],['forms/DateRangePicker','date-range-repair','2026-10-20',['2026-10-21','2026-10-22','2026-10-23'],'Day Day']];
+  for(const [identity,stage,initial,values,name]of cases){
+    let value=initial,index=0,active=true,focus=0;
+    const names=['Other Other',name],observe=async()=>({active,value,valid:!(stage==='date-range-invalid'&&value==='2026-10-20'),ownedIDs:[1,2],ax:names.map((name,i)=>({backendDOMNodeId:i+1,role:{value:'spinbutton'},name:{value:name},properties:[{name:'settable',value:{value:true}},{name:'focused',value:{value:active&&focus===i}}]}))});
+    const press=async key=>{if(key==='Tab'){focus++;if(focus>=names.length)active=false;}else if(key==='Shift+Tab')focus--;else{assert.equal(key,stage==='date-range-invalid'?'ArrowDown':'ArrowUp');value=values[index++];}};
+    const trace=[];await temporalAXKeyboardRoute(identity,stage,observe,press,trace);assert.equal(value,values.at(-1));assert.deepEqual(trace.filter(t=>t.label==='edit').map(t=>t.value),values);
+    value=initial;index=0;focus=0;await assert.rejects(()=>temporalAXKeyboardRoute(identity,stage,async()=>{const state=await observe();state.ax[1].properties[1].value.value=true;return state;},()=>assert.fail('Ambiguous state must stop before input'),[]),/ambiguous/);
+    focus=1;await assert.rejects(()=>temporalAXKeyboardRoute(identity,stage,observe,async()=>{value='wrong';},[]),/intermediate value/);
+    value=initial;focus=1;await assert.rejects(()=>temporalAXKeyboardRoute(identity,stage,async()=>({...await observe(),ownedIDs:[]}),()=>{},[]),/unavailable/);
+    if(identity!=='forms/DateRangePicker'){
+      value=values[0];focus=1;active=true;await temporalAXKeyboardRoute(identity,'period-commit',observe,press,[]);assert.equal(active,false);
+      active=true;focus=1;await assert.rejects(()=>temporalAXKeyboardRoute(identity,'period-commit',observe,async()=>{},[]),/departure/);
+    }
+  }
+  await assert.rejects(()=>temporalAXKeyboardRoute('forms/Input','period-edit',()=>{},()=>{},[]),/Exact/);
+});
+
+test('temporal AX three require eleven exact event windows and range validity without synthetic edits',async()=>{
+  const native=(type,control,value,key=null)=>({type,control,value,key,trusted:true});let count=0;
+  for(const identity of ['forms/DateRangePicker','forms/MonthPicker','forms/TimePicker']){
+    const range=identity==='forms/DateRangePicker',contract=requestedStateContract(identity);assert.equal(contract.nativeFormTwinWitness,true);assert.equal(contract.steps.length,range?7:2);
+    for(const {id:stage}of contract.steps){
+      let events=[],value=identity==='forms/MonthPicker'?'2026-11':'13:30';
+      const proof={identity,rootID:'primary',truncated:false,foreign:false,value,active:stage!=='period-commit',events,range:null};
+      if(stage==='period-commit')events.push(native('keydown','start',value,'Tab'),native('blur','start',value));
+      else if(!range){const initial=identity==='forms/MonthPicker'?'2026-10':'12:30';events.push(native('click','start',initial),native('keydown','start',initial,'ArrowUp'),native('input','start',value),native('change','start',value),{type:'ely:change',detail:{id:'primary',component:identity,name:'caller_value',value,checked:false,type:identity==='forms/MonthPicker'?'month':'time'}});}
+      else{
+        const opened=['date-range-open','date-range-start','date-range-invalid','date-range-repair','date-range-reopen'].includes(stage);proof.range={start:stage==='date-range-open'?'2026-10-20':'2026-10-21',end:['date-range-open','date-range-start'].includes(stage)?'2026-10-22':stage==='date-range-invalid'?'2026-10-20':'2026-10-23',endValid:stage!=='date-range-invalid',validationMessage:stage==='date-range-invalid'?'End must not be before start.':'',expanded:opened,hidden:!opened};
+        if(stage==='date-range-open'||stage==='date-range-reopen')events.push(native('click','trigger',''),native('blur','trigger',''));
+        else if(stage==='date-range-close')events.push(native('blur','end','2026-10-23'),native('click','trigger',''));
+        else if(stage==='date-range-escape')events.push(native('keydown','start','2026-10-21','Escape'),native('blur','start','2026-10-21'));
+        else{
+          const end=stage!=='date-range-start',control=end?'end':'start',values=stage==='date-range-start'?['2026-10-21']:stage==='date-range-invalid'?['2026-10-21','2026-10-20']:['2026-10-21','2026-10-22','2026-10-23'];let prior=stage==='date-range-invalid'?'2026-10-22':'2026-10-20';
+          if(stage==='date-range-invalid')events.push(native('blur','start','2026-10-21'),native('click','end',prior));
+          for(const value of values){events.push(native('keydown',control,prior,stage==='date-range-invalid'?'ArrowDown':'ArrowUp'),native('input',control,value),native('change',control,value),{type:'ely:change',detail:{id:'primary',component:identity,name:end?'caller_value_end':'caller_value',value,checked:false,type:'date'}});prior=value;}proof.value=prior;
+        }
+      }
+      assertTemporalAXStep(identity,stage,proof);count++;
+      for(const mutate of [p=>p.truncated=true,p=>p.foreign=true,p=>p.events[0].trusted=false,p=>p.events.push({type:'ely:action',detail:{action:'save'}}),p=>p.events.pop()]){const bad=structuredClone(proof);mutate(bad);assert.throws(()=>assertTemporalAXStep(identity,stage,bad));}
+      if(stage==='date-range-invalid'){const bad=structuredClone(proof);bad.range.endValid=true;assert.throws(()=>assertTemporalAXStep(identity,stage,bad));}
+    }
+  }
+  assert.equal(count,11);
+  const source=await read('ui/gohtmx/tests/browser/visual-state-audit-drivers.mjs'),branch=source.slice(source.indexOf("if(contract.focusedSequence==='forms-temporal-ax-native'){"),source.indexOf("if(contract.focusedSequence==='forms-complex-eight-native'){"));
+  assert(branch.includes('observeOwnedNativeDate'));assert(branch.includes('receipt.nativeFormProof=proof'));assert(branch.includes('cdp.detach()'));assert(!/\.fill\(|dispatchEvent\(|\.value\s*=/.test(branch));
+});
 
 const relativeOptions=value=>({value,selectedIndex:value==='Yesterday'?2:3,disabled:false,options:['Caller placeholder','Today','Yesterday','Last 7 days','Last 30 days','This month','Last month','This quarter','This year'].map((label,i)=>({value:i?label:'',label,selected:i>0&&label===value,disabled:false}))});
 test('RelativeDatePicker exact fixture includes enabled unselected placeholder and rejects drift',async()=>{
@@ -110,7 +159,7 @@ test('seven range forms require eighteen exact native transitions with independe
       if(name==='VerticalSlider')assert.throws(()=>assertRangeFormStep(identity,stage,{...proof,orientation:{...proof.orientation,height:20}}));
     });
   }
-  assert.equal(count,18);assert.equal(requestedStateContract('forms/DateRangePicker'),null);
+  assert.equal(count,18);assert.equal(requestedStateContract('forms/DateRangePicker').focusedSequence,'forms-temporal-ax-native');
 });
 
 test('seven range forms execute production range synchronization and knob arrow handler',async()=>{

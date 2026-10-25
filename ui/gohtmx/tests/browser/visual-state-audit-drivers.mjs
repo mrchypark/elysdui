@@ -12,6 +12,56 @@ const nativeDateTargets={
   'forms/DateTimePicker':{initial:'2026-10-20T12:30',target:'2026-10-21T13:45',edits:[['Day Day',1],['Hours Hours',1],['Minutes Minutes',15]]},
   'forms/WeekPicker':{initial:'2026-W42',target:'2026-W43',edits:[['Week Week',1]]},
 };
+const temporalAXCases={
+  'forms/MonthPicker':{kind:'MonthPicker',type:'month',field:'input[type="month"]',initial:'2026-10',steps:['period-edit','period-commit'],edits:{'period-edit':{initial:'2026-10',values:['2026-11'],segment:'Month Month',key:'ArrowUp'}}},
+  'forms/TimePicker':{kind:'DatePicker',type:'time',field:'input[type="time"]',initial:'12:30',steps:['period-edit','period-commit'],edits:{'period-edit':{initial:'12:30',values:['13:30'],segment:'Hours Hours',key:'ArrowUp'}}},
+  'forms/DateRangePicker':{kind:'DatePicker',type:'date',field:'input[data-ely-date-start]',initial:'2026-10-20',steps:['date-range-open','date-range-start','date-range-invalid','date-range-repair','date-range-close','date-range-reopen','date-range-escape'],edits:{'date-range-start':{initial:'2026-10-20',values:['2026-10-21'],segment:'Day Day',key:'ArrowUp'},'date-range-invalid':{initial:'2026-10-22',values:['2026-10-21','2026-10-20'],segment:'Day Day',key:'ArrowDown'},'date-range-repair':{initial:'2026-10-20',values:['2026-10-21','2026-10-22','2026-10-23'],segment:'Day Day',key:'ArrowUp'}}},
+};
+
+export async function temporalAXKeyboardRoute(identity,stage,observe,press,trace){
+  const fixture=temporalAXCases[identity];assert(fixture,'Exact temporal identity required');
+  const read=async label=>{const state=await observe();assert(trace.length<32,'Temporal AX trace cap');trace.push({label,...state});return state;};
+  let state=await read('initial');
+  if(stage==='period-commit'){
+    const target=fixture.edits['period-edit'].values[0],{segments}=nativeDateFocusedSegment(state);
+    for(let i=0;i<=segments.length&&state.active;i++){assert.equal(state.value,target);await press('Tab');state=await read('departure');}
+    assert.equal(state.active,false,'Temporal native Tab departure failed');assert.equal(state.value,target);return state;
+  }
+  const edit=fixture.edits[stage];assert(edit,'Exact temporal edit required');assert.equal(state.value,edit.initial);
+  for(let i=0;;i++){
+    const {focused,segments}=nativeDateFocusedSegment(state),target=segments.findIndex(n=>n.name?.value===edit.segment);assert(target>=0,'Owned temporal segment unavailable');
+    if(focused.name.value===edit.segment)break;
+    assert(i<8,'Temporal segment navigation cap');await press(segments.indexOf(focused)<target?'Tab':'Shift+Tab');state=await read('segment');assert.equal(state.value,edit.initial,'Navigation alone must not edit the value');
+  }
+  for(const value of edit.values){assert.equal(nativeDateFocusedSegment(state).focused.name.value,edit.segment);await press(edit.key);state=await read('edit');assert.equal(state.value,value,'Exact native temporal intermediate value');assert.equal(state.valid,!(stage==='date-range-invalid'&&value==='2026-10-20'),'Exact range validity at every native edit');}
+  return state;
+}
+
+export function assertTemporalAXStep(identity,stage,proof){
+  const fixture=temporalAXCases[identity];assert(fixture?.steps.includes(stage));assert.equal(proof.identity,identity);assert(proof.rootID);assert.equal(proof.truncated,false);assert.equal(proof.foreign,false);
+  const range=identity==='forms/DateRangePicker',control=stage==='date-range-invalid'||stage==='date-range-repair'?'end':'start',edit=fixture.edits[stage];
+  const native=(type,control,value,key=null)=>({type,control,value,key,trusted:true});
+  if(edit){
+    let cursor=0;
+    const events=proof.events;
+    if(stage==='date-range-invalid'){assert.deepEqual(events[cursor++],native('blur','start','2026-10-21'));assert.deepEqual(events[cursor++],native('click','end','2026-10-22'));}
+    else if(!range)assert.deepEqual(events[cursor++],native('click','start',edit.initial));
+    let prior=edit.initial;
+    while(events[cursor]?.type==='keydown'&&['Tab','Shift+Tab'].includes(events[cursor].key)){assert.deepEqual(events[cursor],native('keydown',control,prior,events[cursor].key));cursor++;}
+    for(const value of edit.values){
+      assert.deepEqual(events.slice(cursor,cursor+4),[native('keydown',control,prior,edit.key),native('input',control,value),native('change',control,value),{type:'ely:change',detail:{id:proof.rootID,component:identity,name:control==='end'?'caller_value_end':'caller_value',value,checked:false,type:fixture.type}}]);cursor+=4;prior=value;
+    }
+    assert.equal(cursor,events.length,'No extra temporal events or duplicate payloads');assert.equal(proof.value,prior);
+  }else if(stage==='period-commit'){
+    const value=fixture.edits['period-edit'].values[0];assert.equal(proof.value,value);assert.equal(proof.active,false);
+    assert(proof.events.length>=2&&proof.events.length<=9);assert.deepEqual(proof.events.at(-1),native('blur','start',value));
+    for(const event of proof.events.slice(0,-1))assert.deepEqual(event,native('keydown','start',value,'Tab'));
+  }else{
+    const events=stage==='date-range-close'?[native('blur','end','2026-10-23'),native('click','trigger','')]:stage==='date-range-escape'?[native('keydown','start','2026-10-21','Escape'),native('blur','start','2026-10-21')]:[native('click','trigger',''),native('blur','trigger','')];assert.deepEqual(proof.events,events);
+  }
+  if(range){const opened=['date-range-open','date-range-start','date-range-invalid','date-range-repair','date-range-reopen'].includes(stage);assert.deepEqual(proof.range,{start:stage==='date-range-open'?'2026-10-20':'2026-10-21',end:['date-range-open','date-range-start'].includes(stage)?'2026-10-22':stage==='date-range-invalid'?'2026-10-20':'2026-10-23',endValid:stage!=='date-range-invalid',validationMessage:stage==='date-range-invalid'?'End must not be before start.':'',expanded:opened,hidden:!opened});}
+  return proof;
+}
 export function nativeDateFocusedSegment(observation){
   assert(observation.active,'Native date field lost focus before editing');
   const segments=observation.ax.filter(n=>!n.ignored&&n.role?.value==='spinbutton'&&observation.ownedIDs.includes(n.backendDOMNodeId));
@@ -811,6 +861,8 @@ export function activatePresenceStep(step,{ada,stop}){
 }
 
 export function requestedStateContract(identity,trashFixture){
+  const temporal=temporalAXCases[identity];
+  if(temporal)return {identity,kind:temporal.kind,family:'forms',requestedStateOnly:true,focusedSequence:'forms-temporal-ax-native',nativeFormTwinWitness:true,twinFocusSelector:temporal.field,mappingGaps:[],fixtureGuards:{component:identity,...temporal},steps:temporal.steps.map(id=>({id,control:id==='date-range-invalid'||id==='date-range-repair'?'input[data-ely-date-end]':id.includes('open')||id==='date-range-close'?'[data-ely-date-range-trigger]':temporal.field,nativeTabCommit:id==='period-commit',event:'trusted native pointer/observed-owned-AX segment keyboard only',expectedState:`Exact ${identity} ${id}; every intermediate value, validity and public payload retained`,source:{siteId:`temporal-ax:${identity}:${id}`,sourceAnchor:'advanced_forms_fixtures.go; advanced.go qualified date/time values; ely-api-forms.html; ely-api-forms.js dateRange/key; ely-api.js change',provenance:'Unique owned editable AX segment required; no fill, value assignment, locale-order guess or host fulfillment'}})),scope:'Finite source-backed date-range/month/time controls only; unavailable or ambiguous AX fails closed'};
   const complexForm=complexFormCases[identity];
   if(complexForm)return {identity,kind:complexForm.kind,family:'forms',requestedStateOnly:true,focusedSequence:'forms-complex-eight-native',nativeFormTwinWitness:true,twinFocusSelector:complexForm.field,mappingGaps:[],fixtureGuards:{component:identity,...complexForm},steps:complexForm.steps.map(id=>({id,control:id==='form-submit'?'form.ely-api-inline-form button[type="submit"]':id==='array-add'?'[data-ely-array-add]':id==='array-remove'?'[data-ely-array-remove]':id==='tag-remove'?'[data-ui-action="remove-tag"][value="NewCallerTag"]':id==='mention-select'?'[data-ely-mention-value][value="beta"]':complexForm.field,nativeTabCommit:id==='email-commit',event:'trusted native input/Tab/Enter/button; source-generated notifications remain synthetic',expectedState:`Exact ${identity} ${id} ordered native/public window, state and independent twin witness`,source:{siteId:`complex-eight:${identity}:${id}`,sourceAnchor:'advanced_forms_fixtures.go Form/InlineForm/TagInput/MentionInput; ely-api-forms.html; ely-controls.html; ely-api-forms.js; ely-controls.js; ely-api.js',provenance:'Exact canonical/qualified root fixture only; no PreviewExamples or inherited runtime receipt'}})),scope:'Only listed finite root transitions; InlineForm emits save intent only, not subscription/persistence; no arbitrary props, provider or registered equivalence'};
   const rangeForm=rangeFormCases[identity];
@@ -1612,6 +1664,46 @@ export function assertCronNativePreview(expression,now,runs){
 }
 
 export async function runRequestedStateActions(contract,root,runStep,failureDiagnostics){
+  if(contract.focusedSequence==='forms-temporal-ax-native'){
+    const identity=contract.identity,fixture=temporalAXCases[identity],range=identity==='forms/DateRangePicker';assert(fixture);assert.equal(contract.nativeFormTwinWitness,true);
+    assert.equal(await root.getAttribute('data-ely-component'),identity);assert.equal(await root.getAttribute('data-ely-kind'),fixture.kind);
+    const start=root.locator(fixture.field),end=root.locator('input[data-ely-date-end]'),trigger=root.locator('[data-ely-date-range-trigger]');
+    assert.equal(await start.count(),1);assert.equal(await start.inputValue(),fixture.initial);assert.equal(await start.getAttribute('name'),'caller_value');
+    assert.deepEqual(await start.evaluate(n=>({type:n.type,disabled:n.disabled,readOnly:n.readOnly,required:n.required})),{type:fixture.type,disabled:false,readOnly:false,required:false});
+    if(identity==='forms/TimePicker')assert.equal(await start.getAttribute('step'),'900');
+    if(range){assert.equal(await end.count(),1);assert.equal(await end.inputValue(),'2026-10-22');assert.equal(await end.getAttribute('name'),'caller_value_end');assert.equal(await trigger.getAttribute('aria-expanded'),'false');}
+    const cdp=await root.page().context().newCDPSession(root.page());
+    await root.evaluate(node=>{
+      node.__temporalEvents=[];node.__temporalTruncated=false;node.__temporalForeign=false;
+      node.__temporalObserver=e=>{
+        if(node.__temporalEvents.length>=128){node.__temporalTruncated=true;return;}
+        if(e.type==='ely:action'){node.__temporalForeign=true;return;}
+        if(e.type==='ely:change'){if(e.target!==node)node.__temporalForeign=true;node.__temporalEvents.push({type:e.type,detail:{...e.detail}});return;}
+        const first=node.querySelector('input[data-ely-date-start],input[type="month"],input[type="time"]'),last=node.querySelector('input[data-ely-date-end]'),button=node.querySelector('[data-ely-date-range-trigger]'),target=e.target===first?first:e.target===last?last:e.target.closest('button')===button?button:null,control=target===first?'start':target===last?'end':target===button?'trigger':'foreign';
+        if(!target||target.closest('[data-ely-family]')!==node)node.__temporalForeign=true;
+        node.__temporalEvents.push({type:e.type,control,value:target?.value??null,key:e.type==='keydown'?(e.shiftKey&&e.key==='Tab'?'Shift+Tab':e.key):null,trusted:e.isTrusted});
+      };
+      for(const type of ['click','keydown','input','change','blur','ely:change','ely:action'])node.addEventListener(type,node.__temporalObserver,true);
+    });
+    let primaryError=null,cursor=0;
+    try{
+      for(const stage of fixture.steps)await runStep(stage,async()=>{
+        assert.equal(await root.evaluate(n=>n.__temporalEvents.length),cursor);contract.temporalAXTrace??=[];const trace=[];contract.temporalAXTrace.push({stage,trace});
+        if(stage==='date-range-open'||stage==='date-range-close'||stage==='date-range-reopen')await trigger.click();
+        else if(stage==='date-range-escape')await start.press('Escape');
+        else{
+          const field=stage==='date-range-invalid'||stage==='date-range-repair'?end:start;
+          if(stage!=='period-commit'&&!await field.evaluate(n=>n===document.activeElement))await field.click();
+          await temporalAXKeyboardRoute(identity,stage,()=>observeOwnedNativeDate(field,cdp),key=>root.page().keyboard.press(key),trace);
+        }
+      },async(_state,_before,receipt)=>{
+        const proof=await root.evaluate((node,args)=>{const field=node.querySelector(args.control==='end'?'input[data-ely-date-end]':'input[data-ely-date-start],input[type="month"],input[type="time"]'),first=node.querySelector('input[data-ely-date-start]'),last=node.querySelector('input[data-ely-date-end]'),button=node.querySelector('[data-ely-date-range-trigger]');return {identity:node.dataset.elyComponent,rootID:node.id,value:field.value,active:field===document.activeElement,events:node.__temporalEvents.slice(args.cursor),truncated:node.__temporalTruncated,foreign:node.__temporalForeign,range:first?{start:first.value,end:last.value,endValid:last.checkValidity(),validationMessage:last.validationMessage,expanded:button.getAttribute('aria-expanded')==='true',hidden:node.querySelector('[data-ely-date-range-panel]').hidden}:null};},{cursor,control:stage==='date-range-invalid'||stage==='date-range-repair'?'end':'start'});
+        proof.axTrace=contract.temporalAXTrace.at(-1);receipt.nativeFormProof=proof;assertTemporalAXStep(identity,stage,proof);cursor+=proof.events.length;return proof;
+      });
+    }catch(error){primaryError=error;if(failureDiagnostics){failureDiagnostics.temporalAXTrace=contract.temporalAXTrace;await retainFailurePayload(failureDiagnostics,'temporalAX',()=>root.evaluate(n=>({events:n.__temporalEvents,truncated:n.__temporalTruncated,foreign:n.__temporalForeign})));}throw error;}
+    finally{await cleanupPreservingPrimary(async()=>{try{await root.evaluate(node=>{for(const type of ['click','keydown','input','change','blur','ely:change','ely:action'])node.removeEventListener(type,node.__temporalObserver,true);for(const key of ['__temporalEvents','__temporalTruncated','__temporalForeign','__temporalObserver'])delete node[key];});}finally{await cdp.detach();}},primaryError,failureDiagnostics??{},'temporalAXCleanupError');}
+    return;
+  }
   if(contract.focusedSequence==='forms-complex-eight-native'){
     const identity=contract.identity,fixture=complexFormCases[identity];assert(fixture);assert.equal(contract.nativeFormTwinWitness,true);
     assert.equal(await root.getAttribute('data-ely-component'),identity);assert.equal(await root.getAttribute('data-ely-kind'),fixture.kind);
