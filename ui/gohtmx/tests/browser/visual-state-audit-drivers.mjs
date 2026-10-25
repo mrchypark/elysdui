@@ -220,7 +220,9 @@ export async function cleanupPreservingPrimary(cleanup,primaryError,failureDiagn
   }
 }
 export async function probeFailureStateAndPayload(failureDiagnostics,readState,readNativePayload){
-  let currentState=null,nativePayload=failureDiagnostics.complexForms??failureDiagnostics.presenceNativeEvents??failureDiagnostics.eightFormsNative??failureDiagnostics.nativeDate??failureDiagnostics.durationNative??null;const errors=[];
+  let currentState=null,nativePayload=failureDiagnostics.localStudio??failureDiagnostics.complexForms??failureDiagnostics.presenceNativeEvents??failureDiagnostics.eightFormsNative??failureDiagnostics.nativeDate??failureDiagnostics.durationNative??null;const errors=[];
+  if(failureDiagnostics.localStudioError)errors.push({phase:'local-studio-payload',...failureDiagnostics.localStudioError});
+  if(failureDiagnostics.localStudioCleanupError)errors.push({phase:'local-studio-cleanup',...failureDiagnostics.localStudioCleanupError});
   if(failureDiagnostics.complexFormsError)errors.push({phase:'complex-forms-payload',...failureDiagnostics.complexFormsError});
   if(failureDiagnostics.complexCleanupError)errors.push({phase:'complex-forms-cleanup',...failureDiagnostics.complexCleanupError});
   if(failureDiagnostics.presenceCleanupError)errors.push({phase:'cleanup',...failureDiagnostics.presenceCleanupError});
@@ -229,7 +231,7 @@ export async function probeFailureStateAndPayload(failureDiagnostics,readState,r
   if(failureDiagnostics.durationNativeError)errors.push({phase:'duration-native-payload',...failureDiagnostics.durationNativeError});
   if(failureDiagnostics.durationNativeCleanupError)errors.push({phase:'duration-native-cleanup',...failureDiagnostics.durationNativeCleanupError});
   try{currentState=await readState();}catch(error){errors.push({phase:'current-state',name:error?.name??'Error',message:error?.message??String(error),stack:error?.stack??null});}
-  if(nativePayload===null&&!failureDiagnostics.complexFormsError)try{nativePayload=await readNativePayload();}catch(error){errors.push({phase:'native-payload',name:error?.name??'Error',message:error?.message??String(error),stack:error?.stack??null});}
+  if(nativePayload===null&&!failureDiagnostics.complexFormsError&&!failureDiagnostics.localStudioError)try{nativePayload=await readNativePayload();}catch(error){errors.push({phase:'native-payload',name:error?.name??'Error',message:error?.message??String(error),stack:error?.stack??null});}
   return {currentState,nativePayload,...(errors.length?{diagnosticError:errors}:{})};
 }
 // No unhandled page error has a verified exception in this audit.
@@ -1318,7 +1320,15 @@ export function assertLocalStudioStep(identity,stage,proof){
     else if(stage==='gradient-alpha'){
       events=[n('change','hex','#ff0000'),generic('','#ff0000','text'),...redNotifications,n('blur','hex','#ff0000')];
       for(let value=99;value>=50;value--)events.push(n('keydown','alpha',String(value+1),'ArrowLeft'),n('input','alpha',String(value)),aggregate(stops(50,'#ff0000',value)),n('change','alpha',String(value)),generic('caller_value_color_alpha',String(value),'range'),aggregate(stops(50,'#ff0000',value)));
-    }else if(stage==='gradient-stop-right')events=[n('blur','alpha','50'),n('keydown','stop','50','ArrowRight'),aggregate(stops(51,'#ff0000',50))];
+    }else if(stage==='gradient-stop-right'){
+      events=[n('blur','alpha','50'),n('keydown','stop','50','ArrowRight'),{...n('blur','stop','50'),originalStop:true},aggregate(stops(51,'#ff0000',50))];
+      const transition=proof.stopTransition;assert(transition,'Measured original/replacement stop identity required');
+      assert.equal(transition.originalID,null);assert.equal(transition.replacementID,null);assert.equal(transition.replacementValue,'51');
+      for(const key of ['originalDetached','replacementUnique','replacementOwned','replacementIsActive','replacementSelected'])assert.equal(transition[key],true,key);
+      const related=transition.rawRelatedTarget;assert(related&&typeof related.isNull==='boolean'&&typeof related.owned==='boolean','Raw relatedTarget record required without an assumed destination');
+      for(const key of ['id','name','value','tag'])assert(related[key]===null||typeof related[key]==='string'&&related[key].length<=256,'Bounded raw relatedTarget '+key);
+      if(related.isNull){assert.equal(related.owned,false);for(const key of ['id','name','value','tag'])assert.equal(related[key],null);}
+    }
     else events=[n('keydown','stop','51','Delete'),aggregate(stops())];
   }
   assert.deepEqual(proof.events,events,'Full ordered studio window including all intermediate notifications; no deduplication or extra requests');
@@ -1839,7 +1849,7 @@ export async function runRequestedStateActions(contract,root,runStep,failureDiag
       assert.deepEqual(await root.locator(controls.alpha).evaluate(n=>[n.name,n.min,n.max,n.value]),['caller_value_color_alpha','0','100','100']);
     }
     await root.evaluate((node,{controls,signature})=>{
-      node.__studioControls=Object.fromEntries(Object.entries(controls).map(([name,selector])=>[name,node.querySelector(selector)]));node.__studioEvents=[];node.__studioBytes=0;node.__studioTruncated=false;node.__studioForeign=false;
+      node.__studioControls=Object.fromEntries(Object.entries(controls).map(([name,selector])=>[name,node.querySelector(selector)]));node.__studioEvents=[];node.__studioBytes=0;node.__studioTruncated=false;node.__studioForeign=false;node.__studioPinnedStop=null;node.__studioStopRelated=null;
       node.__studioObserver=e=>{
         if(e.type.startsWith('pointer')&&e.target!==node.__studioControls.canvas)return;
         const publicEvent=e.type.startsWith('ely:'),value=publicEvent?e.detail?.value:e.target.value;
@@ -1849,7 +1859,9 @@ export async function runRequestedStateActions(contract,root,runStep,failureDiag
         else{
           const match=Object.entries(node.__studioControls).find(([,n])=>n===e.target),control=match?.[0]??(e.target.matches('button[data-ely-gradient-stop]')?'stop':'foreign');
           if(control==='foreign'||e.target.closest('[data-ely-family]')!==node)node.__studioForeign=true;
-          record={type:e.type,control,value:e.target.value??null,key:e.key??null,trusted:e.isTrusted,...(e.type.startsWith('pointer')?{buttons:e.buttons}:{})};
+          const stopBlur=node.__studioPinnedStop&&control==='stop'&&e.type==='blur';
+          if(stopBlur){const target=e.relatedTarget;node.__studioStopRelated={isNull:target===null,id:target?.getAttribute?.('id')??null,name:target?.getAttribute?.('name')??null,value:target?.value??null,tag:target?.localName??null,owned:!!target&&node.contains(target)&&target.closest('[data-ely-family]')===node};if(Object.values(node.__studioStopRelated).some(value=>typeof value==='string'&&value.length>256)){node.__studioTruncated=true;return;}}
+          record={type:e.type,control,value:e.target.value??null,key:e.key??null,trusted:e.isTrusted,...(e.type.startsWith('pointer')?{buttons:e.buttons}:{}),...(stopBlur?{originalStop:e.target===node.__studioPinnedStop}:{})};
         }
         const size=new TextEncoder().encode(JSON.stringify(record)).byteLength;
         if(node.__studioBytes+size>1048576){node.__studioTruncated=true;return;}node.__studioBytes+=size;node.__studioEvents.push(record);
@@ -1871,7 +1883,11 @@ export async function runRequestedStateActions(contract,root,runStep,failureDiag
       else if(stage==='gradient-add')await root.locator(controls.add).press('Enter');
       else if(stage==='gradient-hex')await root.locator(controls.hex).fill('#ff0000');
       else if(stage==='gradient-alpha'){for(let index=0;index<50;index++)await root.locator(controls.alpha).press('ArrowLeft');}
-      else await root.locator(`button[data-ely-gradient-stop][value="${stage==='gradient-stop-right'?'50':'51'}"]`).press(stage==='gradient-stop-right'?'ArrowRight':'Delete');
+      else {
+        if(stage==='gradient-stop-right')await root.evaluate(node=>{const stops=[...node.querySelectorAll('button[data-ely-gradient-stop][value="50"]')];if(stops.length!==1||stops[0].closest('[data-ely-family]')!==node||stops[0].getAttribute('aria-pressed')!=='true')throw Error('Exact unique selected owned original stop50 required');node.__studioPinnedStop=stops[0];node.__studioStopRelated=null;});
+        else await root.evaluate(node=>{node.__studioPinnedStop=null;node.__studioStopRelated=null;});
+        await root.locator(`button[data-ely-gradient-stop][value="${stage==='gradient-stop-right'?'50':'51'}"]`).press(stage==='gradient-stop-right'?'ArrowRight':'Delete');
+      }
     },async(_state,_before,receipt)=>{
       const proof=await root.evaluate((node,{cursor,signature})=>{
         const q=selector=>node.querySelector(selector);let state,canvasDataURL;
@@ -1886,11 +1902,13 @@ export async function runRequestedStateActions(contract,root,runStep,failureDiag
           state={value,angle:q('[data-ely-gradient-angle]').value,stops:[...node.querySelectorAll('[data-ely-gradient-stop]')].map(n=>({at:Number(n.dataset.elyGradientAt),color:n.querySelector('[data-ely-gradient-color]').dataset.elyGradientColor,alpha:Number(n.dataset.elyGradientAlpha),selected:n.getAttribute('aria-pressed')==='true'})),hex:q('[data-ely-color-hex]').value,alpha:q('[data-ely-color-alpha]').value,start:q('[data-ely-gradient-start]').value,end:q('[data-ely-gradient-end]').value,previewMatches:!!expected.style.background&&expected.style.background===preview.style.background};
         }
         const raw=node.__studioEvents.slice(cursor),pointerButtons=raw.filter(e=>e.type.startsWith('pointer')).map(e=>e.buttons),events=raw.map(({buttons,...event})=>event);
-        return {identity:node.dataset.elyComponent,rootID:node.id,state,events,pointerButtons,...(signature?{canvasDataURL}:{}),truncated:node.__studioTruncated,foreign:node.__studioForeign};
+        let stopTransition;
+        if(node.__studioPinnedStop){const replacements=[...node.querySelectorAll('button[data-ely-gradient-stop][value="51"]')],replacement=replacements.length===1?replacements[0]:null;stopTransition={originalID:node.__studioPinnedStop.getAttribute('id'),originalDetached:!node.__studioPinnedStop.isConnected,replacementUnique:replacements.length===1,replacementID:replacement?.getAttribute('id')??null,replacementValue:replacement?.value??null,replacementOwned:!!replacement&&node.contains(replacement)&&replacement.closest('[data-ely-family]')===node,replacementIsActive:!!replacement&&document.activeElement===replacement,replacementSelected:replacement?.getAttribute('aria-pressed')==='true',rawRelatedTarget:node.__studioStopRelated};}
+        return {identity:node.dataset.elyComponent,rootID:node.id,state,events,pointerButtons,...(signature?{canvasDataURL}:{}),...(stopTransition?{stopTransition}:{}),truncated:node.__studioTruncated,foreign:node.__studioForeign};
       },{cursor,signature});
       receipt.nativeFormProof=proof;assertLocalStudioStep(identity,stage,proof);cursor+=proof.events.length;return proof;
-    });}catch(error){primaryError=error;if(failureDiagnostics)await retainFailurePayload(failureDiagnostics,'localStudio',()=>root.evaluate(n=>({events:n.__studioEvents,truncated:n.__studioTruncated,foreign:n.__studioForeign,bytes:n.__studioBytes})));throw error;}
-    finally{await cleanupPreservingPrimary(()=>root.evaluate(node=>{for(const type of ['input','change','keydown','click','blur','pointerdown','pointermove','pointerup','ely:change','ely:action'])node.removeEventListener(type,node.__studioObserver,true);for(const key of ['__studioControls','__studioEvents','__studioBytes','__studioTruncated','__studioForeign','__studioObserver'])delete node[key];}),primaryError,failureDiagnostics??{},'localStudioCleanupError');}
+    });}catch(error){primaryError=error;if(failureDiagnostics)await retainFailurePayload(failureDiagnostics,'localStudio',()=>root.evaluate(n=>({events:n.__studioEvents,truncated:n.__studioTruncated,foreign:n.__studioForeign,bytes:n.__studioBytes,rawRelatedTarget:n.__studioStopRelated,originalStop:n.__studioPinnedStop?{id:n.__studioPinnedStop.getAttribute('id'),value:n.__studioPinnedStop.value,detached:!n.__studioPinnedStop.isConnected}:null})));throw error;}
+    finally{await cleanupPreservingPrimary(()=>root.evaluate(node=>{for(const type of ['input','change','keydown','click','blur','pointerdown','pointermove','pointerup','ely:change','ely:action'])node.removeEventListener(type,node.__studioObserver,true);for(const key of ['__studioControls','__studioEvents','__studioBytes','__studioTruncated','__studioForeign','__studioObserver','__studioPinnedStop','__studioStopRelated'])delete node[key];}),primaryError,failureDiagnostics??{},'localStudioCleanupError');}
     return;
   }
   if(contract.focusedSequence==='forms-local-picker-native'){
