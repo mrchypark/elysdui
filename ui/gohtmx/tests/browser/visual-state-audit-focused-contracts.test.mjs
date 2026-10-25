@@ -19,6 +19,31 @@ import {assertActivityLogScopedAuditPage,assertCommunicationCallerRequest,assert
 
 const read=path=>readFile(new URL(`../../../../${path}`,import.meta.url),'utf8');
 
+test('activation candidate current reviewed source and exact reversal pins fail closed',async()=>{
+  const {activationMutations,activationMutants,activationMutationMetadata,activationSHA256}=await import('./palette-activation-mutants.mjs');
+  const {applyActivationAuditCandidateMutation}=await import('./palette-activation-audit-candidate.mjs');
+  const {paletteAuditCandidatePins}=await import('./palette-query-production-policy.mjs');
+  const historical=activationMutations.map(activationMutationMetadata);
+  const sources=Object.fromEntries(await Promise.all(Object.entries(historical[0].files).map(async([key,pin])=>[key,await read(pin.sourcePath)])));
+  for(const mode of activationMutations){
+    const {sources:output,metadata}=applyActivationAuditCandidateMutation(sources,mode),rule=activationMutants[mode];
+    for(const [key,pin]of Object.entries(metadata.files)){
+      assert.equal(pin.sourceSHA256,paletteAuditCandidatePins[pin.sourcePath]);
+      assert.equal(output[key],rule?.source===key?sources[key].replace(rule.find,rule.replace):sources[key]);
+      assert.equal(activationSHA256(output[key]),pin.transformedSourceSHA256);
+      assert.equal(Buffer.byteLength(output[key]),pin.transformedSourceBytes);
+      assert.throws(()=>applyActivationAuditCandidateMutation({...sources,[key]:sources[key]+'\n'},mode),/candidate source bytes/);
+      assert.throws(()=>applyActivationAuditCandidateMutation({...sources,[key]:'!'+sources[key].slice(1)},mode),/candidate source SHA256/);
+    }
+  }
+  for(const rule of Object.values(activationMutants)){
+    assert.equal(sources[rule.source].split(rule.find).length-1,1);
+    for(const changed of [sources[rule.source].replace(rule.find,''),sources[rule.source]+rule.find])
+      assert.throws(()=>applyActivationAuditCandidateMutation({...sources,[rule.source]:changed},'control'),/exactly one original site/);
+  }
+  assert.deepEqual(activationMutations.map(activationMutationMetadata),historical);
+});
+
 test('VerticalSlider product flow grows for output while native track geometry stays unchanged',async()=>{
   const css=await read('ui/gohtmx/assets/ely-api-forms.css');
   const wrapper=css.match(/\.ely-api-slider\.is-vertical\{([^}]+)\}/)?.[1],track=css.match(/\.ely-api-slider\.is-vertical input\[type=range\]\{([^}]+)\}/)?.[1];assert(wrapper&&track);
