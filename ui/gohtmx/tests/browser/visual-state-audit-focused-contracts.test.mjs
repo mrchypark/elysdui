@@ -353,6 +353,23 @@ test('eight forms paired Tab return preserves exact twin events and failure payl
   await assert.rejects(cleanupPreservingPrimary(async()=>{throw cleanupError;},null,{},'eightFormsCleanupError'),error=>error===cleanupError);
 });
 
+test('DurationPicker failure payload survives failed verification and listener cleanup',async()=>{
+  const failureDiagnostics={},payload={native:[{type:'change',trusted:true,targetId:'duration-field',value:'31'}],public:[{type:'ely:change',detail:{value:'wrong'}}]};let livePayload=payload,primaryError;
+  try{assertDurationNativeProof('commit',{identity:'forms/DurationPicker',rootID:'duration-root',fieldID:'duration-field',type:'number',value:'31',valid:true,hostRequests:0,focusLeft:true,truncated:false,nativeEvents:payload.native,publicEvents:payload.public});}
+  catch(error){primaryError=error;await retainFailurePayload(failureDiagnostics,'durationNative',async()=>livePayload);}
+  finally{await cleanupPreservingPrimary(async()=>{livePayload=null;},primaryError,failureDiagnostics,'durationNativeCleanupError');}
+  assert(primaryError,'The intentionally wrong payload must fail verification');
+  const retained=await probeFailureStateAndPayload(failureDiagnostics,async()=>({closed:true}),async()=>{assert.equal(livePayload,null);throw Error('listener state was already cleaned');});
+  assert.deepEqual(retained.nativePayload,payload,'The pre-cleanup native and public evidence remains the persisted failure payload');
+  assert.deepEqual(retained.diagnosticError,undefined);
+  const failedRead={};await retainFailurePayload(failedRead,'durationNative',async()=>{throw Error('duration listener read failed');});
+  const readFailure=await probeFailureStateAndPayload(failedRead,async()=>({}),async()=>{throw Error('no fallback payload');});
+  assert.deepEqual(readFailure.diagnosticError.map(error=>error.phase),['duration-native-payload','native-payload']);
+  const cleanupError=Error('duration listener cleanup failed');await cleanupPreservingPrimary(async()=>{throw cleanupError;},Error('original proof failure'),failedRead,'durationNativeCleanupError');
+  const cleanupFailure=await probeFailureStateAndPayload(failedRead,async()=>({}),async()=>null);
+  assert(cleanupFailure.diagnosticError.some(error=>error.phase==='duration-native-cleanup'&&error.message===cleanupError.message));
+});
+
 test('Input TextField ClearableInput finite native contracts preserve aliases and distinguish production clear events',async()=>{
   const identities=['forms/Input','forms/TextField','forms/ClearableInput'];
   for(const identity of identities){
