@@ -929,6 +929,7 @@ try {
         unsupportedSiteCountForModule: selectedModule.transformed.unsupported.length, uncapturedSiteMapping: namedUnsupported.length ? 'mapped' : 'transform prototype does not statically map this check key; runtime active case attribution used for reached safe sites',
       });
       console.log(`${item.caseId}: ${classification}; checkpoints=${instrumentSites.length}`);
+      if(targetContract&&(!requestedStateProofSafe(requestedStateEvidence)||unhandledBrowserErrors(browserErrors).length)){requestedStateStopped=true;break;}
     }
     await Promise.all(contexts.map(context => context.close()));
     assert(interceptCount > 0, `interception count ${filename}`);
@@ -976,7 +977,7 @@ try {
   await writeFile(resolve(options.output, 'report.json'), JSON.stringify(report, null, 2) + '\n', {flag: 'wx'});
   await writeFile(resolve(options.output, 'blockers.json'), JSON.stringify({runtime: report.runtime, caseCount: report.caseCount, checkpointCount: report.checkpointCount, equivalentWithCheckpoints: report.equivalentWithCheckpoints, fullRunGate: report.fullRunGate}, null, 2) + '\n', {flag: 'wx'});
   console.log(`Evidence: ${resolve(options.output, 'report.json')}; cases=${report.caseCount}; checkpoints=${report.checkpointCount}; captures=${report.imageCount}; ${(report.captureBytes / 1048576).toFixed(2)} MiB`);
-  if(options.statesOnly&&!report.requestedStateGate.safe)process.exitCode=1;
+  if(requestedStateStopped||options.statesOnly&&!report.requestedStateGate.safe)process.exitCode=1;
   }
 } catch (error) {
   primaryRunError=error;

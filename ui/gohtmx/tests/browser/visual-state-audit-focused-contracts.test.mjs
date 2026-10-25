@@ -244,10 +244,35 @@ test('requested-state execution stops unsafe proof before next case and ignores 
   assert.deepEqual((await execute(unsafe)).seen,['first']);assert.equal((await execute(unsafe)).requestedStateStopped,true);
   assert.deepEqual((await execute(safe)).seen,['first','next']);assert.equal((await execute(safe)).requestedStateStopped,false);
   for(const proof of [{...safe,status:'failed'},{...safe,receipts:[]},{...safe,visualActionabilityGaps:undefined}])assert.equal(requestedStateProofSafe(proof),false);
-  const exitLine=source.split('\n').find(line=>line.includes('if(options.statesOnly&&!report.requestedStateGate.safe)process.exitCode=1;'));assert(exitLine);
-  const status=report=>{const process={exitCode:0};runInNewContext(exitLine,{process,options:{statesOnly:true},report});return process.exitCode;};
+  const exitLine=source.split('\n').find(line=>line.includes('if(requestedStateStopped||options.statesOnly&&!report.requestedStateGate.safe)process.exitCode=1;'));assert(exitLine);
+  const status=report=>{const process={exitCode:0};runInNewContext(exitLine,{process,requestedStateStopped:false,options:{statesOnly:true},report});return process.exitCode;};
   assert.equal(status({requestedStateGate:{safe:false},fullRunGate:{safe:false}}),1);assert.equal(status({requestedStateGate:{safe:true},fullRunGate:{safe:false}}),0);
   assert(source.indexOf("'report.json'), JSON.stringify(report")<source.indexOf(exitLine));assert(source.includes('if(requestedStateStopped)break;'));
+});
+
+test('mixed requested proof stops after recorded evidence closes contexts and rejects missing read or cleanup failures',async()=>{
+  const source=await read('ui/gohtmx/tests/browser/visual-state-audit-actions.mjs');
+  const guard=source.split('\n').find(line=>line.includes('if(targetContract&&(!requestedStateProofSafe(requestedStateEvidence)'));
+  assert(guard);const record=source.indexOf('reports.push({caseId: item.caseId'),stop=source.indexOf(guard),close=source.indexOf('await Promise.all(contexts.map(context => context.close()));',stop);
+  assert(record>=0&&record<stop&&stop<close&&close<source.indexOf('if(requestedStateStopped)break;',close));
+  const safe={status:'passed',receipts:[{assertionsPassed:true}],visualActionabilityGaps:[]};
+  const execute=async(proof,{readError=false,cleanupError=false}={})=>{
+    const order=[],reports=[];let stopped;
+    const run=runInNewContext(`async()=>{let requestedStateStopped=false;try{for(const item of ['first','next']){const targetContract={};const requestedStateEvidence=await readProof(item);reports.push({item,requestedStateEvidence});record(item);${guard}}}finally{await Promise.all(contexts.map(context=>context.close()));}return requestedStateStopped;}`,{
+      requestedStateProofSafe,unhandledBrowserErrors:()=>[],browserErrors:[],reports,
+      readProof:async item=>{order.push('read:'+item);if(readError)throw Error('proof read failed');return item==='first'?proof:safe;},record:item=>order.push('record:'+item),
+      contexts:[{close:async()=>{order.push('close');if(cleanupError)throw Error('context cleanup failed');}}],
+    });
+    try{stopped=await run();}catch(error){return {order,reports,error};}return {order,reports,stopped};
+  };
+  for(const proof of [null,undefined,{...safe,status:'failed'},{...safe,visualActionabilityGaps:[{reason:'foreign twin'}]}]){
+    const result=await execute(proof);assert.deepEqual(result.order,['read:first','record:first','close']);assert.equal(result.reports.length,1);assert.equal(result.stopped,true);
+  }
+  assert.deepEqual((await execute(safe)).order,['read:first','record:first','read:next','record:next','close']);
+  const readFailure=await execute(safe,{readError:true});assert.match(String(readFailure.error),/proof read failed/);assert.deepEqual(readFailure.order,['read:first','close']);assert.equal(readFailure.reports.length,0);
+  const cleanupFailure=await execute(null,{cleanupError:true});assert.match(String(cleanupFailure.error),/context cleanup failed/);assert.deepEqual(cleanupFailure.order,['read:first','record:first','close']);
+  const exit=source.split('\n').find(line=>line.includes('if(requestedStateStopped||options.statesOnly&&!report.requestedStateGate.safe)process.exitCode=1;'));
+  const process={exitCode:0};runInNewContext(exit,{process,requestedStateStopped:true,options:{statesOnly:false},report:{requestedStateGate:{safe:false},fullRunGate:{safe:false}}});assert.equal(process.exitCode,1);
 });
 
 test('temporal AX three exact routes preserve every intermediate and stop ambiguous or wrong input',async()=>{
