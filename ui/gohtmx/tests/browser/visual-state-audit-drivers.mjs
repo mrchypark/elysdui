@@ -1369,7 +1369,12 @@ export function assertComplexFormStep(identity,stage,proof){
     if(stage==='array-add')assert.deepEqual(proof.arrayPostFocus,{...destination,matchesNewPrimaryInput:true},'Post-click active element independently equals the unique newly added primary input');
   }else if(fixture.mode==='tag'){
     state={value:stage==='tag-add'?`alpha,${tag}`:'alpha',entry:stage==='tag-edit'?tag:'',tags:stage==='tag-add'?['alpha',tag]:['alpha']};
-    events=stage==='tag-edit'?[native('input','field',tag)]:stage==='tag-add'?[native('keydown','field',tag,true,'Enter'),native('input','hidden',`alpha,${tag}`,false),native('change','hidden',`alpha,${tag}`,false),fieldChange('caller_value',`alpha,${tag}`,'hidden')]:[native('blur','field',''),native('click','remove',tag),native('input','hidden','alpha',false),native('change','hidden','alpha',false),fieldChange('caller_value','alpha','hidden')];
+    events=stage==='tag-edit'?[native('input','field',tag)]:stage==='tag-add'?[native('keydown','field',tag,true,'Enter'),native('input','hidden',`alpha,${tag}`,false),native('change','hidden',`alpha,${tag}`,false),fieldChange('caller_value',`alpha,${tag}`,'hidden')]:[native('blur','field',''),native('click','remove',tag),{...native('blur','remove',tag),removal:{targetWasPinned:true,relatedTargetIsNull:true,relatedTargetID:null,relatedTargetName:null}},native('input','hidden','alpha',false),native('change','hidden','alpha',false),fieldChange('caller_value','alpha','hidden')];
+    if(stage==='tag-remove'){
+      const focus=proof.tagRemoval;assert(focus,'Measured removal focus witness required');
+      for(const key of ['entryIsActive','entryUnique','entryOwned','removeDetached'])assert.equal(focus[key],true,key);
+      assert.equal(focus.entryName,null);assert.equal(typeof focus.entryID,'string');assert(focus.entryID&&focus.entryID!==proof.rootID,'Record actual authored entry ID, never invent a removed-control ID');
+    }
     // A user edit restored to its original empty value can commit or remain unchanged on blur.
     if(stage==='tag-remove'&&proof.events[0]?.type==='change')events.unshift(native('change','field',''));
   }else{
@@ -1931,7 +1936,7 @@ export async function runRequestedStateActions(contract,root,runStep,failureDiag
       if(fixture.mode==='mention')assert.deepEqual(await root.locator('[data-ely-mention-value]').evaluateAll(ns=>ns.map(n=>[n.value,n.textContent])),[['alpha','Caller Alpha'],['beta','Caller Beta']]);
     }
     await root.evaluate((node,fixture)=>{
-      node.__complexEvents=[];node.__complexTruncated=false;node.__complexForeign=false;node.__complexSubmit=null;
+      node.__complexEvents=[];node.__complexTruncated=false;node.__complexForeign=false;node.__complexSubmit=null;node.__complexPinnedRemove=null;node.__complexTagEntry=fixture.mode==='tag'?node.querySelector(fixture.field):null;
       node.__complexObserver=e=>{
         if(node.__complexEvents.length>=64){node.__complexTruncated=true;return;}
         if(e.type.startsWith('ely:')){if(e.target!==node)node.__complexForeign=true;const detail={...e.detail},actualFormData=detail.formData instanceof FormData;if(actualFormData)detail.formData=[...detail.formData];node.__complexEvents.push({type:e.type,detail:JSON.parse(JSON.stringify(detail)),...(e.type==='ely:action'?{actualFormData}:{})});return;}
@@ -1939,6 +1944,7 @@ export async function runRequestedStateActions(contract,root,runStep,failureDiag
         const field=node.querySelector(fixture.field),button=e.target.closest('button');let control='foreign',target=e.target;
         if(e.target===field)control='field';
         else if(e.target.matches('input[type="hidden"][name="caller_value"]')&&fixture.mode==='tag')control='hidden';
+        else if(fixture.mode==='tag'&&e.target===node.__complexPinnedRemove)control='remove';
         else if(e.type==='submit'&&e.target===node.querySelector('form.ely-api-inline-form')){control='form';node.__complexSubmit=e;}
         else if(button){target=button;if(button===node.querySelector('[data-ely-array-add]'))control='add';else if(button===node.querySelector(fixture.mode==='tag'?'[data-ui-action="remove-tag"][value="NewCallerTag"]':'[data-ely-array-remove]'))control='remove';else if(button===node.querySelector('[data-ely-mention-value][value="beta"]'))control='option';else if(button===node.querySelector('form.ely-api-inline-form button[type="submit"]'))control='submit';}
         if(control==='foreign')node.__complexForeign=true;
@@ -1947,7 +1953,8 @@ export async function runRequestedStateActions(contract,root,runStep,failureDiag
           const path='.ely-api-field-array > [data-ely-field-array] > [data-ely-array-row]:only-child > input[name="links"]',inputs=[...node.querySelectorAll(path)],added=inputs.length===1?inputs[0]:null,destination=e.relatedTarget;
           relatedTarget={matchesNewPrimaryInput:!!added&&destination===added,rawID:destination?.getAttribute?.('id')??null,rawName:destination?.getAttribute?.('name')??null,owned:!!destination&&node.contains(destination)&&destination.closest('[data-ely-family]')===node,ownedPath:!!destination&&destination.matches?.(path)?path:null,uniqueNewInput:inputs.length===1};
         }
-        node.__complexEvents.push({type:e.type,control,value:control==='form'?null:target.value??null,trusted:e.isTrusted,key:e.key??null,...(relatedTarget?{relatedTarget}:{})});
+        const removal=fixture.mode==='tag'&&control==='remove'&&e.type==='blur'?{targetWasPinned:e.target===node.__complexPinnedRemove,relatedTargetIsNull:e.relatedTarget===null,relatedTargetID:e.relatedTarget?.getAttribute?.('id')??null,relatedTargetName:e.relatedTarget?.getAttribute?.('name')??null}:null;
+        node.__complexEvents.push({type:e.type,control,value:control==='form'?null:target.value??null,trusted:e.isTrusted,key:e.key??null,...(relatedTarget?{relatedTarget}:{}),...(removal?{removal}:{})});
       };
       for(const type of ['input','change','keydown','blur','click','submit','ely:change','ely:action'])node.addEventListener(type,node.__complexObserver,true);
     },fixture);
@@ -1963,7 +1970,11 @@ export async function runRequestedStateActions(contract,root,runStep,failureDiag
         else if(stage==='array-remove')await root.locator('[data-ely-array-row] [data-ely-array-remove]').click();
         else if(stage==='tag-edit')await field().fill('NewCallerTag');
         else if(stage==='tag-add'){assert.equal(await field().evaluate(n=>n===document.activeElement),true);await field().press('Enter');}
-        else if(stage==='tag-remove')await root.locator('[data-ui-action="remove-tag"][value="NewCallerTag"]').click();
+        else if(stage==='tag-remove'){
+          const remove=root.locator('[data-ui-action="remove-tag"][value="NewCallerTag"]');assert.equal(await remove.count(),1);
+          await root.evaluate(node=>{const button=node.querySelector('[data-ui-action="remove-tag"][value="NewCallerTag"]');if(!button||button.closest('[data-ely-family]')!==node)throw Error('Exact owned tag remove required');node.__complexPinnedRemove=button;});
+          await remove.click();
+        }
         else if(stage==='mention-edit')await field().fill(identity==='forms/HashtagInput'?'#b':'@b');
         else {const option=root.locator('[data-ely-mention-value][value="beta"]');assert.equal(await option.isVisible(),true);await option.click();}
       },async(_state,_before,receipt)=>{
@@ -1975,12 +1986,13 @@ export async function runRequestedStateActions(contract,root,runStep,failureDiag
             const path='.ely-api-field-array > [data-ely-field-array] > [data-ely-array-row]:only-child > input[name="links"]',inputs=[...node.querySelectorAll(path)],added=inputs.length===1?inputs[0]:null,destination=document.activeElement;
             arrayPostFocus={matchesNewPrimaryInput:!!added&&destination===added,rawID:destination?.getAttribute?.('id')??null,rawName:destination?.getAttribute?.('name')??null,owned:!!destination&&node.contains(destination)&&destination.closest('[data-ely-family]')===node,ownedPath:!!destination&&destination.matches?.(path)?path:null,uniqueNewInput:inputs.length===1};
           }
-          return {identity:node.dataset.elyComponent,rootID:node.id,truncated:node.__complexTruncated,foreignEvents:node.__complexForeign,events:node.__complexEvents.slice(args.cursor),state,focusLeft:field!==document.activeElement,...(arrayPostFocus?{arrayPostFocus}:{}),siblings:mode==='field'?[...node.querySelectorAll('input,textarea')].filter(n=>n.name!=='email').map(n=>[n.name,n.value]):[],submitterMatches:node.__complexSubmit?.submitter===node.querySelector('form.ely-api-inline-form button[type="submit"]'),submitDefaultPrevented:node.__complexSubmit?.defaultPrevented??false};
+          const tagRemoval=mode==='tag'&&node.__complexPinnedRemove?{entryIsActive:document.activeElement===node.__complexTagEntry,entryUnique:node.querySelectorAll(args.fixture.field).length===1,entryOwned:node.contains(node.__complexTagEntry)&&node.__complexTagEntry.closest('[data-ely-family]')===node,entryID:node.__complexTagEntry.getAttribute('id'),entryName:node.__complexTagEntry.getAttribute('name'),removeDetached:!node.__complexPinnedRemove.isConnected}:null;
+          return {identity:node.dataset.elyComponent,rootID:node.id,truncated:node.__complexTruncated,foreignEvents:node.__complexForeign,events:node.__complexEvents.slice(args.cursor),state,focusLeft:field!==document.activeElement,...(arrayPostFocus?{arrayPostFocus}:{}),...(tagRemoval?{tagRemoval}:{}),siblings:mode==='field'?[...node.querySelectorAll('input,textarea')].filter(n=>n.name!=='email').map(n=>[n.name,n.value]):[],submitterMatches:node.__complexSubmit?.submitter===node.querySelector('form.ely-api-inline-form button[type="submit"]'),submitDefaultPrevented:node.__complexSubmit?.defaultPrevented??false};
         },{fixture,cursor});
         receipt.nativeFormProof=proof;assertComplexFormStep(identity,stage,proof);cursor+=proof.events.length;return proof;
       });
     }catch(error){primaryError=error;if(failureDiagnostics)await retainFailurePayload(failureDiagnostics,'complexForms',()=>root.evaluate(n=>({events:n.__complexEvents,truncated:n.__complexTruncated,foreign:n.__complexForeign})));throw error;}
-    finally{await cleanupPreservingPrimary(()=>root.evaluate(node=>{for(const type of ['input','change','keydown','blur','click','submit','ely:change','ely:action'])node.removeEventListener(type,node.__complexObserver,true);for(const key of ['__complexEvents','__complexTruncated','__complexForeign','__complexSubmit','__complexObserver'])delete node[key];}),primaryError,failureDiagnostics??{},'complexCleanupError');}
+    finally{await cleanupPreservingPrimary(()=>root.evaluate(node=>{for(const type of ['input','change','keydown','blur','click','submit','ely:change','ely:action'])node.removeEventListener(type,node.__complexObserver,true);for(const key of ['__complexEvents','__complexTruncated','__complexForeign','__complexSubmit','__complexObserver','__complexPinnedRemove','__complexTagEntry'])delete node[key];}),primaryError,failureDiagnostics??{},'complexCleanupError');}
     return;
   }
   if(contract.focusedSequence==='forms-range-native'){

@@ -299,7 +299,7 @@ test('complex eight forms require twenty whole ordered native and public windows
     else if(name==='TagInput'||name==='TokenInput')rows=[
       ['tag-edit',{value:'alpha',entry:tag,tags:['alpha']},[n('input','field',tag)]],
       ['tag-add',{value:'alpha,'+tag,entry:'',tags:['alpha',tag]},[n('keydown','field',tag,true,'Enter'),n('input','hidden','alpha,'+tag,false),n('change','hidden','alpha,'+tag,false),c('caller_value','alpha,'+tag,'hidden')]],
-      ['tag-remove',{value:'alpha',entry:'',tags:['alpha']},[n('blur','field',''),n('click','remove',tag),n('input','hidden','alpha',false),n('change','hidden','alpha',false),c('caller_value','alpha','hidden')]],
+      ['tag-remove',{value:'alpha',entry:'',tags:['alpha']},[n('blur','field',''),n('click','remove',tag),{...n('blur','remove',tag),removal:{targetWasPinned:true,relatedTargetIsNull:true,relatedTargetID:null,relatedTargetName:null}},n('input','hidden','alpha',false),n('change','hidden','alpha',false),c('caller_value','alpha','hidden')]],
     ];
     else rows=[
       ['mention-edit',{value:query,listHidden:false,visible:['beta']},[n('input','field',query)]],
@@ -307,7 +307,7 @@ test('complex eight forms require twenty whole ordered native and public windows
     ];
     assert.deepEqual(contract.steps.map(s=>s.id),rows.map(r=>r[0]));
     for(const [stage,state,events]of rows){
-      const proof={identity,rootID:'primary',truncated:false,foreignEvents:false,state,events,...(stage==='array-add'?{arrayPostFocus:destination}:{}),focusLeft:stage==='email-commit',siblings:name==='FormField'||name==='FormSection'?[['name',''],['bio','']]:[],submitterMatches:true,submitDefaultPrevented:true};
+      const proof={identity,rootID:'primary',truncated:false,foreignEvents:false,state,events,...(stage==='array-add'?{arrayPostFocus:destination}:{}),...(stage==='tag-remove'?{tagRemoval:{entryIsActive:true,entryUnique:true,entryOwned:true,entryID:'actual-entry-id',entryName:null,removeDetached:true}}:{}),focusLeft:stage==='email-commit',siblings:name==='FormField'||name==='FormSection'?[['name',''],['bio','']]:[],submitterMatches:true,submitDefaultPrevented:true};
       assertComplexFormStep(identity,stage,proof);count++;
       for(const mutate of [p=>p.identity='forms/Other',p=>p.truncated=true,p=>p.foreignEvents=true,p=>p.events[0].trusted=false,p=>p.events.push({type:'ely:action',detail:{action:'save'}}),p=>p.events.pop()]){const bad=structuredClone(proof);mutate(bad);assert.throws(()=>assertComplexFormStep(identity,stage,bad));}
       if(events.length>1){const bad=structuredClone(proof);bad.events.reverse();assert.throws(()=>assertComplexFormStep(identity,stage,bad));}
@@ -317,6 +317,7 @@ test('complex eight forms require twenty whole ordered native and public windows
       if(stage==='email-commit')assert.throws(()=>assertComplexFormStep(identity,stage,{...proof,focusLeft:false}));
       if(stage==='array-add')for(const mutate of [p=>p.events[1].control='field',p=>p.events[1].relatedTarget.matchesNewPrimaryInput=false,p=>p.events[1].relatedTarget.rawID='invented-id',p=>p.events[1].relatedTarget.rawName='foreign',p=>p.events[1].relatedTarget.owned=false,p=>p.events[1].relatedTarget.uniqueNewInput=false,p=>p.events[1].relatedTarget.ownedPath=null,p=>p.arrayPostFocus={...destination,matchesNewPrimaryInput:false},p=>[p.events[1],p.events[2]]=[p.events[2],p.events[1]],p=>p.events.push(p.events[2])]){const bad=structuredClone(proof);mutate(bad);assert.throws(()=>assertComplexFormStep(identity,stage,bad));}
       if(stage==='tag-remove'){const committed=structuredClone(proof);committed.events.unshift(n('change','field',''));assertComplexFormStep(identity,stage,committed);committed.events.unshift(n('change','field',''));assert.throws(()=>assertComplexFormStep(identity,stage,committed));}
+      if(stage==='tag-remove')for(const mutate of [p=>p.events[2].control='field',p=>p.events[2].removal.targetWasPinned=false,p=>p.events[2].removal.relatedTargetIsNull=false,p=>p.tagRemoval.entryIsActive=false,p=>p.tagRemoval.entryOwned=false,p=>p.tagRemoval.entryUnique=false,p=>p.tagRemoval.removeDetached=false,p=>[p.events[2],p.events[3]]=[p.events[3],p.events[2]],p=>p.events.push(p.events[5])]){const bad=structuredClone(proof);mutate(bad);assert.throws(()=>assertComplexFormStep(identity,stage,bad));}
     }
   }
   assert.equal(count,20);assert.throws(()=>assertComplexFormStep('forms/Form','email-edit',{}));
@@ -361,6 +362,27 @@ test('FieldArray actual blur observer binds relatedTarget node identity without 
   assert.equal(node.__complexEvents[1].relatedTarget.matchesNewPrimaryInput,false,'Identical attributes are not the actual newly added input');
   assert.equal(node.__complexEvents[1].relatedTarget.owned,false);
   assert(branch.includes('destination=document.activeElement'));assert(branch.includes('arrayPostFocus={matchesNewPrimaryInput:!!added&&destination===added'));
+});
+
+test('Tag Token removal production order and exact pinned blur observer do not inherit FieldArray destination',async()=>{
+  const controls=await read('ui/gohtmx/assets/ely-controls.js'),driver=await read('ui/gohtmx/tests/browser/visual-state-audit-drivers.mjs');
+  const removeCode=controls.slice(controls.indexOf("if (action === 'remove-tag')"),controls.indexOf("if (action === 'add-pair')"));
+  const start=driver.indexOf("if(contract.focusedSequence==='forms-complex-eight-native')"),branch=driver.slice(start,driver.indexOf("if(contract.focusedSequence==='forms-range-native')",start));
+  const opening='await root.evaluate((node,fixture)=>{',body=branch.slice(branch.indexOf(opening)+opening.length,branch.indexOf('},fixture);'));
+  for(const identity of ['forms/TagInput','forms/TokenInput']){
+    assert.equal(requestedStateContract(identity).fixtureGuards.mode,'tag');
+    const timeline=[],listeners={},field={value:'',getAttribute:name=>name==='id'?'real-entry':null,closest:()=>node},hidden={value:'alpha,NewCallerTag'},remove={value:'NewCallerTag',closest:selector=>selector==='button'?remove:node,matches:()=>false};
+    const node={querySelector:selector=>selector.includes('hidden')?hidden:selector.includes('remove-tag')?remove:field,addEventListener:(type,fn)=>listeners[type]=fn};
+    runInNewContext(body,{node,fixture:{mode:'tag',field:'input[data-ui-tag-entry]'}});node.__complexPinnedRemove=remove;
+    field.focus=()=>timeline.push('focus-entry');
+    const component={querySelector:()=>field};
+    const run=runInNewContext('(event)=>{const action="remove-tag";'+removeCode+'}',{component,hiddenValue:()=>hidden,text:value=>value.trim(),syncTags:owner=>{assert.equal(owner,component);timeline.push('replace-children');listeners.blur({type:'blur',target:remove,relatedTarget:null,isTrusted:true});},notifyValue:input=>{assert.equal(input,hidden);timeline.push('hidden-notifications');}});
+    run({target:remove});assert.equal(hidden.value,'alpha');assert.deepEqual(timeline,['replace-children','hidden-notifications','focus-entry']);
+    const event=node.__complexEvents[0];assert.equal(event.control,'remove');assert.equal(event.trusted,true);assert.deepEqual({...event.removal},{targetWasPinned:true,relatedTargetIsNull:true,relatedTargetID:null,relatedTargetName:null});
+    node.__complexEvents=[];listeners.blur({type:'blur',target:remove,relatedTarget:field,isTrusted:true});assert.equal(node.__complexEvents[0].removal.relatedTargetIsNull,false,'Do not claim entry is the removal-blur relatedTarget; entry focus is a later independent operation');
+  }
+  assert(controls.includes('host.replaceChildren(...values.map'));
+  assert(branch.includes('entryIsActive:document.activeElement===node.__complexTagEntry'));assert(branch.includes('removeDetached:!node.__complexPinnedRemove.isConnected'));
 });
 
 test('seven range forms require eighteen exact native transitions with independent payload bounds and trust',()=>{
