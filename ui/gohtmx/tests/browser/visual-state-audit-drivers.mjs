@@ -16,9 +16,17 @@ export function assertJsonHighlight(source,highlight){
 }
 
 export function assertFormTwinWitness(before,after){
-  assert.deepEqual(after.snapshot,before.snapshot,'Form native action must preserve the independent twin snapshot');
-  assert.equal(after.focusWithin,before.focusWithin,'Form native action must not move focus into or out of the independent twin');
-  assert.deepEqual(after.events,before.events,'Form native action must not dispatch events in the independent twin');
+  assert(before&&typeof before==='object'&&after&&typeof after==='object','Native form twin witness is required');
+  assert(before.snapshot&&typeof before.snapshot==='object'&&after.snapshot&&typeof after.snapshot==='object','Native form twin snapshot is required');
+  assert.equal(typeof before.focusWithin,'boolean','Native form twin before-focus state is required');
+  assert.equal(typeof after.focusWithin,'boolean','Native form twin after-focus state is required');
+  assert(Array.isArray(before.events),'Native form twin before-event list is required');
+  assert(Array.isArray(after.events),'Native form twin after-event list is required');
+  assert.deepEqual(after.snapshot,before.snapshot,'Native form action must preserve the independent twin snapshot');
+  assert.equal(before.focusWithin,false,'Native form action must start outside the independent twin');
+  assert.equal(after.focusWithin,false,'Native form action must not move focus into the independent twin');
+  assert.deepEqual(before.events,[],'Native form twin must have no pre-action events');
+  assert.deepEqual(after.events,before.events,'Native form action must not dispatch events in the independent twin');
   return true;
 }
 

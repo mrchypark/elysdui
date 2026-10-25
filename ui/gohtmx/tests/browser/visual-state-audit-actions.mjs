@@ -371,10 +371,10 @@ async function directCaseDriver({item, familyURL, captures, reference, semanticS
     const twin = record.locator('[data-audit-twin] > [data-ely-family]');
     await page.waitForFunction(node => node.dataset.elyReady === 'true', await root.elementHandle());
     const initialTwin=await snapshot(twin);
-    const formTwinWitness=contract.identity==='forms/Form';
+    const formTwinWitness=contract.identity==='forms/Form'||contract.focusedSequence==='forms-six-qualified-native-local';
     if(formTwinWitness){
-      assert.equal(await twin.count(),1,'Form requires its exact independent twin');
-      assert.equal(await twin.getAttribute('data-ely-component'),contract.identity,'Form twin must retain the same canonical component identity');
+      assert.equal(await twin.count(),1,'Native form case requires its exact independent twin');
+      assert.equal(await twin.getAttribute('data-ely-component'),contract.identity,'Native form twin must retain the same exact component identity');
       await twin.evaluate(node=>{node.__visualFormTwinEvents=[];for(const type of ['beforeinput','input','change','click','submit','focusin','focusout','ely:change','ely:action'])node.addEventListener(type,event=>node.__visualFormTwinEvents.push({type:event.type,isTrusted:event.isTrusted,target:event.target?.name||event.target?.dataset?.name||event.target?.getAttribute?.('data-ui-action')||event.target?.tagName||null}),true);});
     }
     const readFormTwinWitness=async()=>({snapshot:await snapshot(twin),focusWithin:await twin.evaluate(node=>node.contains(document.activeElement)),events:await twin.evaluate(node=>node.__visualFormTwinEvents.map(event=>({...event})))});
