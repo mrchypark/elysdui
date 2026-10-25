@@ -954,22 +954,22 @@ test('opt-in DateTime Week DL native segment cause diagnostic only',{skip:proces
   finally{try{if(browser)await browser.close();proof.cleanup=true;}finally{const text=segmentDiagnosticOutput(proof);await writeFile(output,text,{flag:'wx'});if(!proof.failed)assert(!JSON.parse(text).failed,'Diagnostic output truncated');}}
 });
 
-test('Relative cause route orders native ArrowUp Enter and rejects focus trust cancellation destination and extras',async()=>{
+test('Relative cause route orders one Space open ArrowUp Enter hypothesis and rejects focus trust cancellation destination and extras',async()=>{
   const key=key=>({type:'keydown',targetID:'primary-field',key,trusted:true,defaultPrevented:false});
   const notes=[{type:'input',targetID:'primary-field',value:'Yesterday',trusted:true},{type:'change',targetID:'primary-field',value:'Yesterday',trusted:true},{type:'ely:change',detail:{id:'primary',component:'forms/RelativeDatePicker',name:'caller_value',value:'Yesterday',checked:false,type:'select-one'}}];
   const run=async(mutate=()=>{},immediate=false)=>{
-    const calls=[],observations=[],states=[{events:[],value:'Last 7 days'},{events:immediate?[key('ArrowUp'),...notes]:[key('ArrowUp')],value:immediate?'Yesterday':'Last 7 days'},{events:immediate?[key('ArrowUp'),...notes,key('Enter')]:[key('ArrowUp'),key('Enter'),...notes],value:'Yesterday'}].map(s=>({fieldID:'primary-field',rootID:'primary',active:true,uniqueOwned:true,truncated:false,...structuredClone(s)}));mutate(states);
+    const calls=[],observations=[],states=[{events:[],value:'Last 7 days'},{events:[key(' ')],value:'Last 7 days'},{events:immediate?[key(' '),key('ArrowUp'),...notes]:[key(' '),key('ArrowUp')],value:immediate?'Yesterday':'Last 7 days'},{events:immediate?[key(' '),key('ArrowUp'),...notes,key('Enter')]:[key(' '),key('ArrowUp'),key('Enter'),...notes],value:'Yesterday'}].map(s=>({fieldID:'primary-field',rootID:'primary',active:true,uniqueOwned:true,truncated:false,...structuredClone(s)}));mutate(states);
     const result=await diagnoseRelativeNativeCommit({focus:async()=>calls.push('focus'),press:async key=>calls.push(key)},async stage=>{calls.push(stage);return states.shift();},observations);return {result,calls,observations};
   };
-  assert.deepEqual((await run()).calls,['focus','focused-before','ArrowUp','after-ArrowUp','Enter','after-Enter']);assert.equal((await run()).result.contractApproval,false);assert.equal((await run(()=>{},true)).result.commitPhase,'ArrowUp');
-  for(const mutate of [s=>s[0].active=false,s=>s[0].uniqueOwned=false,s=>s[1].events[0].trusted=false,s=>s[1].events[0].defaultPrevented=true,s=>s[1].events[0].targetID='twin',s=>s[2].fieldID='twin',s=>s[2].value='Last 7 days',s=>s[2].events.push(notes[2]),s=>s[2].events.reverse(),s=>s[2].truncated=true])await assert.rejects(()=>run(mutate));
+  assert.deepEqual((await run()).calls,['focus','focused-before','Space','after-Space','ArrowUp','after-ArrowUp','Enter','after-Enter']);assert.equal((await run()).result.contractApproval,false);assert.equal((await run()).result.hypothesis,'space-open-arrow-up-enter');assert.equal((await run(()=>{},true)).result.commitPhase,'ArrowUp');
+  for(const mutate of [s=>s[0].active=false,s=>s[0].uniqueOwned=false,s=>s[1].events[0].trusted=false,s=>s[1].events[0].defaultPrevented=true,s=>s[1].events[0].targetID='twin',s=>s[1].value='Yesterday',s=>s[2].fieldID='twin',s=>s[3].value='Last 7 days',s=>s[3].events.push(notes[2]),s=>s[3].events.reverse(),s=>s[3].truncated=true,s=>s[3].events.splice(1,1),s=>s[3].events[1].key='ArrowDown'])await assert.rejects(()=>run(mutate));
 });
 
 test('opt-in Relative DL native select commit cause diagnostic only',{skip:process.env.ELY_RELATIVE_COMMIT_DIAGNOSTIC!=='1'},async()=>{
   const {chromium}=await import('playwright'),{writeFile}=await import('node:fs/promises');
   const base=process.env.ELY_NATIVE_SEGMENT_URL,output=process.env.ELY_NATIVE_SEGMENT_OUTPUT,source=process.env.ELY_NATIVE_SEGMENT_SOURCE;
   assert(base&&output&&/^[a-f0-9]{40}$/.test(source||'')&&process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH);const url=new URL(base);assert(['localhost','127.0.0.1'].includes(url.hostname));assert.equal(url.pathname,'/components/audit');url.searchParams.set('family','forms');url.searchParams.set('case','forms/RelativeDatePicker');
-  const proof={kind:'relative-native-commit-cause-diagnostic-not-contract-approval',source,sourcePinIsCallerSupplied:true,cases:[],observations:[],runtime:{node:process.version},cleanup:false};let browser,primary;
+  const proof={kind:'relative-native-commit-cause-diagnostic-not-contract-approval',hypothesis:{id:'space-open-arrow-up-enter',keys:['Space','ArrowUp','Enter'],source:'https://chromium.googlesource.com/chromium/src/+/refs/tags/143.0.7499.4/third_party/blink/renderer/core/html/forms/select_type.cc',functions:['ShouldOpenPopupForKeyPressEvent','HandlePopupOpenKeyboardEvent'],claim:'Space is an explicit native popup-opening path without a type-ahead session; headless selection behavior remains unproved'},source,sourcePinIsCallerSupplied:true,cases:[],observations:[],runtime:{node:process.version},cleanup:false};let browser,primary;
   try{
     browser=await chromium.launch({executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH});proof.runtime.browser=browser.version();assert.match(proof.runtime.browser,/^143\./);
     const context=await browser.newContext({viewport:{width:1440,height:1000},colorScheme:'light'}),page=await context.newPage();await page.goto(url.href,{waitUntil:'networkidle'});
