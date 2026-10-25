@@ -5,6 +5,7 @@ import {runInNewContext} from 'node:vm';
 import {assertSpecialInputState} from './visual-state-audit-drivers.mjs';
 import {assertRegionalFormStep} from './visual-state-audit-drivers.mjs';
 import {assertPathNativeStep} from './visual-state-audit-drivers.mjs';
+import {assertRangeFormStep} from './visual-state-audit-drivers.mjs';
 import {assertCronNativePreview} from './visual-state-audit-drivers.mjs';
 import {assertJsonHighlight} from './visual-state-audit-drivers.mjs';
 import {nativeDateFocusedSegment,nativeDateKeyboardRoute,assertNativeDateResult} from './visual-state-audit-drivers.mjs';
@@ -13,6 +14,40 @@ import {assertEightFormStep,assertDurationNativeProof,probeFailureStateAndPayloa
 import {assertActivityLogScopedAuditPage,assertCommunicationCallerRequest,assertDockCallerAction,assertDockNativeEvents,assertEvalLastColumnGeometry,assertNativeEmbedOpen,activatePresenceStep,assertPresenceNativeRequest,assertFoundationPublicEvents,assertPlainInputNativeEvents,assertFormattedInputState,calendarDraftWheelDecision,requestedStateContract,runRequestedStateActions} from './visual-state-audit-drivers.mjs';
 
 const read=path=>readFile(new URL(`../../../../${path}`,import.meta.url),'utf8');
+
+test('seven range forms require eighteen exact native transitions with independent payload bounds and trust',()=>{
+  const specs=[['RelativeDatePicker','relative',['Yesterday','Last 7 days']],['Slider','slider',['0','5','4']],['VerticalSlider','slider',['0','5','4']],['RangeSlider','range',['5','0','1','1']],['Knob','knob',['3','2']],['Dial','knob',['3','2']],['Stepper','stepper',['3','2']]];
+  let count=0;
+  for(const [name,mode,values]of specs){const identity='forms/'+name,contract=requestedStateContract(identity);assert.equal(contract.nativeFormTwinWitness,true);assert.equal(contract.steps.length,values.length);
+    values.forEach((value,index)=>{
+      const step=contract.fixtureGuards.steps[index],[stage,selector,key]=step,end=selector.includes('range-end'),synthetic=mode==='knob'||mode==='stepper',control=mode==='knob'?'knob':mode==='stepper'?(index?'down':'up'):end?'end':'field',type=mode==='relative'?'select-one':mode==='stepper'?'number':'range';
+      const controlIDs={field:'primary-control',...(mode==='range'?{end:'primary-end'}:{}),...(mode==='knob'?{knob:'owned-knob'}:{}),...(mode==='stepper'?{up:'owned-up',down:'owned-down'}:{})};
+      const start=mode==='range'?['3','0','1','1'][index]:value,finish=mode==='range'?['5','5','5','1'][index]:null;
+      const field={id:controlIDs.field,name:'caller_value',type,value:start,min:'',max:mode==='relative'?'':finish??'5',step:'',disabled:false,valid:true};
+      const changed=end?'end':'field',proof={identity,rootID:'primary',fieldID:field.id,controlIDs,truncated:false,fields:[field,...(finish===null?[]:[{id:controlIDs.end,name:'caller_value_end',type:'range',value:finish,min:start,max:'5',step:'',disabled:false,valid:true}])],nativeEvents:[{type:key?'keydown':'click',control,targetID:controlIDs[control],trusted:true,key,value:null},...['input','change'].map(type=>({type,control:changed,targetID:controlIDs[changed],trusted:!synthetic,key:null,value}))],publicEvents:[{type:'ely:change',detail:{id:'primary',component:identity,name:end?'caller_value_end':'caller_value',value,...(type==='select-one'?{}:{checked:false}),type}}],output:mode==='range'?`${start}–${finish}`:value,knob:mode==='knob'?{value,output:value,angle:String(-135+Number(value)/5*270),sweep:`${Number(value)/5*270}deg`}:null,orientation:{writingMode:'vertical-lr',direction:'rtl',width:36,height:140}};
+      assertRangeFormStep(identity,stage,proof);count++;
+      for(const mutate of [p=>p.identity='forms/Unknown',p=>p.truncated=true,p=>p.fields[0].value='stale',p=>p.fields[0].max='100',p=>p.nativeEvents[0].trusted=false,p=>p.nativeEvents[1].trusted=synthetic,p=>p.nativeEvents[1].targetID='twin',p=>p.publicEvents[0].detail.component='forms/SliderOther',p=>p.publicEvents.push(p.publicEvents[0])]){const bad=structuredClone(proof);mutate(bad);assert.throws(()=>assertRangeFormStep(identity,stage,bad));}
+      if(mode==='range'){const bad=structuredClone(proof);bad.fields[1].min='0';if(start!=='0')assert.throws(()=>assertRangeFormStep(identity,stage,bad));}
+      if(mode==='knob')assert.throws(()=>assertRangeFormStep(identity,stage,{...proof,knob:{...proof.knob,output:'stale'}}));
+      if(name==='VerticalSlider')assert.throws(()=>assertRangeFormStep(identity,stage,{...proof,orientation:{...proof.orientation,height:20}}));
+    });
+  }
+  assert.equal(count,18);assert.equal(requestedStateContract('forms/DateRangePicker'),null);
+});
+
+test('seven range forms execute production range synchronization and knob arrow handler',async()=>{
+  const source=await read('ui/gohtmx/assets/ely-api-forms.js'),notifySource=source.slice(source.indexOf('const notify ='),source.indexOf('// Bounded settings'));
+  const rangeSource=source.slice(source.indexOf('const range ='),source.indexOf('const dateRange ='));
+  const keyStart=source.indexOf("if(event.target.matches('[data-ely-knob]')"),keySource=source.slice(keyStart,source.indexOf("if(event.target.matches('[data-ely-multi-entry]')",keyStart));assert(keySource.includes('field.stepUp()'));
+  const events=[],style={},attrs={},output={value:''},field={value:'2',min:'',max:'5',step:'',disabled:false,stepUp(){this.value=String(Math.min(5,Number(this.value)+1));},stepDown(){this.value=String(Math.max(0,Number(this.value)-1));},dispatchEvent(event){events.push([event.type,event.isTrusted,this.value]);}};
+  const knob={style:{setProperty:(name,value)=>style[name]=value},setAttribute:(name,value)=>attrs[name]=value};
+  field.closest=()=>null;
+  const q=selector=>({'[data-ely-number]':field,'[data-ely-knob]':knob,'[data-ely-knob-value]':output}[selector]??null);
+  const key=runInNewContext(notifySource+rangeSource+';(event)=>{'+keySource+'}',{Event,q});
+  const target={matches:s=>s==='[data-ely-knob]',closest:()=>null};
+  for(const [pressed,value]of [['ArrowUp','3'],['ArrowDown','2']]){const event={key:pressed,target,preventDefault(){this.prevented=true;}};key(event);assert.equal(event.prevented,true);assert.equal(field.value,value);assert.equal(output.value,value);assert.equal(attrs['aria-valuenow'],value);assert.equal(style['--ely-knob-angle'],String(-135+Number(value)/5*270));}
+  assert.deepEqual(events,[['input',false,'3'],['change',false,'3'],['input',false,'2'],['change',false,'2']]);field.disabled=true;key({key:'ArrowUp',target,preventDefault(){}});assert.equal(events.length,4);
+});
 
 test('PathInput native contract requires exact edit commit request and rejects duplicates',async()=>{
   const contract=requestedStateContract('forms/PathInput');assert.equal(contract.nativeFormTwinWitness,true);assert.deepEqual(contract.steps.map(s=>s.id),['path-edit','path-commit','path-request']);assert.equal(contract.steps[1].nativeTabCommit,true);

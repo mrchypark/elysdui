@@ -811,6 +811,8 @@ export function activatePresenceStep(step,{ada,stop}){
 }
 
 export function requestedStateContract(identity,trashFixture){
+  const rangeForm=rangeFormCases[identity];
+  if(rangeForm)return {identity,kind:rangeForm.kind,family:'forms',requestedStateOnly:true,focusedSequence:'forms-range-native',nativeFormTwinWitness:true,mappingGaps:[],fixtureGuards:{component:identity,...rangeForm},steps:rangeForm.steps.map(([id,control,key,value])=>({id,control,event:key?'trusted native keyboard; knob-generated notifications are synthetic':'trusted native button click; generated notifications are synthetic',expectedState:`Exact ${identity} ${id}: ${value}; native/public event, value, bounds, output and independent twin proof`,source:{siteId:`range-native:${identity}:${id}`,sourceAnchor:'advanced_forms_fixtures.go canonical Slider/Knob/RelativeDatePicker; ely-api-forms.html; ely-api-forms.js range/key/click; ely-api.js change',provenance:'Exact qualified root and inherited Max5; never preview Max100/Max10 or basic Slider transfer'}})),scope:'Only listed default local keyboard/button transitions; no drag, arbitrary bounds, disabled fixture variants, host fulfillment or registered equivalence'};
   if(identity==='forms/PathInput')return {identity,kind:'PathInput',family:'forms',requestedStateOnly:true,focusedSequence:'forms-path-native',nativeFormTwinWitness:true,twinFocusSelector:'input[data-ely-path]',mappingGaps:[],fixtureGuards:{component:identity,initial:'alpha',changed:'~/Projects/ely',name:'caller_value',action:'choose-path'},steps:['path-edit','path-commit','path-request'].map(id=>({id,control:id==='path-request'?'.ely-api-path-input button[data-ely-action="choose-path"]':'input[data-ely-path]',nativeTabCommit:id==='path-commit',event:'trusted native input, Tab departure or button activation',expectedState:`Exact ${id}; retain current typed path and emit only the documented local change/request`,source:{siteId:`path-native:${id}`,sourceAnchor:'advanced_forms_fixtures.go PathInput; ely-api-forms.html PathInput; ely-api-forms.js generic action owner; ely-api.js change',provenance:'Exact advanced PathInput alpha root, not Browse preview'}})),scope:'Native path edit/commit and one choose-path request only; no OS chooser, filesystem change or provider fulfillment'};
   if(regionalFormIDs.includes(identity))return {identity,kind:'LanguageSelect',family:'forms',requestedStateOnly:true,focusedSequence:'forms-regional-native',nativeFormTwinWitness:true,mappingGaps:[],fixtureGuards:{component:identity,initial:'alpha',name:'caller_value',options:[['alpha','Caller Alpha'],['beta','Caller Beta']]},steps:['regional-search','regional-select','regional-unmatched','regional-escape'].map(id=>({id,control:'[data-ui-combobox-input]',event:id==='regional-search'||id==='regional-unmatched'?'trusted native text input':'trusted native keyboard; production hidden selection notifications are synthetic',expectedState:`Exact ${identity} ${id}; beta selection, unmatched filtering or Escape restore; no host request`,source:{siteId:`regional:${identity}:${id}`,sourceAnchor:'advanced_forms_fixtures.go; ely-api-forms.html LanguageSelect; ely-controls.html combobox; ely-controls.js selectCombo; ely-api.js change',provenance:'Exact root alpha/Caller Alpha,Beta fixture only; no preview catalogue or alias receipt transfer'}})),scope:'Exact regional root search, keyboard selection, unmatched query and Escape label restoration only; no provider, locale change, arbitrary options or registered equivalence'};
   const eight=nextEightFormCases[identity];
@@ -1192,6 +1194,33 @@ export function assertEventLoggerPublicState(stage,observation){
   return {...observation,timestampOrigin:rawEvents[0].timeStamp,timestampRule:'first accepted public event.timeStamp; exact two-decimal elapsed seconds',eventProvenance:'Synthetic public DOM events through actual component listeners; trusted physical input is not established'};
 }
 
+const rangeFormCases={
+  'forms/RelativeDatePicker':{kind:'RelativeDatePicker',mode:'relative',field:'select[data-ely-relative-date]',initial:'Last 7 days',steps:[['relative-earlier','select[data-ely-relative-date]','ArrowUp','Yesterday'],['relative-restore','select[data-ely-relative-date]','ArrowDown','Last 7 days']]},
+  ...Object.fromEntries(['Slider','VerticalSlider'].map(name=>['forms/'+name,{kind:'Slider',mode:'slider',field:'input[data-ely-range]',initial:'3',steps:[['range-home','input[data-ely-range]','Home','0'],['range-end','input[data-ely-range]','End','5'],['range-left','input[data-ely-range]','ArrowLeft','4']]}])),
+  'forms/RangeSlider':{kind:'Slider',mode:'range',field:'input[data-ely-range]',initial:'3',steps:[['range-end-max','input[data-ely-range-end]','End','5'],['range-start-min','input[data-ely-range]','Home','0'],['range-start-right','input[data-ely-range]','ArrowRight','1'],['range-end-min','input[data-ely-range-end]','Home','1']]},
+  ...Object.fromEntries(['Knob','Dial'].map(name=>['forms/'+name,{kind:'Knob',mode:'knob',field:'input[data-ely-number]',initial:'2',steps:[['knob-up','[data-ely-knob]','ArrowUp','3'],['knob-down','[data-ely-knob]','ArrowDown','2']]}])),
+  'forms/Stepper':{kind:'Knob',mode:'stepper',field:'input[data-ely-number]',initial:'2',steps:[['stepper-up','button[data-ely-step="up"]',null,'3'],['stepper-down','button[data-ely-step="down"]',null,'2']]},
+};
+
+export function assertRangeFormStep(identity,stage,proof){
+  const fixture=rangeFormCases[identity],index=fixture?.steps.findIndex(s=>s[0]===stage);assert(fixture&&index>=0,'Exact range-form stage required');
+  const [,selector,key,value]=fixture.steps[index],end=selector.includes('range-end'),synthetic=['knob','stepper'].includes(fixture.mode);
+  assert.equal(proof.identity,identity);assert(proof.rootID&&proof.fieldID);assert.equal(proof.truncated,false);
+  const control=fixture.mode==='knob'?'knob':fixture.mode==='stepper'?(index?'down':'up'):end?'end':'field';
+  assert.deepEqual(proof.nativeEvents.map(e=>[e.type,e.control,e.trusted,e.key]),[[key?'keydown':'click',control,true,key],['input',end?'end':'field',!synthetic,null],['change',end?'end':'field',!synthetic,null]],'Exact native initiation and production notification trust');
+  for(const event of proof.nativeEvents){assert.equal(event.targetID,proof.controlIDs[event.control],'Each event must target its exact primary control');if(event.type==='input'||event.type==='change')assert.equal(event.value,value);}
+  assert.equal(proof.controlIDs.field,proof.fieldID);assert.equal(new Set(Object.values(proof.controlIDs)).size,Object.keys(proof.controlIDs).length,'Primary control IDs must be distinct');
+  const type=fixture.mode==='relative'?'select-one':fixture.mode==='stepper'?'number':'range',name=end?'caller_value_end':'caller_value';
+  assert.deepEqual(proof.publicEvents,[{type:'ely:change',detail:{id:proof.rootID,component:identity,name,value,...(type==='select-one'?{}:{checked:false}),type}}],'Exactly one source-backed change and no host action');
+  const start=fixture.mode==='range'?['3','0','1','1'][index]:value,finish=fixture.mode==='range'?['5','5','5','1'][index]:null;
+  assert.deepEqual(proof.fields,[{id:proof.fieldID,name:'caller_value',type,value:start,min:'',max:fixture.mode==='relative'?'':finish??'5',step:'',disabled:false,valid:true},...(finish===null?[]:[{id:proof.controlIDs.end,name:'caller_value_end',type:'range',value:finish,min:start,max:'5',step:'',disabled:false,valid:true}])]);
+  if(fixture.mode==='slider'||fixture.mode==='range')assert.equal(proof.output,finish===null?value:`${start}–${finish}`);
+  if(fixture.mode==='knob')assert.deepEqual(proof.knob,{value,output:value,angle:String(-135+Number(value)/5*270),sweep:`${Number(value)/5*270}deg`});
+  if(fixture.mode==='stepper')assert.equal(proof.output,value);
+  if(identity==='forms/VerticalSlider'){assert.equal(proof.orientation.writingMode,'vertical-lr');assert.equal(proof.orientation.direction,'rtl');assert(proof.orientation.height>proof.orientation.width,'Actual range control must be physically vertical');}
+  return proof;
+}
+
 const regionalFormIDs=['forms/CountrySelect','forms/CurrencySelect','forms/LanguageSelect'];
 
 export function assertPathNativeStep(stage,proof){
@@ -1535,6 +1564,40 @@ export function assertCronNativePreview(expression,now,runs){
 }
 
 export async function runRequestedStateActions(contract,root,runStep,failureDiagnostics){
+  if(contract.focusedSequence==='forms-range-native'){
+    const identity=contract.identity,fixture=rangeFormCases[identity];assert(fixture);assert.equal(contract.nativeFormTwinWitness,true);
+    assert.equal(await root.getAttribute('data-ely-component'),identity);assert.equal(await root.getAttribute('data-ely-kind'),fixture.kind);
+    const field=root.locator(fixture.field);assert.equal(await field.count(),1);assert.equal(await field.inputValue(),fixture.initial);assert.equal(await field.getAttribute('name'),'caller_value');
+    assert.deepEqual(await field.evaluate(n=>({type:n.type,disabled:n.disabled,readOnly:n.readOnly??false,required:n.required})),{type:fixture.mode==='relative'?'select-one':fixture.mode==='stepper'?'number':'range',disabled:false,readOnly:false,required:false});
+    if(fixture.mode==='relative')assert.deepEqual(await field.locator('option').evaluateAll(ns=>ns.map(n=>n.value)),['Today','Yesterday','Last 7 days','Last 30 days','This month','Last month','This quarter','This year']);
+    else {assert.equal(await field.getAttribute('max'),fixture.mode==='range'?'3':'5');assert.equal(await field.getAttribute('min'),null);assert.equal(await field.getAttribute('step'),null);}
+    const controls={field:fixture.field,...(fixture.mode==='range'?{end:'input[data-ely-range-end]'}:{}),...(fixture.mode==='knob'?{knob:'[data-ely-knob]'}:{}),...(fixture.mode==='stepper'?{up:'button[data-ely-step="up"]',down:'button[data-ely-step="down"]'}:{})};
+    // Authored buttons/knob have no IDs; preserve exact node references rather than inventing DOM IDs.
+    const controlIDs={};for(const [name,selector]of Object.entries(controls)){const control=root.locator(selector);assert.equal(await control.count(),1);controlIDs[name]=await control.getAttribute('id')||`owned-${name}`;}
+    const fieldID=controlIDs.field;assert(!fieldID.startsWith('owned-'));assert.equal(await root.page().locator(`[id="${fieldID}"]`).count(),1);
+    await root.evaluate((node,controls)=>{
+      node.__rangeControls=Object.fromEntries(Object.entries(controls).map(([name,selector])=>[name,node.querySelector(selector)]));node.__rangeNative=[];node.__rangePublic=[];node.__rangeTruncated=false;
+      const push=(list,value)=>{if(list.length>=64){node.__rangeTruncated=true;return;}list.push(value);};
+      node.__rangeObserver=e=>{const entry=Object.entries(node.__rangeControls).find(([,n])=>e.target===n||(n.tagName==='BUTTON'&&e.target.closest?.('button')===n));push(node.__rangeNative,{type:e.type,control:entry?.[0]??'foreign',targetID:entry?(entry[1].id||`owned-${entry[0]}`):null,trusted:e.isTrusted,value:e.target.value??null,key:e.key??null});};
+      node.__rangePublicObserver=e=>push(node.__rangePublic,{type:e.type,detail:JSON.parse(JSON.stringify(e.detail))});
+      for(const type of ['keydown','click','input','change'])node.addEventListener(type,node.__rangeObserver,true);for(const type of ['ely:change','ely:action'])node.addEventListener(type,node.__rangePublicObserver);
+    },controls);
+    let primaryError=null,nativeCursor=0,publicCursor=0;
+    try{
+      for(const [stage,selector,key]of fixture.steps)await runStep(stage,async()=>{
+        assert.deepEqual(await root.evaluate(n=>[n.__rangeNative.length,n.__rangePublic.length]),[nativeCursor,publicCursor],'No unaccounted events between range actions');
+        const target=root.locator(selector);assert.equal(await target.count(),1);if(key)await target.press(key);else await target.click();
+      },async(_state,_before,receipt)=>{
+        const proof=await root.evaluate((node,args)=>{
+          const fields=['field','end'].filter(name=>node.__rangeControls[name]).map(name=>{const n=node.__rangeControls[name];return {id:n.id,name:n.name,type:n.type,value:n.value,min:n.min??'',max:n.max??'',step:n.step??'',disabled:n.disabled,valid:n.checkValidity()};}),knob=node.querySelector('[data-ely-knob]'),range=node.__rangeControls.field,style=getComputedStyle(range),rect=range.getBoundingClientRect();
+          return {identity:node.dataset.elyComponent,rootID:node.id,fieldID:range.id,controlIDs:args.controlIDs,truncated:node.__rangeTruncated,fields,nativeEvents:node.__rangeNative.slice(args.nativeCursor),publicEvents:node.__rangePublic.slice(args.publicCursor),output:node.querySelector('[data-ely-range-value],[data-ely-stepper-value]')?.value??null,knob:knob?{value:knob.getAttribute('aria-valuenow'),output:node.querySelector('[data-ely-knob-value]').value,angle:knob.style.getPropertyValue('--ely-knob-angle'),sweep:knob.style.getPropertyValue('--ely-knob-sweep')}:null,orientation:{writingMode:style.writingMode,direction:style.direction,width:rect.width,height:rect.height}};
+        },{controlIDs,nativeCursor,publicCursor});
+        receipt.nativeFormProof=proof;assertRangeFormStep(identity,stage,proof);nativeCursor+=proof.nativeEvents.length;publicCursor+=proof.publicEvents.length;return proof;
+      });
+    }catch(error){primaryError=error;if(failureDiagnostics)await retainFailurePayload(failureDiagnostics,'rangeNative',()=>root.evaluate(n=>({nativeEvents:n.__rangeNative,publicEvents:n.__rangePublic,truncated:n.__rangeTruncated})));throw error;}
+    finally{await cleanupPreservingPrimary(()=>root.evaluate(node=>{for(const type of ['keydown','click','input','change'])node.removeEventListener(type,node.__rangeObserver,true);for(const type of ['ely:change','ely:action'])node.removeEventListener(type,node.__rangePublicObserver);for(const key of ['__rangeControls','__rangeNative','__rangePublic','__rangeTruncated','__rangeObserver','__rangePublicObserver'])delete node[key];}),primaryError,failureDiagnostics??{},'rangeCleanupError');}
+    return;
+  }
   if(contract.focusedSequence==='forms-path-native'){
     assert.equal(contract.identity,'forms/PathInput');assert.equal(contract.nativeFormTwinWitness,true);
     assert.equal(await root.getAttribute('data-ely-component'),contract.identity);assert.equal(await root.getAttribute('data-ely-kind'),'PathInput');
