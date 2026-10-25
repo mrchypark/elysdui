@@ -113,12 +113,17 @@ test('local picker three exact contracts execute fourteen strict ordered oracle 
       else{
         const unmatched=stage==='picker-unmatched',cleared=stage==='picker-clear'||stage==='picker-focus-second';
         state={value:first,search:unmatched?'no-matching-picker-option':cleared?'':query,preview:first,selected:[first],visible:unmatched?[]:cleared?[first,second]:[first],empty:unmatched,focused:stage==='picker-focus'||stage==='picker-select'?'first':stage==='picker-focus-second'?'second':'search'};
-        events=stage==='picker-search'?[n('input','search',query)]:stage==='picker-focus'?[n('keydown','search',query,'ArrowDown'),...commit(query)]:stage==='picker-select'?[n('keydown','first',first,'Enter'),n('click','first',first),p({value:first})]:unmatched?[n('blur','first',first),n('input','search','no-matching-picker-option')]:stage==='picker-clear'?[n('input','search','')]:[n('keydown','search','','ArrowDown'),...commit(''),n('keydown','first',first,'ArrowRight'),n('blur','first',first)];
+        events=stage==='picker-search'?[n('input','search',query)]:stage==='picker-focus'?[n('keydown','search',query,'ArrowDown'),...commit(query)]:stage==='picker-select'?[n('keydown','first',first,'Enter'),n('click','first',first),p({value:first})]:unmatched?[n('blur','first',first),n('input','search','no-matching-picker-option')]:stage==='picker-clear'?[n('keydown','search','no-matching-picker-option','Delete'),n('input','search','')]:[n('keydown','search','','ArrowDown'),...commit(''),n('keydown','first',first,'ArrowRight'),n('blur','first',first)];
       }
       const proof={identity,rootID:'root',truncated:false,foreign:false,state,events};assertLocalPickerStep(identity,stage,proof);count++;
       assert.throws(()=>assertLocalPickerStep(identity,stage,{...proof,truncated:true}));assert.throws(()=>assertLocalPickerStep(identity,stage,{...proof,foreign:true}));
       assert.throws(()=>assertLocalPickerStep(identity,stage,{...proof,events:[...events,p({value:'extra'})]}));
       const wrong=structuredClone(proof);wrong.events[0].trusted=false;assert.throws(()=>assertLocalPickerStep(identity,stage,wrong));
+      if(stage==='picker-clear'){
+        for(const patch of [{key:'Backspace'},{control:'first'},{value:''}]){const bad=structuredClone(proof);Object.assign(bad.events[0],patch);assert.throws(()=>assertLocalPickerStep(identity,stage,bad));}
+        assert.throws(()=>assertLocalPickerStep(identity,stage,{...proof,events:[...events].reverse()}));
+        assert.throws(()=>assertLocalPickerStep(identity,stage,{...proof,events:events.slice(1)}));
+      }
       assert.throws(()=>assertLocalPickerStep(identity,stage,{...proof,state:{...state,value:'wrong'}}));
     }
   }
@@ -130,6 +135,7 @@ test('local picker three routes actual qualified fixture selectors and preserves
   assert(fixtures.includes('"Inter", "The quick brown fox jumps over the lazy dog."'));assert(aliases.includes('"✨"'));assert(aliases.includes('"👩‍💻"'));
   const start=driver.indexOf("if(contract.focusedSequence==='forms-local-picker-native')"),branch=driver.slice(start,driver.indexOf("if(contract.focusedSequence==='forms-complex-eight-native')",start));
   for(const text of ['.fill(fixture.query)',".press('Enter')",".press('ArrowDown')",".press('ArrowRight')",'receipt.nativeFormProof=proof','retainFailurePayload','cleanupPreservingPrimary','node.__localPickerEvents.length>=64'])assert(branch.includes(text),text);
+  assert(branch.includes("else if(stage==='picker-clear')await field.fill('');"),'Delete belongs only to the existing native empty-fill clear action');
   assert.doesNotMatch(branch,/dispatchEvent|new Event|\.value\s*=(?!=|>)/);
 });
 

@@ -1362,7 +1362,7 @@ export function assertLocalPickerStep(identity,stage,proof){
     else if(stage==='picker-focus')events=[n('keydown','search',query,'ArrowDown'),...committed(query)];
     else if(stage==='picker-select')events=[n('keydown','first',first,'Enter'),n('click','first',first),p({value:first})];
     else if(stage==='picker-unmatched')events=[n('blur','first',first),n('input','search',unmatched)];
-    else if(stage==='picker-clear')events=[n('input','search','')];
+    else if(stage==='picker-clear')events=[n('keydown','search',unmatched,'Delete'),n('input','search','')];
     else events=[n('keydown','search','','ArrowDown'),...committed(''),n('keydown','first',first,'ArrowRight'),n('blur','first',first)];
   }
   assert.deepEqual(proof.events,events,'Entire local picker event window; no ignored public changes, requests or extra notifications');
