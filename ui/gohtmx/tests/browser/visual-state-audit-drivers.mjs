@@ -1269,6 +1269,21 @@ export function assertEightFormStep(identity,stage,proof){
   return proof;
 }
 
+export function assertDurationNativeProof(stage,proof){
+  assert.equal(proof.identity,'forms/DurationPicker');assert(proof.rootID&&proof.fieldID&&proof.rootID!==proof.fieldID);
+  assert.equal(proof.type,'number');assert.equal(proof.value,'31');assert.equal(proof.valid,true);assert.equal(proof.hostRequests,0);
+  assert(Array.isArray(proof.nativeEvents)&&Array.isArray(proof.publicEvents));assert.equal(proof.truncated,false);
+  assert(proof.nativeEvents.every(event=>event.trusted===true&&event.targetId===proof.fieldID&&event.value==='31'),'Duration native events must be trusted and target the exact primary field');
+  if(stage==='edit'){
+    assert.deepEqual(proof.nativeEvents.map(event=>event.type),['input']);assert.deepEqual(proof.publicEvents,[],'Editing has not committed a public change');
+  }else{
+    assert.equal(stage,'commit');assert.equal(proof.focusLeft,true);
+    assert.deepEqual(proof.nativeEvents.map(event=>event.type),['change','blur']);
+    assert.deepEqual(proof.publicEvents,[{type:'ely:change',detail:{id:proof.rootID,component:proof.identity,name:'caller_value',value:'31',checked:false,type:'number'}}],'Commit serializes the exact delegated native-input public payload');
+  }
+  return proof;
+}
+
 const formattedInputCases={
   'forms/EmailInput':{kind:'EmailInput',type:'email',initial:'caller@example.test',valid:'changed@example.test',invalid:'not-an-email',invalidFlag:'typeMismatch'},
   'forms/UrlInput':{kind:'EmailInput',type:'url',initial:'https://example.test/source',valid:'https://example.test/changed',invalid:'not-a-url',invalidFlag:'typeMismatch'},
@@ -1636,6 +1651,28 @@ export async function runRequestedStateActions(contract,root,runStep,failureDiag
     const field=root.locator(contract.steps[0].control);assert.equal(await field.count(),1);assert.equal(await field.getAttribute('type'),contract.fixtureGuards.type);assert.equal(await field.inputValue(),contract.fixtureGuards.initial);
     if(identity==='forms/YearPicker'){assert.equal(await field.getAttribute('step'),contract.fixtureGuards.step);assert.equal(await field.getAttribute('max'),null,'The qualified year fixture has no inherited Max=5 bound');}
     if(identity==='forms/DurationPicker'){assert.equal(await field.getAttribute('min'),contract.fixtureGuards.min);assert.equal(await field.getAttribute('max'),null,'The qualified duration fixture has no inherited Max=5 bound');}
+    if(identity==='forms/DurationPicker'){
+      const rootID=await root.getAttribute('id'),fieldID=await field.getAttribute('id');assert(rootID&&fieldID);assert.equal(await field.getAttribute('name'),'caller_value');
+      const cursor={native:0,public:0},proofState={identity,rootID,fieldID,type:contract.fixtureGuards.type,hostRequests:0};let primaryError=null;
+      await root.evaluate(node=>{
+        node.__durationNative=[];node.__durationPublic=[];node.__durationTruncated=false;
+        node.__durationNativeListener=event=>{if(node.__durationNative.length>=16){node.__durationTruncated=true;return;}node.__durationNative.push({type:event.type,trusted:event.isTrusted,targetId:event.target?.id||null,value:event.target?.value??null});};
+        node.__durationPublicListener=event=>{if(event.target!==node)return;if(node.__durationPublic.length>=8){node.__durationTruncated=true;return;}node.__durationPublic.push({type:event.type,detail:event.detail===undefined?null:{...event.detail}});};
+        for(const type of ['input','change','blur'])node.addEventListener(type,node.__durationNativeListener,true);
+        node.addEventListener('ely:change',node.__durationPublicListener,true);
+      });
+      const readDurationStep=async stage=>{
+        const observed=await root.evaluate(node=>({native:node.__durationNative,public:node.__durationPublic,truncated:node.__durationTruncated}));
+        const proof={...proofState,value:await field.inputValue(),valid:await field.evaluate(node=>node.checkValidity()),nativeEvents:observed.native.slice(cursor.native),publicEvents:observed.public.slice(cursor.public),truncated:observed.truncated,...(stage==='commit'?{focusLeft:await field.evaluate(node=>document.activeElement!==node)}:{})};
+        assertDurationNativeProof(stage,proof);cursor.native=observed.native.length;cursor.public=observed.public.length;return proof;
+      };
+      try{
+        await local('duration-edit',()=>field.fill(contract.fixtureGuards.changed),async()=>{assert.equal(await field.inputValue(),contract.fixtureGuards.changed);assert.equal(await field.evaluate(node=>node.checkValidity()),true);return readDurationStep('edit');});
+        await local('duration-commit',()=>leaveField(field),async()=>{assert.equal(await field.inputValue(),contract.fixtureGuards.changed);assert.equal(await field.evaluate(node=>node.checkValidity()),true);return readDurationStep('commit');});
+      }catch(error){primaryError=error;await retainFailurePayload(failureDiagnostics??{},'durationNative',()=>root.evaluate(node=>({native:node.__durationNative,public:node.__durationPublic,truncated:node.__durationTruncated})));throw error;}
+      finally{await cleanupPreservingPrimary(()=>root.evaluate(node=>{for(const type of ['input','change','blur'])node.removeEventListener(type,node.__durationNativeListener,true);node.removeEventListener('ely:change',node.__durationPublicListener,true);delete node.__durationNativeListener;delete node.__durationPublicListener;delete node.__durationNative;delete node.__durationPublic;delete node.__durationTruncated;}),primaryError,failureDiagnostics??{},'durationNativeCleanupError');}
+      return;
+    }
     await observeNative(field);
     const editId=contract.steps[0].id,commitId=contract.steps[1].id,value=contract.fixtureGuards.changed;
     await local(editId,()=>field.fill(value),async()=>{assert.equal(await field.inputValue(),value);await assertTrusted(field,'input');assert.equal(await field.evaluate(node=>node.checkValidity()),true,'The exact edited native value must be valid');return {value,type:contract.fixtureGuards.type,valid:true,hostRequests:0};});

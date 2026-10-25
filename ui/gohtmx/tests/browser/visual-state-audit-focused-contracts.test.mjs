@@ -7,7 +7,7 @@ import {assertCronNativePreview} from './visual-state-audit-drivers.mjs';
 import {assertJsonHighlight} from './visual-state-audit-drivers.mjs';
 import {nativeDateFocusedSegment,nativeDateKeyboardRoute,assertNativeDateResult} from './visual-state-audit-drivers.mjs';
 import {assertFormTwinWitness,isDurationOwnUnitCommit} from './visual-state-audit-drivers.mjs';
-import {assertEightFormStep,probeFailureStateAndPayload,retainFailurePayload,cleanupPreservingPrimary} from './visual-state-audit-drivers.mjs';
+import {assertEightFormStep,assertDurationNativeProof,probeFailureStateAndPayload,retainFailurePayload,cleanupPreservingPrimary} from './visual-state-audit-drivers.mjs';
 import {assertActivityLogScopedAuditPage,assertCommunicationCallerRequest,assertDockCallerAction,assertDockNativeEvents,assertEvalLastColumnGeometry,assertNativeEmbedOpen,activatePresenceStep,assertPresenceNativeRequest,assertFoundationPublicEvents,assertPlainInputNativeEvents,assertFormattedInputState,calendarDraftWheelDecision,requestedStateContract,runRequestedStateActions} from './visual-state-audit-drivers.mjs';
 
 const read=path=>readFile(new URL(`../../../../${path}`,import.meta.url),'utf8');
@@ -320,6 +320,18 @@ test('eight exact forms contracts execute 28 native checkpoint oracles with stri
   const node={__eightFormsNative:[{}],__eightFormsPublic:[{}]},cursors={native:1,public:1};
   runInNewContext(`(${guard})(node,cursors)`,{node,cursors});
   for(const bad of [{native:0,public:1},{native:1,public:0},{native:2,public:1}])assert.throws(()=>runInNewContext(`(${guard})(node,cursors)`,{node,cursors:bad}),/Unaccounted native\/public event/);
+});
+
+test('DurationPicker serializes trusted native edit/commit and exact public payload',async()=>{
+  const base={identity:'forms/DurationPicker',rootID:'duration-root',fieldID:'duration-root-duration',type:'number',value:'31',valid:true,hostRequests:0,truncated:false};
+  const edit={...base,nativeEvents:[{type:'input',trusted:true,targetId:base.fieldID,value:'31'}],publicEvents:[]};
+  assert.equal(assertDurationNativeProof('edit',edit),edit);
+  for(const mutate of [p=>p.nativeEvents[0].trusted=false,p=>p.nativeEvents[0].targetId='twin',p=>p.publicEvents.push({type:'ely:change',detail:{}}),p=>p.value='30']){const bad=structuredClone(edit);mutate(bad);assert.throws(()=>assertDurationNativeProof('edit',bad));}
+  const commit={...base,focusLeft:true,nativeEvents:[{type:'change',trusted:true,targetId:base.fieldID,value:'31'},{type:'blur',trusted:true,targetId:base.fieldID,value:'31'}],publicEvents:[{type:'ely:change',detail:{id:base.rootID,component:base.identity,name:'caller_value',value:'31',checked:false,type:'number'}}]};
+  assert.equal(assertDurationNativeProof('commit',commit),commit);
+  for(const mutate of [p=>p.nativeEvents[1].trusted=false,p=>p.publicEvents[0].detail.value='30',p=>p.publicEvents[0].detail.component='forms/YearPicker',p=>p.publicEvents=[],p=>p.publicEvents.push(structuredClone(p.publicEvents[0])),p=>p.focusLeft=false]){const bad=structuredClone(commit);mutate(bad);assert.throws(()=>assertDurationNativeProof('commit',bad));}
+  const source=await read('ui/gohtmx/tests/browser/visual-state-audit-drivers.mjs'),branch=source.split("if(identity==='forms/DurationPicker'){\n      const rootID=")[1].split("\n    }\n    await observeNative(field);")[0];
+  assert.match(branch,/addEventListener\('ely:change',node\.__durationPublicListener,true\)/);assert.match(branch,/nativeEvents:observed\.native\.slice\(cursor\.native\),publicEvents:observed\.public\.slice\(cursor\.public\)/);assert.match(branch,/assertDurationNativeProof\(stage,proof\)/);assert.doesNotMatch(branch,/dispatchEvent|new Event|requestSubmit|\.value\s*=/);
 });
 
 test('eight forms paired Tab return preserves exact twin events and failure payload without waiver',async()=>{
