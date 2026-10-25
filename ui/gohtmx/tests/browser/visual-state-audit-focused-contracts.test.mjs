@@ -363,7 +363,7 @@ test('complex eight forms require twenty whole ordered native and public windows
     else if(name==='FieldArray')rows=[
       ['array-add',{values:[''],forms:0},[n('click','add',''),{...n('blur','add',''),relatedTarget:destination},p({name:'links',values:['']})]],
       ['array-edit',{values:[url],forms:0},[n('input','field',url)]],
-      ['array-remove',{values:[],forms:0},[n('change','field',url),c('links',url),n('blur','field',url),n('click','remove',''),p({name:'links',values:[]})]],
+      ['array-remove',{values:[],forms:0},[n('change','field',url),c('links',url),n('blur','field',url),n('click','remove',''),{...n('blur','remove',''),arrayRemoval:{targetWasPinned:true,relatedTarget:{isNull:true,id:null,name:null,tag:null,value:null,owned:false}}},p({name:'links',values:[]})]],
     ];
     else if(name==='TagInput'||name==='TokenInput')rows=[
       ['tag-edit',{value:'alpha',entry:tag,tags:['alpha']},[n('input','field',tag)]],
@@ -376,7 +376,8 @@ test('complex eight forms require twenty whole ordered native and public windows
     ];
     assert.deepEqual(contract.steps.map(s=>s.id),rows.map(r=>r[0]));
     for(const [stage,state,events]of rows){
-      const proof={identity,rootID:'primary',truncated:false,foreignEvents:false,state,events,...(stage==='array-add'?{arrayPostFocus:destination}:{}),...(stage==='tag-remove'?{tagRemoval:{entryIsActive:true,entryUnique:true,entryOwned:true,entryID:'actual-entry-id',entryName:null,removeDetached:true}}:{}),focusLeft:stage==='email-commit',siblings:name==='FormField'||name==='FormSection'?[['name',''],['bio','']]:[],submitterMatches:true,submitDefaultPrevented:true};
+      const proof={identity,rootID:'primary',truncated:false,foreignEvents:false,state,events,...(stage==='array-add'?{arrayPostFocus:destination}:{}),...(stage==='array-remove'?{arrayRemoval:{removedDetached:true,addUnique:true,addOwned:true,addIsActive:true,addID:null,addName:null}}:{}),...(stage==='tag-remove'?{tagRemoval:{entryIsActive:true,entryUnique:true,entryOwned:true,entryID:'actual-entry-id',entryName:null,removeDetached:true}}:{}),focusLeft:stage==='email-commit',siblings:name==='FormField'||name==='FormSection'?[['name',''],['bio','']]:[],submitterMatches:true,submitDefaultPrevented:true};
+      if(stage==='array-remove')proof.arrayRemoval.addConnected=true;
       assertComplexFormStep(identity,stage,proof);count++;
       for(const mutate of [p=>p.identity='forms/Other',p=>p.truncated=true,p=>p.foreignEvents=true,p=>p.events[0].trusted=false,p=>p.events.push({type:'ely:action',detail:{action:'save'}}),p=>p.events.pop()]){const bad=structuredClone(proof);mutate(bad);assert.throws(()=>assertComplexFormStep(identity,stage,bad));}
       if(events.length>1){const bad=structuredClone(proof);bad.events.reverse();assert.throws(()=>assertComplexFormStep(identity,stage,bad));}
@@ -386,6 +387,11 @@ test('complex eight forms require twenty whole ordered native and public windows
       if(stage==='email-commit')assert.throws(()=>assertComplexFormStep(identity,stage,{...proof,focusLeft:false}));
       if(stage==='array-add')for(const mutate of [p=>p.events[1].control='field',p=>p.events[1].relatedTarget.matchesNewPrimaryInput=false,p=>p.events[1].relatedTarget.rawID='invented-id',p=>p.events[1].relatedTarget.rawName='foreign',p=>p.events[1].relatedTarget.owned=false,p=>p.events[1].relatedTarget.uniqueNewInput=false,p=>p.events[1].relatedTarget.ownedPath=null,p=>p.arrayPostFocus={...destination,matchesNewPrimaryInput:false},p=>[p.events[1],p.events[2]]=[p.events[2],p.events[1]],p=>p.events.push(p.events[2])]){const bad=structuredClone(proof);mutate(bad);assert.throws(()=>assertComplexFormStep(identity,stage,bad));}
       if(stage==='tag-remove'){const committed=structuredClone(proof);committed.events.unshift(n('change','field',''));assertComplexFormStep(identity,stage,committed);committed.events.unshift(n('change','field',''));assert.throws(()=>assertComplexFormStep(identity,stage,committed));}
+      if(stage==='array-remove'){
+        assert.throws(()=>assertComplexFormStep(identity,stage,{...proof,arrayRemoval:{...proof.arrayRemoval,addConnected:false}}));
+        for(const mutate of [p=>p.events[4].arrayRemoval.targetWasPinned=false,p=>p.events[4].control='add',p=>p.events[4].arrayRemoval.relatedTarget.value='x'.repeat(257),p=>p.events[4].arrayRemoval.relatedTarget.owned=true,p=>p.arrayRemoval.addIsActive=false,p=>p.arrayRemoval.addOwned=false,p=>p.arrayRemoval.addUnique=false,p=>p.arrayRemoval.removedDetached=false,p=>p.arrayRemoval.addID='invented',p=>[p.events[4],p.events[5]]=[p.events[5],p.events[4]],p=>p.events.push(p.events[5])]){const bad=structuredClone(proof);mutate(bad);assert.throws(()=>assertComplexFormStep(identity,stage,bad));}
+        const body=structuredClone(proof);body.events[4].arrayRemoval.relatedTarget={isNull:false,id:null,name:null,tag:'body',value:null,owned:false};assertComplexFormStep(identity,stage,body);
+      }
       if(stage==='tag-remove')for(const mutate of [p=>p.events[2].control='field',p=>p.events[2].removal.targetWasPinned=false,p=>p.events[2].removal.relatedTargetIsNull=false,p=>p.tagRemoval.entryIsActive=false,p=>p.tagRemoval.entryOwned=false,p=>p.tagRemoval.entryUnique=false,p=>p.tagRemoval.removeDetached=false,p=>[p.events[2],p.events[3]]=[p.events[3],p.events[2]],p=>p.events.push(p.events[5])]){const bad=structuredClone(proof);mutate(bad);assert.throws(()=>assertComplexFormStep(identity,stage,bad));}
     }
   }
@@ -430,6 +436,11 @@ test('FieldArray actual blur observer binds relatedTarget node identity without 
   listeners.blur({type:'blur',target:add,relatedTarget:{...input},isTrusted:true});
   assert.equal(node.__complexEvents[1].relatedTarget.matchesNewPrimaryInput,false,'Identical attributes are not the actual newly added input');
   assert.equal(node.__complexEvents[1].relatedTarget.owned,false);
+  const remove={value:'',matches:()=>false,closest:selector=>selector==='button'?remove:node};node.__complexPinnedRemove=remove;
+  listeners.blur({type:'blur',target:remove,relatedTarget:null,isTrusted:true});
+  assert.equal(node.__complexEvents[2].control,'remove');assert.equal(node.__complexEvents[2].arrayRemoval.targetWasPinned,true);assert.equal(node.__complexEvents[2].arrayRemoval.relatedTarget.isNull,true);
+  const lookalike={...remove,closest:selector=>selector==='button'?lookalike:node};listeners.blur({type:'blur',target:lookalike,relatedTarget:null,isTrusted:true});
+  assert.equal(node.__complexEvents[3].control,'foreign','A lookalike removed button is not the pinned original');assert.equal(node.__complexEvents[3].arrayRemoval,undefined);
   assert(branch.includes('destination=document.activeElement'));assert(branch.includes('arrayPostFocus={matchesNewPrimaryInput:!!added&&destination===added'));
 });
 

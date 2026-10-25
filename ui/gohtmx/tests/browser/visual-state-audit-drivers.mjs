@@ -1394,8 +1394,15 @@ export function assertComplexFormStep(identity,stage,proof){
   }else if(fixture.mode==='array'){
     state={values:stage==='array-add'?['']:stage==='array-edit'?[url]:[],forms:0};
     const destination={matchesNewPrimaryInput:true,rawID:null,rawName:'links',owned:true,ownedPath:'.ely-api-field-array > [data-ely-field-array] > [data-ely-array-row]:only-child > input[name="links"]',uniqueNewInput:true};
-    events=stage==='array-add'?[native('click','add',''),{...native('blur','add',''),relatedTarget:destination},change({name:'links',values:['']})]:stage==='array-edit'?[native('input','field',url)]:[native('change','field',url),fieldChange('links',url),native('blur','field',url),native('click','remove',''),change({name:'links',values:[]})];
+    events=stage==='array-add'?[native('click','add',''),{...native('blur','add',''),relatedTarget:destination},change({name:'links',values:['']})]:stage==='array-edit'?[native('input','field',url)]:[native('change','field',url),fieldChange('links',url),native('blur','field',url),native('click','remove',''),{...native('blur','remove',''),arrayRemoval:proof.events[4]?.arrayRemoval},change({name:'links',values:[]})];
     if(stage==='array-add')assert.deepEqual(proof.arrayPostFocus,{...destination,matchesNewPrimaryInput:true},'Post-click active element independently equals the unique newly added primary input');
+    if(stage==='array-remove'){
+      const removal=proof.events[4]?.arrayRemoval;assert(removal,'Actual removed-node blur witness required');assert.equal(removal.targetWasPinned,true);
+      const raw=removal.relatedTarget;assert(raw&&typeof raw.isNull==='boolean'&&typeof raw.owned==='boolean');assert.deepEqual(Object.keys(raw).sort(),['id','isNull','name','owned','tag','value']);assert.deepEqual(Object.keys(removal).sort(),['relatedTarget','targetWasPinned']);
+      for(const key of ['id','name','tag','value'])assert(raw[key]===null||typeof raw[key]==='string'&&raw[key].length<=256);
+      if(raw.isNull){assert.equal(raw.owned,false);for(const key of ['id','name','tag','value'])assert.equal(raw[key],null);}
+      assert.deepEqual(proof.arrayRemoval,{removedDetached:true,addUnique:true,addOwned:true,addConnected:true,addIsActive:true,addID:null,addName:null},'Removal must leave the actual unique owned Add button focused, independently of blur relatedTarget');
+    }
   }else if(fixture.mode==='tag'){
     state={value:stage==='tag-add'?`alpha,${tag}`:'alpha',entry:stage==='tag-edit'?tag:'',tags:stage==='tag-add'?['alpha',tag]:['alpha']};
     events=stage==='tag-edit'?[native('input','field',tag)]:stage==='tag-add'?[native('keydown','field',tag,true,'Enter'),native('input','hidden',`alpha,${tag}`,false),native('change','hidden',`alpha,${tag}`,false),fieldChange('caller_value',`alpha,${tag}`,'hidden')]:[native('blur','field',''),native('click','remove',tag),{...native('blur','remove',tag),removal:{targetWasPinned:true,relatedTargetIsNull:true,relatedTargetID:null,relatedTargetName:null}},native('input','hidden','alpha',false),native('change','hidden','alpha',false),fieldChange('caller_value','alpha','hidden')];
@@ -1981,7 +1988,7 @@ export async function runRequestedStateActions(contract,root,runStep,failureDiag
         const field=node.querySelector(fixture.field),button=e.target.closest('button');let control='foreign',target=e.target;
         if(e.target===field)control='field';
         else if(e.target.matches('input[type="hidden"][name="caller_value"]')&&fixture.mode==='tag')control='hidden';
-        else if(fixture.mode==='tag'&&e.target===node.__complexPinnedRemove)control='remove';
+        else if((fixture.mode==='tag'||fixture.mode==='array')&&e.target===node.__complexPinnedRemove)control='remove';
         else if(e.type==='submit'&&e.target===node.querySelector('form.ely-api-inline-form')){control='form';node.__complexSubmit=e;}
         else if(button){target=button;if(button===node.querySelector('[data-ely-array-add]'))control='add';else if(button===node.querySelector(fixture.mode==='tag'?'[data-ui-action="remove-tag"][value="NewCallerTag"]':'[data-ely-array-remove]'))control='remove';else if(button===node.querySelector('[data-ely-mention-value][value="beta"]'))control='option';else if(button===node.querySelector('form.ely-api-inline-form button[type="submit"]'))control='submit';}
         if(control==='foreign')node.__complexForeign=true;
@@ -1991,7 +1998,13 @@ export async function runRequestedStateActions(contract,root,runStep,failureDiag
           relatedTarget={matchesNewPrimaryInput:!!added&&destination===added,rawID:destination?.getAttribute?.('id')??null,rawName:destination?.getAttribute?.('name')??null,owned:!!destination&&node.contains(destination)&&destination.closest('[data-ely-family]')===node,ownedPath:!!destination&&destination.matches?.(path)?path:null,uniqueNewInput:inputs.length===1};
         }
         const removal=fixture.mode==='tag'&&control==='remove'&&e.type==='blur'?{targetWasPinned:e.target===node.__complexPinnedRemove,relatedTargetIsNull:e.relatedTarget===null,relatedTargetID:e.relatedTarget?.getAttribute?.('id')??null,relatedTargetName:e.relatedTarget?.getAttribute?.('name')??null}:null;
-        node.__complexEvents.push({type:e.type,control,value:control==='form'?null:target.value??null,trusted:e.isTrusted,key:e.key??null,...(relatedTarget?{relatedTarget}:{}),...(removal?{removal}:{})});
+        let arrayRemoval;
+        if(fixture.mode==='array'&&control==='remove'&&e.type==='blur'){
+          const r=e.relatedTarget,raw={isNull:r===null,id:r?.getAttribute?.('id')??null,name:r?.getAttribute?.('name')??null,tag:r?.localName??null,value:r?.value??null,owned:!!r&&node.contains(r)&&r.closest('[data-ely-family]')===node};
+          if(Object.values(raw).some(v=>typeof v==='string'&&v.length>256)){node.__complexTruncated=true;return;}
+          arrayRemoval={targetWasPinned:e.target===node.__complexPinnedRemove,relatedTarget:raw};
+        }
+        node.__complexEvents.push({type:e.type,control,value:control==='form'?null:target.value??null,trusted:e.isTrusted,key:e.key??null,...(relatedTarget?{relatedTarget}:{}),...(removal?{removal}:{}),...(arrayRemoval?{arrayRemoval}:{})});
       };
       for(const type of ['input','change','keydown','blur','click','submit','ely:change','ely:action'])node.addEventListener(type,node.__complexObserver,true);
     },fixture);
@@ -2004,7 +2017,11 @@ export async function runRequestedStateActions(contract,root,runStep,failureDiag
         else if(stage==='form-submit')await root.locator('form.ely-api-inline-form button[type="submit"]').click();
         else if(stage==='array-add')await root.locator('[data-ely-array-add]').click();
         else if(stage==='array-edit'){assert.equal(await field().count(),1);await field().fill('https://example.test');}
-        else if(stage==='array-remove')await root.locator('[data-ely-array-row] [data-ely-array-remove]').click();
+        else if(stage==='array-remove'){
+          const remove=root.locator('[data-ely-array-row] [data-ely-array-remove]');assert.equal(await remove.count(),1);
+          await root.evaluate(node=>{const buttons=[...node.querySelectorAll('[data-ely-array-row] [data-ely-array-remove]')];if(buttons.length!==1||buttons[0].closest('[data-ely-family]')!==node)throw Error('Exact unique owned array remove required');node.__complexPinnedRemove=buttons[0];});
+          await remove.click();
+        }
         else if(stage==='tag-edit')await field().fill('NewCallerTag');
         else if(stage==='tag-add'){assert.equal(await field().evaluate(n=>n===document.activeElement),true);await field().press('Enter');}
         else if(stage==='tag-remove'){
@@ -2024,7 +2041,9 @@ export async function runRequestedStateActions(contract,root,runStep,failureDiag
             arrayPostFocus={matchesNewPrimaryInput:!!added&&destination===added,rawID:destination?.getAttribute?.('id')??null,rawName:destination?.getAttribute?.('name')??null,owned:!!destination&&node.contains(destination)&&destination.closest('[data-ely-family]')===node,ownedPath:!!destination&&destination.matches?.(path)?path:null,uniqueNewInput:inputs.length===1};
           }
           const tagRemoval=mode==='tag'&&node.__complexPinnedRemove?{entryIsActive:document.activeElement===node.__complexTagEntry,entryUnique:node.querySelectorAll(args.fixture.field).length===1,entryOwned:node.contains(node.__complexTagEntry)&&node.__complexTagEntry.closest('[data-ely-family]')===node,entryID:node.__complexTagEntry.getAttribute('id'),entryName:node.__complexTagEntry.getAttribute('name'),removeDetached:!node.__complexPinnedRemove.isConnected}:null;
-          return {identity:node.dataset.elyComponent,rootID:node.id,truncated:node.__complexTruncated,foreignEvents:node.__complexForeign,events:node.__complexEvents.slice(args.cursor),state,focusLeft:field!==document.activeElement,...(arrayPostFocus?{arrayPostFocus}:{}),...(tagRemoval?{tagRemoval}:{}),siblings:mode==='field'?[...node.querySelectorAll('input,textarea')].filter(n=>n.name!=='email').map(n=>[n.name,n.value]):[],submitterMatches:node.__complexSubmit?.submitter===node.querySelector('form.ely-api-inline-form button[type="submit"]'),submitDefaultPrevented:node.__complexSubmit?.defaultPrevented??false};
+          const adds=mode==='array'&&node.__complexPinnedRemove?[...node.querySelectorAll('[data-ely-array-add]')]:[],add=adds.length===1?adds[0]:null;
+          const arrayRemoval=mode==='array'&&node.__complexPinnedRemove?{removedDetached:!node.__complexPinnedRemove.isConnected,addUnique:adds.length===1,addOwned:!!add&&node.contains(add)&&add.closest('[data-ely-family]')===node,addConnected:!!add&&add.isConnected,addIsActive:!!add&&document.activeElement===add,addID:add?.getAttribute('id')??null,addName:add?.getAttribute('name')??null}:null;
+          return {identity:node.dataset.elyComponent,rootID:node.id,truncated:node.__complexTruncated,foreignEvents:node.__complexForeign,events:node.__complexEvents.slice(args.cursor),state,focusLeft:field!==document.activeElement,...(arrayPostFocus?{arrayPostFocus}:{}),...(tagRemoval?{tagRemoval}:{}),...(arrayRemoval?{arrayRemoval}:{}),siblings:mode==='field'?[...node.querySelectorAll('input,textarea')].filter(n=>n.name!=='email').map(n=>[n.name,n.value]):[],submitterMatches:node.__complexSubmit?.submitter===node.querySelector('form.ely-api-inline-form button[type="submit"]'),submitDefaultPrevented:node.__complexSubmit?.defaultPrevented??false};
         },{fixture,cursor});
         receipt.nativeFormProof=proof;assertComplexFormStep(identity,stage,proof);cursor+=proof.events.length;return proof;
       });
