@@ -1242,6 +1242,13 @@ const rangeFormCases={
   'forms/Stepper':{kind:'Knob',mode:'stepper',field:'input[data-ely-number]',initial:'2',steps:[['stepper-up','button[data-ely-step="up"]',null,'3'],['stepper-down','button[data-ely-step="down"]',null,'2']]},
 };
 
+export function assertRelativeDateFixture(observed,value='Last 7 days'){
+  assert(['Last 7 days','Yesterday'].includes(value),'Only the exact relative fixture states are supported');
+  const labels=['Caller placeholder','Today','Yesterday','Last 7 days','Last 30 days','This month','Last month','This quarter','This year'];
+  assert.deepEqual(observed,{value,selectedIndex:value==='Yesterday'?2:3,disabled:false,options:labels.map((label,index)=>({value:index?label:'',label,selected:index>0&&label===value,disabled:false}))},'Exact placeholder plus relative options, labels, selection and disabled states');
+  return observed;
+}
+
 export function assertRangeFormStep(identity,stage,proof){
   const fixture=rangeFormCases[identity],index=fixture?.steps.findIndex(s=>s[0]===stage);assert(fixture&&index>=0,'Exact range-form stage required');
   const [,selector,key,value]=fixture.steps[index],end=selector.includes('range-end'),synthetic=['knob','stepper'].includes(fixture.mode);
@@ -1257,6 +1264,7 @@ export function assertRangeFormStep(identity,stage,proof){
   if(fixture.mode==='slider'||fixture.mode==='range')assert.equal(proof.output,finish===null?value:`${start}–${finish}`);
   if(fixture.mode==='knob')assert.deepEqual(proof.knob,{value,output:value,angle:String(-135+Number(value)/5*270),sweep:`${Number(value)/5*270}deg`});
   if(fixture.mode==='stepper')assert.equal(proof.output,value);
+  if(fixture.mode==='relative')assertRelativeDateFixture(proof.relativeOptions,value);
   if(identity==='forms/VerticalSlider'){assert.equal(proof.orientation.writingMode,'vertical-lr');assert.equal(proof.orientation.direction,'rtl');assert(proof.orientation.height>proof.orientation.width,'Actual range control must be physically vertical');}
   return proof;
 }
@@ -1672,7 +1680,7 @@ export async function runRequestedStateActions(contract,root,runStep,failureDiag
     assert.equal(await root.getAttribute('data-ely-component'),identity);assert.equal(await root.getAttribute('data-ely-kind'),fixture.kind);
     const field=root.locator(fixture.field);assert.equal(await field.count(),1);assert.equal(await field.inputValue(),fixture.initial);assert.equal(await field.getAttribute('name'),'caller_value');
     assert.deepEqual(await field.evaluate(n=>({type:n.type,disabled:n.disabled,readOnly:n.readOnly??false,required:n.required})),{type:fixture.mode==='relative'?'select-one':fixture.mode==='stepper'?'number':'range',disabled:false,readOnly:false,required:false});
-    if(fixture.mode==='relative')assert.deepEqual(await field.locator('option').evaluateAll(ns=>ns.map(n=>n.value)),['Today','Yesterday','Last 7 days','Last 30 days','This month','Last month','This quarter','This year']);
+    if(fixture.mode==='relative')assertRelativeDateFixture(await field.evaluate(n=>({value:n.value,selectedIndex:n.selectedIndex,disabled:n.disabled,options:[...n.options].map(o=>({value:o.value,label:o.label,selected:o.selected,disabled:o.disabled}))})));
     else {assert.equal(await field.getAttribute('max'),fixture.mode==='range'?'3':'5');assert.equal(await field.getAttribute('min'),null);assert.equal(await field.getAttribute('step'),null);}
     const controls={field:fixture.field,...(fixture.mode==='range'?{end:'input[data-ely-range-end]'}:{}),...(fixture.mode==='knob'?{knob:'[data-ely-knob]'}:{}),...(fixture.mode==='stepper'?{up:'button[data-ely-step="up"]',down:'button[data-ely-step="down"]'}:{})};
     // Authored buttons/knob have no IDs; preserve exact node references rather than inventing DOM IDs.
@@ -1693,7 +1701,7 @@ export async function runRequestedStateActions(contract,root,runStep,failureDiag
       },async(_state,_before,receipt)=>{
         const proof=await root.evaluate((node,args)=>{
           const fields=['field','end'].filter(name=>node.__rangeControls[name]).map(name=>{const n=node.__rangeControls[name];return {id:n.id,name:n.name,type:n.type,value:n.value,min:n.min??'',max:n.max??'',step:n.step??'',disabled:n.disabled,valid:n.checkValidity()};}),knob=node.querySelector('[data-ely-knob]'),range=node.__rangeControls.field,style=getComputedStyle(range),rect=range.getBoundingClientRect();
-          return {identity:node.dataset.elyComponent,rootID:node.id,fieldID:range.id,controlIDs:args.controlIDs,truncated:node.__rangeTruncated,fields,nativeEvents:node.__rangeNative.slice(args.nativeCursor),publicEvents:node.__rangePublic.slice(args.publicCursor),output:node.querySelector('[data-ely-range-value],[data-ely-stepper-value]')?.value??null,knob:knob?{value:knob.getAttribute('aria-valuenow'),output:node.querySelector('[data-ely-knob-value]').value,angle:knob.style.getPropertyValue('--ely-knob-angle'),sweep:knob.style.getPropertyValue('--ely-knob-sweep')}:null,orientation:{writingMode:style.writingMode,direction:style.direction,width:rect.width,height:rect.height}};
+          return {identity:node.dataset.elyComponent,rootID:node.id,fieldID:range.id,controlIDs:args.controlIDs,truncated:node.__rangeTruncated,fields,nativeEvents:node.__rangeNative.slice(args.nativeCursor),publicEvents:node.__rangePublic.slice(args.publicCursor),relativeOptions:range.tagName==='SELECT'?{value:range.value,selectedIndex:range.selectedIndex,disabled:range.disabled,options:[...range.options].map(o=>({value:o.value,label:o.label,selected:o.selected,disabled:o.disabled}))}:null,output:node.querySelector('[data-ely-range-value],[data-ely-stepper-value]')?.value??null,knob:knob?{value:knob.getAttribute('aria-valuenow'),output:node.querySelector('[data-ely-knob-value]').value,angle:knob.style.getPropertyValue('--ely-knob-angle'),sweep:knob.style.getPropertyValue('--ely-knob-sweep')}:null,orientation:{writingMode:style.writingMode,direction:style.direction,width:rect.width,height:rect.height}};
         },{controlIDs,nativeCursor,publicCursor});
         receipt.nativeFormProof=proof;assertRangeFormStep(identity,stage,proof);nativeCursor+=proof.nativeEvents.length;publicCursor+=proof.publicEvents.length;return proof;
       });

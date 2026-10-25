@@ -7,6 +7,7 @@ import {assertRegionalFormStep} from './visual-state-audit-drivers.mjs';
 import {assertPathNativeStep} from './visual-state-audit-drivers.mjs';
 import {assertRangeFormStep} from './visual-state-audit-drivers.mjs';
 import {assertComplexFormStep} from './visual-state-audit-drivers.mjs';
+import {assertRelativeDateFixture} from './visual-state-audit-drivers.mjs';
 import {assertCronNativePreview} from './visual-state-audit-drivers.mjs';
 import {assertJsonHighlight} from './visual-state-audit-drivers.mjs';
 import {nativeDateFocusedSegment,nativeDateKeyboardRoute,assertNativeDateResult} from './visual-state-audit-drivers.mjs';
@@ -15,6 +16,17 @@ import {assertEightFormStep,assertDurationNativeProof,probeFailureStateAndPayloa
 import {assertActivityLogScopedAuditPage,assertCommunicationCallerRequest,assertDockCallerAction,assertDockNativeEvents,assertEvalLastColumnGeometry,assertNativeEmbedOpen,activatePresenceStep,assertPresenceNativeRequest,assertFoundationPublicEvents,assertPlainInputNativeEvents,assertFormattedInputState,calendarDraftWheelDecision,requestedStateContract,runRequestedStateActions} from './visual-state-audit-drivers.mjs';
 
 const read=path=>readFile(new URL(`../../../../${path}`,import.meta.url),'utf8');
+
+const relativeOptions=value=>({value,selectedIndex:value==='Yesterday'?2:3,disabled:false,options:['Caller placeholder','Today','Yesterday','Last 7 days','Last 30 days','This month','Last month','This quarter','This year'].map((label,i)=>({value:i?label:'',label,selected:i>0&&label===value,disabled:false}))});
+test('RelativeDatePicker exact fixture includes enabled unselected placeholder and rejects drift',async()=>{
+  for(const value of ['Last 7 days','Yesterday']){
+    const proof=relativeOptions(value);assertRelativeDateFixture(proof,value);
+    for(const mutate of [p=>p.options.shift(),p=>p.options[0].disabled=true,p=>p.options[0].label='Pick anything',p=>p.options[0].selected=true,p=>p.selectedIndex=0,p=>p.options[2].label='Other',p=>p.options[3].disabled=true,p=>p.disabled=true]){const bad=structuredClone(proof);mutate(bad);assert.throws(()=>assertRelativeDateFixture(bad,value));}
+  }
+  const template=await read('ui/gohtmx/templates/shadcn-select.html'),fixture=await read('internal/gallery/advanced_forms_fixtures.go');
+  assert(template.includes('{{if .Placeholder}}<option value=""{{if not .Value}} selected{{end}}>{{.Placeholder}}</option>{{end}}'));
+  assert(fixture.includes('"Placeholder": "Caller placeholder"'));assert(fixture.includes('props["Value"] = "Last 7 days"'));assert(fixture.includes('{"Label": "Yesterday", "Value": "Yesterday"}'));
+});
 
 test('complex eight forms require twenty whole ordered native and public windows',()=>{
   const n=(type,control,value,trusted=true,key=null)=>({type,control,value,trusted,key});
@@ -90,6 +102,7 @@ test('seven range forms require eighteen exact native transitions with independe
       const start=mode==='range'?['3','0','1','1'][index]:value,finish=mode==='range'?['5','5','5','1'][index]:null;
       const field={id:controlIDs.field,name:'caller_value',type,value:start,min:'',max:mode==='relative'?'':finish??'5',step:'',disabled:false,valid:true};
       const changed=end?'end':'field',proof={identity,rootID:'primary',fieldID:field.id,controlIDs,truncated:false,fields:[field,...(finish===null?[]:[{id:controlIDs.end,name:'caller_value_end',type:'range',value:finish,min:start,max:'5',step:'',disabled:false,valid:true}])],nativeEvents:[{type:key?'keydown':'click',control,targetID:controlIDs[control],trusted:true,key,value:null},...['input','change'].map(type=>({type,control:changed,targetID:controlIDs[changed],trusted:!synthetic,key:null,value}))],publicEvents:[{type:'ely:change',detail:{id:'primary',component:identity,name:end?'caller_value_end':'caller_value',value,...(type==='select-one'?{}:{checked:false}),type}}],output:mode==='range'?`${start}–${finish}`:value,knob:mode==='knob'?{value,output:value,angle:String(-135+Number(value)/5*270),sweep:`${Number(value)/5*270}deg`}:null,orientation:{writingMode:'vertical-lr',direction:'rtl',width:36,height:140}};
+      if(mode==='relative')proof.relativeOptions=relativeOptions(value);
       assertRangeFormStep(identity,stage,proof);count++;
       for(const mutate of [p=>p.identity='forms/Unknown',p=>p.truncated=true,p=>p.fields[0].value='stale',p=>p.fields[0].max='100',p=>p.nativeEvents[0].trusted=false,p=>p.nativeEvents[1].trusted=synthetic,p=>p.nativeEvents[1].targetID='twin',p=>p.publicEvents[0].detail.component='forms/SliderOther',p=>p.publicEvents.push(p.publicEvents[0])]){const bad=structuredClone(proof);mutate(bad);assert.throws(()=>assertRangeFormStep(identity,stage,bad));}
       if(mode==='range'){const bad=structuredClone(proof);bad.fields[1].min='0';if(start!=='0')assert.throws(()=>assertRangeFormStep(identity,stage,bad));}
