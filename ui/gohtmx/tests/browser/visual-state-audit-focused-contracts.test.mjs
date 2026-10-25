@@ -277,6 +277,7 @@ test('RelativeDatePicker exact fixture includes enabled unselected placeholder a
 
 test('complex eight forms require twenty whole ordered native and public windows',()=>{
   const n=(type,control,value,trusted=true,key=null)=>({type,control,value,trusted,key});
+  const destination={matchesNewPrimaryInput:true,rawID:null,rawName:'links',owned:true,ownedPath:'.ely-api-field-array > [data-ely-field-array] > [data-ely-array-row]:only-child > input[name="links"]',uniqueNewInput:true};
   let count=0;
   for(const name of ['FormField','FormSection','InlineForm','FieldArray','TagInput','TokenInput','HashtagInput','MentionInput']){
     const identity='forms/'+name,contract=requestedStateContract(identity);assert.equal(contract.nativeFormTwinWitness,true);
@@ -289,7 +290,7 @@ test('complex eight forms require twenty whole ordered native and public windows
       ...(name==='InlineForm'?[['form-submit',{value:email,valid:true},[n('click','submit',''),n('submit','form',null),{type:'ely:action',actualFormData:true,detail:{formData:[['email',email]],values:[['email',email]],submitter:'',id:'primary',component:identity,action:'save'}}]]]:[]),
     ];
     else if(name==='FieldArray')rows=[
-      ['array-add',{values:[''],forms:0},[n('click','add',''),p({name:'links',values:['']})]],
+      ['array-add',{values:[''],forms:0},[n('click','add',''),{...n('blur','add',''),relatedTarget:destination},p({name:'links',values:['']})]],
       ['array-edit',{values:[url],forms:0},[n('input','field',url)]],
       ['array-remove',{values:[],forms:0},[n('change','field',url),c('links',url),n('blur','field',url),n('click','remove',''),p({name:'links',values:[]})]],
     ];
@@ -304,7 +305,7 @@ test('complex eight forms require twenty whole ordered native and public windows
     ];
     assert.deepEqual(contract.steps.map(s=>s.id),rows.map(r=>r[0]));
     for(const [stage,state,events]of rows){
-      const proof={identity,rootID:'primary',truncated:false,foreignEvents:false,state,events,focusLeft:stage==='email-commit',siblings:name==='FormField'||name==='FormSection'?[['name',''],['bio','']]:[],submitterMatches:true,submitDefaultPrevented:true};
+      const proof={identity,rootID:'primary',truncated:false,foreignEvents:false,state,events,...(stage==='array-add'?{arrayPostFocus:destination}:{}),focusLeft:stage==='email-commit',siblings:name==='FormField'||name==='FormSection'?[['name',''],['bio','']]:[],submitterMatches:true,submitDefaultPrevented:true};
       assertComplexFormStep(identity,stage,proof);count++;
       for(const mutate of [p=>p.identity='forms/Other',p=>p.truncated=true,p=>p.foreignEvents=true,p=>p.events[0].trusted=false,p=>p.events.push({type:'ely:action',detail:{action:'save'}}),p=>p.events.pop()]){const bad=structuredClone(proof);mutate(bad);assert.throws(()=>assertComplexFormStep(identity,stage,bad));}
       if(events.length>1){const bad=structuredClone(proof);bad.events.reverse();assert.throws(()=>assertComplexFormStep(identity,stage,bad));}
@@ -312,6 +313,7 @@ test('complex eight forms require twenty whole ordered native and public windows
         for(const mutate of [p=>p.submitterMatches=false,p=>p.submitDefaultPrevented=false,p=>p.events[2].actualFormData=false,p=>p.events[2].detail.formData=[['email','stale']],p=>p.events.push(p.events[2])]){const bad=structuredClone(proof);mutate(bad);assert.throws(()=>assertComplexFormStep(identity,stage,bad));}
       }
       if(stage==='email-commit')assert.throws(()=>assertComplexFormStep(identity,stage,{...proof,focusLeft:false}));
+      if(stage==='array-add')for(const mutate of [p=>p.events[1].control='field',p=>p.events[1].relatedTarget.matchesNewPrimaryInput=false,p=>p.events[1].relatedTarget.rawID='invented-id',p=>p.events[1].relatedTarget.rawName='foreign',p=>p.events[1].relatedTarget.owned=false,p=>p.events[1].relatedTarget.uniqueNewInput=false,p=>p.events[1].relatedTarget.ownedPath=null,p=>p.arrayPostFocus={...destination,matchesNewPrimaryInput:false},p=>[p.events[1],p.events[2]]=[p.events[2],p.events[1]],p=>p.events.push(p.events[2])]){const bad=structuredClone(proof);mutate(bad);assert.throws(()=>assertComplexFormStep(identity,stage,bad));}
       if(stage==='tag-remove'){const committed=structuredClone(proof);committed.events.unshift(n('change','field',''));assertComplexFormStep(identity,stage,committed);committed.events.unshift(n('change','field',''));assert.throws(()=>assertComplexFormStep(identity,stage,committed));}
     }
   }
@@ -323,6 +325,10 @@ test('complex eight forms execute array and mention production branches with sou
   const calls=[],arrayInput={name:'links',value:'https://example.test'},array={querySelector:s=>s==='template'?{content:{querySelector:()=>arrayInput}}:{focus(){calls.push('focus-add');}},querySelectorAll:()=>array.removed?[]:[arrayInput],closest:()=>null};
   const arrayChanged=runInNewContext(source.slice(source.indexOf('const arrayChanged ='),source.indexOf('const initialForms ='))+';arrayChanged',{root:'primary',changed:(root,detail)=>calls.push(JSON.parse(JSON.stringify({root,detail})))});
   arrayChanged(array);assert.deepEqual(calls,[{root:'primary',detail:{name:'links',values:['https://example.test']}}]);
+  const addCode=source.slice(source.indexOf("if(button.matches('[data-ely-array-add]')")).split('\n')[0];assert(addCode.endsWith('return;}'));
+  const addTimeline=[],newInput={focus(){addTimeline.push('focus-new-input');}},newRow={querySelector:()=>newInput},addArray={querySelector:selector=>selector==='[data-ely-field-row]'?{content:{firstElementChild:{cloneNode:deep=>{assert.equal(deep,true);return newRow;}}}}:{append:row=>{assert.equal(row,newRow);addTimeline.push('append');}}};
+  const add=runInNewContext('(button)=>{'+addCode+'}',{arrayChanged:owner=>{assert.equal(owner,addArray);addTimeline.push('aggregate');}});
+  add({matches:()=>true,closest:()=>addArray});assert.deepEqual(addTimeline,['append','focus-new-input','aggregate'],'Production focus precedes aggregate notification');
   const removeCode=source.slice(source.indexOf("if(button.matches('[data-ely-array-remove]')")).split('\n')[0];assert(removeCode.endsWith('return;}'));
   const remove=runInNewContext('(button)=>{'+removeCode+'}',{arrayChanged});
   remove({matches:()=>true,closest:s=>s==='.ely-api-field-array'?array:{remove(){array.removed=true;}}});assert.equal(calls[1],'focus-add');assert.deepEqual(calls[2],{root:'primary',detail:{name:'links',values:[]}});
@@ -337,6 +343,22 @@ test('complex eight forms execute array and mention production branches with sou
   class FormDataStub{constructor(node){assert.equal(node,form);}*[Symbol.iterator](){yield ['email','caller@example.test'];}}
   const submit=runInNewContext(submitCode+';submit',{root:'primary',belongs:()=>true,FormData:FormDataStub,emit:(root,action,detail)=>emitted.push({root,action,detail})});
   const event={target:form,submitter:button,preventDefault(){this.defaultPrevented=true;}};submit(event);assert.equal(event.defaultPrevented,true);assert.equal(emitted.length,1);assert.equal(emitted[0].action,'save');assert.deepEqual(Array.from(emitted[0].detail.formData),[['email','caller@example.test']]);assert.equal(emitted[0].detail.submitter,'');
+});
+
+test('FieldArray actual blur observer binds relatedTarget node identity without inventing IDs',async()=>{
+  const driver=await read('ui/gohtmx/tests/browser/visual-state-audit-drivers.mjs'),start=driver.indexOf("if(contract.focusedSequence==='forms-complex-eight-native')"),branch=driver.slice(start,driver.indexOf("if(contract.focusedSequence==='forms-range-native')",start));
+  const opening='await root.evaluate((node,fixture)=>{',body=branch.slice(branch.indexOf(opening)+opening.length,branch.indexOf('},fixture);'));
+  const path='.ely-api-field-array > [data-ely-field-array] > [data-ely-array-row]:only-child > input[name="links"]',listeners={};
+  const input={getAttribute:name=>name==='name'?'links':null,matches:selector=>selector===path,closest:()=>node};
+  const add={value:'',closest:selector=>selector==='button'?add:node,matches:()=>false};
+  const node={querySelector:selector=>selector==='[data-ely-array-add]'?add:input,querySelectorAll:()=>[input],contains:target=>target===input||target===add,addEventListener:(type,fn)=>listeners[type]=fn};
+  runInNewContext(body,{node,fixture:{mode:'array',field:'[data-ely-array-row] input[name="links"]'}});
+  listeners.blur({type:'blur',target:add,relatedTarget:input,isTrusted:true});
+  assert.equal(node.__complexEvents[0].relatedTarget.matchesNewPrimaryInput,true);assert.equal(node.__complexEvents[0].relatedTarget.rawID,null);assert.equal(node.__complexEvents[0].relatedTarget.ownedPath,path);
+  listeners.blur({type:'blur',target:add,relatedTarget:{...input},isTrusted:true});
+  assert.equal(node.__complexEvents[1].relatedTarget.matchesNewPrimaryInput,false,'Identical attributes are not the actual newly added input');
+  assert.equal(node.__complexEvents[1].relatedTarget.owned,false);
+  assert(branch.includes('destination=document.activeElement'));assert(branch.includes('arrayPostFocus={matchesNewPrimaryInput:!!added&&destination===added'));
 });
 
 test('seven range forms require eighteen exact native transitions with independent payload bounds and trust',()=>{

@@ -1360,7 +1360,9 @@ export function assertComplexFormStep(identity,stage,proof){
     if(stage==='form-submit'){assert.equal(proof.submitterMatches,true);assert.equal(proof.submitDefaultPrevented,true);}
   }else if(fixture.mode==='array'){
     state={values:stage==='array-add'?['']:stage==='array-edit'?[url]:[],forms:0};
-    events=stage==='array-add'?[native('click','add',''),change({name:'links',values:['']})]:stage==='array-edit'?[native('input','field',url)]:[native('change','field',url),fieldChange('links',url),native('blur','field',url),native('click','remove',''),change({name:'links',values:[]})];
+    const destination={matchesNewPrimaryInput:true,rawID:null,rawName:'links',owned:true,ownedPath:'.ely-api-field-array > [data-ely-field-array] > [data-ely-array-row]:only-child > input[name="links"]',uniqueNewInput:true};
+    events=stage==='array-add'?[native('click','add',''),{...native('blur','add',''),relatedTarget:destination},change({name:'links',values:['']})]:stage==='array-edit'?[native('input','field',url)]:[native('change','field',url),fieldChange('links',url),native('blur','field',url),native('click','remove',''),change({name:'links',values:[]})];
+    if(stage==='array-add')assert.deepEqual(proof.arrayPostFocus,{...destination,matchesNewPrimaryInput:true},'Post-click active element independently equals the unique newly added primary input');
   }else if(fixture.mode==='tag'){
     state={value:stage==='tag-add'?`alpha,${tag}`:'alpha',entry:stage==='tag-edit'?tag:'',tags:stage==='tag-add'?['alpha',tag]:['alpha']};
     events=stage==='tag-edit'?[native('input','field',tag)]:stage==='tag-add'?[native('keydown','field',tag,true,'Enter'),native('input','hidden',`alpha,${tag}`,false),native('change','hidden',`alpha,${tag}`,false),fieldChange('caller_value',`alpha,${tag}`,'hidden')]:[native('blur','field',''),native('click','remove',tag),native('input','hidden','alpha',false),native('change','hidden','alpha',false),fieldChange('caller_value','alpha','hidden')];
@@ -1935,7 +1937,12 @@ export async function runRequestedStateActions(contract,root,runStep,failureDiag
         else if(e.type==='submit'&&e.target===node.querySelector('form.ely-api-inline-form')){control='form';node.__complexSubmit=e;}
         else if(button){target=button;if(button===node.querySelector('[data-ely-array-add]'))control='add';else if(button===node.querySelector(fixture.mode==='tag'?'[data-ui-action="remove-tag"][value="NewCallerTag"]':'[data-ely-array-remove]'))control='remove';else if(button===node.querySelector('[data-ely-mention-value][value="beta"]'))control='option';else if(button===node.querySelector('form.ely-api-inline-form button[type="submit"]'))control='submit';}
         if(control==='foreign')node.__complexForeign=true;
-        node.__complexEvents.push({type:e.type,control,value:control==='form'?null:target.value??null,trusted:e.isTrusted,key:e.key??null});
+        let relatedTarget;
+        if(fixture.mode==='array'&&control==='add'&&e.type==='blur'){
+          const path='.ely-api-field-array > [data-ely-field-array] > [data-ely-array-row]:only-child > input[name="links"]',inputs=[...node.querySelectorAll(path)],added=inputs.length===1?inputs[0]:null,destination=e.relatedTarget;
+          relatedTarget={matchesNewPrimaryInput:!!added&&destination===added,rawID:destination?.getAttribute?.('id')??null,rawName:destination?.getAttribute?.('name')??null,owned:!!destination&&node.contains(destination)&&destination.closest('[data-ely-family]')===node,ownedPath:!!destination&&destination.matches?.(path)?path:null,uniqueNewInput:inputs.length===1};
+        }
+        node.__complexEvents.push({type:e.type,control,value:control==='form'?null:target.value??null,trusted:e.isTrusted,key:e.key??null,...(relatedTarget?{relatedTarget}:{})});
       };
       for(const type of ['input','change','keydown','blur','click','submit','ely:change','ely:action'])node.addEventListener(type,node.__complexObserver,true);
     },fixture);
@@ -1958,7 +1965,12 @@ export async function runRequestedStateActions(contract,root,runStep,failureDiag
         const proof=await root.evaluate((node,args)=>{
           const field=node.querySelector(args.fixture.field),mode=args.fixture.mode;
           const state=mode==='array'?{values:[...node.querySelectorAll('[data-ely-array-row] input')].map(n=>n.value),forms:node.querySelectorAll('form').length}:mode==='tag'?{value:node.querySelector('input[type="hidden"][name="caller_value"]').value,entry:field.value,tags:[...node.querySelectorAll('[data-ui-tag-text]')].map(n=>n.textContent)}:mode==='mention'?{value:field.value,listHidden:node.querySelector('[data-ely-mention-list]').hidden,visible:[...node.querySelectorAll('[data-ely-mention-value]')].filter(n=>!n.hidden).map(n=>n.value)}:{value:field.value,valid:field.checkValidity()};
-          return {identity:node.dataset.elyComponent,rootID:node.id,truncated:node.__complexTruncated,foreignEvents:node.__complexForeign,events:node.__complexEvents.slice(args.cursor),state,focusLeft:field!==document.activeElement,siblings:mode==='field'?[...node.querySelectorAll('input,textarea')].filter(n=>n.name!=='email').map(n=>[n.name,n.value]):[],submitterMatches:node.__complexSubmit?.submitter===node.querySelector('form.ely-api-inline-form button[type="submit"]'),submitDefaultPrevented:node.__complexSubmit?.defaultPrevented??false};
+          let arrayPostFocus;
+          if(mode==='array'){
+            const path='.ely-api-field-array > [data-ely-field-array] > [data-ely-array-row]:only-child > input[name="links"]',inputs=[...node.querySelectorAll(path)],added=inputs.length===1?inputs[0]:null,destination=document.activeElement;
+            arrayPostFocus={matchesNewPrimaryInput:!!added&&destination===added,rawID:destination?.getAttribute?.('id')??null,rawName:destination?.getAttribute?.('name')??null,owned:!!destination&&node.contains(destination)&&destination.closest('[data-ely-family]')===node,ownedPath:!!destination&&destination.matches?.(path)?path:null,uniqueNewInput:inputs.length===1};
+          }
+          return {identity:node.dataset.elyComponent,rootID:node.id,truncated:node.__complexTruncated,foreignEvents:node.__complexForeign,events:node.__complexEvents.slice(args.cursor),state,focusLeft:field!==document.activeElement,...(arrayPostFocus?{arrayPostFocus}:{}),siblings:mode==='field'?[...node.querySelectorAll('input,textarea')].filter(n=>n.name!=='email').map(n=>[n.name,n.value]):[],submitterMatches:node.__complexSubmit?.submitter===node.querySelector('form.ely-api-inline-form button[type="submit"]'),submitDefaultPrevented:node.__complexSubmit?.defaultPrevented??false};
         },{fixture,cursor});
         receipt.nativeFormProof=proof;assertComplexFormStep(identity,stage,proof);cursor+=proof.events.length;return proof;
       });
