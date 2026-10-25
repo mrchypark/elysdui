@@ -450,6 +450,30 @@ test('forms action ownership production listeners emit exactly once in actual re
   root.dataset.elyFamily='native';pathMode=true;const before=requests.length;listeners[0]({target:button,preventDefault(){}});assert.equal(requests.length,before+1,'Non-forms families retain generic ownership');
 });
 
+test('forms sole action owner preserves associated FormData order duplicates and no-form shape',async()=>{
+  const api=await read('ui/gohtmx/assets/ely-api.js'),forms=await read('ui/gohtmx/assets/ely-api-forms.js');
+  const core=api.slice(api.indexOf('const click = event => {'),api.indexOf('const submit = event => {')),family=forms.slice(forms.indexOf("  const click = event => {",forms.indexOf("register('forms', root =>")),forms.indexOf('  const input = event => {'));
+  assert(api.indexOf("root.addEventListener('click', click)")<api.indexOf('mounted.set(root'));
+  assert(forms.includes("root.addEventListener('click',click);"));
+  const entries=[['title','Current title'],['tag','first'],['tag','second']],associated={entries},field={value:'current composite value'},requests=[];let mode='path',cancel=false,constructed=0;
+  const root={id:'primary',dataset:{elyFamily:'forms',elyComponent:'forms/PathInput'},dispatchEvent(event){requests.push(event.detail);return !cancel;}};
+  class NativeFormDataDouble{constructor(form){assert.equal(form,associated,'Use native button.form association, not closest(form)');this.entries=form.entries.map(pair=>[...pair]);constructed++;}*[Symbol.iterator](){yield* this.entries;}}
+  class EventDouble{constructor(type,init){this.type=type;Object.assign(this,init);}}
+  const emitSource=api.slice(api.indexOf('export function emit('),api.indexOf('\n}',api.indexOf('export function emit('))+2).replace('export function','function');
+  const emit=runInNewContext(emitSource+';emit',{CustomEvent:EventDouble});
+  const button={tagName:'BUTTON',type:'button',value:'stale button value',form:associated,dataset:{elyAction:'caller-custom'},matches:()=>false,getAttribute:()=>null,closest(selector){if(selector==='[data-ely-family]')return root;if(selector==='button'||selector==='[data-ely-action]')return this;if(selector===(mode==='path'?'.ely-api-path-input':'.ely-api-input-group'))return {querySelector:()=>field};return null;}};
+  const nested={closest:selector=>button.closest(selector)},context={root,emit,belongs:(owner,target)=>owner===root&&target.closest('[data-ely-family]')===root,FormData:NativeFormDataDouble};
+  const listeners=[runInNewContext(core+';click',{...context}),runInNewContext(family+';click',{...context})];
+  const click=()=>{const event={target:nested,defaultPrevented:false,preventDefault(){this.defaultPrevented=true;}};const before=requests.length;listeners.forEach(listener=>listener(event));assert.equal(requests.length,before+1);return event;};
+  for(const valueMode of ['path','group']){
+    mode=valueMode;root.dataset.elyComponent=mode==='path'?'forms/PathInput':'forms/InputGroup';field.value=mode==='path'?'~/Projects/ely':'current copy text';button.form=associated;
+    click();const detail=requests.at(-1);assert.deepEqual(Object.keys(detail),['value','formData','values','id','component','action']);assert(detail.formData instanceof NativeFormDataDouble);assert.deepEqual([...detail.formData],entries);assert.deepEqual(Array.from(detail.values,pair=>[...pair]),entries);assert.equal(detail.value,field.value);assert.equal(detail.action,'caller-custom');assert.equal(detail.component,root.dataset.elyComponent);assert.equal(detail.id,'primary');
+    cancel=true;assert.equal(click().defaultPrevented,true);cancel=false;
+    const before=constructed;button.form=null;click();assert.deepEqual({...requests.at(-1)},{value:field.value,id:'primary',component:root.dataset.elyComponent,action:'caller-custom'});assert.equal(constructed,before,'No FormData construction or null metadata for an unassociated button');
+  }
+  assert.equal(constructed,4);
+});
+
 test('forms action ownership preserves actual suite capture confirmation before core bubble',async()=>{
   const forms=await read('ui/gohtmx/assets/ely-api-forms.js'),api=await read('ui/gohtmx/assets/ely-api.js');
   assert(forms.includes("root.addEventListener('click',click,{...options,capture:true})"));
