@@ -19,6 +19,15 @@ import {assertActivityLogScopedAuditPage,assertCommunicationCallerRequest,assert
 
 const read=path=>readFile(new URL(`../../../../${path}`,import.meta.url),'utf8');
 
+test('regional audit route scopes exact aliases only and retains complete painted-union camera guards',async()=>{
+  const source=await read('ui/gohtmx/tests/browser/visual-state-audit-actions.mjs'),start=source.indexOf("if(contract.identity==='forms/MultiSelect'"),end=source.indexOf("if(contract.focusedSequence==='workspace-activity-native-link-focus')",start),branch=source.slice(start,end);assert(start>=0&&end>start);
+  const route=runInNewContext('(contract,familyURL)=>{'+branch+'return familyURL;}',{URL,assert});
+  for(const identity of ['forms/LanguageSelect','forms/CountrySelect','forms/CurrencySelect']){const url=new URL(route(requestedStateContract(identity),'http://127.0.0.1/components/audit?family=forms'));assert.equal(url.searchParams.get('case'),identity);}
+  const unchanged='http://127.0.0.1/components/audit?family=forms';assert.equal(route({identity:'forms/Other',focusedSequence:'forms-regional-native'},unchanged),unchanged);
+  assert.throws(()=>route(requestedStateContract('forms/CountrySelect'),'http://127.0.0.1/components/audit?family=workspace'));
+  const driver=await read('ui/gohtmx/tests/browser/visual-state-audit-drivers.mjs');assert(driver.includes('const camera={fullPage:!fits,clip:fits?viewportClip:bounds.clip}'));assert(driver.includes('captureForeignPaint,{clip:bounds.clip,checkedRootID}'));
+});
+
 test('requested-state execution stops unsafe proof before next case and ignores intentional full gate limit',async()=>{
   const source=await read('ui/gohtmx/tests/browser/visual-state-audit-actions.mjs');
   const start=source.indexOf('if(options.statesOnly){',source.indexOf('for (const item of familyCases)')),end=source.indexOf('// Fresh documents',start),branch=source.slice(start,end);assert(start>=0&&end>start);

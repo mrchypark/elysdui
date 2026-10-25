@@ -8,3 +8,5 @@
 [data-audit-case][data-audit-name="buttons/ActionSheet"]>.advanced-grid>[data-audit-main]{min-block-size:100vh}
 /* Exact-case MultiSelect diagnostics retain the twin outside the primary paint frame. */
 .advanced-cases>[data-audit-case][data-audit-name="forms/MultiSelect"]:only-child>.advanced-grid>[data-audit-main]{min-block-size:100vh}
+/* Exact regional popup audits reserve flow space without altering either specimen. */
+.advanced-cases>[data-audit-case][data-audit-name="forms/LanguageSelect"]:only-child>.advanced-grid>[data-audit-main],.advanced-cases>[data-audit-case][data-audit-name="forms/CountrySelect"]:only-child>.advanced-grid>[data-audit-main],.advanced-cases>[data-audit-case][data-audit-name="forms/CurrencySelect"]:only-child>.advanced-grid>[data-audit-main]{min-block-size:100vh}

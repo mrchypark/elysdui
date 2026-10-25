@@ -333,7 +333,7 @@ async function directCaseDriver({item, familyURL, captures, reference, semanticS
   page.on('pageerror',error=>browserErrors.push({family:item.family,driver:'direct-playwright',caseId:item.caseId,type:'pageerror',text:String(error)}));
   try {
     await page.addInitScript(semanticSnapshotInit);
-    if(contract.identity==='forms/MultiSelect'&&contract.focusedSequence==='forms-seven-native-local'){
+    if(contract.identity==='forms/MultiSelect'&&contract.focusedSequence==='forms-seven-native-local'||contract.focusedSequence==='forms-regional-native'&&['forms/LanguageSelect','forms/CountrySelect','forms/CurrencySelect'].includes(contract.identity)){
       const scopedURL=new URL(familyURL);
       assert.equal(scopedURL.pathname,'/components/audit');assert.equal(scopedURL.searchParams.get('family'),'forms');
       scopedURL.searchParams.set('case',contract.identity);familyURL=scopedURL.href;
