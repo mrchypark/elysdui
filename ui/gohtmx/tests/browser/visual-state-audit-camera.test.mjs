@@ -17,14 +17,14 @@ test('DateRange separate focused outline is measured diagnostic only and rejects
   const start=field('actual-start','[data-ely-date-start]'),end=field('actual-end','[data-ely-date-end]'),trigger={closest:()=>root,getAttribute:()=> 'true'};
   panel.querySelectorAll=()=>[start,end];root.querySelectorAll=selector=>selector==='[data-ely-date-range-panel]'?[panel]:[trigger];
   const bounds={clip:{x:10,y:30,width:80,height:50},root:{left:10,top:30,right:90,bottom:80},focusOutline:{status:'unsupported',reason:'unbounded focus-within shadow'}};
-  const document={activeElement:start,querySelectorAll:()=>[root]},context={node:root,bounds,document,URL,location:{href:'http://localhost/components/audit?family=forms&case=forms%2FDateRangePicker'},getComputedStyle:node=>node.style,scrollX:0,scrollY:0,innerWidth:390,innerHeight:844};
+  const document={activeElement:start,querySelectorAll:selector=>selector.includes('actual-start')?[start]:[root]},context={node:root,bounds,document,URL,location:{href:'http://localhost/components/audit?family=forms&case=forms%2FDateRangePicker'},getComputedStyle:node=>node.style,scrollX:0,scrollY:0,innerWidth:390,innerHeight:844};
   const measure=()=>JSON.parse(JSON.stringify(runInNewContext(`(${dateRangeFocusedOutline.toString()})(node,bounds)`,context)));
   const valid=measure();assert.equal(valid.status,'bounded-focused-outline-only');assert.equal(valid.ownershipPromotion,false);assert.equal(valid.panel.id,null);assert.deepEqual(valid.outline.paint,{left:14,top:34,right:86,bottom:66});assert.equal(valid.outline.width,2);assert.equal(valid.outline.offset,4);assert.equal(bounds.focusOutline.status,'unsupported','Independent measure must not mutate/promote original shadow gate');
   panel.closest=()=>({});assert.equal(measure().status,'unsupported');panel.closest=()=>root;
   document.activeElement={...start};assert.equal(measure().status,'unsupported');document.activeElement=start;
   start.style.outlineStyle='auto';assert.equal(measure().status,'unsupported');start.style.outlineStyle='solid';
   panel.style.clipPath='inset(1px)';assert.equal(measure().status,'unsupported');panel.style.clipPath='none';
-  document.querySelectorAll=()=>[root,root];assert.equal(measure().status,'unsupported');document.querySelectorAll=()=>[root];
+  document.querySelectorAll=()=>[root,root];assert.equal(measure().status,'unsupported');document.querySelectorAll=selector=>selector.includes('actual-start')?[start]:[root];
   assert.equal(measure().status,'bounded-focused-outline-only');
   const sampler=multiSelectShadowFrame.toString();assert(sampler.includes("root?.dataset.elyComponent!=='forms/MultiSelect'"));assert(sampler.includes("'generated owned shadow-frame paint'"),'Pseudo paint remains unsupported, not waived for DateRange');
 });
@@ -33,7 +33,7 @@ test('DateRange diagnostic cannot publish raster or ownership approval and exist
   const source=await readFile(new URL('./visual-state-audit-drivers.mjs',import.meta.url),'utf8');
   assert(source.includes('if(measurement)bounds={...bounds,dateRangeFocusedOutline:measurement}'));
   const f=shadowRasterFixture();f.pixel(0,5,254);assert.throws(()=>proveMultiSelectShadowRaster(f.png,f.sample),/boundary/);
-  const region=source.slice(source.indexOf('let bounds=await root.evaluate(actionBounds)'),source.indexOf('const shadowSample=await root.evaluate(multiSelectShadowFrame)'));
+  const region=source.slice(source.indexOf('let bounds=await root.evaluate(actionBounds)'),source.indexOf('const shadowSample=await root.evaluate(multiSelectShadowFrame,'));
   assert(!region.includes('not-painted'));assert(!region.includes('countsAsOwnedEvidence'));assert(!region.includes('focusOutline:measurement'));
 });
 
@@ -62,6 +62,56 @@ function multiSelectSamplerFixture({viewport={width:100,height:100},scroll={x:0,
   const sample=()=>JSON.parse(JSON.stringify(runInNewContext(`(${multiSelectShadowFrame.toString()})(node)`,{node:root,document,URL,location:{href:'http://127.0.0.1/components/audit?family=forms&case=forms%2FMultiSelect'},getComputedStyle:(node,pseudo)=>pseudo?{content:node.pseudos[pseudo]??'none'}:node.style,innerWidth:viewport.width,innerHeight:viewport.height,scrollX:scroll.x,scrollY:scroll.y})));
   return {style,rect,make,record,grid,host,root,twin,panel,entry,focused,document,sample};
 }
+
+function dateRangeSamplerFixture(){
+  const f=multiSelectSamplerFixture(),{root,panel,entry,focused,record,host,twin,grid,rect,make}=f;
+  for(const [node,box]of [[record,rect(0,0,200,240)],[grid,rect(0,0,200,240)],[host,rect(0,10,200,200)],[root,rect(10,10,180,40)],[twin,rect(0,210,200,240)],[panel,rect(10,40,180,140)],[entry,rect(10,10,180,38)],[focused,rect(20,50,170,78)]])node.getBoundingClientRect=()=>box;
+  root.dataset={elyComponent:'forms/DateRangePicker',elyKind:'DatePicker'};panel.id='';panel.closest=()=>root;entry.closest=()=>root;
+  entry.clientTop=0;
+  const first=make('',panel,rect(20,50,170,85)),second=make('',panel,rect(20,95,170,130)),end=make('actual-end',second,rect(20,95,170,123));focused.parentElement=first;focused.id='actual-start';focused.type='date';focused.style.outlineStyle='solid';focused.style.outlineWidth='2px';focused.style.outlineOffset='4px';
+  const output=make('',entry,rect(40,10,170,38));output.matches=selector=>selector==='output[data-ely-date-range-label]';output.style.order='0';entry.children=[output];
+  for(const node of [root,panel,entry,first,second,focused,end,output])node.style.zoom='1';
+  first.clientTop=second.clientTop=0;
+  const base={...f.style,zoom:'1',textShadow:'none',isolation:'auto',willChange:'auto',content:'""',display:'block',width:'16px',height:'16px',backgroundColor:'rgb(100, 100, 100)',backgroundImage:'none',paddingTop:'0px',paddingRight:'0px',paddingBottom:'0px',paddingLeft:'0px',maskSize:'contain',maskPosition:'50% 50%',maskRepeat:'no-repeat',maskClip:'border-box',maskOrigin:'border-box',maskComposite:'add',maskMode:'match-source',marginLeft:'0px',marginTop:'0px',marginBottom:'0px',marginRight:'0px'};
+  for(const label of [first,second]){label.style={...label.style,position:'relative',direction:'ltr',writingMode:'horizontal-tb'};Object.assign(label,{clientWidth:150,clientHeight:35,scrollLeft:0,scrollTop:0});label.pseudos['::before']={...base,position:'absolute',zIndex:'1',left:'10.4px',right:'auto',top:'6px',bottom:'auto',maskImage:'url("http://localhost/assets/ely/icons/calendar.svg")'};}
+  Object.assign(entry,{clientWidth:170,clientHeight:28,scrollLeft:0,scrollTop:0});Object.assign(entry.style,{display:'flex',flexDirection:'row',flexWrap:'nowrap',alignItems:'center',justifyContent:'normal',textIndent:'0px',direction:'ltr',writingMode:'horizontal-tb',paddingLeft:'10px',paddingTop:'0px',paddingBottom:'0px'});
+  entry.pseudos['::before']={...base,position:'static',zIndex:'auto',order:'0',flexGrow:'0',flexShrink:'0',flexBasis:'auto',left:'auto',right:'auto',top:'auto',bottom:'auto',marginRight:'8.8px',maskImage:'url("http://localhost/assets/ely/icons/calendar-range.svg")'};
+  root.querySelector=()=>panel;root.querySelectorAll=selector=>selector==='*'?[entry,output,panel,first,focused,second,end]:selector==='[data-ely-date-range-panel]'?[panel]:[entry];panel.querySelectorAll=()=>[first,second];focused.matches=()=>true;
+  const outline={status:'bounded-focused-outline-only',focusedID:'actual-start',outline:{status:'bounded',width:2,offset:4,paint:{left:14,top:44,right:176,bottom:84}}};
+  const document={...f.document,activeElement:focused,documentElement:{font:true}};
+  const sample=()=>JSON.parse(JSON.stringify(runInNewContext(`(${multiSelectShadowFrame.toString()})(node,outline)`,{node:root,outline,document,URL,location:{href:'http://localhost/components/audit?family=forms&case=forms%2FDateRangePicker'},getComputedStyle:(node,pseudo)=>node.font?{fontSize:'16px'}:pseudo?node.pseudos[pseudo]??{content:'none'}:node.style,innerWidth:200,innerHeight:240,scrollX:0,scrollY:0})));
+  return {...f,first,second,end,outline,document,sample};
+}
+
+test('DateRange exact finite masked pseudo and independent focused outline reuse strict frame sampler',()=>{
+  const f=dateRangeSamplerFixture(),sample=f.sample();assert.equal(sample.eligible,true,JSON.stringify(sample));assert.equal(sample.dateRange.pseudos.length,3);assert.equal(sample.panelID,'');assert.equal(sample.shadows[0].actualOwnedPanel,true);assert.equal(sample.dateRange.outline.outline.status,'bounded');
+  for(const mutate of [f=>f.first.pseudos['::before'].width='17px',f=>f.first.pseudos['::before'].top='7px',f=>f.first.pseudos['::before'].maskImage='url("http://localhost/foreign.svg")',f=>f.first.pseudos['::before'].transform='matrix(2,0,0,2,0,0)',f=>f.first.pseudos['::before'].filter='blur(1px)',f=>f.first.pseudos['::before'].clipPath='inset(1px)',f=>f.first.pseudos['::before'].zIndex='2',f=>f.first.clientWidth=20,f=>f.entry.pseudos['::before'].position='absolute',f=>f.entry.style.justifyContent='space-between',f=>f.entry.style.direction='rtl',f=>f.second.pseudos['::after']={...f.second.pseudos['::before']},f=>f.panel.style.overflowX='hidden',f=>f.grid.style.overflowY='hidden',f=>f.panel.style.transform='matrix(1,0,0,1,2,0)',f=>f.focused.style.boxShadow='rgba(0,0,0,.1) 0px 1px 2px 0px',f=>f.outline.status='unsupported',f=>f.outline.focusedID='foreign',f=>f.outline.outline.paint.left=-1,f=>f.twin.getBoundingClientRect=()=>f.rect(0,50,200,240),f=>f.root.querySelectorAll=selector=>selector==='[data-ely-date-range-panel]'?[f.panel,f.panel]:selector==='*'?[f.entry,f.panel,f.first,f.focused,f.second,f.end]:[f.entry]]){
+    const bad=dateRangeSamplerFixture();mutate(bad);assert.equal(bad.sample().eligible,false,mutate.toString());
+  }
+});
+
+test('DateRange raster capture retains bounded focus rejects idless impostor foreign contact and geometry changes',async()=>{
+  const require=createRequire(import.meta.url),{PNG}=require(resolve(dirname(require.resolve('playwright-core/package.json')),'lib/utilsBundle.js'));
+  for(const mode of ['valid','foreign','contact','impostor-shadow','wrong-ancestor','changed-outline','changed-pseudo']){
+    const f=shadowRasterFixture(),sample=f.sample;
+    sample.panelID='';sample.shadows[0].id='';sample.shadows[0].actualOwnedPanel=mode!=='impostor-shadow';
+    const measured={status:'bounded-focused-outline-only',ownershipPromotion:false,focusedID:'actual-start',outline:{status:'bounded',width:2,offset:4,paint:{left:4,top:4,right:8,bottom:8}}};
+    const panelRect={left:4,top:4,right:8,bottom:8,width:4,height:4};
+    sample.dateRange={panelReference:{selector:'[data-ely-date-range-panel]',unique:true,ownerID:'primary',rect:panelRect},pseudos:[{maskImage:'calendar.svg'}],outline:measured};
+    let measurements=0,samples=0,shots=0;
+    const root={async scrollIntoViewIfNeeded(){},async evaluate(fn){
+      if(fn===dateRangeFocusedOutline){measurements++;return mode==='changed-outline'&&measurements>1?{...measured,focusedID:'wrong'}:measured;}
+      if(fn===multiSelectShadowFrame){samples++;return mode==='changed-pseudo'&&samples>1?{...sample,dateRange:{...sample.dateRange,pseudos:[]}}:sample;}
+      if(fn===captureForeignPaint)return {foreignDOMIntersections:mode==='foreign'?[{id:'foreign-twin',exposedPaintArea:308*28}]:[],occludedForeignPaint:[]};
+      return {clip:sample.documentFrame,focusOutline:{status:'unsupported',reason:'unbounded focus-within shadow',diagnostic:{focused:{type:'date'},active:{tag:'div',id:null,rect:mode==='wrong-ancestor'?{...panelRect,left:3}:panelRect}}}};
+    }};
+    if(mode==='contact')f.pixel(0,5,254);const bytes=PNG.sync.write(f.png);
+    const page={async evaluate(){return {scroll:{x:0,y:0},viewport:{width:100,height:100}};},async screenshot(){shots++;return bytes;}};
+    const result=await captureTargetPNG(page,root);
+    if(mode==='valid'){assert.equal(result.bounds.focusOutline.status,'bounded');assert.equal(result.bounds.focusOutline.width,2);assert.equal(result.bounds.focusOutline.offset,4);assert.equal(result.bounds.decorativeShadowProof.dateRange.outline.focusedID,'actual-start');assert.equal(shots,1);}
+    else{assert.equal(result.bounds.focusOutline.status,'unsupported',mode);assert.equal(result.bounds.decorativeShadowProof,undefined,mode);if(mode==='foreign')assert.equal(shots,1,'Foreign check rejects raster camera before taking a candidate; only failed-context fallback remains');}
+  }
+});
 
 test('MultiSelect shadow camera retains full authored frame when current popup extends below viewport',async()=>{
   const f=multiSelectSamplerFixture({viewport:{width:100,height:84},scroll:{x:0,y:200}});

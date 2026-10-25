@@ -487,17 +487,20 @@ export function captureForeignPaint(node,{clip,checkedRootID}){
 }
 
 // This is a finite audit-frame proof, not a CSS blur-radius approximation.
-export function multiSelectShadowFrame(node){
+export function multiSelectShadowFrame(node,dateOutline=null){
   const root=node.closest('[data-audit-main]>[data-ely-family]');
-  if(root?.dataset.elyComponent!=='forms/MultiSelect')return null;
-  const panel=root.querySelector('[data-ely-multi-source].is-open [data-ui-multi-list][role=group]');
+  const date=root?.dataset.elyComponent==='forms/DateRangePicker'&&root.dataset.elyKind==='DatePicker';
+  if(root?.dataset.elyComponent!=='forms/MultiSelect'&&!date)return null;
+  const panel=root.querySelector(date?'[data-ely-date-range-panel]:not([hidden])':'[data-ely-multi-source].is-open [data-ui-multi-list][role=group]');
   if(!panel)return null;
   const fail=reason=>({eligible:false,reason});
-  if(new URL(location.href).searchParams.get('case')!=='forms/MultiSelect'||document.querySelectorAll('[data-audit-case]').length!==1)return fail('shadow proof requires exact-case audit');
+  if((date?new URL(location.href).searchParams.get('case')!=='forms/DateRangePicker':new URL(location.href).searchParams.get('case')!=='forms/MultiSelect')||document.querySelectorAll('[data-audit-case]').length!==1)return fail('shadow proof requires exact-case audit');
   const host=root.closest('[data-audit-main]'),record=root.closest('[data-audit-case]'),twin=record?.querySelector('[data-audit-twin]');
-  if(!host||!record||!twin||document.querySelectorAll(`[id="${panel.id}"]`).length!==1)return fail('ambiguous shadow frame owner');
-  const entries=[...root.querySelectorAll('[data-ely-multi-entry][role=combobox]')];
-  if(entries.length!==1||entries[0].getAttribute('aria-expanded')!=='true'||entries[0].getAttribute('aria-controls')!==panel.id)return fail('shadow panel reference mismatch');
+  if(!host||!record||!twin||(!date&&document.querySelectorAll(`[id="${panel.id}"]`).length!==1))return fail('ambiguous shadow frame owner');
+  const entries=[...root.querySelectorAll(date?'[data-ely-date-range-trigger]':'[data-ely-multi-entry][role=combobox]')];
+  if(entries.length!==1||entries[0].getAttribute('aria-expanded')!=='true'||!date&&entries[0].getAttribute('aria-controls')!==panel.id)return fail('shadow panel reference mismatch');
+  const focused=document.activeElement;
+  if(date&&(root.querySelectorAll('[data-ely-date-range-panel]').length!==1||panel.closest('[data-ely-family]')!==root||entries[0].closest('[data-ely-family]')!==root||!panel.contains(focused)||dateOutline?.status!=='bounded-focused-outline-only'||dateOutline.focusedID!==focused.id))return fail('exact date panel and separate focused outline required');
   const r=root.getBoundingClientRect(),h=host.getBoundingClientRect(),box=record.getBoundingClientRect(),s=getComputedStyle(record),p=panel.getBoundingClientRect();
   const frame={x:Math.ceil(box.left+record.clientLeft),y:Math.floor(r.top),width:Math.floor(box.right-record.clientLeft)-Math.ceil(box.left+record.clientLeft),height:Math.floor(h.bottom)-Math.floor(r.top)};
   const documentFrame={...frame,x:frame.x+scrollX,y:frame.y+scrollY};
@@ -515,7 +518,28 @@ export function multiSelectShadowFrame(node){
     for(const pseudo of ['::before','::after'])if(!['none','normal'].includes(getComputedStyle(a,pseudo).content))return fail('generated audit backdrop paint');
   }
   if(!reachedRecord)return fail('shadow frame record is not an ancestor');
-  const rects=[],shadows=[],compositedDisabledLeaves=[];
+  const rects=[],shadows=[],compositedDisabledLeaves=[],datePseudos=[];
+  const datePseudo=(element,pseudo,ps,b)=>{
+    const trigger=element===entries[0],fields=[...panel.querySelectorAll('.ely-api-date-field')];
+    if(pseudo!=='::before'||!trigger&&(!fields.includes(element)||fields.length!==2)||ps.content!=='""'||ps.display==='none')return false;
+    const parent=getComputedStyle(element),font=parseFloat(getComputedStyle(document.documentElement).fontSize);
+    const none=['transform','translate','rotate','scale','perspective','filter','backdropFilter','clipPath','boxShadow','textShadow'];
+    if(none.some(key=>ps[key]!=='none')||ps.opacity!=='1'||ps.mixBlendMode!=='normal'||ps.isolation!=='auto'||ps.contain!=='none'||ps.willChange!=='auto'||ps.clip!=='auto'||ps.backgroundImage!=='none'||!/^rgb\(\d+,\s*\d+,\s*\d+\)$/.test(ps.backgroundColor)||!['none','hidden'].includes(ps.outlineStyle)&&parseFloat(ps.outlineWidth)!==0||['Top','Right','Bottom','Left'].some(side=>parseFloat(ps['border'+side+'Width'])!==0)||['Top','Right','Bottom','Left'].some(side=>parseFloat(ps['padding'+side])!==0)||ps.width!=='16px'||ps.height!=='16px'||ps.maskSize!=='contain'||ps.maskPosition!=='50% 50%'||ps.maskRepeat!=='no-repeat'||ps.maskClip!=='border-box'||ps.maskOrigin!=='border-box'||ps.maskComposite!=='add'||ps.maskMode!=='match-source')return false;
+    const icon=new URL(trigger?'/assets/ely/icons/calendar-range.svg':'/assets/ely/icons/calendar.svg',location.href).href;
+    if(ps.maskImage!==`url("${icon}")`||!['normal','1'].includes(ps.zoom)||parent.direction!=='ltr'||parent.writingMode!=='horizontal-tb'||element.scrollLeft!==0||element.scrollTop!==0)return false;
+    let left,top;
+    if(trigger){
+      const children=[...element.children];
+      if(children.length!==1||!children[0].matches('output[data-ely-date-range-label]')||getComputedStyle(children[0]).order!=='0'||getComputedStyle(children[0]).position!=='static'||parent.display!=='flex'||parent.flexDirection!=='row'||parent.flexWrap!=='nowrap'||parent.alignItems!=='center'||!['normal','flex-start'].includes(parent.justifyContent)||parent.textIndent!=='0px'||ps.position!=='static'||ps.zIndex!=='auto'||ps.order!=='0'||ps.flexGrow!=='0'||ps.flexShrink!=='0'||ps.flexBasis!=='auto'||['left','right','top','bottom'].some(key=>ps[key]!=='auto')||ps.marginLeft!=='0px'||ps.marginTop!=='0px'||ps.marginBottom!=='0px'||Math.abs(parseFloat(ps.marginRight)-font*.55)>.001)return false;
+      left=b.left+element.clientLeft+parseFloat(parent.paddingLeft);top=b.top+element.clientTop+parseFloat(parent.paddingTop)+(element.clientHeight-parseFloat(parent.paddingTop)-parseFloat(parent.paddingBottom)-16)/2;
+    }else{
+      if(parent.position!=='relative'||ps.position!=='absolute'||ps.zIndex!=='1'||ps.top!=='6px'||ps.right!=='auto'||ps.bottom!=='auto'||Math.abs(parseFloat(ps.left)-font*.65)>.001||['Left','Right','Top','Bottom'].some(side=>ps['margin'+side]!=='0px'))return false;
+      left=b.left+element.clientLeft+parseFloat(ps.left);top=b.top+element.clientTop+6;
+    }
+    const paint={left,top,right:left+16,bottom:top+16};
+    if(!Object.values(paint).every(Number.isFinite)||paint.left<b.left+element.clientLeft||paint.top<b.top+element.clientTop||paint.right>b.left+element.clientLeft+element.clientWidth||paint.bottom>b.top+element.clientTop+element.clientHeight)return false;
+    datePseudos.push({role:trigger?'range-trigger':'date-field',id:element.id||null,pseudo,maskImage:ps.maskImage,position:ps.position,zIndex:ps.zIndex,paint});return true;
+  };
   const containedDisabledLeaf=(element,st,b)=>{
     if(st.opacity!=='0.55'||element.localName!=='input'||element.type!=='checkbox'||!element.disabled||!element.matches(':disabled')||element.children.length||!element.id||element.closest('[data-ui-multi-list]')!==panel)return false;
     const matchingIDs=document.querySelectorAll(`[id="${element.id}"]`);
@@ -544,7 +568,7 @@ export function multiSelectShadowFrame(node){
     if(!element.checkVisibility({checkOpacity:true,checkVisibilityCSS:true}))continue;
     const st=getComputedStyle(element),b=element.getBoundingClientRect();
     const containedAlpha=st.opacity!=='1'&&containedDisabledLeaf(element,st,b);
-    if(st.transform!=='none'||st.translate!=='none'||st.rotate!=='none'||st.scale!=='none'||st.perspective!=='none'||st.filter !== 'none'||st.backdropFilter!=='none'||st.clipPath!=='none'||st.maskImage!=='none'||st.mixBlendMode!=='normal'||st.opacity!=='1'&&!containedAlpha||st.position==='fixed'||st.position==='sticky'||!['none','hidden'].includes(st.outlineStyle)&&parseFloat(st.outlineWidth)!==0){
+    if(st.transform!=='none'||st.translate!=='none'||st.rotate!=='none'||st.scale!=='none'||st.perspective!=='none'||st.filter !== 'none'||st.backdropFilter!=='none'||st.clipPath!=='none'||st.maskImage!=='none'||st.mixBlendMode!=='normal'||st.opacity!=='1'&&!containedAlpha||st.position==='fixed'||st.position==='sticky'||!['none','hidden'].includes(st.outlineStyle)&&parseFloat(st.outlineWidth)!==0&&!(date&&element===focused)){
       // Diagnostic only: preserve the exact rejecting predicate and its DOM provenance.
       const selectorFor=target=>{
         if(target.id)return `[id=${JSON.stringify(target.id)}]`;
@@ -561,13 +585,19 @@ export function multiSelectShadowFrame(node){
       for(let a=element;a;a=a.parentElement){const computed=getComputedStyle(a);ancestorPath.push({selector:selectorFor(a),id:a.id||null,tag:a.localName,style:Object.fromEntries(properties.map(property=>[property,computed[property]]))});if(a===record)break;}
       return {...fail('complex owned shadow-frame paint'),rejectionWitness:{selector:selectorFor(element),ownerID:root.id,ownerComponent:root.dataset.elyComponent,panelID:panel.id,styleRejections,ancestorPath}};
     }
-    for(const pseudo of ['::before','::after'])if(!['none','normal'].includes(getComputedStyle(element,pseudo).content))return fail('generated owned shadow-frame paint');
+    if(date&&(element!==focused&&(st.overflowX!=='visible'||st.overflowY!=='visible')||st.clip!=='auto'||st.contain!=='none'||!['normal','1'].includes(st.zoom)||st.boxShadow!=='none'&&element!==panel))return fail('unproven date clip or additional shadow');
+    for(const pseudo of ['::before','::after']){const ps=getComputedStyle(element,pseudo);if(!['none','normal'].includes(ps.content)&&!(date&&datePseudo(element,pseudo,ps,b)))return fail('generated owned shadow-frame paint');}
     if(b.width>0&&b.height>0)rects.push({left:b.left-frame.x,top:b.top-frame.y,right:b.right-frame.x,bottom:b.bottom-frame.y});
-    if(st.boxShadow!=='none')shadows.push({id:element.id,css:st.boxShadow,left:b.left-frame.x,top:b.top-frame.y,right:b.right-frame.x,bottom:b.bottom-frame.y});
+    if(st.boxShadow!=='none')shadows.push({id:element.id,css:st.boxShadow,left:b.left-frame.x,top:b.top-frame.y,right:b.right-frame.x,bottom:b.bottom-frame.y,...(date?{actualOwnedPanel:element===panel}:{})});
   }
-  const focused=document.activeElement,fs=focused&&getComputedStyle(focused);
-  if(!focused||!root.contains(focused)||!['none','hidden'].includes(fs.outlineStyle)&&parseFloat(fs.outlineWidth)!==0)return fail('visible focused outline requires separate proof');
-  return {eligible:true,ownerID:root.id,panelID:panel.id,frame,documentFrame,camera,background:[...color.slice(1).map(Number),255],rects,shadows,compositedDisabledLeaves,panel:{left:p.left-frame.x,top:p.top-frame.y,right:p.right-frame.x,bottom:p.bottom-frame.y},focused:{id:focused.id,type:focused.type,matchesFocusVisible:focused.matches(':focus-visible'),outlineStyle:fs.outlineStyle,boxShadow:fs.boxShadow}};
+  const fs=focused&&getComputedStyle(focused);
+  if(!focused||!root.contains(focused)||!date&&!['none','hidden'].includes(fs.outlineStyle)&&parseFloat(fs.outlineWidth)!==0)return fail('visible focused outline requires separate proof');
+  if(date){
+    if(datePseudos.length!==3||dateOutline.outline?.status!=='bounded'||fs.outlineStyle!=='solid'||parseFloat(fs.outlineWidth)!==dateOutline.outline.width||parseFloat(fs.outlineOffset)!==dateOutline.outline.offset)return fail('incomplete finite date pseudo or focused outline proof');
+    const paint=dateOutline.outline.paint;if(!paint||paint.left<frame.x||paint.top<frame.y||paint.right>frame.x+frame.width||paint.bottom>frame.y+frame.height)return fail('focused date outline escapes frame');
+    rects.push({left:paint.left-frame.x,top:paint.top-frame.y,right:paint.right-frame.x,bottom:paint.bottom-frame.y});
+  }
+  return {eligible:true,ownerID:root.id,panelID:panel.id,frame,documentFrame,camera,background:[...color.slice(1).map(Number),255],rects,shadows,compositedDisabledLeaves,...(date?{dateRange:{panelReference:{selector:'[data-ely-date-range-panel]',unique:true,ownerID:root.id,rect:{left:p.left,top:p.top,right:p.right,bottom:p.bottom,width:p.width,height:p.height}},pseudos:datePseudos,outline:dateOutline}}:{}),panel:{left:p.left-frame.x,top:p.top-frame.y,right:p.right-frame.x,bottom:p.bottom-frame.y},focused:{id:focused.id,type:focused.type,matchesFocusVisible:focused.matches(':focus-visible'),outlineStyle:fs.outlineStyle,boxShadow:fs.boxShadow}};
 }
 
 // Diagnostic only until the exact panel's decorative paint has an independent raster proof.
@@ -581,6 +611,7 @@ export const dateRangeFocusedOutline=new Function('node','bounds',`
   const panel=panels[0];if(panel.hidden)return null;
   const focused=document.activeElement,fields=[...panel.querySelectorAll('input[data-ely-date-start],input[data-ely-date-end]')];
   if(triggers[0].getAttribute('aria-expanded')!=='true'||fields.length!==2||fields.filter(field=>field.matches('[data-ely-date-start]')).length!==1||fields.filter(field=>field.matches('[data-ely-date-end]')).length!==1||!fields.includes(focused)||focused.type!=='date'||focused.closest('[data-ely-family]')!==node)return fail('focused input is not one of the two actual owned date fields');
+  if(!focused.id||document.querySelectorAll('[id="'+focused.id+'"]').length!==1||document.querySelectorAll('[id="'+focused.id+'"]')[0]!==focused)return fail('focused date field ID must resolve uniquely');
   const measured=(${activeOutlineBounds.toString()})(focused,bounds);
   return {status:measured.focusOutline?.status==='bounded'?'bounded-focused-outline-only':'unsupported',ownershipPromotion:false,panel:{id:panel.id||null,selector:'[data-ely-date-range-panel]',unique:true},focusedID:focused.id||null,outline:measured.focusOutline??null};
 `);
@@ -593,7 +624,7 @@ export function proveMultiSelectShadowRaster({width,height,data},sample){
     const pattern=/rgba?\(0,\s*0,\s*0(?:,\s*([\d.]+))?\) (-?[\d.]+)px (-?[\d.]+)px ([\d.]+)px ([\d.]+)px/g;
     const parts=[...shadow.css.matchAll(pattern)];assert(parts.length&&shadow.css.replace(pattern,'').replaceAll(',','').trim()==='','Unknown shadow form');
     const visible=parts.filter(m=>Number(m[1]??1)>0);assert(visible.length<=1,'Multiple visible shadows are unresolved');
-    for(const m of visible){const [alpha,x,y,blur,spread]=[Number(m[1]??1),...m.slice(2).map(Number)];assert([alpha,x,y,blur,spread].every(Number.isFinite)&&alpha<=1&&blur>0&&spread===0,'Only ordinary outer black blur with zero spread is supported');assert(shadow.left+x>0&&shadow.top+y>0&&shadow.right+x<width&&shadow.bottom+y<height,'Shadow origin escapes measured frame');if(shadow.id===sample.panelID)panelShadow=true;}
+    for(const m of visible){const [alpha,x,y,blur,spread]=[Number(m[1]??1),...m.slice(2).map(Number)];assert([alpha,x,y,blur,spread].every(Number.isFinite)&&alpha<=1&&blur>0&&spread===0,'Only ordinary outer black blur with zero spread is supported');assert(shadow.left+x>0&&shadow.top+y>0&&shadow.right+x<width&&shadow.bottom+y<height,'Shadow origin escapes measured frame');if(sample.dateRange?shadow.actualOwnedPanel===true:shadow.id===sample.panelID)panelShadow=true;}
   }
   assert(panelShadow,'Actual visible panel shadow required');
   let ink=0,shadowPixels=0;
@@ -604,7 +635,7 @@ export function proveMultiSelectShadowRaster({width,height,data},sample){
     if(!sample.rects.some(r=>x+.5>=r.left&&x+.5<r.right&&y+.5>=r.top&&y+.5<r.bottom))shadowPixels++;
   }
   assert(ink>0&&shadowPixels>0,'Native shadow pixels outside layout boxes must be retained');
-  return {status:'bounded-native-raster',inkPixels:ink,shadowPixels,frame:sample.documentFrame,panelID:sample.panelID,focused:sample.focused,compositedDisabledLeaves:sample.compositedDisabledLeaves??[]};
+  return {status:'bounded-native-raster',inkPixels:ink,shadowPixels,frame:sample.documentFrame,panelID:sample.panelID,focused:sample.focused,compositedDisabledLeaves:sample.compositedDisabledLeaves??[],...(sample.dateRange?{dateRange:sample.dateRange}:{})};
 }
 
 export async function captureTargetPNG(page,root,path,{checkedRootID}={}){
@@ -618,7 +649,7 @@ export async function captureTargetPNG(page,root,path,{checkedRootID}={}){
     const measurement=await root.evaluate(dateRangeFocusedOutline,bounds);
     if(measurement)bounds={...bounds,dateRangeFocusedOutline:measurement};
   }
-  const shadowSample=await root.evaluate(multiSelectShadowFrame);
+  const shadowSample=await root.evaluate(multiSelectShadowFrame,bounds.dateRangeFocusedOutline??null);
   if(shadowSample&&typeof shadowSample.eligible==='boolean'){
     let candidate;
     try{
@@ -627,17 +658,22 @@ export async function captureTargetPNG(page,root,path,{checkedRootID}={}){
       const png=candidate=await screenshotWithoutCaretMutation(page,{...shadowSample.camera,animations:'disabled',scale:'css'});
       const require=createRequire(import.meta.url),{PNG}=require(resolve(dirname(require.resolve('playwright-core/package.json')),'lib/utilsBundle.js'));
       const proof=proveMultiSelectShadowRaster(PNG.sync.read(png),shadowSample);
-      assert.deepEqual(await root.evaluate(multiSelectShadowFrame),shadowSample,'Shadow frame/source geometry changed during capture');
+      const afterDateOutline=shadowSample.dateRange?await root.evaluate(dateRangeFocusedOutline,bounds):null;
+      if(shadowSample.dateRange)assert.deepEqual(afterDateOutline,bounds.dateRangeFocusedOutline,'Focused date outline changed during capture');
+      assert.deepEqual(await root.evaluate(multiSelectShadowFrame,afterDateOutline),shadowSample,'Shadow frame/source geometry changed during capture');
       assert.deepEqual(await root.evaluate(captureForeignPaint,{clip:shadowSample.documentFrame,checkedRootID:shadowSample.ownerID}),owner,'Foreign paint changed during shadow capture');
-      assert(!bounds.focusOutline||bounds.focusOutline.status!=='unsupported'||bounds.focusOutline.reason==='unbounded focus-within shadow'&&bounds.focusOutline.diagnostic.active.id===shadowSample.panelID,'Unrelated focus gap cannot be resolved by a shadow frame');
+      if(shadowSample.dateRange){
+        assert.equal(bounds.focusOutline?.reason,'unbounded focus-within shadow');assert.equal(bounds.focusOutline.diagnostic.active.tag,'div');assert.equal(bounds.focusOutline.diagnostic.active.id,shadowSample.panelID||null);
+        assert.deepEqual(bounds.focusOutline.diagnostic.active.rect,shadowSample.dateRange.panelReference.rect,'The unbounded ancestor must be the actual unique sampled panel, not another idless node');
+      }else assert(!bounds.focusOutline||bounds.focusOutline.status!=='unsupported'||bounds.focusOutline.reason==='unbounded focus-within shadow'&&bounds.focusOutline.diagnostic.active.id===shadowSample.panelID,'Unrelated focus gap cannot be resolved by a shadow frame');
       const {scroll,viewport}=await page.evaluate(()=>({scroll:{x:scrollX,y:scrollY},viewport:{width:innerWidth,height:innerHeight}}));
       if(path)await writeFile(path,png,{flag:'wx'});
-      return {bounds:{...bounds,clip:shadowSample.documentFrame,decorativeShadowProof:proof,focusOutline:{status:'not-painted',diagnostic:bounds.focusOutline?.diagnostic},scroll,viewport,camera:shadowSample.camera,coordinateSpace:'document receipt; native authored-audit shadow frame'},png,...owner};
+      return {bounds:{...bounds,clip:shadowSample.documentFrame,decorativeShadowProof:proof,focusOutline:shadowSample.dateRange?shadowSample.dateRange.outline.outline:{status:'not-painted',diagnostic:bounds.focusOutline?.diagnostic},scroll,viewport,camera:shadowSample.camera,coordinateSpace:'document receipt; native authored-audit shadow frame'},png,...owner};
     }catch(error){
       const retainedPath=path&&candidate?`${path}.shadow-proof.png`:null;
       if(retainedPath)await writeFile(retainedPath,candidate,{flag:'wx'});
       const retainedRaster=candidate?{path:retainedPath,sha256:createHash('sha256').update(candidate).digest('hex'),bytes:candidate.length,width:candidate.readUInt32BE(16),height:candidate.readUInt32BE(20),role:'failed-shadow-proof-context-only'}:null;
-      bounds={...bounds,focusOutline:{status:'unsupported',reason:'unproven MultiSelect shadow raster',diagnostic:{prior:bounds.focusOutline,shadowSample,retainedPath,retainedRaster,error:String(error)}}};
+      bounds={...bounds,focusOutline:{status:'unsupported',reason:bounds.dateRangeFocusedOutline?'unproven DateRange shadow raster':'unproven MultiSelect shadow raster',diagnostic:{prior:bounds.focusOutline,shadowSample,retainedPath,retainedRaster,error:String(error)}}};
     }
   }
   assert(bounds.clip.width>0&&bounds.clip.height>0,'Target painted union must have positive dimensions');
