@@ -1440,6 +1440,24 @@ export function assertRelativeDateFixture(observed,value='Last 7 days'){
   return observed;
 }
 
+export async function diagnoseRelativeNativeCommit(field,read,observations){
+  await field.focus();
+  const before=await read('focused-before');observations.push(before);
+  assert(before.active&&before.uniqueOwned&&before.fieldID,'Actual unique primary select focus required');assert.equal(before.value,'Last 7 days');assert.deepEqual(before.events,[]);
+  for(const key of ['ArrowUp','Enter']){
+    await field.press(key);const state=await read('after-'+key);observations.push(state);
+    assert.equal(state.fieldID,before.fieldID);assert(state.active&&state.uniqueOwned,'Native key must remain on the exact primary select');assert.equal(state.truncated,false);
+    const keys=state.events.filter(e=>e.type==='keydown');assert.deepEqual(keys.map(e=>e.key),key==='ArrowUp'?['ArrowUp']:['ArrowUp','Enter']);
+    for(const event of keys){assert.equal(event.targetID,before.fieldID);assert.equal(event.trusted,true);assert.equal(event.defaultPrevented,false,'Record final cancellation after production propagation, never fabricate an uncancelled key');}
+  }
+  const last=observations.at(-1);assert.equal(last.value,'Yesterday');
+  const key=key=>({type:'keydown',targetID:before.fieldID,key,trusted:true,defaultPrevented:false});
+  const notifications=[{type:'input',targetID:before.fieldID,value:'Yesterday',trusted:true},{type:'change',targetID:before.fieldID,value:'Yesterday',trusted:true},{type:'ely:change',detail:{id:before.rootID,component:'forms/RelativeDatePicker',name:'caller_value',value:'Yesterday',checked:false,type:'select-one'}}];
+  const afterArrow=observations[1].events.length>1;
+  assert.deepEqual(last.events,afterArrow?[key('ArrowUp'),...notifications,key('Enter')]:[key('ArrowUp'),key('Enter'),...notifications],'Entire diagnostic native/public window, without ignored extra events');
+  return {mechanicsObserved:true,commitPhase:afterArrow?'ArrowUp':'Enter',contractApproval:false};
+}
+
 export function assertRangeFormStep(identity,stage,proof){
   const fixture=rangeFormCases[identity],index=fixture?.steps.findIndex(s=>s[0]===stage);assert(fixture&&index>=0,'Exact range-form stage required');
   const [,selector,key,value]=fixture.steps[index],end=selector.includes('range-end'),synthetic=['knob','stepper'].includes(fixture.mode);

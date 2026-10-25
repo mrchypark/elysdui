@@ -10,7 +10,7 @@ import {assertComplexFormStep} from './visual-state-audit-drivers.mjs';
 import {assertLocalPickerStep} from './visual-state-audit-drivers.mjs';
 import {assertLocalStudioStep} from './visual-state-audit-drivers.mjs';
 import {persistDirectCaseFailure} from './visual-state-audit-drivers.mjs';
-import {assertRelativeDateFixture} from './visual-state-audit-drivers.mjs';
+import {assertRelativeDateFixture,diagnoseRelativeNativeCommit} from './visual-state-audit-drivers.mjs';
 import {temporalAXKeyboardRoute,assertTemporalAXStep} from './visual-state-audit-drivers.mjs';
 import {requestedStateProofSafe} from './visual-state-audit-drivers.mjs';
 import {assertCronNativePreview} from './visual-state-audit-drivers.mjs';
@@ -938,6 +938,41 @@ test('opt-in DateTime Week DL native segment cause diagnostic only',{skip:proces
     }
   }catch(error){proof.failed=true;proof.truncated=/truncated|limit|byte cap/.test(error.message);proof.error={name:error.name,message:error.message.slice(0,1024),stack:error.stack?.slice(0,4096)};throw error;}
   finally{try{if(browser)await browser.close();proof.cleanup=true;}finally{const text=segmentDiagnosticOutput(proof);await writeFile(output,text,{flag:'wx'});if(!proof.failed)assert(!JSON.parse(text).failed,'Diagnostic output truncated');}}
+});
+
+test('Relative cause route orders native ArrowUp Enter and rejects focus trust cancellation destination and extras',async()=>{
+  const key=key=>({type:'keydown',targetID:'primary-field',key,trusted:true,defaultPrevented:false});
+  const notes=[{type:'input',targetID:'primary-field',value:'Yesterday',trusted:true},{type:'change',targetID:'primary-field',value:'Yesterday',trusted:true},{type:'ely:change',detail:{id:'primary',component:'forms/RelativeDatePicker',name:'caller_value',value:'Yesterday',checked:false,type:'select-one'}}];
+  const run=async(mutate=()=>{},immediate=false)=>{
+    const calls=[],observations=[],states=[{events:[],value:'Last 7 days'},{events:immediate?[key('ArrowUp'),...notes]:[key('ArrowUp')],value:immediate?'Yesterday':'Last 7 days'},{events:immediate?[key('ArrowUp'),...notes,key('Enter')]:[key('ArrowUp'),key('Enter'),...notes],value:'Yesterday'}].map(s=>({fieldID:'primary-field',rootID:'primary',active:true,uniqueOwned:true,truncated:false,...structuredClone(s)}));mutate(states);
+    const result=await diagnoseRelativeNativeCommit({focus:async()=>calls.push('focus'),press:async key=>calls.push(key)},async stage=>{calls.push(stage);return states.shift();},observations);return {result,calls,observations};
+  };
+  assert.deepEqual((await run()).calls,['focus','focused-before','ArrowUp','after-ArrowUp','Enter','after-Enter']);assert.equal((await run()).result.contractApproval,false);assert.equal((await run(()=>{},true)).result.commitPhase,'ArrowUp');
+  for(const mutate of [s=>s[0].active=false,s=>s[0].uniqueOwned=false,s=>s[1].events[0].trusted=false,s=>s[1].events[0].defaultPrevented=true,s=>s[1].events[0].targetID='twin',s=>s[2].fieldID='twin',s=>s[2].value='Last 7 days',s=>s[2].events.push(notes[2]),s=>s[2].events.reverse(),s=>s[2].truncated=true])await assert.rejects(()=>run(mutate));
+});
+
+test('opt-in Relative DL native select commit cause diagnostic only',{skip:process.env.ELY_RELATIVE_COMMIT_DIAGNOSTIC!=='1'},async()=>{
+  const {chromium}=await import('playwright'),{writeFile}=await import('node:fs/promises');
+  const base=process.env.ELY_NATIVE_SEGMENT_URL,output=process.env.ELY_NATIVE_SEGMENT_OUTPUT,source=process.env.ELY_NATIVE_SEGMENT_SOURCE;
+  assert(base&&output&&/^[a-f0-9]{40}$/.test(source||'')&&process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH);const url=new URL(base);assert(['localhost','127.0.0.1'].includes(url.hostname));assert.equal(url.pathname,'/components/audit');url.searchParams.set('family','forms');url.searchParams.set('case','forms/RelativeDatePicker');
+  const proof={kind:'relative-native-commit-cause-diagnostic-not-contract-approval',source,sourcePinIsCallerSupplied:true,cases:[],observations:[],runtime:{node:process.version},cleanup:false};let browser,primary;
+  try{
+    browser=await chromium.launch({executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH});proof.runtime.browser=browser.version();assert.match(proof.runtime.browser,/^143\./);
+    const context=await browser.newContext({viewport:{width:1440,height:1000},colorScheme:'light'}),page=await context.newPage();await page.goto(url.href,{waitUntil:'networkidle'});
+    const record=page.locator('[data-audit-name="forms/RelativeDatePicker"]');assert.equal(await record.count(),1);const root=record.locator('[data-audit-main] > [data-ely-family]'),twin=record.locator('[data-audit-twin] > [data-ely-family]'),field=root.locator('select[data-ely-relative-date]');assert.equal(await root.count(),1);assert.equal(await twin.count(),1);assert.equal(await field.count(),1);
+    assert.equal(await root.getAttribute('data-ely-component'),'forms/RelativeDatePicker');await page.waitForFunction(node=>node.dataset.elyReady==='true',await root.elementHandle());
+    assertRelativeDateFixture(await field.evaluate(n=>({value:n.value,selectedIndex:n.selectedIndex,disabled:n.disabled,options:[...n.options].map(o=>({value:o.value,label:o.label,selected:o.selected,disabled:o.disabled}))})));
+    const twinBefore=await twin.evaluate(boundedSegmentTwinSnapshot);
+    await root.evaluate(node=>{node.__relativeDiagnostic=[];node.__relativeDiagnosticTruncated=false;for(const type of ['keydown','input','change','ely:change','ely:action'])node.addEventListener(type,event=>{if(node.__relativeDiagnostic.length>=32||Object.keys(event.detail||{}).length>16){node.__relativeDiagnosticTruncated=true;return;}node.__relativeDiagnostic.push(event);},true);});
+    const read=stage=>root.evaluate((node,stage)=>{
+      const fields=[...node.querySelectorAll('select[data-ely-relative-date]')],field=fields[0],bounded=v=>{if(typeof v==='string'&&v.length>256){node.__relativeDiagnosticTruncated=true;return v.slice(0,256);}return v;};
+      const events=node.__relativeDiagnostic.map(e=>e.type==='keydown'?{type:e.type,targetID:bounded(e.target.id),key:bounded(e.key),trusted:e.isTrusted,defaultPrevented:e.defaultPrevented}:e.type.startsWith('ely:')?{type:e.type,detail:Object.fromEntries(Object.entries(e.detail||{}).slice(0,16).map(([k,v])=>{if(v!==null&&!['string','number','boolean'].includes(typeof v))node.__relativeDiagnosticTruncated=true;return [bounded(k),bounded(v)];}))}:{type:e.type,targetID:bounded(e.target.id),value:bounded(e.target.value),trusted:e.isTrusted});
+      return {stage,rootID:node.id,fieldID:field?.id,value:field?.value,active:field===document.activeElement,uniqueOwned:fields.length===1&&field.closest('[data-ely-family]')===node&&!!field.id&&document.querySelectorAll('[id="'+CSS.escape(field.id)+'"]').length===1,events,truncated:node.__relativeDiagnosticTruncated};
+    },stage);
+    proof.mechanics=await diagnoseRelativeNativeCommit(field,read,proof.observations);assert.deepEqual(await twin.evaluate(boundedSegmentTwinSnapshot),twinBefore);
+  }catch(error){primary=error;proof.failed=true;proof.error={name:error.name,message:error.message.slice(0,1024)};}
+  finally{try{if(browser)await browser.close();proof.cleanup=true;}catch(error){proof.cleanupError=String(error).slice(0,512);primary??=error;}const text=segmentDiagnosticOutput(proof);await writeFile(output,text,{flag:'wx'});if(JSON.parse(text).truncated)primary??=Error('Relative diagnostic output truncated');}
+  if(primary)throw primary;
 });
 
 test('eight exact forms contracts execute 28 native checkpoint oracles with strict payload trust and source fixtures',async()=>{
