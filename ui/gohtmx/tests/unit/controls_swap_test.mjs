@@ -5,6 +5,8 @@ import {runInNewContext} from 'node:vm';
 // Execute the entire production runtime against a small, deterministic DOM.
 // The browser companion exercises these same swaps using bundled HTMX itself.
 const source = readFileSync(new URL('../../assets/ely-controls.js', import.meta.url), 'utf8');
+const controlsCSS = readFileSync(new URL('../../assets/ely-controls.css', import.meta.url), 'utf8');
+const formsCSS = readFileSync(new URL('../../assets/ely-api-forms.css', import.meta.url), 'utf8');
 const dataKey = name => name.slice(5).replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
 class DOMEvent {
   constructor(type, options = {}) { Object.assign(this, {type, bubbles: false, detail: undefined}, options); }
@@ -17,6 +19,8 @@ class Element {
     this.dataset = {};
     this.children = [];
     this.listeners = new Map();
+    this.rect = {width: 200, height: 100, left: 0, top: 0};
+    this.context2d = {calls: [], setTransform(...args) { this.calls.push(['setTransform', ...args]); }, clearRect(...args) { this.calls.push(['clearRect', ...args]); }, drawImage(...args) { this.calls.push(['drawImage', ...args]); }, beginPath() { this.calls.push(['beginPath']); }, moveTo(...args) { this.calls.push(['moveTo', ...args]); }, lineTo(...args) { this.calls.push(['lineTo', ...args]); }, stroke() { this.calls.push(['stroke']); }};
     this.value = '';
     this.hidden = this.disabled = this.required = false;
     for (const [name, value] of Object.entries(attributes)) this.setAttribute(name, value);
@@ -86,8 +90,8 @@ class Element {
   setCustomValidity(message) { this.validationMessage = message; }
   focus() { document.activeElement = this; }
   scrollIntoView() {}
-  getBoundingClientRect() { return {width: 200, height: 100, left: 0, top: 0}; }
-  getContext() { return {setTransform() {}, clearRect() {}, drawImage() {}, beginPath() {}, moveTo() {}, lineTo() {}, stroke() {}}; }
+  getBoundingClientRect() { return this.rect; }
+  getContext() { return this.context2d; }
   setPointerCapture() {}
   toDataURL() { return 'data:image/png;base64,drawn'; }
 }
@@ -321,3 +325,50 @@ fixture.tagEntry.disabled = true; fixture.slots[0].disabled = true;
 fixture.tagEntry.value = 'blocked'; fixture.tagEntry.dispatchEvent(new DOMEvent('keydown', {bubbles: true, key: 'Enter'})); paste('1111');
 assert.equal(changes.length, 6, 'disabled editors do not notify changes');
 console.log('Composite tag/PIN named input/change events and host callbacks passed');
+
+function cssDeclarations(css, selector) {
+  const rule = css.split('\n').find(line => line.startsWith(`${selector}{`));
+  assert(rule, `Missing exact CSS rule: ${selector}`);
+  return Object.fromEntries(rule.slice(rule.indexOf('{') + 1, rule.lastIndexOf('}')).split(';').filter(Boolean).map(declaration => {
+    const separator = declaration.indexOf(':');
+    return [declaration.slice(0, separator).trim(), declaration.slice(separator + 1).trim()];
+  }));
+}
+const signatureRootCSS = cssDeclarations(controlsCSS, '[data-ui-component="signature-pad"]');
+assert.equal(signatureRootCSS['inline-size'], 'min(420px,100%)', 'SignaturePad retains its desktop width while fitting a narrow parent');
+assert.equal(signatureRootCSS['min-inline-size'], '0', 'SignaturePad may shrink below canvas intrinsic width');
+const signatureCanvasCSS = cssDeclarations(controlsCSS, '.ui-signature-surface [data-ui-signature]');
+assert.equal(signatureCanvasCSS['inline-size'], '100%');
+assert.equal(signatureCanvasCSS['max-inline-size'], '100%');
+assert.equal(signatureCanvasCSS['min-inline-size'], '0');
+assert.equal(signatureCanvasCSS['block-size'], '160px', 'Responsive width preserves the existing canvas height');
+const inlineFormCSS = cssDeclarations(formsCSS, "[data-ely-family='forms'] .ely-api-inline-form");
+assert.equal(inlineFormCSS['inline-size'], 'min(30rem,100%)', 'InlineForm retains its desktop width while fitting a narrow parent');
+assert.equal(inlineFormCSS['min-inline-size'], '0');
+const inlineFieldsetCSS = cssDeclarations(formsCSS, "[data-ely-family='forms'] .ely-api-inline-form>fieldset");
+assert.equal(inlineFieldsetCSS['min-inline-size'], '0', 'InlineForm fieldset cannot impose its min-content width');
+assert.equal(inlineFieldsetCSS['max-inline-size'], '100%');
+
+const responsiveSignature = controls('responsive-signature');
+responsiveSignature.canvas.rect = {left: 30, top: 40, width: 308, height: 160};
+const responsiveHost = element('main'); body.append(responsiveHost);
+responsiveHost.replaceChildren(...responsiveSignature.nodes);
+window.devicePixelRatio = 2;
+afterSwap(form, responsiveHost, 'innerHTML');
+assert.equal(responsiveSignature.canvas.width, 616, 'Initial backing width follows the rendered CSS width and DPR');
+assert.equal(responsiveSignature.canvas.height, 320);
+const signatureResize = ResizeObserver.instances.findLast(observer => observer.canvas === responsiveSignature.canvas);
+assert(signatureResize, 'The responsive canvas has an observed size');
+responsiveSignature.canvas.rect = {left: 30, top: 40, width: 290, height: 160};
+signatureResize.callback();
+assert.equal(responsiveSignature.canvas.width, 580, 'ResizeObserver recalibrates backing pixels after a width change');
+assert(responsiveSignature.canvas.context2d.calls.some(call => call[0] === 'setTransform' && call[1] === 2), 'Resize retains device-pixel-ratio drawing coordinates');
+responsiveSignature.canvas.dispatchEvent(new DOMEvent('pointerdown', {button: 0, pointerId: 7, clientX: 50, clientY: 60}));
+responsiveSignature.canvas.dispatchEvent(new DOMEvent('pointermove', {pointerId: 7, clientX: 80, clientY: 100}));
+responsiveSignature.canvas.dispatchEvent(new DOMEvent('pointerup', {pointerId: 7}));
+assert(responsiveSignature.canvas.context2d.calls.some(call => call[0] === 'moveTo' && call[1] === 20 && call[2] === 20), 'Pointer origin uses CSS coordinates relative to the resized canvas');
+assert(responsiveSignature.canvas.context2d.calls.some(call => call[0] === 'lineTo' && call[1] === 50 && call[2] === 60), 'Pointer movement remains aligned after backing-store rescale');
+assert.equal(responsiveSignature.signatureValue.value, 'data:image/png;base64,drawn', 'Responsive drawing retains the existing serialized value contract');
+window.devicePixelRatio = 1;
+responsiveHost.remove();
+console.log('Responsive SignaturePad and InlineForm constraints plus resized-canvas DPR/pointer calibration passed');

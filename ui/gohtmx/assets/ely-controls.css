@@ -49,9 +49,9 @@ dialog[data-ui-component]:not([open]) { display: none; }
 [data-ui-component] [role="tabpanel"] { border: 1px solid var(--border, #8c8781); border-radius: .4rem; padding: 1rem; }
 dialog[data-ui-component="dialog"], [data-ui-component] dialog { margin: auto; }
 
-[data-ui-component="signature-pad"]{inline-size:420px;max-inline-size:100%;display:grid;gap:8px}
-.ui-signature-surface{position:relative;line-height:0}
-.ui-signature-surface [data-ui-signature]{inline-size:100%;block-size:160px;cursor:crosshair}
+[data-ui-component="signature-pad"]{inline-size:min(420px,100%);max-inline-size:100%;min-inline-size:0;display:grid;gap:8px}
+.ui-signature-surface{position:relative;line-height:0;min-inline-size:0}
+.ui-signature-surface [data-ui-signature]{inline-size:100%;max-inline-size:100%;min-inline-size:0;box-sizing:border-box;block-size:160px;cursor:crosshair}
 .ui-signature-guide{position:absolute;inset-inline:24px;bottom:32px;padding-bottom:4px;border-bottom:1px dashed var(--border);font-size:11px;line-height:16px;color:var(--color-muted);pointer-events:none}
 [data-ui-signature-clear]{justify-self:end}
 [data-ui-signature-count],.ui-signature-typing summary{font-size:11px;color:var(--color-muted)}

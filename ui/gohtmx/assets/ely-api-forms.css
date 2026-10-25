@@ -190,7 +190,8 @@
 
 [data-ely-family="forms"] .ely-api-field-caption{font-size:11px;font-weight:400;color:var(--color-muted)}
 
-[data-ely-family='forms'] .ely-api-inline-form{inline-size:30rem;max-inline-size:100%}
+[data-ely-family='forms'] .ely-api-inline-form{inline-size:min(30rem,100%);max-inline-size:100%;min-inline-size:0;box-sizing:border-box}
+[data-ely-family='forms'] .ely-api-inline-form>fieldset{min-inline-size:0;max-inline-size:100%;box-sizing:border-box}
 [data-ely-family='forms'] .ely-api-profile-form{max-inline-size:30rem;min-inline-size:0}
 [data-ely-family='forms'] :is(.ely-api-profile-form,.ely-api-inline-form)>fieldset{border:0;padding:0;border-radius:0}
 [data-ely-family='forms'] .ely-api-profile-form legend{font-size:1rem;font-weight:600;padding:0;margin-block-end:.25rem}
