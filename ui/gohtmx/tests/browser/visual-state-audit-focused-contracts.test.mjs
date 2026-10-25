@@ -3,7 +3,7 @@ import {readFile} from 'node:fs/promises';
 import test from 'node:test';
 import {runInNewContext} from 'node:vm';
 import {assertSpecialInputState} from './visual-state-audit-drivers.mjs';
-import {assertRegionalFormStep} from './visual-state-audit-drivers.mjs';
+import {assertRegionalFormStep,assertRegionalStartingState} from './visual-state-audit-drivers.mjs';
 import {assertPathNativeStep} from './visual-state-audit-drivers.mjs';
 import {assertRangeFormStep} from './visual-state-audit-drivers.mjs';
 import {assertComplexFormStep} from './visual-state-audit-drivers.mjs';
@@ -231,6 +231,27 @@ test('regional audit route scopes exact aliases only and retains complete painte
   const unchanged='http://127.0.0.1/components/audit?family=forms';assert.equal(route({identity:'forms/Other',focusedSequence:'forms-regional-native'},unchanged),unchanged);
   assert.throws(()=>route(requestedStateContract('forms/CountrySelect'),'http://127.0.0.1/components/audit?family=workspace'));
   const driver=await read('ui/gohtmx/tests/browser/visual-state-audit-drivers.mjs');assert(driver.includes('const camera={fullPage:!fits,clip:fits?viewportClip:bounds.clip}'));assert(driver.includes('captureForeignPaint,{clip:bounds.clip,checkedRootID}'));
+});
+
+test('regional scoped renderer IDs require independent exact alias primary twin and aria ownership',async()=>{
+  const suffixes=['','-control','-control-value','-control-input','-control-listbox','-control-option-0','-control-option-1'];
+  const packet=(identity,index)=>{
+    const owner=id=>({id,component:identity,kind:'LanguageSelect',ids:suffixes.map(s=>id+s),uniqueOwned:true,ariaControls:id+'-control-listbox',ariaControlsResolves:true,snapshot:{id,component:identity,kind:'LanguageSelect',text:'Caller Alpha',controls:suffixes.slice(2).map(s=>({id:id+s,value:s==='-control-input'?'Caller Alpha':'alpha',aria:s==='-control-input'?[['aria-controls',id+'-control-listbox'],['aria-expanded','false']]:[]}))}});
+    return {recordName:identity,behaviorKey:'forms/LanguageSelect',primary:owner('audit-instance-'+index),twin:owner('audit-instance-'+index+'-twin')};
+  };
+  for(const identity of ['forms/CountrySelect','forms/CurrencySelect','forms/LanguageSelect']){
+    const original=packet(identity,87),scoped=packet(identity,0);assertRegionalStartingState(identity,original,scoped);
+    for(const mutate of [p=>p.recordName='forms/Other',p=>p.behaviorKey='forms/CountrySelect',p=>p.primary.component='forms/Other',p=>p.primary.kind='Other',p=>p.primary.uniqueOwned=false,p=>p.twin.id=p.primary.id,p=>p.primary.ids[1]=p.primary.ids[0],p=>p.primary.ariaControls=p.twin.ariaControls,p=>p.primary.ariaControlsResolves=false,p=>p.primary.snapshot.controls[1].aria[0][1]=p.twin.ariaControls,p=>p.primary.snapshot.text='Wrong caller',p=>p.twin.snapshot.controls[0].value='beta']){
+      const bad=structuredClone(scoped);mutate(bad);
+      assert.throws(()=>assertRegionalStartingState(identity,original,bad));
+    }
+    assert.throws(()=>assertRegionalStartingState(identity,original,{...scoped,primary:scoped.twin,twin:scoped.primary}));
+  }
+  assert.throws(()=>assertRegionalStartingState('forms/Unknown',packet('forms/Unknown',1),packet('forms/Unknown',0)));
+  const actions=await read('ui/gohtmx/tests/browser/visual-state-audit-actions.mjs'),gallery=await read('internal/gallery/advanced.go'),templates=await read('ui/gohtmx/templates/ely-controls.html');
+  assert(gallery.includes('fmt.Sprintf("audit-instance-%d", len(p.Cases))'));assert(gallery.includes('component.ID += "-twin"'));
+  assert(templates.includes('aria-controls" (printf "%s-listbox" .ID)'));assert(actions.includes("if(contract.focusedSequence==='forms-regional-native'){"));assert(actions.includes('reference.regionalIdentity'));
+  assert(actions.includes("else assert.deepEqual(await snapshot(root),reference.initial,'Direct driver begins from the same semantic state')"));
 });
 
 test('DateRange exact audit route reserves only its seven-step case without neighbor promotion',async()=>{

@@ -1475,6 +1475,32 @@ export function assertPathNativeStep(stage,proof){
   return proof;
 }
 
+export function assertRegionalStartingState(identity,reference,actual){
+  assert(regionalFormIDs.includes(identity),'Only the three authored regional aliases');
+  const suffixes=['','-control','-control-value','-control-input','-control-listbox','-control-option-0','-control-option-1'];
+  const qualify=packet=>{
+    assert.equal(packet.recordName,identity);assert.equal(packet.behaviorKey,'forms/LanguageSelect');
+    assert.match(packet.primary.id,/^audit-instance-\d+$/);assert.equal(packet.twin.id,packet.primary.id+'-twin');
+    for(const role of ['primary','twin']){
+      const owner=packet[role];assert.equal(owner.component,identity);assert.equal(owner.kind,'LanguageSelect');
+      assert.deepEqual(owner.ids,suffixes.map(suffix=>owner.id+suffix));assert.equal(owner.uniqueOwned,true);
+      assert.equal(owner.ariaControls,owner.id+'-control-listbox');assert.equal(owner.ariaControlsResolves,true);
+      assert.equal(owner.snapshot.id,owner.id);assert.equal(owner.snapshot.component,identity);assert.equal(owner.snapshot.kind,'LanguageSelect');
+    }
+    assert.equal(new Set([...packet.primary.ids,...packet.twin.ids]).size,14);
+  };
+  qualify(reference);qualify(actual);
+  for(const role of ['primary','twin']){
+    const from=reference[role],to=actual[role],map=new Map(from.ids.map((id,index)=>[id,to.ids[index]]));
+    const expected={...from.snapshot,id:map.get(from.snapshot.id),controls:from.snapshot.controls.map(control=>{
+      assert(map.has(control.id),'Every snapshot control must be one of the exact owned authored IDs');
+      return {...control,id:map.get(control.id),aria:control.aria.map(([key,value])=>key==='aria-controls'?[key,map.get(value)??assert.fail('Foreign aria-controls')]:[key,value])};
+    })};
+    assert.deepEqual(to.snapshot,expected,'Only independently qualified renderer IDs may differ; every other field remains exact');
+  }
+  return {identity,referencePrimary:reference.primary.id,actualPrimary:actual.primary.id,referenceTwin:reference.twin.id,actualTwin:actual.twin.id};
+}
+
 export function assertRegionalFormStep(identity,stage,proof){
   assert(regionalFormIDs.includes(identity),'Exact regional identity required');
   assert(['regional-search','regional-select','regional-unmatched','regional-escape'].includes(stage),'Unknown regional stage');

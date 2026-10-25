@@ -11,7 +11,7 @@ import {isDeepStrictEqual} from 'node:util';
 import {chromium} from 'playwright';
 import {actionModuleNames,prepareActionModule,synchronousTraceInit,registeredOutcomesEqual,registeredOutcomeDifferences,firstDifference,compareActionTrace,traceContractStatus} from './visual-state-audit-instrument.mjs';
 import {caseActionContract, requestedStateContract, runRequestedStateActions, runRegisteredCanvasActions, ownedOverlayInventory, captureTargetPNG, screenshotWithoutCaretMutation, inventoryReceipt, inventoryDrift, unhandledBrowserErrors, visualCaptureGap, persistDirectCaseFailure, probeFailureStateAndPayload, deliverDirectActionVerification, assertFormTwinWitness, isDurationOwnUnitCommit} from './visual-state-audit-drivers.mjs';
-import {requestedStateProofSafe} from './visual-state-audit-drivers.mjs';
+import {requestedStateProofSafe,assertRegionalStartingState} from './visual-state-audit-drivers.mjs';
 import {basicFixturePackage,basicRootSelector} from './visual-state-audit-basic.mjs';
 import {basicActionContract,validateBasicActionMatrix,runBasicActions,basicActionSurface,selectBasicActionCases,fulfillBasicActionAsset,assertBasicActionAssets,retainBasicFailureEvidence,basicOwnedModal,basicModalCaptureTarget} from './visual-state-audit-basic-actions.mjs';
 
@@ -327,6 +327,17 @@ async function captureOwnedState({page, record, root, caseId, siteId, checkpoint
   return {component,primaryTarget:modal?{scope:'exact-owned-native-modal',...modal}:null,beforeFramingViewport,ownedOverlays: overlays, viewport,ownedStateEvidence:!component.focusOutlineGap&&(overlays.length?overlays.every(item=>item.countsAsOwnedEvidence):component.countsAsOwnedEvidence)};
 }
 
+async function regionalStartingIdentity(record){
+  return record.evaluate(record=>{
+    const read=selector=>{
+      const nodes=[...record.querySelectorAll(selector)];if(nodes.length!==1)throw Error('Exact regional primary/twin required');const root=nodes[0],ids=[root,...root.querySelectorAll('[id]')];
+      const input=root.querySelector('[data-ui-combobox-input]'),target=input?.getAttribute('aria-controls'),list=target?document.getElementById(target):null;
+      return {id:root.id,component:root.dataset.elyComponent,kind:root.dataset.elyKind,ids:ids.map(n=>n.id),uniqueOwned:ids.every(n=>n.id&&document.querySelectorAll('[id="'+CSS.escape(n.id)+'"]').length===1&&n.closest('[data-ely-family]')===root),ariaControls:target,ariaControlsResolves:!!list&&root.contains(list)&&list.matches('[data-ui-combobox-list]')};
+    };
+    return {recordName:record.dataset.auditName,behaviorKey:record.dataset.auditKey,primary:read('[data-audit-main] > [data-ely-family]'),twin:read('[data-audit-twin] > [data-ely-family]')};
+  });
+}
+
 async function executeCheck(page, item, onCheckpoint) {
   const record = page.locator(`[data-audit-name=${JSON.stringify(item.componentIdentity)}]`);
   assert.equal(await record.count(), 1, `fixture exists: ${item.componentIdentity}`);
@@ -336,6 +347,7 @@ async function executeCheck(page, item, onCheckpoint) {
   await page.waitForFunction(element => element.dataset.elyReady === 'true', await twin.elementHandle());
   await record.scrollIntoViewIfNeeded();
   const initial = await snapshot(root);
+  const regionalIdentity=requestedStateContract(item.componentIdentity)?.focusedSequence==='forms-regional-native'?await regionalStartingIdentity(record):null;
   const result = await page.evaluate(async ({name, checkpointed}) => {
     const record = document.querySelector(`[data-audit-name="${CSS.escape(name)}"]`);
       const checkRoot = record.querySelector('[data-audit-main] > [data-ely-family]');
@@ -357,7 +369,7 @@ async function executeCheck(page, item, onCheckpoint) {
     } finally { checkRoot.removeEventListener('ely:action', listener); }
   }, {name: item.componentIdentity, checkpointed: Boolean(onCheckpoint)});
   const finalTwin = await snapshot(twin);
-  return {record, root, twin, initial, finalTwin, result};
+  return {record, root, twin, initial, finalTwin, result,regionalIdentity};
 }
 
 // Execute exact guarded contracts on unmodified modules; never make a
@@ -425,7 +437,12 @@ async function directCaseDriver({item, familyURL, captures, reference, semanticS
     if(contract.fixtureGuards.canvasSceneAbsent)assert.equal(await root.locator('[data-ws-canvas-scene]').count(),0);
     if(contract.fixtureGuards.requiredEditor)assert.equal(await root.locator('form[data-ws-edit-form]').getAttribute('data-ws-required'),'true');
     if(contract.fixtureGuards.passwordInputName)assert.equal(await root.locator('input:not([type=hidden])').getAttribute('name'),contract.fixtureGuards.passwordInputName,'Exact PasswordInput fixture name is required before dispatch');
-    if(reference)assert.deepEqual(await snapshot(root),reference.initial,'Direct driver begins from the same semantic state');
+    if(reference){
+      if(contract.focusedSequence==='forms-regional-native'){
+        const current=await regionalStartingIdentity(record),prior=reference.regionalIdentity;assert(prior,'Independent original regional ownership identity required');
+        assertRegionalStartingState(contract.identity,{...prior,primary:{...prior.primary,snapshot:reference.initial},twin:{...prior.twin,snapshot:reference.finalTwin}},{...current,primary:{...current.primary,snapshot:await snapshot(root)},twin:{...current.twin,snapshot:initialTwin}});
+      }else assert.deepEqual(await snapshot(root),reference.initial,'Direct driver begins from the same semantic state');
+    }
     await root.evaluate(node => {
       globalThis.__visualDirectActions = [];
       globalThis.__visualDirectDOMEvents = [];
