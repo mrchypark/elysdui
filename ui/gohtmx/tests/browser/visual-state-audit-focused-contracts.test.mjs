@@ -9,6 +9,7 @@ import {assertRangeFormStep} from './visual-state-audit-drivers.mjs';
 import {assertComplexFormStep} from './visual-state-audit-drivers.mjs';
 import {assertLocalPickerStep} from './visual-state-audit-drivers.mjs';
 import {assertLocalStudioStep} from './visual-state-audit-drivers.mjs';
+import {persistDirectCaseFailure} from './visual-state-audit-drivers.mjs';
 import {assertRelativeDateFixture} from './visual-state-audit-drivers.mjs';
 import {temporalAXKeyboardRoute,assertTemporalAXStep} from './visual-state-audit-drivers.mjs';
 import {requestedStateProofSafe} from './visual-state-audit-drivers.mjs';
@@ -886,6 +887,28 @@ test('eight forms paired Tab return preserves exact twin events and failure payl
   const cleanupError=Error('closed cleanup context');await cleanupPreservingPrimary(async()=>{throw cleanupError;},Error('original assertion'),failedRead,'eightFormsCleanupError');
   const withCleanup=await probeFailureStateAndPayload(failedRead,async()=>({}),async()=>null);assert.equal(withCleanup.diagnosticError[1].phase,'eight-forms-cleanup');
   await assert.rejects(cleanupPreservingPrimary(async()=>{throw cleanupError;},null,{},'eightFormsCleanupError'),error=>error===cleanupError);
+});
+
+test('complex forms failure trace survives cleanup and persists with fail-closed read and cleanup errors',async()=>{
+  const trace={events:[{type:'click',control:'add',value:'',trusted:true,key:null},{type:'blur',control:'add',value:'',trusted:true,key:null}],truncated:false,foreign:false};
+  for(const failCleanup of [false,true]){
+    let live=trace,primaryError,persisted,fallbackReads=0;const diagnostics={},cleanupError=Error('complex observer cleanup rejected');
+    try{assertComplexFormStep('forms/FieldArray','array-add',{identity:'forms/FieldArray',rootID:'primary',truncated:false,foreignEvents:false,state:{values:[''],forms:0},events:trace.events});}
+    catch(error){primaryError=error;await retainFailurePayload(diagnostics,'complexForms',async()=>live);}
+    finally{await cleanupPreservingPrimary(async()=>{live=null;if(failCleanup)throw cleanupError;},primaryError,diagnostics,'complexCleanupError');}
+    assert(primaryError);assert.equal(live,null);
+    diagnostics.presenceNativeEvents=['unrelated presence'];
+    const probe=await probeFailureStateAndPayload(diagnostics,async()=>({closed:true}),async()=>{fallbackReads++;throw Error('observer deleted');});
+    assert.equal(fallbackReads,0);assert.deepEqual(probe.nativePayload,trace);
+    await persistDirectCaseFailure({caseId:'gallery/forms/FieldArray',error:primaryError,receipts:[],...probe},async receipt=>{persisted=JSON.parse(JSON.stringify(receipt));});
+    assert.deepEqual(persisted.nativePayload,trace);assert.equal(persisted.error.message,primaryError.message);
+    if(failCleanup)assert(persisted.diagnosticError.some(error=>error.phase==='complex-forms-cleanup'&&error.message===cleanupError.message));
+    else assert.equal(persisted.diagnosticError,undefined);
+  }
+  const diagnostics={};await retainFailurePayload(diagnostics,'complexForms',async()=>{throw Error('complex trace read rejected');});
+  const readFailure=await probeFailureStateAndPayload(diagnostics,async()=>({}),async()=>assert.fail('Unrelated presence fallback cannot replace failed complex trace'));
+  assert.equal(readFailure.nativePayload,null);assert.equal(readFailure.diagnosticError[0].phase,'complex-forms-payload');
+  const cleanupError=Error('cleanup without primary');await assert.rejects(cleanupPreservingPrimary(async()=>{throw cleanupError;},null,{},'complexCleanupError'),error=>error===cleanupError);
 });
 
 test('DurationPicker failure payload survives failed verification and listener cleanup',async()=>{

@@ -220,14 +220,16 @@ export async function cleanupPreservingPrimary(cleanup,primaryError,failureDiagn
   }
 }
 export async function probeFailureStateAndPayload(failureDiagnostics,readState,readNativePayload){
-  let currentState=null,nativePayload=failureDiagnostics.presenceNativeEvents??failureDiagnostics.eightFormsNative??failureDiagnostics.nativeDate??failureDiagnostics.durationNative??null;const errors=[];
+  let currentState=null,nativePayload=failureDiagnostics.complexForms??failureDiagnostics.presenceNativeEvents??failureDiagnostics.eightFormsNative??failureDiagnostics.nativeDate??failureDiagnostics.durationNative??null;const errors=[];
+  if(failureDiagnostics.complexFormsError)errors.push({phase:'complex-forms-payload',...failureDiagnostics.complexFormsError});
+  if(failureDiagnostics.complexCleanupError)errors.push({phase:'complex-forms-cleanup',...failureDiagnostics.complexCleanupError});
   if(failureDiagnostics.presenceCleanupError)errors.push({phase:'cleanup',...failureDiagnostics.presenceCleanupError});
   if(failureDiagnostics.eightFormsNativeError)errors.push({phase:'eight-forms-native-payload',...failureDiagnostics.eightFormsNativeError});
   if(failureDiagnostics.eightFormsCleanupError)errors.push({phase:'eight-forms-cleanup',...failureDiagnostics.eightFormsCleanupError});
   if(failureDiagnostics.durationNativeError)errors.push({phase:'duration-native-payload',...failureDiagnostics.durationNativeError});
   if(failureDiagnostics.durationNativeCleanupError)errors.push({phase:'duration-native-cleanup',...failureDiagnostics.durationNativeCleanupError});
   try{currentState=await readState();}catch(error){errors.push({phase:'current-state',name:error?.name??'Error',message:error?.message??String(error),stack:error?.stack??null});}
-  if(nativePayload===null)try{nativePayload=await readNativePayload();}catch(error){errors.push({phase:'native-payload',name:error?.name??'Error',message:error?.message??String(error),stack:error?.stack??null});}
+  if(nativePayload===null&&!failureDiagnostics.complexFormsError)try{nativePayload=await readNativePayload();}catch(error){errors.push({phase:'native-payload',name:error?.name??'Error',message:error?.message??String(error),stack:error?.stack??null});}
   return {currentState,nativePayload,...(errors.length?{diagnosticError:errors}:{})};
 }
 // No unhandled page error has a verified exception in this audit.
