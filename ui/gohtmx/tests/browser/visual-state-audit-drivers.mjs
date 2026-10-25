@@ -523,26 +523,45 @@ export function multiSelectShadowFrame(node,dateOutline=null){
     for(const pseudo of ['::before','::after'])if(!['none','normal'].includes(getComputedStyle(a,pseudo).content))return fail('generated audit backdrop paint');
   }
   if(!reachedRecord)return fail('shadow frame record is not an ancestor');
-  const rects=[],shadows=[],compositedDisabledLeaves=[],datePseudos=[];
+  const rects=[],shadows=[],compositedDisabledLeaves=[],datePseudos=[];let datePseudoRejection=null;
   const datePseudo=(element,pseudo,ps,b)=>{
     const trigger=element===entries[0],fields=[...panel.querySelectorAll('.ely-api-date-field')];
-    if(pseudo!=='::before'||!trigger&&(!fields.includes(element)||fields.length!==2)||ps.content!=='""'||ps.display==='none')return false;
+    const check=(property,actual,expected,valid=actual===expected,paint=null)=>{
+      if(!valid&&!datePseudoRejection){
+        const text=value=>value===null?null:String(value).length<=256?String(value):String(value).slice(0,240)+'...[truncated]';
+        const number=value=>Number.isFinite(value)?value:null;
+        datePseudoRejection={scope:'exact-DateRange-pseudo',ownerID:text(root.id),node:{tag:text(element.localName),id:text(element.id||null),role:trigger?'range-trigger':fields.includes(element)?'date-field':'unsupported-owned-node',ownedIndex:[...root.querySelectorAll('*')].indexOf(element)},pseudo:text(pseudo),property:text(property),actual:text(actual),expected:text(expected),geometry:{border:[b.left,b.top,b.right,b.bottom].map(number),client:[element.clientLeft,element.clientTop,element.clientWidth,element.clientHeight].map(number),paint:paint?Object.values(paint).map(number):null}};
+      }
+      return valid;
+    };
+    if(!check('pseudo',pseudo,'::before')||!check('owner',trigger?'actual-trigger':fields.indexOf(element),'actual trigger or one of exactly two actual date fields',trigger||fields.includes(element)&&fields.length===2)||!check('content',ps.content,'""')||!check('display',ps.display,'not none',ps.display!=='none'))return false;
     const parent=getComputedStyle(element),font=parseFloat(getComputedStyle(document.documentElement).fontSize);
     const none=['transform','translate','rotate','scale','perspective','filter','backdropFilter','clipPath','boxShadow','textShadow'];
-    if(none.some(key=>ps[key]!=='none')||ps.opacity!=='1'||ps.mixBlendMode!=='normal'||ps.isolation!=='auto'||ps.contain!=='none'||ps.willChange!=='auto'||ps.clip!=='auto'||ps.backgroundImage!=='none'||!/^rgb\(\d+,\s*\d+,\s*\d+\)$/.test(ps.backgroundColor)||!['none','hidden'].includes(ps.outlineStyle)&&parseFloat(ps.outlineWidth)!==0||['Top','Right','Bottom','Left'].some(side=>parseFloat(ps['border'+side+'Width'])!==0)||['Top','Right','Bottom','Left'].some(side=>parseFloat(ps['padding'+side])!==0)||ps.width!=='16px'||ps.height!=='16px'||ps.maskSize!=='contain'||ps.maskPosition!=='50% 50%'||ps.maskRepeat!=='no-repeat'||ps.maskClip!=='border-box'||ps.maskOrigin!=='border-box'||ps.maskComposite!=='add'||ps.maskMode!=='match-source')return false;
+    for(const property of none)if(!check(property,ps[property],'none'))return false;
+    for(const [property,expected]of [['opacity','1'],['mixBlendMode','normal'],['isolation','auto'],['contain','none'],['willChange','auto'],['clip','auto'],['backgroundImage','none']])if(!check(property,ps[property],expected))return false;
+    if(!check('backgroundColor',ps.backgroundColor,'opaque rgb()',/^rgb\(\d+,\s*\d+,\s*\d+\)$/.test(ps.backgroundColor))||!check('outline',ps.outlineStyle+'/'+ps.outlineWidth,'none, hidden, or zero width',['none','hidden'].includes(ps.outlineStyle)||parseFloat(ps.outlineWidth)===0))return false;
+    for(const side of ['Top','Right','Bottom','Left'])for(const property of ['border'+side+'Width','padding'+side])if(!check(property,ps[property],'zero px',parseFloat(ps[property])===0))return false;
+    for(const [property,expected]of [['width','16px'],['height','16px'],['maskSize','contain'],['maskPosition','50% 50%'],['maskRepeat','no-repeat'],['maskClip','border-box'],['maskOrigin','border-box'],['maskComposite','add'],['maskMode','match-source']])if(!check(property,ps[property],expected))return false;
     const icon=new URL(trigger?'/assets/ely/icons/calendar-range.svg':'/assets/ely/icons/calendar.svg',location.href).href;
-    if(ps.maskImage!==`url("${icon}")`||!['normal','1'].includes(ps.zoom)||parent.direction!=='ltr'||parent.writingMode!=='horizontal-tb'||element.scrollLeft!==0||element.scrollTop!==0)return false;
+    if(!check('maskImage',ps.maskImage,`url("${icon}")`)||!check('zoom',ps.zoom,'normal or 1',['normal','1'].includes(ps.zoom))||!check('owner.direction',parent.direction,'ltr')||!check('owner.writingMode',parent.writingMode,'horizontal-tb')||!check('owner.scrollLeft',element.scrollLeft,0)||!check('owner.scrollTop',element.scrollTop,0))return false;
     let left,top;
     if(trigger){
       const children=[...element.children];
-      if(children.length!==1||!children[0].matches('output[data-ely-date-range-label]')||getComputedStyle(children[0]).order!=='0'||getComputedStyle(children[0]).position!=='static'||parent.display!=='flex'||parent.flexDirection!=='row'||parent.flexWrap!=='nowrap'||parent.alignItems!=='center'||!['normal','flex-start'].includes(parent.justifyContent)||parent.textIndent!=='0px'||ps.position!=='static'||ps.zIndex!=='auto'||ps.order!=='0'||ps.flexGrow!=='0'||ps.flexShrink!=='0'||ps.flexBasis!=='auto'||['left','right','top','bottom'].some(key=>ps[key]!=='auto')||ps.marginLeft!=='0px'||ps.marginTop!=='0px'||ps.marginBottom!=='0px'||Math.abs(parseFloat(ps.marginRight)-font*.55)>.001)return false;
+      if(!check('owner.children.length',children.length,1)||!check('owner.child',children[0].localName,'output[data-ely-date-range-label]',children[0].matches('output[data-ely-date-range-label]'))||!check('owner.child.order',getComputedStyle(children[0]).order,'0')||!check('owner.child.position',getComputedStyle(children[0]).position,'static'))return false;
+      for(const [property,expected]of [['display','flex'],['flexDirection','row'],['flexWrap','nowrap'],['alignItems','center'],['textIndent','0px']])if(!check('owner.'+property,parent[property],expected))return false;
+      if(!check('owner.justifyContent',parent.justifyContent,'normal or flex-start',['normal','flex-start'].includes(parent.justifyContent)))return false;
+      for(const [property,expected]of [['position','static'],['zIndex','auto'],['order','0'],['flexGrow','0'],['flexShrink','0'],['flexBasis','auto'],['left','auto'],['right','auto'],['top','auto'],['bottom','auto'],['marginLeft','0px'],['marginTop','0px'],['marginBottom','0px']])if(!check(property,ps[property],expected))return false;
+      if(!check('marginRight',ps.marginRight,font*.55+'px within 0.001px',!(Math.abs(parseFloat(ps.marginRight)-font*.55)>.001)))return false;
       left=b.left+element.clientLeft+parseFloat(parent.paddingLeft);top=b.top+element.clientTop+parseFloat(parent.paddingTop)+(element.clientHeight-parseFloat(parent.paddingTop)-parseFloat(parent.paddingBottom)-16)/2;
     }else{
-      if(parent.position!=='relative'||ps.position!=='absolute'||ps.zIndex!=='1'||ps.top!=='6px'||ps.right!=='auto'||ps.bottom!=='auto'||Math.abs(parseFloat(ps.left)-font*.65)>.001||['Left','Right','Top','Bottom'].some(side=>ps['margin'+side]!=='0px'))return false;
+      if(!check('owner.position',parent.position,'relative'))return false;
+      for(const [property,expected]of [['position','absolute'],['zIndex','1'],['top','6px'],['right','auto'],['bottom','auto']])if(!check(property,ps[property],expected))return false;
+      if(!check('left',ps.left,font*.65+'px within 0.001px',!(Math.abs(parseFloat(ps.left)-font*.65)>.001)))return false;
+      for(const side of ['Left','Right','Top','Bottom'])if(!check('margin'+side,ps['margin'+side],'0px'))return false;
       left=b.left+element.clientLeft+parseFloat(ps.left);top=b.top+element.clientTop+6;
     }
     const paint={left,top,right:left+16,bottom:top+16};
-    if(!Object.values(paint).every(Number.isFinite)||paint.left<b.left+element.clientLeft||paint.top<b.top+element.clientTop||paint.right>b.left+element.clientLeft+element.clientWidth||paint.bottom>b.top+element.clientTop+element.clientHeight)return false;
+    if(!check('paint.bounds',Object.values(paint).join(','),'finite and contained in actual client box',Object.values(paint).every(Number.isFinite)&&paint.left>=b.left+element.clientLeft&&paint.top>=b.top+element.clientTop&&paint.right<=b.left+element.clientLeft+element.clientWidth&&paint.bottom<=b.top+element.clientTop+element.clientHeight,paint))return false;
     datePseudos.push({role:trigger?'range-trigger':'date-field',id:element.id||null,pseudo,maskImage:ps.maskImage,position:ps.position,zIndex:ps.zIndex,paint});return true;
   };
   const containedDisabledLeaf=(element,st,b)=>{
@@ -591,7 +610,7 @@ export function multiSelectShadowFrame(node,dateOutline=null){
       return {...fail('complex owned shadow-frame paint'),rejectionWitness:{selector:selectorFor(element),ownerID:root.id,ownerComponent:root.dataset.elyComponent,panelID:panel.id,styleRejections,ancestorPath}};
     }
     if(date&&(element!==focused&&(st.overflowX!=='visible'||st.overflowY!=='visible')||st.clip!=='auto'||st.contain!=='none'||!['normal','1'].includes(st.zoom)||st.boxShadow!=='none'&&element!==panel))return fail('unproven date clip or additional shadow');
-    for(const pseudo of ['::before','::after']){const ps=getComputedStyle(element,pseudo);if(!['none','normal'].includes(ps.content)&&!(date&&datePseudo(element,pseudo,ps,b)))return fail('generated owned shadow-frame paint');}
+    for(const pseudo of ['::before','::after']){const ps=getComputedStyle(element,pseudo);if(!['none','normal'].includes(ps.content)&&!(date&&datePseudo(element,pseudo,ps,b)))return {...fail('generated owned shadow-frame paint'),...(date?{datePseudoRejection}:{})};}
     if(b.width>0&&b.height>0)rects.push({left:b.left-frame.x,top:b.top-frame.y,right:b.right-frame.x,bottom:b.bottom-frame.y});
     if(st.boxShadow!=='none')shadows.push({id:element.id,css:st.boxShadow,left:b.left-frame.x,top:b.top-frame.y,right:b.right-frame.x,bottom:b.bottom-frame.y,...(date?{actualOwnedPanel:element===panel}:{})});
   }

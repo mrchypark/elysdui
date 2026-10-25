@@ -8,6 +8,8 @@ import {tmpdir} from 'node:os';
 import {captureTargetPNG,captureForeignPaint,screenshotWithoutCaretMutation,activeOutlineBounds,visualCaptureGap,proveMultiSelectShadowRaster,multiSelectShadowFrame} from './visual-state-audit-drivers.mjs';
 import {captureBounds} from './visual-state-audit-bounds.mjs';
 import {dateRangeFocusedOutline} from './visual-state-audit-drivers.mjs';
+import {persistDirectCaseFailure,cleanupPreservingPrimary} from './visual-state-audit-drivers.mjs';
+import {createHash} from 'node:crypto';
 
 test('DateRange separate focused outline is measured diagnostic only and rejects owner outline and clip ambiguity',()=>{
   const rect={left:20,top:40,right:80,bottom:60,width:60,height:20},plain={display:'block',visibility:'visible',opacity:'1',contentVisibility:'visible',outlineStyle:'none',outlineWidth:'0px',outlineOffset:'0px',outlineColor:'rgb(0, 0, 255)',boxShadow:'none',transform:'none',translate:'none',rotate:'none',scale:'none',perspective:'none',filter:'none',clipPath:'none',clip:'auto',maskImage:'none',contain:'none',zoom:'1',overflowX:'visible',overflowY:'visible',position:'static'};
@@ -93,6 +95,24 @@ test('DateRange exact finite masked pseudo and independent focused outline reuse
   for(const mutate of [f=>f.first.pseudos['::before'].width='17px',f=>f.first.pseudos['::before'].top='7px',f=>f.first.pseudos['::before'].maskImage='url("http://localhost/foreign.svg")',f=>f.first.pseudos['::before'].transform='matrix(2,0,0,2,0,0)',f=>f.first.pseudos['::before'].filter='blur(1px)',f=>f.first.pseudos['::before'].clipPath='inset(1px)',f=>f.first.pseudos['::before'].zIndex='2',f=>f.first.clientWidth=20,f=>f.entry.pseudos['::before'].position='absolute',f=>f.entry.style.justifyContent='space-between',f=>f.entry.style.direction='rtl',f=>f.second.pseudos['::after']={...f.second.pseudos['::before']},f=>f.panel.style.overflowX='hidden',f=>f.grid.style.overflowY='hidden',f=>f.panel.style.transform='matrix(1,0,0,1,2,0)',f=>f.focused.style.boxShadow='rgba(0,0,0,.1) 0px 1px 2px 0px',f=>f.outline.status='unsupported',f=>f.outline.focusedID='foreign',f=>f.outline.outline.paint.left=-1,f=>f.twin.getBoundingClientRect=()=>f.rect(0,50,200,240),f=>f.root.querySelectorAll=selector=>selector==='[data-ely-date-range-panel]'?[f.panel,f.panel]:selector==='*'?[f.entry,f.panel,f.first,f.focused,f.second,f.end]:[f.entry]]){
     const bad=dateRangeSamplerFixture();mutate(bad);assert.equal(bad.sample().eligible,false,mutate.toString());
   }
+});
+
+test('DateRange first pseudo rejection is exact bounded and persists through capture fallback and cleanup',async()=>{
+  const f=dateRangeSamplerFixture();f.entry.pseudos['::before'].height='17px';f.entry.pseudos['::before'].maskImage='wrong-mask';
+  const sample=f.sample();assert.equal(sample.eligible,false);assert.equal(sample.reason,'generated owned shadow-frame paint');
+  const witness=sample.datePseudoRejection;
+  assert.equal(Object.keys(witness).length,8);assert.equal(witness.property,'height','First actual rejection, not a later bad mask');assert.equal(witness.actual,'17px');assert.equal(witness.expected,'16px');assert.equal(witness.pseudo,'::before');assert.equal(witness.node.role,'range-trigger');assert.equal(witness.node.ownedIndex,0);assert.deepEqual(witness.geometry.border,[10,10,180,38]);assert.deepEqual(witness.geometry.client,[0,0,170,28]);
+  const huge=dateRangeSamplerFixture();huge.entry.pseudos['::before'].maskImage='x'.repeat(8192);const bounded=huge.sample().datePseudoRejection;assert.equal(bounded.property,'maskImage');assert(bounded.actual.length<=256);assert.match(bounded.actual,/\[truncated\]$/);assert(JSON.stringify(bounded).length<2048);
+  const escaped=dateRangeSamplerFixture();escaped.first.clientWidth=20;const geometry=escaped.sample().datePseudoRejection;assert.equal(geometry.property,'paint.bounds');assert.deepEqual(geometry.geometry.paint,[30.4,56,46.4,72]);
+  const raster=shadowRasterFixture(),require=createRequire(import.meta.url),{PNG}=require(resolve(dirname(require.resolve('playwright-core/package.json')),'lib/utilsBundle.js')),bytes=PNG.sync.write(raster.png);let cleaned=false;
+  const root={async scrollIntoViewIfNeeded(){},async evaluate(fn){assert.equal(cleaned,false,'No diagnostic DOM read after cleanup');if(fn===multiSelectShadowFrame)return sample;if(fn===dateRangeFocusedOutline)return f.outline;if(fn===captureForeignPaint)return {foreignDOMIntersections:[],occludedForeignPaint:[]};return {clip:raster.sample.documentFrame,focusOutline:{status:'unsupported',reason:'unbounded focus-within shadow',diagnostic:{focused:{type:'date'}}}};}};
+  const page={async evaluate(){return {scroll:{x:0,y:0},viewport:{width:200,height:240}};},async screenshot(){return bytes;}};
+  const result=await captureTargetPNG(page,root);assert.equal(result.bounds.focusOutline.status,'unsupported');assert.equal(result.bounds.decorativeShadowProof,undefined);assert.deepEqual(result.bounds.focusOutline.diagnostic.shadowSample.datePseudoRejection,witness);
+  const sourceSHA256=createHash('sha256').update(await readFile(new URL('./visual-state-audit-drivers.mjs',import.meta.url))).digest('hex'),primary=Error('Original DateRange visual gate failure'),diagnostics={};
+  await cleanupPreservingPrimary(async()=>{cleaned=true;throw Error('cleanup rejected');},primary,diagnostics,'complexCleanupError');assert.equal(cleaned,true);
+  let persisted;await persistDirectCaseFailure({caseId:'gallery:forms/DateRangePicker',error:primary,receipts:[{sourceSHA256,afterCaptureOwnership:{bounds:result.bounds}}],diagnosticError:[{phase:'cleanup',...diagnostics.complexCleanupError}]},async value=>{persisted=JSON.parse(JSON.stringify(value));});
+  assert.equal(persisted.error.message,primary.message);assert.equal(persisted.receipts[0].sourceSHA256,sourceSHA256);assert.deepEqual(persisted.receipts[0].afterCaptureOwnership.bounds.focusOutline.diagnostic.shadowSample.datePseudoRejection,witness);assert.equal(persisted.diagnosticError[0].message,'cleanup rejected');
+  assert.equal(dateRangeSamplerFixture().sample().eligible,true,'Valid neighboring source remains eligible, not approved pixels');
 });
 
 test('DateRange raster capture retains bounded focus rejects idless impostor foreign contact and geometry changes',async()=>{
