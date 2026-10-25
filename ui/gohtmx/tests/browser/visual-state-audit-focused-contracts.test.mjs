@@ -11,6 +11,71 @@ import {assertActivityLogScopedAuditPage,assertCommunicationCallerRequest,assert
 
 const read=path=>readFile(new URL(`../../../../${path}`,import.meta.url),'utf8');
 
+function observedNativeSegment(dom,ax){
+  const ids=new Set();
+  const visit=node=>{if(node.backendNodeId)ids.add(node.backendNodeId);for(const child of [...(node.children||[]),...(node.shadowRoots||[])])visit(child);};visit(dom);
+  const segments=ax.filter(node=>!node.ignored&&ids.has(node.backendDOMNodeId)&&node.role?.value==='spinbutton');
+  const focused=segments.filter(node=>node.properties?.some(p=>p.name==='focused'&&p.value?.value===true));
+  assert(segments.length>0&&segments.length<=8,'Native segment count unavailable or unbounded');
+  assert.equal(focused.length,1,'Native focused segment is ambiguous or absent');
+  assert(focused[0].name?.value,'Native segment lacks an observed identity');
+  assert.equal(new Set(segments.map(node=>node.backendDOMNodeId)).size,segments.length,'Duplicate native segment ownership');
+  return {segment:focused[0],count:segments.length};
+}
+
+test('native date segment diagnostic rejects absent foreign and ambiguous AX ownership',()=>{
+  const dom={backendNodeId:1,shadowRoots:[{backendNodeId:2,children:[{backendNodeId:3},{backendNodeId:4}]}]};
+  const node=(id,focused=true)=>({backendDOMNodeId:id,role:{value:'spinbutton'},name:{value:'Observed segment'},properties:[{name:'focused',value:{value:focused}}]});
+  assert.equal(observedNativeSegment(dom,[node(3),node(4,false)]).count,2);
+  for(const ax of [[],[node(99)],[node(3),node(4)],[{...node(3),name:{value:''}}],[{...node(3),ignored:true}]])assert.throws(()=>observedNativeSegment(dom,ax));
+  assert.throws(()=>observedNativeSegment(dom,[node(3),node(3,false)]));
+});
+
+test('opt-in DateTime Week DL native segment cause diagnostic only',{skip:process.env.ELY_NATIVE_SEGMENT_DIAGNOSTIC!=='1'},async()=>{
+  const {writeFile}=await import('node:fs/promises');
+  const {chromium}=await import('playwright');
+  const base=process.env.ELY_NATIVE_SEGMENT_URL,output=process.env.ELY_NATIVE_SEGMENT_OUTPUT;
+  assert(base&&output&&process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH&&/^[a-f0-9]{40}$/.test(process.env.ELY_NATIVE_SEGMENT_SOURCE||''),'Explicit existing gallery URL, source pin, immutable output and browser executable required');
+  const url=new URL(base);assert(['127.0.0.1','localhost'].includes(url.hostname),'Local owned gallery only');
+  const proof={kind:'native-segment-diagnostic-not-contract-approval',source:process.env.ELY_NATIVE_SEGMENT_SOURCE,sourcePinIsCallerSupplied:true,cases:[],runtime:{node:process.version},cleanup:false};
+  let browser;
+  try{
+    browser=await chromium.launch({executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH});proof.runtime.browser=browser.version();
+    assert.match(proof.runtime.browser,/^143\./,'Diagnostic comparison requires the installed Chromium143');
+    const context=await browser.newContext({viewport:{width:1440,height:900},colorScheme:'light'});
+    const page=await context.newPage(),cdp=await context.newCDPSession(page);
+    await cdp.send('DOM.enable');await cdp.send('Accessibility.enable');
+    for(const [identity,type,initial] of [['forms/DateTimePicker','datetime-local','2026-10-20T12:30'],['forms/WeekPicker','week','2026-W42']]){
+      const row={identity,observations:[]};proof.cases.push(row);const target=new URL(base);target.searchParams.set('case',identity);
+      await page.goto(target.href,{waitUntil:'networkidle'});
+      const main=page.locator('[data-audit-main]'),twin=page.locator('[data-audit-twin]');
+      assert.equal(await main.count(),1);assert.equal(await twin.count(),1);
+      const field=main.locator(`input[type="${type}"]`);assert.equal(await field.count(),1);assert.equal(await field.inputValue(),initial);
+      const id=await field.getAttribute('id');assert(id,'Exact field ID required');
+      await page.evaluate(()=>{window.__segmentDiagnosticEvents=[];for(const type of ['keydown','input','change','focusin','focusout','ely:change','ely:action'])document.addEventListener(type,event=>window.__segmentDiagnosticEvents.push({type:event.type,trusted:event.isTrusted,key:event.key||null,targetId:event.target?.id||null,value:event.target?.value??null,detail:event.type.startsWith('ely:')?event.detail:null}),true);});
+      const twinBefore=await twin.innerHTML();
+      const observe=async stage=>{
+        const {root}=await cdp.send('DOM.getDocument',{depth:-1,pierce:true});
+        const {nodeId}=await cdp.send('DOM.querySelector',{nodeId:root.nodeId,selector:`#${await field.evaluate(node=>CSS.escape(node.id))}`});assert(nodeId);
+        const {node}=await cdp.send('DOM.describeNode',{nodeId,depth:-1,pierce:true});
+        const {nodes}=await cdp.send('Accessibility.getFullAXTree');
+        const state=await field.evaluate(node=>({value:node.value,active:document.activeElement===node,valid:node.validity.valid}));
+        const raw={stage,dom:node,ax:nodes,state,events:await page.evaluate(()=>window.__segmentDiagnosticEvents)};row.observations.push(raw);return raw;
+      };
+      await field.click();const before=await observe('clicked');assert(before.state.active);const observed=observedNativeSegment(before.dom,before.ax);
+      await page.keyboard.press('ArrowUp');const after=await observe('one-arrow-up');assert(after.state.active);observedNativeSegment(after.dom,after.ax);assert.notEqual(after.state.value,before.state.value);assert(after.state.valid);
+      for(let n=0;n<observed.count+1;n++){await page.keyboard.press('Tab');const state=await observe(`tab-${n+1}`);if(!state.state.active)break;}
+      const last=row.observations.at(-1);assert.equal(last.state.active,false,'Bounded Tab traversal must actually leave the field');
+      assert(last.events.some(e=>e.type==='keydown'&&e.key==='ArrowUp'&&e.targetId===id&&e.trusted));
+      assert(last.events.some(e=>e.type==='input'&&e.targetId===id&&e.trusted));
+      assert(last.events.filter(e=>['keydown','input','change'].includes(e.type)&&e.targetId===id).every(e=>e.trusted),'Native events must remain trusted');
+      assert.equal(await twin.innerHTML(),twinBefore);assert(!last.events.some(e=>e.targetId&&e.targetId!==id&&['input','change'].includes(e.type)),'No neighboring control input');
+      row.mechanicsObserved=true;
+    }
+  }catch(error){proof.error={name:error.name,message:error.message,stack:error.stack};throw error;}
+  finally{try{if(browser)await browser.close();proof.cleanup=true;}finally{await writeFile(output,JSON.stringify(proof,null,2),{flag:'wx'});}}
+});
+
 test('eight exact forms contracts execute 28 native checkpoint oracles with strict payload trust and source fixtures',async()=>{
   const rows=[['NumberInput','NumberInput',4],['ScrubInput','ScrubInput',2],['PinInput','PinInput',3],['OTPInput','PinInput',3],['InlineEdit','InlineEdit',6],['EditableText','InlineEdit',6],['InputGroup','InputGroup',2],['InputAddon','InputGroup',2]];
   const event=(type,control,value,trusted=true,key=null)=>({type,control,value,trusted,key,targetId:control==='field'||control==='hidden'?'primary-field':control.startsWith('slot-')?'primary-'+control:null});
