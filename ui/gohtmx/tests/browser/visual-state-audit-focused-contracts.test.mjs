@@ -6,6 +6,7 @@ import {assertSpecialInputState} from './visual-state-audit-drivers.mjs';
 import {assertRegionalFormStep} from './visual-state-audit-drivers.mjs';
 import {assertPathNativeStep} from './visual-state-audit-drivers.mjs';
 import {assertRangeFormStep} from './visual-state-audit-drivers.mjs';
+import {assertComplexFormStep} from './visual-state-audit-drivers.mjs';
 import {assertCronNativePreview} from './visual-state-audit-drivers.mjs';
 import {assertJsonHighlight} from './visual-state-audit-drivers.mjs';
 import {nativeDateFocusedSegment,nativeDateKeyboardRoute,assertNativeDateResult} from './visual-state-audit-drivers.mjs';
@@ -14,6 +15,70 @@ import {assertEightFormStep,assertDurationNativeProof,probeFailureStateAndPayloa
 import {assertActivityLogScopedAuditPage,assertCommunicationCallerRequest,assertDockCallerAction,assertDockNativeEvents,assertEvalLastColumnGeometry,assertNativeEmbedOpen,activatePresenceStep,assertPresenceNativeRequest,assertFoundationPublicEvents,assertPlainInputNativeEvents,assertFormattedInputState,calendarDraftWheelDecision,requestedStateContract,runRequestedStateActions} from './visual-state-audit-drivers.mjs';
 
 const read=path=>readFile(new URL(`../../../../${path}`,import.meta.url),'utf8');
+
+test('complex eight forms require twenty whole ordered native and public windows',()=>{
+  const n=(type,control,value,trusted=true,key=null)=>({type,control,value,trusted,key});
+  let count=0;
+  for(const name of ['FormField','FormSection','InlineForm','FieldArray','TagInput','TokenInput','HashtagInput','MentionInput']){
+    const identity='forms/'+name,contract=requestedStateContract(identity);assert.equal(contract.nativeFormTwinWitness,true);
+    const p=detail=>({type:'ely:change',detail:{...detail,id:'primary',component:identity}}),c=(name,value,type='text')=>p({name,value,...(type==='textarea'?{}:{checked:false}),type});
+    const email='caller@example.test',url='https://example.test',tag='NewCallerTag',query=name==='HashtagInput'?'#b':'@b',inserted=name==='HashtagInput'?'#beta ':'@beta ';
+    let rows;
+    if(['FormField','FormSection','InlineForm'].includes(name))rows=[
+      ['email-edit',{value:email,valid:true},[n('input','field',email)]],
+      ['email-commit',{value:email,valid:true},[n('keydown','field',email,true,'Tab'),n('change','field',email),c('email',email,'email'),n('blur','field',email)]],
+      ...(name==='InlineForm'?[['form-submit',{value:email,valid:true},[n('click','submit',''),n('submit','form',null),{type:'ely:action',actualFormData:true,detail:{formData:[['email',email]],values:[['email',email]],submitter:'',id:'primary',component:identity,action:'save'}}]]]:[]),
+    ];
+    else if(name==='FieldArray')rows=[
+      ['array-add',{values:[''],forms:0},[n('click','add',''),p({name:'links',values:['']})]],
+      ['array-edit',{values:[url],forms:0},[n('input','field',url)]],
+      ['array-remove',{values:[],forms:0},[n('change','field',url),c('links',url),n('blur','field',url),n('click','remove',''),p({name:'links',values:[]})]],
+    ];
+    else if(name==='TagInput'||name==='TokenInput')rows=[
+      ['tag-edit',{value:'alpha',entry:tag,tags:['alpha']},[n('input','field',tag)]],
+      ['tag-add',{value:'alpha,'+tag,entry:'',tags:['alpha',tag]},[n('keydown','field',tag,true,'Enter'),n('input','hidden','alpha,'+tag,false),n('change','hidden','alpha,'+tag,false),c('caller_value','alpha,'+tag,'hidden')]],
+      ['tag-remove',{value:'alpha',entry:'',tags:['alpha']},[n('blur','field',''),n('click','remove',tag),n('input','hidden','alpha',false),n('change','hidden','alpha',false),c('caller_value','alpha','hidden')]],
+    ];
+    else rows=[
+      ['mention-edit',{value:query,listHidden:false,visible:['beta']},[n('input','field',query)]],
+      ['mention-select',{value:inserted,listHidden:true,visible:['alpha','beta']},[n('change','field',query),c('caller_value',query,'textarea'),n('blur','field',query),n('click','option','beta'),n('input','field',inserted,false),n('change','field',inserted,false),c('caller_value',inserted,'textarea'),n('blur','option','beta')]],
+    ];
+    assert.deepEqual(contract.steps.map(s=>s.id),rows.map(r=>r[0]));
+    for(const [stage,state,events]of rows){
+      const proof={identity,rootID:'primary',truncated:false,foreignEvents:false,state,events,focusLeft:stage==='email-commit',siblings:name==='FormField'||name==='FormSection'?[['name',''],['bio','']]:[],submitterMatches:true,submitDefaultPrevented:true};
+      assertComplexFormStep(identity,stage,proof);count++;
+      for(const mutate of [p=>p.identity='forms/Other',p=>p.truncated=true,p=>p.foreignEvents=true,p=>p.events[0].trusted=false,p=>p.events.push({type:'ely:action',detail:{action:'save'}}),p=>p.events.pop()]){const bad=structuredClone(proof);mutate(bad);assert.throws(()=>assertComplexFormStep(identity,stage,bad));}
+      if(events.length>1){const bad=structuredClone(proof);bad.events.reverse();assert.throws(()=>assertComplexFormStep(identity,stage,bad));}
+      if(stage==='form-submit'){
+        for(const mutate of [p=>p.submitterMatches=false,p=>p.submitDefaultPrevented=false,p=>p.events[2].actualFormData=false,p=>p.events[2].detail.formData=[['email','stale']],p=>p.events.push(p.events[2])]){const bad=structuredClone(proof);mutate(bad);assert.throws(()=>assertComplexFormStep(identity,stage,bad));}
+      }
+      if(stage==='email-commit')assert.throws(()=>assertComplexFormStep(identity,stage,{...proof,focusLeft:false}));
+      if(stage==='tag-remove'){const committed=structuredClone(proof);committed.events.unshift(n('change','field',''));assertComplexFormStep(identity,stage,committed);committed.events.unshift(n('change','field',''));assert.throws(()=>assertComplexFormStep(identity,stage,committed));}
+    }
+  }
+  assert.equal(count,20);assert.throws(()=>assertComplexFormStep('forms/Form','email-edit',{}));
+});
+
+test('complex eight forms execute array and mention production branches with source submit ownership',async()=>{
+  const source=await read('ui/gohtmx/assets/ely-api-forms.js'),api=await read('ui/gohtmx/assets/ely-api.js');
+  const calls=[],arrayInput={name:'links',value:'https://example.test'},array={querySelector:s=>s==='template'?{content:{querySelector:()=>arrayInput}}:{focus(){calls.push('focus-add');}},querySelectorAll:()=>array.removed?[]:[arrayInput],closest:()=>null};
+  const arrayChanged=runInNewContext(source.slice(source.indexOf('const arrayChanged ='),source.indexOf('const initialForms ='))+';arrayChanged',{root:'primary',changed:(root,detail)=>calls.push(JSON.parse(JSON.stringify({root,detail})))});
+  arrayChanged(array);assert.deepEqual(calls,[{root:'primary',detail:{name:'links',values:['https://example.test']}}]);
+  const removeCode=source.slice(source.indexOf("if(button.matches('[data-ely-array-remove]')")).split('\n')[0];assert(removeCode.endsWith('return;}'));
+  const remove=runInNewContext('(button)=>{'+removeCode+'}',{arrayChanged});
+  remove({matches:()=>true,closest:s=>s==='.ely-api-field-array'?array:{remove(){array.removed=true;}}});assert.equal(calls[1],'focus-add');assert.deepEqual(calls[2],{root:'primary',detail:{name:'links',values:[]}});
+  const mentionBranch=source.slice(source.indexOf("if(button.matches('[data-ely-mention-value]')")).split('\n')[0];assert(mentionBranch.endsWith('return;}'));
+  for(const identity of ['forms/MentionInput','forms/HashtagInput']){const field={value:identity.endsWith('HashtagInput')?'#b':'@b',focus(){calls.push('focus-mention');}},list={hidden:false};let notified=0;
+    const select=runInNewContext('(button)=>{'+mentionBranch+'}',{root:{dataset:{elyComponent:identity}},q:s=>s==='[data-ely-mention]'?field:list,setMentionActive:index=>assert.equal(index,-1),notify:n=>{assert.equal(n,field);notified++;}});
+    select({matches:()=>true,value:'beta'});assert.equal(field.value,identity.endsWith('HashtagInput')?'#beta ':'@beta ');assert.equal(list.hidden,true);assert.equal(notified,1);
+  }
+  const start=source.indexOf("register('forms', root =>");assert(source.slice(start).includes("root.addEventListener('submit',feedbackSubmit)"));assert(!source.slice(start).includes("root.addEventListener('submit',submit"));
+  const submitCode=api.slice(api.indexOf('const submit = event => {'),api.indexOf('const change = event => {'));
+  const form={dataset:{elySubmit:'save'},matches:()=>true,reportValidity:()=>true},button={value:''},emitted=[];
+  class FormDataStub{constructor(node){assert.equal(node,form);}*[Symbol.iterator](){yield ['email','caller@example.test'];}}
+  const submit=runInNewContext(submitCode+';submit',{root:'primary',belongs:()=>true,FormData:FormDataStub,emit:(root,action,detail)=>emitted.push({root,action,detail})});
+  const event={target:form,submitter:button,preventDefault(){this.defaultPrevented=true;}};submit(event);assert.equal(event.defaultPrevented,true);assert.equal(emitted.length,1);assert.equal(emitted[0].action,'save');assert.deepEqual(Array.from(emitted[0].detail.formData),[['email','caller@example.test']]);assert.equal(emitted[0].detail.submitter,'');
+});
 
 test('seven range forms require eighteen exact native transitions with independent payload bounds and trust',()=>{
   const specs=[['RelativeDatePicker','relative',['Yesterday','Last 7 days']],['Slider','slider',['0','5','4']],['VerticalSlider','slider',['0','5','4']],['RangeSlider','range',['5','0','1','1']],['Knob','knob',['3','2']],['Dial','knob',['3','2']],['Stepper','stepper',['3','2']]];
