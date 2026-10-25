@@ -7,6 +7,7 @@ import {assertRegionalFormStep} from './visual-state-audit-drivers.mjs';
 import {assertPathNativeStep} from './visual-state-audit-drivers.mjs';
 import {assertRangeFormStep} from './visual-state-audit-drivers.mjs';
 import {assertComplexFormStep} from './visual-state-audit-drivers.mjs';
+import {assertLocalPickerStep} from './visual-state-audit-drivers.mjs';
 import {assertRelativeDateFixture} from './visual-state-audit-drivers.mjs';
 import {temporalAXKeyboardRoute,assertTemporalAXStep} from './visual-state-audit-drivers.mjs';
 import {requestedStateProofSafe} from './visual-state-audit-drivers.mjs';
@@ -18,6 +19,39 @@ import {assertEightFormStep,assertDurationNativeProof,probeFailureStateAndPayloa
 import {assertActivityLogScopedAuditPage,assertCommunicationCallerRequest,assertDockCallerAction,assertDockNativeEvents,assertEvalLastColumnGeometry,assertNativeEmbedOpen,activatePresenceStep,assertPresenceNativeRequest,assertFoundationPublicEvents,assertPlainInputNativeEvents,assertFormattedInputState,calendarDraftWheelDecision,requestedStateContract,runRequestedStateActions} from './visual-state-audit-drivers.mjs';
 
 const read=path=>readFile(new URL(`../../../../${path}`,import.meta.url),'utf8');
+
+test('local picker three exact contracts execute fourteen strict ordered oracle windows',()=>{
+  const n=(type,control,value,key=null,trusted=true)=>({type,control,value,key,trusted});
+  let count=0;
+  for(const identity of ['forms/FontPicker','forms/IconPicker','forms/EmojiPicker']){
+    const contract=requestedStateContract(identity);assert.equal(contract.nativeFormTwinWitness,true);assert.equal(contract.focusedSequence,'forms-local-picker-native');
+    const font=identity==='forms/FontPicker',emoji=identity==='forms/EmojiPicker',first=emoji?'✨':'alpha',second=emoji?'👩‍💻':'beta',query=emoji?'sparkles':'alpha';
+    const p=detail=>({type:'ely:change',detail:{id:'root',component:identity,...detail}}),commit=value=>[n('change','search',value),p({name:'',value,checked:false,type:'search'}),n('blur','search',value)];
+    for(const {id:stage}of contract.steps){
+      let state,events;
+      if(font){const selected=stage==='font-select';state={value:selected?'Georgia':'Inter',search:selected?'Georgia':'geor',selected:[selected?'Georgia':'Inter'],visible:['Georgia'],expanded:!selected,listHidden:selected,font:selected?'Georgia':'Inter',text:'The quick brown fox jumps over the lazy dog.',fontFamily:[selected?'Georgia':'Inter','Geist','Pretendard','system-ui','sans-serif'],focused:'search'};events=selected?[n('keydown','search','geor','Enter'),n('input','hidden','Georgia',null,false),n('change','hidden','Georgia',null,false),p({name:'caller_value',value:'Georgia',checked:false,type:'hidden'})]:[n('input','search','geor')];}
+      else{
+        const unmatched=stage==='picker-unmatched',cleared=stage==='picker-clear'||stage==='picker-focus-second';
+        state={value:first,search:unmatched?'no-matching-picker-option':cleared?'':query,preview:first,selected:[first],visible:unmatched?[]:cleared?[first,second]:[first],empty:unmatched,focused:stage==='picker-focus'||stage==='picker-select'?'first':stage==='picker-focus-second'?'second':'search'};
+        events=stage==='picker-search'?[n('input','search',query)]:stage==='picker-focus'?[n('keydown','search',query,'ArrowDown'),...commit(query)]:stage==='picker-select'?[n('keydown','first',first,'Enter'),n('click','first',first),p({value:first})]:unmatched?[n('blur','first',first),n('input','search','no-matching-picker-option')]:stage==='picker-clear'?[n('input','search','')]:[n('keydown','search','','ArrowDown'),...commit(''),n('keydown','first',first,'ArrowRight'),n('blur','first',first)];
+      }
+      const proof={identity,rootID:'root',truncated:false,foreign:false,state,events};assertLocalPickerStep(identity,stage,proof);count++;
+      assert.throws(()=>assertLocalPickerStep(identity,stage,{...proof,truncated:true}));assert.throws(()=>assertLocalPickerStep(identity,stage,{...proof,foreign:true}));
+      assert.throws(()=>assertLocalPickerStep(identity,stage,{...proof,events:[...events,p({value:'extra'})]}));
+      const wrong=structuredClone(proof);wrong.events[0].trusted=false;assert.throws(()=>assertLocalPickerStep(identity,stage,wrong));
+      assert.throws(()=>assertLocalPickerStep(identity,stage,{...proof,state:{...state,value:'wrong'}}));
+    }
+  }
+  assert.equal(count,14);assert.equal(requestedStateContract('forms/FontPickerPreview')?.focusedSequence=== 'forms-local-picker-native',false);
+});
+
+test('local picker three routes actual qualified fixture selectors and preserves failure payload',async()=>{
+  const driver=await read('ui/gohtmx/tests/browser/visual-state-audit-drivers.mjs'),fixtures=await read('internal/gallery/advanced_forms_fixtures.go'),aliases=await read('internal/gallery/advanced.go');
+  assert(fixtures.includes('"Inter", "The quick brown fox jumps over the lazy dog."'));assert(aliases.includes('"✨"'));assert(aliases.includes('"👩‍💻"'));
+  const start=driver.indexOf("if(contract.focusedSequence==='forms-local-picker-native')"),branch=driver.slice(start,driver.indexOf("if(contract.focusedSequence==='forms-complex-eight-native')",start));
+  for(const text of ['.fill(fixture.query)',".press('Enter')",".press('ArrowDown')",".press('ArrowRight')",'receipt.nativeFormProof=proof','retainFailurePayload','cleanupPreservingPrimary','node.__localPickerEvents.length>=64'])assert(branch.includes(text),text);
+  assert.doesNotMatch(branch,/dispatchEvent|new Event|\.value\s*=(?!=|>)/);
+});
 
 test('owned cleanup phase ledger preserves order errors and pending await evidence',async()=>{
   const source=await read('ui/gohtmx/tests/browser/visual-state-audit-actions.mjs');

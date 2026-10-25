@@ -865,6 +865,8 @@ export function activatePresenceStep(step,{ada,stop}){
 }
 
 export function requestedStateContract(identity,trashFixture){
+  const picker=localPickerCases[identity];
+  if(picker)return {identity,kind:picker.kind,family:'forms',requestedStateOnly:true,focusedSequence:'forms-local-picker-native',nativeFormTwinWitness:true,twinFocusSelector:picker.field,mappingGaps:[],fixtureGuards:{component:identity,...picker},steps:picker.steps.map(id=>({id,control:id==='picker-select'?'[data-ely-icon-option]:not([hidden])':picker.field,event:'trusted native search and keyboard; production notifications retain synthetic provenance',expectedState:`Exact ${identity} ${id} local state and entire event window`,source:{siteId:`local-picker:${identity}:${id}`,sourceAnchor:'advanced_forms_fixtures.go; advanced.go EmojiPicker override; ely-api-forms.html; ely-api-forms.js; ely-controls.js',provenance:'Canonical/qualified root only, not PreviewExamples'}})),scope:'Finite local search/selection/focus only; no provider, arbitrary options, font availability guarantee or registered equivalence'};
   const temporal=temporalAXCases[identity];
   if(temporal)return {identity,kind:temporal.kind,family:'forms',requestedStateOnly:true,focusedSequence:'forms-temporal-ax-native',nativeFormTwinWitness:true,twinFocusSelector:temporal.field,mappingGaps:[],fixtureGuards:{component:identity,...temporal},steps:temporal.steps.map(id=>({id,control:id==='date-range-invalid'||id==='date-range-repair'?'input[data-ely-date-end]':id.includes('open')||id==='date-range-close'?'[data-ely-date-range-trigger]':temporal.field,nativeTabCommit:id==='period-commit',event:'trusted native pointer/observed-owned-AX segment keyboard only',expectedState:`Exact ${identity} ${id}; every intermediate value, validity and public payload retained`,source:{siteId:`temporal-ax:${identity}:${id}`,sourceAnchor:'advanced_forms_fixtures.go; advanced.go qualified date/time values; ely-api-forms.html; ely-api-forms.js dateRange/key; ely-api.js change',provenance:'Unique owned editable AX segment required; no fill, value assignment, locale-order guess or host fulfillment'}})),scope:'Finite source-backed date-range/month/time controls only; unavailable or ambiguous AX fails closed'};
   const complexForm=complexFormCases[identity];
@@ -1250,6 +1252,40 @@ export function assertEventLoggerPublicState(stage,observation){
     assert.deepEqual(rows[index],{time,message,text:time+message},'Displayed timestamp and message must match the observed event; no normalization or tolerance');
   });
   return {...observation,timestampOrigin:rawEvents[0].timeStamp,timestampRule:'first accepted public event.timeStamp; exact two-decimal elapsed seconds',eventProvenance:'Synthetic public DOM events through actual component listeners; trusted physical input is not established'};
+}
+
+const localPickerCases={
+  'forms/FontPicker':{kind:'FontPicker',mode:'font',field:'input[data-ui-combobox-input]',initial:'Inter',query:'geor',first:'Georgia',second:'Courier New',steps:['font-search','font-select']},
+  'forms/IconPicker':{kind:'IconPicker',mode:'icon',field:'input[data-ely-icon-search]',initial:'alpha',query:'alpha',first:'alpha',second:'beta',steps:['picker-search','picker-focus','picker-select','picker-unmatched','picker-clear','picker-focus-second']},
+  'forms/EmojiPicker':{kind:'IconPicker',mode:'icon',field:'input[data-ely-icon-search]',initial:'✨',query:'sparkles',first:'✨',second:'👩‍💻',steps:['picker-search','picker-focus','picker-select','picker-unmatched','picker-clear','picker-focus-second']},
+};
+
+export function assertLocalPickerStep(identity,stage,proof){
+  const fixture=localPickerCases[identity];assert(fixture?.steps.includes(stage),'Exact local picker stage required');
+  assert.equal(proof.identity,identity);assert(proof.rootID);assert.equal(proof.truncated,false);assert.equal(proof.foreign,false);
+  const n=(type,control,value,key=null,trusted=true)=>({type,control,value,key,trusted});
+  const p=detail=>({type:'ely:change',detail:{id:proof.rootID,component:identity,...detail}});
+  let events;
+  if(fixture.mode==='font'){
+    const selected=stage==='font-select';
+    assert.deepEqual(proof.state,{value:selected?'Georgia':'Inter',search:selected?'Georgia':'geor',selected:[selected?'Georgia':'Inter'],visible:['Georgia'],expanded:!selected,listHidden:selected,font:selected?'Georgia':'Inter',text:'The quick brown fox jumps over the lazy dog.',fontFamily:[selected?'Georgia':'Inter','Geist','Pretendard','system-ui','sans-serif'],focused:'search'});
+    events=selected?[n('keydown','search','geor','Enter'),n('input','hidden','Georgia',null,false),n('change','hidden','Georgia',null,false),p({name:'caller_value',value:'Georgia',checked:false,type:'hidden'})]:[n('input','search','geor')];
+  }else{
+    const first=fixture.first,query=fixture.query,unmatched='no-matching-picker-option';
+    const value=stage==='picker-search'||stage==='picker-focus'?fixture.initial:first;
+    const search=stage==='picker-unmatched'?unmatched:stage==='picker-clear'||stage==='picker-focus-second'?'':query;
+    const visible=stage==='picker-unmatched'?[]:stage==='picker-clear'||stage==='picker-focus-second'?[first,fixture.second]:[first];
+    assert.deepEqual(proof.state,{value,search,preview:value,selected:[value],visible,empty:stage==='picker-unmatched',focused:stage==='picker-focus'||stage==='picker-select'?'first':stage==='picker-focus-second'?'second':'search'});
+    const committed=(text)=>[n('change','search',text),p({name:'',value:text,checked:false,type:'search'}),n('blur','search',text)];
+    if(stage==='picker-search')events=[n('input','search',query)];
+    else if(stage==='picker-focus')events=[n('keydown','search',query,'ArrowDown'),...committed(query)];
+    else if(stage==='picker-select')events=[n('keydown','first',first,'Enter'),n('click','first',first),p({value:first})];
+    else if(stage==='picker-unmatched')events=[n('blur','first',first),n('input','search',unmatched)];
+    else if(stage==='picker-clear')events=[n('input','search','')];
+    else events=[n('keydown','search','','ArrowDown'),...committed(''),n('keydown','first',first,'ArrowRight'),n('blur','first',first)];
+  }
+  assert.deepEqual(proof.events,events,'Entire local picker event window; no ignored public changes, requests or extra notifications');
+  return proof;
 }
 
 const complexFormCases={
@@ -1711,6 +1747,47 @@ export async function runRequestedStateActions(contract,root,runStep,failureDiag
       });
     }catch(error){primaryError=error;if(failureDiagnostics){failureDiagnostics.temporalAXTrace=contract.temporalAXTrace;await retainFailurePayload(failureDiagnostics,'temporalAX',()=>root.evaluate(n=>({events:n.__temporalEvents,truncated:n.__temporalTruncated,foreign:n.__temporalForeign})));}throw error;}
     finally{await cleanupPreservingPrimary(async()=>{try{await root.evaluate(node=>{for(const type of ['click','keydown','input','change','blur','ely:change','ely:action'])node.removeEventListener(type,node.__temporalObserver,true);for(const key of ['__temporalEvents','__temporalTruncated','__temporalForeign','__temporalObserver'])delete node[key];});}finally{await cdp.detach();}},primaryError,failureDiagnostics??{},'temporalAXCleanupError');}
+    return;
+  }
+  if(contract.focusedSequence==='forms-local-picker-native'){
+    const identity=contract.identity,fixture=localPickerCases[identity],font=fixture.mode==='font';assert.equal(contract.nativeFormTwinWitness,true);
+    assert.equal(await root.getAttribute('data-ely-component'),identity);assert.equal(await root.getAttribute('data-ely-kind'),fixture.kind);
+    const field=root.locator(fixture.field),hidden=root.locator(font?'input[type="hidden"][name="caller_value"]':'[data-ely-icon-value]');
+    assert.equal(await field.count(),1);assert.equal(await hidden.count(),1);assert.equal(await hidden.inputValue(),fixture.initial);assert.equal(await field.inputValue(),font?'Inter':'');
+    assert.equal(await field.isEnabled(),true);assert.equal(await hidden.getAttribute('name'),'caller_value');
+    assert.deepEqual(await root.locator(font?'[data-ui-option]':'[data-ely-icon-option]').evaluateAll((nodes,font)=>nodes.map(n=>font?[n.dataset.value,n.textContent.trim(),n.getAttribute('aria-disabled')]:[n.value,n.getAttribute('aria-label'),n.disabled]),font),font?[['Inter','Inter',null],['Georgia','Georgia',null],['Courier New','Courier New',null]]:identity==='forms/IconPicker'?[['alpha','Caller Alpha',false],['beta','Caller Beta',false]]:[['✨','Sparkles',false],['👩‍💻','Woman technologist',false]]);
+    await root.evaluate((node,fixture)=>{
+      const controls={search:node.querySelector(fixture.field),hidden:node.querySelector('input[type="hidden"][name="caller_value"]')};
+      if(fixture.mode==='icon'){controls.first=[...node.querySelectorAll('[data-ely-icon-option]')].find(n=>n.value===fixture.first);controls.second=[...node.querySelectorAll('[data-ely-icon-option]')].find(n=>n.value===fixture.second);}
+      node.__localPickerEvents=[];node.__localPickerTruncated=false;node.__localPickerForeign=false;
+      node.__localPickerObserver=e=>{
+        if(node.__localPickerEvents.length>=64){node.__localPickerTruncated=true;return;}
+        if(e.type.startsWith('ely:')){if(e.target!==node)node.__localPickerForeign=true;node.__localPickerEvents.push({type:e.type,detail:JSON.parse(JSON.stringify(e.detail))});return;}
+        const control=Object.entries(controls).find(([,n])=>n===e.target)?.[0]??'foreign';if(control==='foreign'||e.target.closest('[data-ely-family]')!==node)node.__localPickerForeign=true;
+        node.__localPickerEvents.push({type:e.type,control,value:e.target.value??null,key:e.key??null,trusted:e.isTrusted});
+      };
+      for(const type of ['input','change','keydown','click','blur','ely:change','ely:action'])node.addEventListener(type,node.__localPickerObserver,true);
+    },fixture);
+    let cursor=0,primaryError=null;
+    try{for(const stage of fixture.steps)await runStep(stage,async()=>{
+      assert.equal(await root.evaluate(n=>n.__localPickerEvents.length),cursor,'No unaccounted picker events between actions');
+      if(stage==='font-search'||stage==='picker-search')await field.fill(fixture.query);
+      else if(stage==='font-select')await field.press('Enter');
+      else if(stage==='picker-focus')await field.press('ArrowDown');
+      else if(stage==='picker-select')await root.locator('[data-ely-icon-option]').filter({hasText:identity==='forms/EmojiPicker'?'Sparkles':'Caller Alpha'}).press('Enter');
+      else if(stage==='picker-unmatched')await field.fill('no-matching-picker-option');
+      else if(stage==='picker-clear')await field.fill('');
+      else {await field.press('ArrowDown');await root.locator('[data-ely-icon-option]').filter({hasText:identity==='forms/EmojiPicker'?'Sparkles':'Caller Alpha'}).press('ArrowRight');}
+    },async(_state,_before,receipt)=>{
+      const proof=await root.evaluate((node,args)=>{
+        const {fixture,cursor}=args,font=fixture.mode==='font',field=node.querySelector(fixture.field),hidden=node.querySelector('input[type="hidden"][name="caller_value"]'),preview=node.querySelector('[data-ely-picker-preview]'),options=[...node.querySelectorAll(font?'[data-ui-option]':'[data-ely-icon-option]')];
+        const value=n=>font?n.dataset.value:n.value,focus=document.activeElement;
+        const state=font?{value:hidden.value,search:field.value,selected:options.filter(n=>n.getAttribute('aria-selected')==='true').map(value),visible:options.filter(n=>!n.hidden).map(value),expanded:field.getAttribute('aria-expanded')==='true',listHidden:node.querySelector('[data-ui-combobox-list]').hidden,font:preview.dataset.elySelectedFont,text:preview.textContent,fontFamily:preview.style.fontFamily.split(',').map(n=>n.trim().replace(/^"|"$/g,'')),focused:focus===field?'search':'foreign'}:{value:hidden.value,search:field.value,preview:preview.value,selected:options.filter(n=>n.getAttribute('aria-selected')==='true').map(value),visible:options.filter(n=>!n.hidden).map(value),empty:!node.querySelector('[data-ely-icon-empty]').hidden,focused:focus===field?'search':focus===options[0]?'first':focus===options[1]?'second':'foreign'};
+        return {identity:node.dataset.elyComponent,rootID:node.id,events:node.__localPickerEvents.slice(cursor),truncated:node.__localPickerTruncated,foreign:node.__localPickerForeign,state};
+      },{fixture,cursor});
+      receipt.nativeFormProof=proof;assertLocalPickerStep(identity,stage,proof);cursor+=proof.events.length;return proof;
+    });}catch(error){primaryError=error;if(failureDiagnostics)await retainFailurePayload(failureDiagnostics,'localPicker',()=>root.evaluate(n=>({events:n.__localPickerEvents,truncated:n.__localPickerTruncated,foreign:n.__localPickerForeign})));throw error;}
+    finally{await cleanupPreservingPrimary(()=>root.evaluate(node=>{for(const type of ['input','change','keydown','click','blur','ely:change','ely:action'])node.removeEventListener(type,node.__localPickerObserver,true);for(const key of ['__localPickerEvents','__localPickerTruncated','__localPickerForeign','__localPickerObserver'])delete node[key];}),primaryError,failureDiagnostics??{},'localPickerCleanupError');}
     return;
   }
   if(contract.focusedSequence==='forms-complex-eight-native'){
