@@ -87,6 +87,48 @@ function boundedSegmentDOMNodes(){
   return nodes;
 }
 
+function boundedSegmentTwinSnapshot(root,maxBytes=65536){
+  let bytes=2;const queue=[root],snapshot=[];
+  const add=count=>{bytes+=count;if(bytes>maxBytes)throw Error('Diagnostic twin snapshot byte cap exceeded');};
+  const string=value=>{
+    add(2);for(let i=0;i<value.length;i++){
+      const code=value.charCodeAt(i);
+      if(code===34||code===92||[8,9,10,12,13].includes(code))add(2);
+      else if(code<32)add(6);else if(code<128)add(1);else if(code<2048)add(2);
+      else if(code>=0xd800&&code<=0xdbff&&value.charCodeAt(i+1)>=0xdc00&&value.charCodeAt(i+1)<=0xdfff){add(4);i++;}
+      else if(code>=0xd800&&code<=0xdfff)add(6);else add(3);
+    }
+  };
+  while(queue.length){
+    const node=queue.shift(),index=snapshot.length;
+    if(index+queue.length+node.childNodes.length>=128||node.attributes?.length>32)throw Error('Diagnostic twin snapshot truncated');
+    const text=node.nodeType===3?node.nodeValue:null,value=node.value??null,checked=node.checked??null;
+    if(node.nodeName.length>256||text?.length>256||value?.length>256)throw Error(`Diagnostic twin text truncated node=${index}`);
+    if(index)add(1);add(2);let fields=0;
+    const primitive=(key,item)=>{if(fields++)add(1);string(key);add(1);if(item===null)add(4);else if(typeof item==='boolean')add(item?4:5);else string(item);};
+    primitive('tag',node.nodeName);primitive('text',text);
+    if(fields++)add(1);string('attributes');add(3);const attributes=[];
+    for(const attr of node.attributes||[]){
+      if(attr.name.length>256||attr.value.length>8192)throw Error(`Diagnostic twin attribute truncated node=${index} tag=${node.nodeName.slice(0,64)} attribute=${attr.name.slice(0,64)} nameLength=${attr.name.length} valueLength=${attr.value.length}`);
+      if(attributes.length)add(1);add(3);string(attr.name);string(attr.value);attributes.push([attr.name,attr.value]);
+    }
+    primitive('value',value);primitive('checked',checked);
+    snapshot.push({tag:node.nodeName,text,attributes,value,checked});for(const child of node.childNodes)queue.push(child);
+  }
+  return snapshot;
+}
+
+test('native segment diagnostic twin preserves actual shared input class with bounded exact attributes',async()=>{
+  const template=await read('ui/gohtmx/templates/shadcn-input.html'),classValue=template.match(/\$base := "([^"]+)"/)[1];
+  assert.equal(classValue.length,656);const node={nodeName:'INPUT',nodeType:1,childNodes:[],attributes:[{name:'class',value:classValue}],value:'2026-10-20T12:30',checked:false};
+  const result=boundedSegmentTwinSnapshot(node);assert.equal(result[0].attributes[0][1],classValue);
+  const exactBytes=Buffer.byteLength(JSON.stringify(result));assert.deepEqual(boundedSegmentTwinSnapshot(node,exactBytes),result);assert.throws(()=>boundedSegmentTwinSnapshot(node,exactBytes-1),/byte cap/);
+  const changed={...node,attributes:[{name:'class',value:classValue+' changed'}]};assert.notDeepEqual(boundedSegmentTwinSnapshot(changed),result);
+  for(const value of ['界😀"\\\n\ud800','x'.repeat(8192)]){const sample={...node,attributes:[{name:'data-proof',value}]},snapshot=boundedSegmentTwinSnapshot(sample),bytes=Buffer.byteLength(JSON.stringify(snapshot));assert.deepEqual(boundedSegmentTwinSnapshot(sample,bytes),snapshot);assert.throws(()=>boundedSegmentTwinSnapshot(sample,bytes-1),/byte cap/);}
+  assert.throws(()=>boundedSegmentTwinSnapshot({...node,attributes:[{name:'data-long',value:'x'.repeat(8193)}]}),/node=0 tag=INPUT attribute=data-long.*valueLength=8193/);
+  assert.throws(()=>boundedSegmentTwinSnapshot({...node,attributes:Array.from({length:32},(_,i)=>({name:'data-'+i,value:'x'.repeat(8192)}))}),/byte cap/);
+});
+
 test('native segment diagnostic bounds DOM traversal before transferring raw nodes',()=>{
   const leaf={childNodes:[]};assert.equal(boundedSegmentDOMNodes.call({childNodes:[leaf]}).length,2);
   assert.throws(()=>boundedSegmentDOMNodes.call({childNodes:Array(65).fill(leaf)}),/truncated/);
@@ -148,14 +190,7 @@ test('opt-in DateTime Week DL native segment cause diagnostic only',{skip:proces
         const detail={};if(event.type.startsWith('ely:')){let count=0;for(const key in event.detail||{}){if(++count>16){window.__segmentDiagnosticTruncated=true;break;}const value=event.detail[key];if(value!==null&&!['string','boolean','number'].includes(typeof value)){window.__segmentDiagnosticTruncated=true;continue;}detail[bounded(key)]=bounded(value);}}
         window.__segmentDiagnosticEvents.push({type:event.type,trusted:event.isTrusted,key:bounded(event.key||null),targetId:bounded(event.target?.id||null),value:bounded(event.target?.value??null),detail});
       },true);});
-      const twinSnapshot=()=>twin.evaluate(root=>{
-        const queue=[root],snapshot=[];
-        while(queue.length){const node=queue.shift();if(snapshot.length+queue.length+node.childNodes.length>=128||node.attributes?.length>32)throw Error('Diagnostic twin snapshot truncated');
-          const text=node.nodeType===Node.TEXT_NODE?node.nodeValue:null;if(text?.length>256||node.value?.length>256)throw Error('Diagnostic twin text truncated');
-          const attributes=[];for(const attr of node.attributes||[]){if(attr.name.length>256||attr.value.length>256)throw Error('Diagnostic twin attribute truncated');attributes.push([attr.name,attr.value]);}
-          snapshot.push({tag:node.nodeName,text,attributes,value:node.value??null,checked:node.checked??null});for(const child of node.childNodes)queue.push(child);
-        }return snapshot;
-      });
+      const twinSnapshot=()=>twin.evaluate(boundedSegmentTwinSnapshot);
       const twinBefore=await twinSnapshot();
       const observe=async stage=>{
         const {root}=await cdp.send('DOM.getDocument',{depth:0});
