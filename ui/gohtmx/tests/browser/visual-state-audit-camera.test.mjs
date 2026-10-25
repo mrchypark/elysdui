@@ -26,6 +26,11 @@ test('DateRange separate focused outline is measured diagnostic only and rejects
   panel.style.clipPath='inset(1px)';assert.equal(measure().status,'unsupported');panel.style.clipPath='none';
   document.querySelectorAll=()=>[root,root];assert.equal(measure().status,'unsupported');document.querySelectorAll=selector=>selector.includes('actual-start')?[start]:[root];
   assert.equal(measure().status,'bounded-focused-outline-only');
+  root.closest=()=>root;root.contains=target=>{for(let n=target;n;n=n.parentElement)if(n===root)return true;return false;};panel.matches=selector=>selector===':focus-within';panel.localName='div';
+  const originalDiagnostic=()=>JSON.parse(JSON.stringify(runInNewContext(`(${activeOutlineBounds.toString()})(node,bounds)`,context))).focusOutline.diagnostic;
+  const actual=originalDiagnostic();assert.equal(actual.dateRangePanelWitness.activeIsSelectedPanel,true);assert.equal(actual.dateRangePanelWitness.selectedPanelOwned,true);
+  const impostor={...panel};start.parentElement=impostor;const wrong=originalDiagnostic();
+  assert.deepEqual(wrong.active,actual.active,'Distinct idless DIV can have identical diagnostic tag and geometry');assert.equal(wrong.dateRangePanelWitness.activeIsSelectedPanel,false,'Actual node identity must reject same-rectangle impostor');start.parentElement=panel;
   const sampler=multiSelectShadowFrame.toString();assert(sampler.includes("root?.dataset.elyComponent!=='forms/MultiSelect'"));assert(sampler.includes("'generated owned shadow-frame paint'"),'Pseudo paint remains unsupported, not waived for DateRange');
 });
 
@@ -92,7 +97,7 @@ test('DateRange exact finite masked pseudo and independent focused outline reuse
 
 test('DateRange raster capture retains bounded focus rejects idless impostor foreign contact and geometry changes',async()=>{
   const require=createRequire(import.meta.url),{PNG}=require(resolve(dirname(require.resolve('playwright-core/package.json')),'lib/utilsBundle.js'));
-  for(const mode of ['valid','foreign','contact','impostor-shadow','wrong-ancestor','changed-outline','changed-pseudo']){
+  for(const mode of ['valid','foreign','contact','impostor-shadow','wrong-ancestor','same-rect-impostor','missing-witness','changed-outline','changed-pseudo']){
     const f=shadowRasterFixture(),sample=f.sample;
     sample.panelID='';sample.shadows[0].id='';sample.shadows[0].actualOwnedPanel=mode!=='impostor-shadow';
     const measured={status:'bounded-focused-outline-only',ownershipPromotion:false,focusedID:'actual-start',outline:{status:'bounded',width:2,offset:4,paint:{left:4,top:4,right:8,bottom:8}}};
@@ -103,7 +108,7 @@ test('DateRange raster capture retains bounded focus rejects idless impostor for
       if(fn===dateRangeFocusedOutline){measurements++;return mode==='changed-outline'&&measurements>1?{...measured,focusedID:'wrong'}:measured;}
       if(fn===multiSelectShadowFrame){samples++;return mode==='changed-pseudo'&&samples>1?{...sample,dateRange:{...sample.dateRange,pseudos:[]}}:sample;}
       if(fn===captureForeignPaint)return {foreignDOMIntersections:mode==='foreign'?[{id:'foreign-twin',exposedPaintArea:308*28}]:[],occludedForeignPaint:[]};
-      return {clip:sample.documentFrame,focusOutline:{status:'unsupported',reason:'unbounded focus-within shadow',diagnostic:{focused:{type:'date'},active:{tag:'div',id:null,rect:mode==='wrong-ancestor'?{...panelRect,left:3}:panelRect}}}};
+      return {clip:sample.documentFrame,focusOutline:{status:'unsupported',reason:'unbounded focus-within shadow',diagnostic:{focused:{type:'date'},dateRangePanelWitness:mode==='missing-witness'?undefined:{ownerID:'primary',panelCount:1,selectedPanelOwned:true,activeIsSelectedPanel:mode!=='same-rect-impostor'},active:{tag:'div',id:null,rect:mode==='wrong-ancestor'?{...panelRect,left:3}:panelRect}}}};
     }};
     if(mode==='contact')f.pixel(0,5,254);const bytes=PNG.sync.write(f.png);
     const page={async evaluate(){return {scroll:{x:0,y:0},viewport:{width:100,height:100}};},async screenshot(){shots++;return bytes;}};

@@ -289,7 +289,12 @@ export function activeOutlineBounds(node,bounds){
     }
     const offsetParent=identity(active.offsetParent);
     const focusStyle=getComputedStyle(focused);
-    return {focused:{...identity(focused),type:focused.type||null,matchesFocusVisible:focused.matches?.(':focus-visible')??false,outlineStyle:focusStyle.outlineStyle,outlineWidth:focusStyle.outlineWidth,outlineOffset:focusStyle.outlineOffset,outlineColor:focusStyle.outlineColor,boxShadow:focusStyle.boxShadow,clientRects:[...(focused.getClientRects?.()??[])].map(rectJSON)},focusedOutline:active===focused?null:bounds.focusOutline??null,active:{...identity(active),matchesFocusVisible:active.matches?.(':focus-visible')??false,outlineStyle:style.outlineStyle,outlineWidth:style.outlineWidth,outlineOffset:style.outlineOffset,outlineColor:style.outlineColor,boxShadow:style.boxShadow,clientRects:[...(active.getClientRects?.()??[])].map(rectJSON)},offsetParent,ancestors,...extra};
+    const owner=node.closest('[data-ely-family]');let dateRangePanelWitness;
+    if(owner?.dataset?.elyComponent==='forms/DateRangePicker'&&owner.dataset.elyKind==='DatePicker'){
+      const panels=[...owner.querySelectorAll('[data-ely-date-range-panel]')],selected=panels.length===1?panels[0]:null;
+      dateRangePanelWitness={ownerID:owner.id,panelCount:panels.length,selectedPanelOwned:!!selected&&selected.closest('[data-ely-family]')===owner,activeIsSelectedPanel:!!selected&&active===selected};
+    }
+    return {focused:{...identity(focused),type:focused.type||null,matchesFocusVisible:focused.matches?.(':focus-visible')??false,outlineStyle:focusStyle.outlineStyle,outlineWidth:focusStyle.outlineWidth,outlineOffset:focusStyle.outlineOffset,outlineColor:focusStyle.outlineColor,boxShadow:focusStyle.boxShadow,clientRects:[...(focused.getClientRects?.()??[])].map(rectJSON)},focusedOutline:active===focused?null:bounds.focusOutline??null,active:{...identity(active),matchesFocusVisible:active.matches?.(':focus-visible')??false,outlineStyle:style.outlineStyle,outlineWidth:style.outlineWidth,outlineOffset:style.outlineOffset,outlineColor:style.outlineColor,boxShadow:style.boxShadow,clientRects:[...(active.getClientRects?.()??[])].map(rectJSON)},offsetParent,ancestors,...(dateRangePanelWitness?{dateRangePanelWitness}:{}),...extra};
   };
   const gap=(reason,extra)=>({...bounds,focusOutline:{status:'unsupported',reason,diagnostic:diagnostic(extra)}});
   const positioned=[];
@@ -663,6 +668,7 @@ export async function captureTargetPNG(page,root,path,{checkedRootID}={}){
       assert.deepEqual(await root.evaluate(multiSelectShadowFrame,afterDateOutline),shadowSample,'Shadow frame/source geometry changed during capture');
       assert.deepEqual(await root.evaluate(captureForeignPaint,{clip:shadowSample.documentFrame,checkedRootID:shadowSample.ownerID}),owner,'Foreign paint changed during shadow capture');
       if(shadowSample.dateRange){
+        assert.deepEqual(bounds.focusOutline?.diagnostic?.dateRangePanelWitness,{ownerID:shadowSample.ownerID,panelCount:1,selectedPanelOwned:true,activeIsSelectedPanel:true},'The unbounded focus ancestor must equal the unique actual selected DateRange panel node');
         assert.equal(bounds.focusOutline?.reason,'unbounded focus-within shadow');assert.equal(bounds.focusOutline.diagnostic.active.tag,'div');assert.equal(bounds.focusOutline.diagnostic.active.id,shadowSample.panelID||null);
         assert.deepEqual(bounds.focusOutline.diagnostic.active.rect,shadowSample.dateRange.panelReference.rect,'The unbounded ancestor must be the actual unique sampled panel, not another idless node');
       }else assert(!bounds.focusOutline||bounds.focusOutline.status!=='unsupported'||bounds.focusOutline.reason==='unbounded focus-within shadow'&&bounds.focusOutline.diagnostic.active.id===shadowSample.panelID,'Unrelated focus gap cannot be resolved by a shadow frame');
