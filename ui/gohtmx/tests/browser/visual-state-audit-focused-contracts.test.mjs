@@ -204,6 +204,15 @@ test('regional audit route scopes exact aliases only and retains complete painte
   const driver=await read('ui/gohtmx/tests/browser/visual-state-audit-drivers.mjs');assert(driver.includes('const camera={fullPage:!fits,clip:fits?viewportClip:bounds.clip}'));assert(driver.includes('captureForeignPaint,{clip:bounds.clip,checkedRootID}'));
 });
 
+test('DateRange exact audit route reserves only its seven-step case without neighbor promotion',async()=>{
+  const source=await read('ui/gohtmx/tests/browser/visual-state-audit-actions.mjs'),start=source.indexOf("if(contract.identity==='forms/MultiSelect'"),end=source.indexOf("if(contract.focusedSequence==='workspace-activity-native-link-focus')",start),branch=source.slice(start,end);
+  const route=runInNewContext('(contract,familyURL)=>{'+branch+'return familyURL;}',{URL,assert}),base='http://localhost/components/audit?family=forms',contract=requestedStateContract('forms/DateRangePicker');
+  assert.equal(contract.steps.length,7);assert.equal(new URL(route(contract,base)).searchParams.get('case'),'forms/DateRangePicker');
+  for(const identity of ['forms/DatePicker','forms/MonthPicker','forms/TimePicker'])assert.equal(route(requestedStateContract(identity),base),base);
+  assert.equal(route({...contract,identity:'forms/UnknownDateAlias'},base),base);assert.equal(route({...contract,focusedSequence:'unknown'},base),base);
+  assert.throws(()=>route(contract,'http://localhost/components/audit?family=workspace'));
+});
+
 test('requested-state execution stops unsafe proof before next case and ignores intentional full gate limit',async()=>{
   const source=await read('ui/gohtmx/tests/browser/visual-state-audit-actions.mjs');
   const start=source.indexOf('if(options.statesOnly){',source.indexOf('for (const item of familyCases)')),end=source.indexOf('// Fresh documents',start),branch=source.slice(start,end);assert(start>=0&&end>start);

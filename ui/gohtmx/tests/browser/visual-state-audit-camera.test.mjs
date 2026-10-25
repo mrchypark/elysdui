@@ -7,6 +7,35 @@ import {dirname,resolve,join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {captureTargetPNG,captureForeignPaint,screenshotWithoutCaretMutation,activeOutlineBounds,visualCaptureGap,proveMultiSelectShadowRaster,multiSelectShadowFrame} from './visual-state-audit-drivers.mjs';
 import {captureBounds} from './visual-state-audit-bounds.mjs';
+import {dateRangeFocusedOutline} from './visual-state-audit-drivers.mjs';
+
+test('DateRange separate focused outline is measured diagnostic only and rejects owner outline and clip ambiguity',()=>{
+  const rect={left:20,top:40,right:80,bottom:60,width:60,height:20},plain={display:'block',visibility:'visible',opacity:'1',contentVisibility:'visible',outlineStyle:'none',outlineWidth:'0px',outlineOffset:'0px',outlineColor:'rgb(0, 0, 255)',boxShadow:'none',transform:'none',translate:'none',rotate:'none',scale:'none',perspective:'none',filter:'none',clipPath:'none',clip:'auto',maskImage:'none',contain:'none',zoom:'1',overflowX:'visible',overflowY:'visible',position:'static'};
+  const root={id:'owner',dataset:{elyComponent:'forms/DateRangePicker',elyKind:'DatePicker'},matches:()=>true};
+  const panel={id:'',hidden:false,style:{...plain,boxShadow:'rgba(0, 0, 0, 0.133) 0px 8px 16px 0px'},parentElement:root,closest:()=>root,getBoundingClientRect:()=>({left:10,top:30,right:90,bottom:80})};root.style={...plain};
+  const field=(id,selector)=>({id,type:'date',localName:'input',style:{...plain,outlineStyle:'solid',outlineWidth:'2px',outlineOffset:'4px'},parentElement:panel,closest:()=>root,matches:query=>query===selector,getBoundingClientRect:()=>rect,getClientRects:()=>[rect],contains(target){return target===this;}});
+  const start=field('actual-start','[data-ely-date-start]'),end=field('actual-end','[data-ely-date-end]'),trigger={closest:()=>root,getAttribute:()=> 'true'};
+  panel.querySelectorAll=()=>[start,end];root.querySelectorAll=selector=>selector==='[data-ely-date-range-panel]'?[panel]:[trigger];
+  const bounds={clip:{x:10,y:30,width:80,height:50},root:{left:10,top:30,right:90,bottom:80},focusOutline:{status:'unsupported',reason:'unbounded focus-within shadow'}};
+  const document={activeElement:start,querySelectorAll:()=>[root]},context={node:root,bounds,document,URL,location:{href:'http://localhost/components/audit?family=forms&case=forms%2FDateRangePicker'},getComputedStyle:node=>node.style,scrollX:0,scrollY:0,innerWidth:390,innerHeight:844};
+  const measure=()=>JSON.parse(JSON.stringify(runInNewContext(`(${dateRangeFocusedOutline.toString()})(node,bounds)`,context)));
+  const valid=measure();assert.equal(valid.status,'bounded-focused-outline-only');assert.equal(valid.ownershipPromotion,false);assert.equal(valid.panel.id,null);assert.deepEqual(valid.outline.paint,{left:14,top:34,right:86,bottom:66});assert.equal(valid.outline.width,2);assert.equal(valid.outline.offset,4);assert.equal(bounds.focusOutline.status,'unsupported','Independent measure must not mutate/promote original shadow gate');
+  panel.closest=()=>({});assert.equal(measure().status,'unsupported');panel.closest=()=>root;
+  document.activeElement={...start};assert.equal(measure().status,'unsupported');document.activeElement=start;
+  start.style.outlineStyle='auto';assert.equal(measure().status,'unsupported');start.style.outlineStyle='solid';
+  panel.style.clipPath='inset(1px)';assert.equal(measure().status,'unsupported');panel.style.clipPath='none';
+  document.querySelectorAll=()=>[root,root];assert.equal(measure().status,'unsupported');document.querySelectorAll=()=>[root];
+  assert.equal(measure().status,'bounded-focused-outline-only');
+  const sampler=multiSelectShadowFrame.toString();assert(sampler.includes("root?.dataset.elyComponent!=='forms/MultiSelect'"));assert(sampler.includes("'generated owned shadow-frame paint'"),'Pseudo paint remains unsupported, not waived for DateRange');
+});
+
+test('DateRange diagnostic cannot publish raster or ownership approval and existing contact rejection remains',async()=>{
+  const source=await readFile(new URL('./visual-state-audit-drivers.mjs',import.meta.url),'utf8');
+  assert(source.includes('if(measurement)bounds={...bounds,dateRangeFocusedOutline:measurement}'));
+  const f=shadowRasterFixture();f.pixel(0,5,254);assert.throws(()=>proveMultiSelectShadowRaster(f.png,f.sample),/boundary/);
+  const region=source.slice(source.indexOf('let bounds=await root.evaluate(actionBounds)'),source.indexOf('const shadowSample=await root.evaluate(multiSelectShadowFrame)'));
+  assert(!region.includes('not-painted'));assert(!region.includes('countsAsOwnedEvidence'));assert(!region.includes('focusOutline:measurement'));
+});
 
 // Synthetic bytes exercise the fail-closed oracle, not actual browser paint evidence.
 function shadowRasterFixture(){

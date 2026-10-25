@@ -563,6 +563,21 @@ export function multiSelectShadowFrame(node){
   return {eligible:true,ownerID:root.id,panelID:panel.id,frame,documentFrame,camera,background:[...color.slice(1).map(Number),255],rects,shadows,compositedDisabledLeaves,panel:{left:p.left-frame.x,top:p.top-frame.y,right:p.right-frame.x,bottom:p.bottom-frame.y},focused:{id:focused.id,type:focused.type,matchesFocusVisible:focused.matches(':focus-visible'),outlineStyle:fs.outlineStyle,boxShadow:fs.boxShadow}};
 }
 
+// Diagnostic only until the exact panel's decorative paint has an independent raster proof.
+// Measuring the focused input alone still traverses its real ancestor clip/transform chain.
+export const dateRangeFocusedOutline=new Function('node','bounds',`
+  if(node.dataset.elyComponent!=='forms/DateRangePicker'||node.dataset.elyKind!=='DatePicker')return null;
+  const fail=reason=>({status:'unsupported',reason,ownershipPromotion:false});
+  if(new URL(location.href).searchParams.get('case')!=='forms/DateRangePicker'||document.querySelectorAll('[data-audit-case]').length!==1||!node.matches('[data-audit-main]>[data-ely-family]')||!node.id||document.querySelectorAll('[id="'+node.id+'"]').length!==1)return fail('exact unique date-range audit owner required');
+  const panels=[...node.querySelectorAll('[data-ely-date-range-panel]')],triggers=[...node.querySelectorAll('[data-ely-date-range-trigger]')];
+  if(panels.length!==1||triggers.length!==1||panels[0].closest('[data-ely-family]')!==node||triggers[0].closest('[data-ely-family]')!==node)return fail('ambiguous date-range panel/trigger');
+  const panel=panels[0];if(panel.hidden)return null;
+  const focused=document.activeElement,fields=[...panel.querySelectorAll('input[data-ely-date-start],input[data-ely-date-end]')];
+  if(triggers[0].getAttribute('aria-expanded')!=='true'||fields.length!==2||fields.filter(field=>field.matches('[data-ely-date-start]')).length!==1||fields.filter(field=>field.matches('[data-ely-date-end]')).length!==1||!fields.includes(focused)||focused.type!=='date'||focused.closest('[data-ely-family]')!==node)return fail('focused input is not one of the two actual owned date fields');
+  const measured=(${activeOutlineBounds.toString()})(focused,bounds);
+  return {status:measured.focusOutline?.status==='bounded'?'bounded-focused-outline-only':'unsupported',ownershipPromotion:false,panel:{id:panel.id||null,selector:'[data-ely-date-range-panel]',unique:true},focusedID:focused.id||null,outline:measured.focusOutline??null};
+`);
+
 export function proveMultiSelectShadowRaster({width,height,data},sample){
   assert.equal(width,sample.frame.width);assert.equal(height,sample.frame.height);assert.equal(data.length,width*height*4);
   assert(sample.rects.every(r=>r.left>=0&&r.top>=0&&r.right<=width&&r.bottom<=height),'Owned boxes escape the measured frame');
@@ -592,6 +607,10 @@ export async function captureTargetPNG(page,root,path,{checkedRootID}={}){
   else await root.scrollIntoViewIfNeeded();
   await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
   let bounds=await root.evaluate(actionBounds);
+  if(bounds.focusOutline?.reason==='unbounded focus-within shadow'&&bounds.focusOutline.diagnostic?.focused?.type==='date'){
+    const measurement=await root.evaluate(dateRangeFocusedOutline,bounds);
+    if(measurement)bounds={...bounds,dateRangeFocusedOutline:measurement};
+  }
   const shadowSample=await root.evaluate(multiSelectShadowFrame);
   if(shadowSample&&typeof shadowSample.eligible==='boolean'){
     let candidate;

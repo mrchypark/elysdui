@@ -10,3 +10,5 @@
 .advanced-cases>[data-audit-case][data-audit-name="forms/MultiSelect"]:only-child>.advanced-grid>[data-audit-main]{min-block-size:100vh}
 /* Exact regional popup audits reserve flow space without altering either specimen. */
 .advanced-cases>[data-audit-case][data-audit-name="forms/LanguageSelect"]:only-child>.advanced-grid>[data-audit-main],.advanced-cases>[data-audit-case][data-audit-name="forms/CountrySelect"]:only-child>.advanced-grid>[data-audit-main],.advanced-cases>[data-audit-case][data-audit-name="forms/CurrencySelect"]:only-child>.advanced-grid>[data-audit-main]{min-block-size:100vh}
+/* The exact date-range popup audit retains its twin below the authored primary frame. */
+.advanced-cases>[data-audit-case][data-audit-name="forms/DateRangePicker"]:only-child>.advanced-grid>[data-audit-main]{min-block-size:100vh}

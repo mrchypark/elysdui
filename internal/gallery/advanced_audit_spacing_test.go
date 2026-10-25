@@ -59,3 +59,17 @@ func TestRegionalComboboxAuditSpacingRequiresSingleExactCase(t *testing.T) {
 		t.Fatal("Audit separation must not restyle the product combobox or its twin")
 	}
 }
+
+func TestDateRangeAuditSpacingRequiresSingleExactCase(t *testing.T) {
+	css, err := Files.ReadFile("assets/advanced.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `.advanced-cases>[data-audit-case][data-audit-name="forms/DateRangePicker"]:only-child>.advanced-grid>[data-audit-main]{min-block-size:100vh}`
+	if strings.Count(string(css), want) != 1 {
+		t.Fatal("DateRange spacing must reserve only the exact single-case primary wrapper")
+	}
+	if strings.Contains(string(css), ".ely-api-date-range") {
+		t.Fatal("Audit spacing must not change date-range product paint or its twin")
+	}
+}
