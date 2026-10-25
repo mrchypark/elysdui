@@ -13,16 +13,46 @@ const read=path=>readFile(new URL(`../../../../${path}`,import.meta.url),'utf8')
 
 const segmentDiagnosticMaxBytes=1024*1024;
 function boundedSegmentJSON(value,maxBytes=segmentDiagnosticMaxBytes){
-  let units=0;
-  const check=(item,depth=0)=>{
-    assert(depth<=24&&++units<=50000,'Diagnostic collection limit exceeded');
-    if(typeof item==='string')assert(item.length<=8192,'Diagnostic string limit exceeded');
-    else if(item&&typeof item==='object'){
-      const keys=Object.keys(item);assert(keys.length<=256,'Diagnostic member limit exceeded');
-      for(const key of keys){assert(key.length<=256);check(item[key],depth+1);}
+  assert(Number.isSafeInteger(maxBytes)&&maxBytes>0,'Invalid diagnostic byte cap');
+  let units=0,bytes=0;
+  const add=count=>{bytes+=count;assert(bytes<=maxBytes,'Diagnostic JSON byte cap exceeded');};
+  const stringBytes=text=>{
+    assert(text.length<=8192,'Diagnostic string limit exceeded');add(2);
+    for(let i=0;i<text.length;i++){
+      const code=text.charCodeAt(i);
+      if(code===34||code===92||[8,9,10,12,13].includes(code))add(2);
+      else if(code<32)add(6);
+      else if(code<128)add(1);
+      else if(code<2048)add(2);
+      else if(code>=0xd800&&code<=0xdbff&&text.charCodeAt(i+1)>=0xdc00&&text.charCodeAt(i+1)<=0xdfff){add(4);i++;}
+      else if(code>=0xd800&&code<=0xdfff)add(6);
+      else add(3);
     }
   };
-  check(value);const json=JSON.stringify(value);assert(Buffer.byteLength(json)<=maxBytes,'Diagnostic JSON byte cap exceeded');return json;
+  const check=(item,depth=0)=>{
+    assert(depth<=24&&++units<=50000,'Diagnostic collection limit exceeded');
+    if(typeof item==='string')stringBytes(item);
+    else if(item===null||item===undefined)add(4);
+    else if(typeof item==='boolean')add(item?4:5);
+    else if(typeof item==='number')add(Number.isFinite(item)?String(item).length:4);
+    else if(item&&typeof item==='object'){
+      assert(Array.isArray(item)||Object.getPrototypeOf(item)===Object.prototype||Object.getPrototypeOf(item)===null,'Diagnostic requires plain JSON data');
+      assert(!('toJSON' in item),'Diagnostic custom serialization forbidden');
+      add(2);let count=0,members=0;
+      if(Array.isArray(item)){
+        assert(item.length<=256,'Diagnostic member limit exceeded');
+        for(let i=0;i<item.length;i++){if(i)add(1);const property=Object.getOwnPropertyDescriptor(item,String(i));assert(!property||'value' in property,'Diagnostic accessors forbidden');check(property?.value,depth+1);}
+      }else for(const key in item){
+        if(!Object.hasOwn(item,key))continue;
+        assert(++members<=256,'Diagnostic member limit exceeded');assert(key.length<=256);
+        const property=Object.getOwnPropertyDescriptor(item,key);assert('value' in property,'Diagnostic accessors forbidden');
+        if(property.value===undefined)continue;
+        if(count++)add(1);stringBytes(key);add(1);check(property.value,depth+1);
+      }
+    }else assert.fail('Unsupported diagnostic JSON value');
+  };
+  assert(value!==undefined,'Diagnostic root must be JSON data');check(value);
+  const json=JSON.stringify(value);assert.equal(Buffer.byteLength(json),bytes,'Diagnostic JSON byte accounting mismatch');return json;
 }
 function segmentDiagnosticOutput(proof,maxBytes=segmentDiagnosticMaxBytes){
   try{return boundedSegmentJSON(proof,maxBytes);}
@@ -37,6 +67,17 @@ test('native segment diagnostic caps bytes unicode raw strings and member alloca
     assert(Buffer.byteLength(json)<=512);assert.equal(result.truncated,true);assert.equal(result.failed,true);assert.equal(result.mechanicsObserved,undefined);
   }
   assert.throws(()=>boundedSegmentJSON({text:'界'.repeat(200)},512));
+});
+
+test('native segment diagnostic rejects aggregate before stringify and counts UTF8 escaping containers exactly',()=>{
+  runInNewContext(`assert.throws(()=>(${boundedSegmentJSON.toString()})(Array.from({length:200},()=>Array(200).fill('small')),1024),/byte cap/);`,{assert,JSON:{stringify(){assert.fail('Aggregate overflow must reject before stringify');}}});
+  for(const value of ['界','😀','\ud800','\udfff','"\\\b\f\n\r\t\u0000\u001f','é',[null,undefined,true,false,0,-0,1e30,NaN,Infinity],{'界"': ['😀','\ud800'],omitted:undefined}]){
+    const expected=JSON.stringify(value),bytes=Buffer.byteLength(expected);
+    assert.equal(boundedSegmentJSON(value,bytes),expected);
+    assert.throws(()=>boundedSegmentJSON(value,bytes-1),/byte cap/);
+  }
+  assert.throws(()=>boundedSegmentJSON({get value(){assert.fail('Getter must not execute');}}),/accessors/);
+  assert.throws(()=>boundedSegmentJSON({toJSON(){assert.fail('toJSON must not execute');}}),/custom serialization/);
 });
 
 // This function runs in Chromium before nodes are transferred over CDP.
