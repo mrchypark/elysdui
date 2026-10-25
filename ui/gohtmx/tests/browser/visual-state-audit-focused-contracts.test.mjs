@@ -19,6 +19,44 @@ import {assertActivityLogScopedAuditPage,assertCommunicationCallerRequest,assert
 
 const read=path=>readFile(new URL(`../../../../${path}`,import.meta.url),'utf8');
 
+test('owned cleanup phase ledger preserves order errors and pending await evidence',async()=>{
+  const source=await read('ui/gohtmx/tests/browser/visual-state-audit-actions.mjs');
+  const body=source.slice(source.indexOf('async function cleanupOwnedActionResources('),source.indexOf('function parseArgs('));
+  const make=(overrides={})=>{
+    const records=[],writes=[],calls=[],stderr=[];
+    const context={process:{pid:123,platform:'win32'},resolve:(...parts)=>parts.join('/'),console:{error:text=>stderr.push(text)},
+      appendFile:async(path,text)=>{records.push(JSON.parse(text));},writeFile:async(path,text)=>{writes.push(JSON.parse(text));},rm:async()=>{calls.push('remove');},...overrides};
+    return {records,writes,calls,stderr,run:runInNewContext(body+';cleanupOwnedActionResources',context)};
+  };
+  const options={output:'/evidence',runDir:'/owned-private',browser:{close:async()=>{}}};
+  const success=make();await success.run(options);
+  assert.deepEqual(success.records.map(x=>x.phase+':'+x.state),['browser.close:before','browser.close:after','temporaryDirectory.remove:before','temporaryDirectory.remove:after','resources.write:before','resources.write:after','resources.finalize:before','resources.finalize:after']);
+  assert(success.records.every(x=>x.runnerPID===123&&x.galleryPID===null&&typeof x.timestamp==='string'));
+  assert.equal(success.writes.at(-1).state,'cleaned');
+  const rejected=Error('browser close rejected'),failed=make();
+  await assert.rejects(failed.run({...options,browser:{close:async()=>{throw rejected;}}}),error=>error.errors[0]===rejected);
+  assert.deepEqual(failed.calls,['remove']);assert.equal(failed.writes.at(-1).state,'cleanup-unwitnessed');
+  assert(failed.records.some(x=>x.phase==='browser.close'&&x.state==='error'));
+  const markerError=Error('marker rejected'),marker=make({appendFile:async()=>{throw markerError;}});
+  await assert.rejects(marker.run(options),error=>error.errors.includes(markerError));
+  assert.deepEqual(marker.calls,['remove']);assert.equal(marker.writes.at(-1).state,'cleanup-unwitnessed');assert(marker.stderr.length>0);
+  const primary=Error('original assertion');
+  await assert.rejects(marker.run({...options,primaryError:primary}),error=>error===primary);
+  await assert.rejects(failed.run({...options,primaryError:primary,browser:{close:async()=>{throw rejected;}}}),error=>error===primary);
+  const finalMarker=make({appendFile:async(path,text)=>{const record=JSON.parse(text);if(record.phase==='resources.finalize'&&record.state==='after')throw markerError;}});
+  await assert.rejects(finalMarker.run(options),error=>error.errors.includes(markerError));
+  assert.equal(finalMarker.writes.at(-1).state,'cleanup-unwitnessed');
+  const writeError=Error('resources rejected'),writeFailure=make({writeFile:async()=>{throw writeError;}});
+  await assert.rejects(writeFailure.run(options),error=>error.errors.includes(writeError));
+  assert(writeFailure.records.some(x=>x.phase==='resources.write'&&x.state==='error'));
+  let release;const pending=make(),wait=new Promise(resolve=>{release=resolve;});
+  const running=pending.run({...options,browser:{close:()=>wait}});
+  await Promise.resolve();await Promise.resolve();
+  assert.deepEqual(pending.records.map(x=>x.phase+':'+x.state),['browser.close:before']);
+  assert.equal(pending.writes.length,0);
+  release();await running;assert.equal(pending.writes.at(-1).state,'cleaned');
+});
+
 test('activation candidate preflight follows dependency install and precedes browser install',async()=>{
   const workflow=await read('.github/workflows/palette-activation.yml');
   const dependencies=workflow.indexOf('      - run: npm ci\n');

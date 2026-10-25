@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {execFileSync, spawn} from 'node:child_process';
 import {createServer} from 'node:http';
-import {mkdir, mkdtemp, readFile, rm, stat, unlink, writeFile} from 'node:fs/promises';
+import {appendFile, mkdir, mkdtemp, readFile, rm, stat, unlink, writeFile} from 'node:fs/promises';
 import {extname, resolve, sep} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {tmpdir} from 'node:os';
@@ -39,6 +39,42 @@ const pilotNames = [
   'shell/ZoomControl', 'media/Playlist', 'media/VideoPlayer',
   'forms/PasswordInput', 'forms/Checkbox',
 ];
+
+async function cleanupOwnedActionResources({browser,staticServer,child,runDir,output,primaryError,cleanupErrors=[],ledgerErrors=[]}) {
+  const identity={runnerPID:process.pid,galleryPID:child?.pid||null};
+  const describe=error=>String(error).slice(0,512);
+  const marker=async(phase,state,error)=>{
+    if(!runDir)return;
+    try{await appendFile(resolve(output,'cleanup-phases.jsonl'),JSON.stringify({...identity,timestamp:new Date().toISOString(),phase,state,...(error?{error:describe(error)}:{})})+'\n');}
+    catch(failure){ledgerErrors.push(failure);console.error('cleanup ledger write failed: '+describe(failure));}
+  };
+  const phase=async(name,operation)=>{
+    await marker(name,'before');
+    try{await operation();await marker(name,'after');}
+    catch(error){cleanupErrors.push(error);console.error('cleanup '+name+' failed: '+describe(error));await marker(name,'error',error);}
+  };
+  if(browser)await phase('browser.close',()=>browser.close());
+  if(staticServer?.listening)await phase('staticServer.close',()=>new Promise(resolve=>staticServer.close(resolve)));
+  if(child&&child.exitCode===null)await phase('gallery.exit',async()=>{
+    const exited=new Promise(resolve=>child.once('exit',resolve));
+    if(process.platform==='win32')child.kill('SIGTERM');else process.kill(-child.pid,'SIGTERM');
+    await exited;
+  });
+  if(runDir){
+    await phase('temporaryDirectory.remove',()=>rm(runDir,{recursive:true,force:true}));
+    // Keep resources non-final until the post-write observation is durable.
+    await phase('resources.write',()=>writeFile(resolve(output,'resources.json'),JSON.stringify({...identity,runDir,state:'cleanup-unwitnessed',cleanupErrors:cleanupErrors.map(describe),ledgerErrors:ledgerErrors.map(describe)})+'\n'));
+    if(!cleanupErrors.length&&!ledgerErrors.length){
+      await phase('resources.finalize',()=>writeFile(resolve(output,'resources.json'),JSON.stringify({...identity,runDir,state:'cleaned',browserClosed:true,serverClosed:true,temporaryDirectoryRemoved:true})+'\n'));
+      if(cleanupErrors.length||ledgerErrors.length){
+        try{await writeFile(resolve(output,'resources.json'),JSON.stringify({...identity,runDir,state:'cleanup-unwitnessed',cleanupErrors:cleanupErrors.map(describe),ledgerErrors:ledgerErrors.map(describe)})+'\n');}
+        catch(error){ledgerErrors.push(error);console.error('cleanup invalidation write failed: '+describe(error));}
+      }
+    }
+  }
+  if(primaryError)throw primaryError;
+  if(cleanupErrors.length||ledgerErrors.length)throw new AggregateError([...cleanupErrors,...ledgerErrors],'Owned resource cleanup or observation failed');
+}
 
 function parseArgs(argv) {
   const options = {fixture:'advanced',fixtureManifest:null,evidenceRoot: environmentEvidenceRoot, output: defaultOutput, matrixPath: null, coverageManifestPath: null, families: [], caseIds: [], pilot: 20, full: false, baseURL: null, profileId: 'live-desktop-light', surface: 'live-audit', maxCaptureBytes: 1024 ** 3};
@@ -198,7 +234,8 @@ const profile = {id: options.profileId, ...profiles[options.profileId], deviceSc
 const sha256 = value => createHash('sha256').update(value).digest('hex');
 const digest = value => sha256(JSON.stringify(value));
 const slug = value => value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 90);
-let child, browser, runDir, staticServer, serverOutput = '', captureBytes = 0;
+let child, browser, runDir, staticServer, primaryRunError, serverOutput = '', captureBytes = 0;
+const cleanupErrors=[],cleanupLedgerErrors=[];
 
 async function sourceReceipt() {
   const paths = [...new Set(execFileSync('git', ['ls-files', '-z', '--cached', '--others', '--exclude-standard'], {cwd: repo, encoding: 'utf8'}).split('\0').filter(Boolean))].sort();
@@ -942,16 +979,10 @@ try {
   if(options.statesOnly&&!report.requestedStateGate.safe)process.exitCode=1;
   }
 } catch (error) {
-  if (runDir) await writeFile(resolve(options.output, 'failure.json'), JSON.stringify({runtime: process.version, error: String(error), stack: error.stack, runnerPID: process.pid, galleryPID: child?.pid, runDir, serverOutput}, null, 2) + '\n', {flag: 'wx'});
+  primaryRunError=error;
+  try{if (runDir) await writeFile(resolve(options.output, 'failure.json'), JSON.stringify({runtime: process.version, error: String(error), stack: error.stack, runnerPID: process.pid, galleryPID: child?.pid, runDir, serverOutput}, null, 2) + '\n', {flag: 'wx'});}
+  catch(failure){cleanupLedgerErrors.push(failure);console.error('failure record write failed: '+String(failure).slice(0,512));}
   throw error;
 } finally {
-  await browser?.close();
-  if (staticServer?.listening) await new Promise(resolve => staticServer.close(resolve));
-  if (child && child.exitCode === null) {
-    const exited = new Promise(resolve => child.once('exit', resolve));
-    if (process.platform === 'win32') child.kill('SIGTERM'); else process.kill(-child.pid, 'SIGTERM');
-    await exited;
-  }
-  if (runDir) await rm(runDir, {recursive: true, force: true});
-  if (runDir) await writeFile(resolve(options.output, 'resources.json'), JSON.stringify({runnerPID: process.pid, galleryPID: child?.pid || null, runDir, state: 'cleaned', browserClosed: true, serverClosed: true, temporaryDirectoryRemoved: true}) + '\n');
+  await cleanupOwnedActionResources({browser,staticServer,child,runDir,output:options.output,primaryError:primaryRunError,cleanupErrors,ledgerErrors:cleanupLedgerErrors});
 }
