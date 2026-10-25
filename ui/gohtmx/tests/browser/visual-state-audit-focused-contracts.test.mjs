@@ -8,6 +8,7 @@ import {assertPathNativeStep} from './visual-state-audit-drivers.mjs';
 import {assertRangeFormStep} from './visual-state-audit-drivers.mjs';
 import {assertComplexFormStep} from './visual-state-audit-drivers.mjs';
 import {assertLocalPickerStep} from './visual-state-audit-drivers.mjs';
+import {assertLocalStudioStep} from './visual-state-audit-drivers.mjs';
 import {assertRelativeDateFixture} from './visual-state-audit-drivers.mjs';
 import {temporalAXKeyboardRoute,assertTemporalAXStep} from './visual-state-audit-drivers.mjs';
 import {requestedStateProofSafe} from './visual-state-audit-drivers.mjs';
@@ -19,6 +20,57 @@ import {assertEightFormStep,assertDurationNativeProof,probeFailureStateAndPayloa
 import {assertActivityLogScopedAuditPage,assertCommunicationCallerRequest,assertDockCallerAction,assertDockNativeEvents,assertEvalLastColumnGeometry,assertNativeEmbedOpen,activatePresenceStep,assertPresenceNativeRequest,assertFoundationPublicEvents,assertPlainInputNativeEvents,assertFormattedInputState,calendarDraftWheelDecision,requestedStateContract,runRequestedStateActions} from './visual-state-audit-drivers.mjs';
 
 const read=path=>readFile(new URL(`../../../../${path}`,import.meta.url),'utf8');
+
+test('local studio two execute nine exact state and complete ordered event windows',()=>{
+  const n=(type,control,value,key=null,trusted=true)=>({type,control,value,key,trusted});let count=0;
+  for(const identity of ['forms/SignaturePad','forms/GradientEditor']){
+    const contract=requestedStateContract(identity);assert.equal(contract.nativeFormTwinWitness,true);
+    const p=detail=>({type:'ely:change',detail:{id:'root',component:identity,...detail}}),generic=(name,value,type)=>p({name,value,...(type==='textarea'?{}:{checked:false}),type});
+    for(const {id:stage}of contract.steps){
+      let state,events,pointerButtons=[];
+      if(identity==='forms/SignaturePad'){
+        const typed='Caller native signature',drawn=stage==='signature-draw',value=drawn?'data:image/png;base64,YWJj':stage==='signature-type'?typed:'';
+        state={value,fallback:stage==='signature-type'?typed:'',strokes:drawn?'1 stroke':'0 strokes',inkPixels:drawn?12:0,canvasMatchesValue:true,valid:true,hiddenEnabled:true,fallbackName:'',guideHidden:stage!=='signature-clear'};
+        const notify=[n('change','hidden',value,null,false),generic('caller_value',value,'hidden')];
+        events=stage==='signature-type'?[n('input','fallback',typed),...notify]:stage==='signature-clear'?[n('click','clear',''),...notify]:[n('pointermove','canvas',null),n('pointerdown','canvas',null),n('change','fallback',typed),generic('',typed,'textarea'),n('blur','fallback',typed),n('pointermove','canvas',null),n('pointermove','canvas',null),n('pointermove','canvas',null),n('pointerup','canvas',null),...notify,n('click','canvas',null)];
+        if(drawn)pointerButtons=[0,1,1,1,1,0];
+      }else{
+        const stops=(at=null,color='#817f7c',alpha=100)=>[{at:0,color:'#181613',alpha:100},...(at===null?[]:[{at,color,alpha}]),{at:1,color:'#e9e7e5',alpha:100}];
+        const css=items=>`linear-gradient(180deg, ${items.map(s=>`${s.color}${s.alpha<100?Math.round(s.alpha*255/100).toString(16).padStart(2,'0'):''} ${s.at*100}%`).join(', ')})`,agg=items=>p({value:css(items),stops:items});
+        const red=!['gradient-angle','gradient-add'].includes(stage),alpha=['gradient-alpha','gradient-stop-right'].includes(stage)?50:100,items=['gradient-angle','gradient-delete'].includes(stage)?stops():stops(stage==='gradient-stop-right'?.51:.5,red?'#ff0000':'#817f7c',alpha),selected=['gradient-angle','gradient-delete'].includes(stage)?0:1;
+        state={value:css(items),angle:'180',stops:items.map((s,index)=>({...s,selected:index===selected})),hex:selected===0?'#181613':red?'#ff0000':'#817f7c',alpha:String(selected===0?100:alpha),start:'#181613',end:'#e9e7e5',previewMatches:true};
+        const redEvents=[n('input','color','#ff0000',null,false),agg(stops(.5,'#ff0000')),n('change','color','#ff0000',null,false),generic('caller_value_color','#ff0000','color'),agg(stops(.5,'#ff0000'))];
+        if(stage==='gradient-angle')events=[n('input','angle','180'),agg(stops())];
+        else if(stage==='gradient-add')events=[n('change','angle','180'),generic('','180','number'),agg(stops()),n('blur','angle','180'),n('keydown','add','','Enter'),n('click','add',''),agg(stops(.5)),n('blur','add','')];
+        else if(stage==='gradient-hex')events=[n('blur','stop','50'),n('input','hex','#ff0000'),...redEvents];
+        else if(stage==='gradient-alpha'){events=[n('change','hex','#ff0000'),generic('','#ff0000','text'),...redEvents,n('blur','hex','#ff0000')];for(let value=99;value>=50;value--)events.push(n('keydown','alpha',String(value+1),'ArrowLeft'),n('input','alpha',String(value)),agg(stops(.5,'#ff0000',value)),n('change','alpha',String(value)),generic('caller_value_color_alpha',String(value),'range'),agg(stops(.5,'#ff0000',value)));assert.equal(events.length,308);}
+        else if(stage==='gradient-stop-right')events=[n('blur','alpha','50'),n('keydown','stop','50','ArrowRight'),agg(stops(.51,'#ff0000',50))];
+        else events=[n('keydown','stop','51','Delete'),agg(stops())];
+      }
+      const proof={identity,rootID:'root',state,events,pointerButtons,truncated:false,foreign:false};assertLocalStudioStep(identity,stage,proof);count++;
+      assert.throws(()=>assertLocalStudioStep(identity,stage,{...proof,truncated:true}));assert.throws(()=>assertLocalStudioStep(identity,stage,{...proof,foreign:true}));
+      assert.throws(()=>assertLocalStudioStep(identity,stage,{...proof,events:events.slice(1)}));assert.throws(()=>assertLocalStudioStep(identity,stage,{...proof,events:[...events,p({value:'extra'})]}));
+      const wrong=structuredClone(proof);wrong.events.find(e=>'trusted'in e).trusted=false;assert.throws(()=>assertLocalStudioStep(identity,stage,wrong));
+      if(stage==='signature-draw'){assert.throws(()=>assertLocalStudioStep(identity,stage,{...proof,state:{...state,inkPixels:0}}));assert.throws(()=>assertLocalStudioStep(identity,stage,{...proof,state:{...state,canvasMatchesValue:false}}));}
+      if(stage==='gradient-alpha'){const missing=structuredClone(proof);missing.events.splice(20,1);assert.throws(()=>assertLocalStudioStep(identity,stage,missing));}
+    }
+  }
+  assert.equal(count,9);
+});
+
+test('local studio two native route caps fail closed and preserve bounded stroke and fifty alpha events',async()=>{
+  const source=await read('ui/gohtmx/tests/browser/visual-state-audit-drivers.mjs'),start=source.indexOf("if(contract.focusedSequence==='forms-local-studio-native')"),branch=source.slice(start,source.indexOf("if(contract.focusedSequence==='forms-local-picker-native')",start));
+  for(const text of ['mouse.down()','mouse.up()','for(let index=0;index<50;index++)',".press('ArrowLeft')",'receipt.nativeFormProof=proof','retainFailurePayload','cleanupPreservingPrimary','getImageData','canvas.toDataURL()===hidden.value'])assert(branch.includes(text),text);
+  assert.doesNotMatch(branch,/dispatchEvent|new Event|\.value\s*=(?!=|>)/);
+  const installer=branch.slice(branch.indexOf('await root.evaluate((node,{controls,signature})=>{')+'await root.evaluate((node,{controls,signature})=>{'.length,branch.indexOf('},{controls,signature});'));
+  const listeners={},field={value:'180',matches:()=>false,closest:()=>node},node={querySelector:()=>field,addEventListener:(type,fn)=>listeners[type]=fn};
+  runInNewContext(installer,{node,controls:{angle:'angle'},signature:false,TextEncoder});
+  const event={type:'input',target:field,isTrusted:true};
+  for(let index=0;index<512;index++)listeners.input(event);
+  assert.equal(node.__studioEvents.length,512);assert.equal(node.__studioTruncated,false);listeners.input(event);assert.equal(node.__studioTruncated,true);assert.equal(node.__studioEvents.length,512);
+  node.__studioEvents=[];node.__studioTruncated=false;node.__studioBytes=1048576;listeners.input(event);assert.equal(node.__studioTruncated,true);assert.equal(node.__studioEvents.length,0);
+  node.__studioTruncated=false;node.__studioBytes=0;field.value='x'.repeat(131073);listeners.input(event);assert.equal(node.__studioTruncated,true);assert.equal(node.__studioEvents.length,0);
+});
 
 test('local picker three exact contracts execute fourteen strict ordered oracle windows',()=>{
   const n=(type,control,value,key=null,trusted=true)=>({type,control,value,key,trusted});
@@ -205,7 +257,7 @@ test('temporal AX three require eleven exact event windows and range validity wi
     }
   }
   assert.equal(count,11);
-  const source=await read('ui/gohtmx/tests/browser/visual-state-audit-drivers.mjs'),branch=source.slice(source.indexOf("if(contract.focusedSequence==='forms-temporal-ax-native'){"),source.indexOf("if(contract.focusedSequence==='forms-complex-eight-native'){"));
+  const source=await read('ui/gohtmx/tests/browser/visual-state-audit-drivers.mjs'),branch=source.slice(source.indexOf("if(contract.focusedSequence==='forms-temporal-ax-native'){"),source.indexOf("if(contract.focusedSequence==='forms-local-studio-native'){"));
   assert(branch.includes('observeOwnedNativeDate'));assert(branch.includes('receipt.nativeFormProof=proof'));assert(branch.includes('cdp.detach()'));assert(!/\.fill\(|dispatchEvent\(|\.value\s*=/.test(branch));
 });
 

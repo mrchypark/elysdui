@@ -865,6 +865,8 @@ export function activatePresenceStep(step,{ada,stop}){
 }
 
 export function requestedStateContract(identity,trashFixture){
+  const studio=localStudioCases[identity];
+  if(studio)return {identity,kind:studio.kind,family:'forms',requestedStateOnly:true,focusedSequence:'forms-local-studio-native',nativeFormTwinWitness:true,twinFocusSelector:studio.field,mappingGaps:[],fixtureGuards:{component:identity,...studio},steps:studio.steps.map(([id,control])=>({id,control,event:'trusted native input/pointer/keyboard; exact source-generated synthetic notifications',expectedState:`Exact ${identity} ${id} local state, paint/data and ordered complete event window`,source:{siteId:`local-studio:${identity}:${id}`,sourceAnchor:'advanced_forms_fixtures.go; ely-api-forms.html; ely-controls.html; ely-api-forms.js; ely-controls.js',provenance:'Exact authored root fixture; fifty alpha keypresses are one grouped checkpoint with every intermediate event retained'}})),scope:'Local typed/drawn signature and finite gradient edits only; no signature authenticity, persistence, provider or arbitrary props'};
   const picker=localPickerCases[identity];
   if(picker)return {identity,kind:picker.kind,family:'forms',requestedStateOnly:true,focusedSequence:'forms-local-picker-native',nativeFormTwinWitness:true,twinFocusSelector:picker.field,mappingGaps:[],fixtureGuards:{component:identity,...picker},steps:picker.steps.map(id=>({id,control:id==='picker-select'?'[data-ely-icon-option]:not([hidden])':picker.field,event:'trusted native search and keyboard; production notifications retain synthetic provenance',expectedState:`Exact ${identity} ${id} local state and entire event window`,source:{siteId:`local-picker:${identity}:${id}`,sourceAnchor:'advanced_forms_fixtures.go; advanced.go EmojiPicker override; ely-api-forms.html; ely-api-forms.js; ely-controls.js',provenance:'Canonical/qualified root only, not PreviewExamples'}})),scope:'Finite local search/selection/focus only; no provider, arbitrary options, font availability guarantee or registered equivalence'};
   const temporal=temporalAXCases[identity];
@@ -1252,6 +1254,52 @@ export function assertEventLoggerPublicState(stage,observation){
     assert.deepEqual(rows[index],{time,message,text:time+message},'Displayed timestamp and message must match the observed event; no normalization or tolerance');
   });
   return {...observation,timestampOrigin:rawEvents[0].timeStamp,timestampRule:'first accepted public event.timeStamp; exact two-decimal elapsed seconds',eventProvenance:'Synthetic public DOM events through actual component listeners; trusted physical input is not established'};
+}
+
+const localStudioCases={
+  'forms/SignaturePad':{kind:'SignaturePad',field:'textarea',steps:[['signature-type','textarea'],['signature-draw','canvas[data-ui-signature]'],['signature-clear','button[data-ui-signature-clear]']]},
+  'forms/GradientEditor':{kind:'GradientEditor',field:'input[data-ely-gradient-angle]',steps:[['gradient-angle','input[data-ely-gradient-angle]'],['gradient-add','button[data-ely-gradient-add]'],['gradient-hex','input[data-ely-color-hex]'],['gradient-alpha','input[data-ely-color-alpha]'],['gradient-stop-right','button[data-ely-gradient-stop][value="50"]'],['gradient-delete','button[data-ely-gradient-stop][value="51"]']]},
+};
+
+export function assertLocalStudioStep(identity,stage,proof){
+  assert(localStudioCases[identity]?.steps.some(([id])=>id===stage),'Exact local studio stage required');
+  assert.equal(proof.identity,identity);assert(proof.rootID);assert.equal(proof.truncated,false);assert.equal(proof.foreign,false);
+  const n=(type,control,value,key=null,trusted=true)=>({type,control,value,key,trusted});
+  const p=detail=>({type:'ely:change',detail:{id:proof.rootID,component:identity,...detail}});
+  const generic=(name,value,type)=>p({name,value,...(type==='textarea'?{}:{checked:false}),type});
+  let events;
+  if(identity==='forms/SignaturePad'){
+    const typed='Caller native signature',drawn=stage==='signature-draw',value=drawn?proof.state.value:stage==='signature-type'?typed:'';
+    assert.equal(typeof value,'string');assert(value.length<=131072,'Signature data URL cap');
+    if(drawn){assert.match(value,/^data:image\/png;base64,[A-Za-z0-9+/]+=*$/);assert.equal(proof.state.canvasMatchesValue,true);assert(proof.state.inkPixels>0);}
+    else assert.equal(proof.state.inkPixels,0);
+    assert.deepEqual({...proof.state,value,inkPixels:0,canvasMatchesValue:true},{value,fallback:stage==='signature-type'?typed:'',strokes:drawn?'1 stroke':'0 strokes',inkPixels:0,canvasMatchesValue:true,valid:true,hiddenEnabled:true,fallbackName:'',guideHidden:stage!=='signature-clear'});
+    const notification=[n('change','hidden',value,null,false),generic('caller_value',value,'hidden')];
+    events=stage==='signature-type'?[n('input','fallback',typed),...notification]:stage==='signature-clear'?[n('click','clear',''),...notification]:[
+      n('pointermove','canvas',null),n('pointerdown','canvas',null),n('change','fallback',typed),generic('',typed,'textarea'),n('blur','fallback',typed),
+      ...Array.from({length:3},()=>n('pointermove','canvas',null)),n('pointerup','canvas',null),...notification,n('click','canvas',null),
+    ];
+    if(drawn)assert.deepEqual(proof.pointerButtons,[0,1,1,1,1,0],'One native stroke with exactly three in-contact moves');
+  }else{
+    const stops=(middleAt=null,color='#817f7c',alpha=100)=>[{at:0,color:'#181613',alpha:100},...(middleAt===null?[]:[{at:middleAt/100,color,alpha}]),{at:1,color:'#e9e7e5',alpha:100}];
+    const css=items=>`linear-gradient(180deg, ${items.map(s=>`${s.color}${s.alpha<100?Math.round(s.alpha/100*255).toString(16).padStart(2,'0'):''} ${s.at*100}%`).join(', ')})`;
+    const aggregate=items=>p({value:css(items),stops:items});
+    const red=stage!=='gradient-angle'&&stage!=='gradient-add',alpha=['gradient-alpha','gradient-stop-right'].includes(stage)?50:100;
+    const items=stage==='gradient-angle'||stage==='gradient-delete'?stops():stops(stage==='gradient-stop-right'?51:50,red?'#ff0000':'#817f7c',alpha);
+    const selected=stage==='gradient-angle'||stage==='gradient-delete'?0:1;
+    assert.deepEqual(proof.state,{value:css(items),angle:'180',stops:items.map((s,index)=>({...s,selected:index===selected})),hex:selected===0?'#181613':red?'#ff0000':'#817f7c',alpha:String(selected===0?100:alpha),start:'#181613',end:'#e9e7e5',previewMatches:true});
+    const redNotifications=[n('input','color','#ff0000',null,false),aggregate(stops(50,'#ff0000')),n('change','color','#ff0000',null,false),generic('caller_value_color','#ff0000','color'),aggregate(stops(50,'#ff0000'))];
+    if(stage==='gradient-angle')events=[n('input','angle','180'),aggregate(stops())];
+    else if(stage==='gradient-add')events=[n('change','angle','180'),generic('','180','number'),aggregate(stops()),n('blur','angle','180'),n('keydown','add','','Enter'),n('click','add',''),aggregate(stops(50)),n('blur','add','')];
+    else if(stage==='gradient-hex')events=[n('blur','stop','50'),n('input','hex','#ff0000'),...redNotifications];
+    else if(stage==='gradient-alpha'){
+      events=[n('change','hex','#ff0000'),generic('','#ff0000','text'),...redNotifications,n('blur','hex','#ff0000')];
+      for(let value=99;value>=50;value--)events.push(n('keydown','alpha',String(value+1),'ArrowLeft'),n('input','alpha',String(value)),aggregate(stops(50,'#ff0000',value)),n('change','alpha',String(value)),generic('caller_value_color_alpha',String(value),'range'),aggregate(stops(50,'#ff0000',value)));
+    }else if(stage==='gradient-stop-right')events=[n('blur','alpha','50'),n('keydown','stop','50','ArrowRight'),aggregate(stops(51,'#ff0000',50))];
+    else events=[n('keydown','stop','51','Delete'),aggregate(stops())];
+  }
+  assert.deepEqual(proof.events,events,'Full ordered studio window including all intermediate notifications; no deduplication or extra requests');
+  return proof;
 }
 
 const localPickerCases={
@@ -1747,6 +1795,71 @@ export async function runRequestedStateActions(contract,root,runStep,failureDiag
       });
     }catch(error){primaryError=error;if(failureDiagnostics){failureDiagnostics.temporalAXTrace=contract.temporalAXTrace;await retainFailurePayload(failureDiagnostics,'temporalAX',()=>root.evaluate(n=>({events:n.__temporalEvents,truncated:n.__temporalTruncated,foreign:n.__temporalForeign})));}throw error;}
     finally{await cleanupPreservingPrimary(async()=>{try{await root.evaluate(node=>{for(const type of ['click','keydown','input','change','blur','ely:change','ely:action'])node.removeEventListener(type,node.__temporalObserver,true);for(const key of ['__temporalEvents','__temporalTruncated','__temporalForeign','__temporalObserver'])delete node[key];});}finally{await cdp.detach();}},primaryError,failureDiagnostics??{},'temporalAXCleanupError');}
+    return;
+  }
+  if(contract.focusedSequence==='forms-local-studio-native'){
+    const identity=contract.identity,fixture=localStudioCases[identity],signature=identity==='forms/SignaturePad';assert.equal(contract.nativeFormTwinWitness,true);
+    assert.equal(await root.getAttribute('data-ely-component'),identity);assert.equal(await root.getAttribute('data-ely-kind'),fixture.kind);
+    const controls=signature?{fallback:'textarea',hidden:'[data-ui-signature-value]',clear:'[data-ui-signature-clear]',canvas:'canvas[data-ui-signature]'}:{angle:'[data-ely-gradient-angle]',add:'[data-ely-gradient-add]',hex:'[data-ely-color-hex]',color:'[data-ely-color]',alpha:'[data-ely-color-alpha]'};
+    for(const selector of Object.values(controls)){assert.equal(await root.locator(selector).count(),1);assert.equal(await root.locator(selector).isEnabled(),true);}
+    if(signature){assert.equal(await root.locator(controls.fallback).inputValue(),'Caller signature');assert.equal(await root.locator(controls.hidden).inputValue(),'Caller signature');assert.equal(await root.locator('details').getAttribute('open'),'');assert.equal(await root.locator(controls.fallback).getAttribute('name'),null);assert.equal(await root.locator(controls.hidden).getAttribute('name'),'caller_value');}
+    else{
+      assert.equal(await root.locator(controls.angle).inputValue(),'90');assert.equal(await root.locator(controls.angle).getAttribute('min'),'0');assert.equal(await root.locator(controls.angle).getAttribute('max'),'360');
+      assert.deepEqual(await root.locator('[data-ely-gradient-stop]').evaluateAll(ns=>ns.map(n=>[n.value,n.dataset.elyGradientAlpha,n.querySelector('[data-ely-gradient-color]').dataset.elyGradientColor])),[['0','100','#181613'],['100','100','#e9e7e5']]);
+      assert.deepEqual(await root.locator(controls.alpha).evaluate(n=>[n.name,n.min,n.max,n.value]),['caller_value_color_alpha','0','100','100']);
+    }
+    await root.evaluate((node,{controls,signature})=>{
+      node.__studioControls=Object.fromEntries(Object.entries(controls).map(([name,selector])=>[name,node.querySelector(selector)]));node.__studioEvents=[];node.__studioBytes=0;node.__studioTruncated=false;node.__studioForeign=false;
+      node.__studioObserver=e=>{
+        if(e.type.startsWith('pointer')&&e.target!==node.__studioControls.canvas)return;
+        const publicEvent=e.type.startsWith('ely:'),value=publicEvent?e.detail?.value:e.target.value;
+        if(node.__studioEvents.length>=512||typeof value==='string'&&value.length>131072||publicEvent&&e.detail?.stops?.length>3){node.__studioTruncated=true;return;}
+        let record;
+        if(publicEvent){if(e.target!==node)node.__studioForeign=true;record={type:e.type,detail:JSON.parse(JSON.stringify(e.detail))};}
+        else{
+          const match=Object.entries(node.__studioControls).find(([,n])=>n===e.target),control=match?.[0]??(e.target.matches('button[data-ely-gradient-stop]')?'stop':'foreign');
+          if(control==='foreign'||e.target.closest('[data-ely-family]')!==node)node.__studioForeign=true;
+          record={type:e.type,control,value:e.target.value??null,key:e.key??null,trusted:e.isTrusted,...(e.type.startsWith('pointer')?{buttons:e.buttons}:{})};
+        }
+        const size=new TextEncoder().encode(JSON.stringify(record)).byteLength;
+        if(node.__studioBytes+size>1048576){node.__studioTruncated=true;return;}node.__studioBytes+=size;node.__studioEvents.push(record);
+      };
+      for(const type of ['input','change','keydown','click','blur','pointerdown','pointermove','pointerup','ely:change','ely:action'])node.addEventListener(type,node.__studioObserver,true);
+    },{controls,signature});
+    let cursor=0,primaryError=null;
+    try{for(const [stage]of fixture.steps)await runStep(stage,async()=>{
+      assert.equal(await root.evaluate(n=>n.__studioEvents.length),cursor,'No unaccounted studio events between steps');
+      if(stage==='signature-type')await root.locator(controls.fallback).fill('Caller native signature');
+      else if(stage==='signature-draw'){
+        const canvas=root.locator(controls.canvas);await canvas.scrollIntoViewIfNeeded();
+        const box=await canvas.boundingBox();assert(box&&box.width>=80&&box.height>=40,'Bounded authored canvas required');
+        await root.page().mouse.move(box.x+box.width*.25,box.y+box.height*.5);await root.page().mouse.down();
+        try{for(const [x,y]of [[.4,.35],[.55,.65],[.7,.45]])await root.page().mouse.move(box.x+box.width*x,box.y+box.height*y);}
+        finally{await root.page().mouse.up();}
+      }else if(stage==='signature-clear')await root.locator(controls.clear).click();
+      else if(stage==='gradient-angle')await root.locator(controls.angle).fill('180');
+      else if(stage==='gradient-add')await root.locator(controls.add).press('Enter');
+      else if(stage==='gradient-hex')await root.locator(controls.hex).fill('#ff0000');
+      else if(stage==='gradient-alpha'){for(let index=0;index<50;index++)await root.locator(controls.alpha).press('ArrowLeft');}
+      else await root.locator(`button[data-ely-gradient-stop][value="${stage==='gradient-stop-right'?'50':'51'}"]`).press(stage==='gradient-stop-right'?'ArrowRight':'Delete');
+    },async(_state,_before,receipt)=>{
+      const proof=await root.evaluate((node,{cursor,signature})=>{
+        const q=selector=>node.querySelector(selector);let state;
+        if(signature){
+          const canvas=q('[data-ui-signature]'),hidden=q('[data-ui-signature-value]'),fallback=q('textarea');
+          if(canvas.width*canvas.height>1048576||hidden.value.length>131072)throw Error('Signature bounded raster/data URL limit');
+          const pixels=canvas.getContext('2d').getImageData(0,0,canvas.width,canvas.height).data;let inkPixels=0;for(let index=3;index<pixels.length;index+=4)if(pixels[index])inkPixels++;
+          state={value:hidden.value,fallback:fallback.value,strokes:q('[data-ui-signature-count]').textContent,inkPixels,canvasMatchesValue:hidden.value.startsWith('data:')?canvas.toDataURL()===hidden.value:true,valid:fallback.checkValidity(),hiddenEnabled:!hidden.disabled,fallbackName:fallback.name,guideHidden:q('.ui-signature-guide').hidden};
+        }else{
+          const value=q('[data-ely-gradient-value]').value,preview=q('[data-ely-gradient-preview]'),expected=document.createElement('output');expected.style.background=value;
+          state={value,angle:q('[data-ely-gradient-angle]').value,stops:[...node.querySelectorAll('[data-ely-gradient-stop]')].map(n=>({at:Number(n.dataset.elyGradientAt),color:n.querySelector('[data-ely-gradient-color]').dataset.elyGradientColor,alpha:Number(n.dataset.elyGradientAlpha),selected:n.getAttribute('aria-pressed')==='true'})),hex:q('[data-ely-color-hex]').value,alpha:q('[data-ely-color-alpha]').value,start:q('[data-ely-gradient-start]').value,end:q('[data-ely-gradient-end]').value,previewMatches:!!expected.style.background&&expected.style.background===preview.style.background};
+        }
+        const raw=node.__studioEvents.slice(cursor),pointerButtons=raw.filter(e=>e.type.startsWith('pointer')).map(e=>e.buttons),events=raw.map(({buttons,...event})=>event);
+        return {identity:node.dataset.elyComponent,rootID:node.id,state,events,pointerButtons,truncated:node.__studioTruncated,foreign:node.__studioForeign};
+      },{cursor,signature});
+      receipt.nativeFormProof=proof;assertLocalStudioStep(identity,stage,proof);cursor+=proof.events.length;return proof;
+    });}catch(error){primaryError=error;if(failureDiagnostics)await retainFailurePayload(failureDiagnostics,'localStudio',()=>root.evaluate(n=>({events:n.__studioEvents,truncated:n.__studioTruncated,foreign:n.__studioForeign,bytes:n.__studioBytes})));throw error;}
+    finally{await cleanupPreservingPrimary(()=>root.evaluate(node=>{for(const type of ['input','change','keydown','click','blur','pointerdown','pointermove','pointerup','ely:change','ely:action'])node.removeEventListener(type,node.__studioObserver,true);for(const key of ['__studioControls','__studioEvents','__studioBytes','__studioTruncated','__studioForeign','__studioObserver'])delete node[key];}),primaryError,failureDiagnostics??{},'localStudioCleanupError');}
     return;
   }
   if(contract.focusedSequence==='forms-local-picker-native'){
