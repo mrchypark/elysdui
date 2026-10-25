@@ -7,6 +7,84 @@ import {createRequire} from 'node:module';
 import {dirname,resolve} from 'node:path';
 import {codeSpans} from '../../assets/ely-code.js';
 
+// Chromium143 retained cause diagnostic090dd21e…71fc41: observed AX names, not locale-position guesses.
+const nativeDateTargets={
+  'forms/DateTimePicker':{initial:'2026-10-20T12:30',target:'2026-10-21T13:45',edits:[['Day Day',1],['Hours Hours',1],['Minutes Minutes',15]]},
+  'forms/WeekPicker':{initial:'2026-W42',target:'2026-W43',edits:[['Week Week',1]]},
+};
+export function nativeDateFocusedSegment(observation){
+  assert(observation.active,'Native date field lost focus before editing');
+  const segments=observation.ax.filter(n=>!n.ignored&&n.role?.value==='spinbutton'&&observation.ownedIDs.includes(n.backendDOMNodeId));
+  assert(segments.length>0&&segments.length<=8,'Native date AX segments unavailable');
+  assert.equal(new Set(segments.map(n=>n.name?.value)).size,segments.length,'Ambiguous native date segment names');
+  const focused=segments.filter(n=>n.properties?.some(p=>p.name==='focused'&&p.value?.value===true));
+  assert.equal(focused.length,1,'Native date focused editable segment ambiguous or unavailable');
+  assert(focused[0].properties?.some(p=>p.name==='settable'&&p.value?.value===true),'Native date focused segment is not editable');
+  return {focused:focused[0],segments};
+}
+export function assertNativeDateResult(identity,stage,proof){
+  const fixture=nativeDateTargets[identity];assert(fixture,'Only exact DateTimePicker and WeekPicker use AX keyboard editing');
+  assert.equal(proof.value,fixture.target,'Native date must reach the original exact target');assert.equal(proof.valid,true);
+  const events=proof.events;assert(events.length<=128&&!proof.truncated,'Native date event collection truncated');
+  assert(events.filter(e=>['keydown','input','change','blur'].includes(e.type)).every(e=>e.trusted&&e.targetId===proof.fieldID),'Native date event trust/target mismatch');
+  const changes=events.filter(e=>e.type==='change');
+  if(stage==='edit'){
+    assert.equal(events.filter(e=>e.type==='keydown'&&e.key==='ArrowUp').length,fixture.edits.reduce((n,[,count])=>n+count,0));
+    assert.equal(changes.length,fixture.edits.reduce((n,[,count])=>n+count,0));
+    assert.deepEqual(events.filter(e=>e.type==='input').map(e=>e.value),changes.map(e=>e.value),'Native input/change values must agree');
+    assert.deepEqual(events.filter(e=>e.type==='ely:change').map(e=>e.detail),changes.map(e=>({id:proof.rootID,component:identity,name:'caller_value',value:e.value,checked:false,type:identity==='forms/WeekPicker'?'week':'datetime-local'})),'Exact native changes must have exact component public payloads');
+    assert.equal(proof.active,true);
+  }else{
+    assert.equal(stage,'commit');assert.equal(proof.active,false,'Bounded native Tabs must actually leave the field');
+    assert(events.some(e=>e.type==='keydown'&&e.key==='Tab'));assert(events.some(e=>e.type==='blur'));
+    assert(!events.some(e=>['input','change','ely:change'].includes(e.type)),'Tab-only departure must not fabricate another edit');
+  }
+  return proof;
+}
+export async function nativeDateKeyboardRoute(identity,stage,observe,press,trace){
+  const fixture=nativeDateTargets[identity];assert(fixture,'Exact native date identity required');
+  const read=async label=>{const state=await observe();trace.push({label,...state});assert(trace.length<=48,'Native date observation bound');return state;};
+  let state=await read(stage+'-start');
+  if(stage==='commit'){
+    const {segments}=nativeDateFocusedSegment(state);
+    for(let i=0;i<segments.length+1&&state.active;i++){await press('Tab');state=await read('leave-'+i);assert.equal(state.value,fixture.target);}
+    assert.equal(state.active,false,'Native date bounded Tab departure failed');return state;
+  }
+  assert.equal(stage,'edit');assert.equal(state.value,fixture.initial);
+  for(const [name,count]of fixture.edits){
+    for(let n=0;;n++){
+      const {focused,segments}=nativeDateFocusedSegment(state),target=segments.findIndex(node=>node.name?.value===name);assert(target>=0,'Observed native segment identity unavailable: '+name);
+      if(focused.name.value===name)break;
+      assert(n<8,'Native date segment navigation bound');await press(segments.indexOf(focused)<target?'Tab':'Shift+Tab');state=await read('navigate-'+name);
+    }
+    for(let n=0;n<count;n++){
+      assert.equal(nativeDateFocusedSegment(state).focused.name.value,name);
+      const before=state.value;await press('ArrowUp');state=await read('increment-'+name+'-'+n);assert.notEqual(state.value,before,'Native ArrowUp must change the actual DOM value');assert.equal(state.valid,true);
+    }
+  }
+  assert.equal(state.value,fixture.target,'AX keyboard edits must reach exact fixture target');return state;
+}
+
+async function observeOwnedNativeDate(field,cdp){
+  const id=await field.evaluate(node=>CSS.escape(node.id));assert(id);
+  const {root}=await cdp.send('DOM.getDocument',{depth:0});
+  const {nodeId}=await cdp.send('DOM.querySelector',{nodeId:root.nodeId,selector:'#'+id});assert(nodeId);
+  const {node}=await cdp.send('DOM.describeNode',{nodeId,depth:0});assert((node.shadowRoots||[]).length<=2);
+  const ownedIDs=new Set(),ax=[];
+  for(const backendNodeId of [node.backendNodeId,...(node.shadowRoots||[]).map(n=>n.backendNodeId)]){
+    const {object}=await cdp.send('DOM.resolveNode',{backendNodeId});assert(object.objectId);
+    try{
+      const list=await cdp.send('Runtime.callFunctionOn',{objectId:object.objectId,functionDeclaration:`function(){const nodes=[],queue=[this];while(queue.length){const node=queue.shift();if(nodes.length+queue.length+node.childNodes.length>=64)throw Error('Native date DOM bound');nodes.push(node);for(const child of node.childNodes)queue.push(child);}return nodes;}`});
+      assert(!list.exceptionDetails&&list.result.objectId,'Native date UA shadow traversal unavailable');
+      try{const properties=await cdp.send('Runtime.getProperties',{objectId:list.result.objectId,ownProperties:true});assert(properties.result.length<=66);
+        for(const property of properties.result.filter(p=>/^\d+$/.test(p.name))){const {node:child}=await cdp.send('DOM.describeNode',{objectId:property.value.objectId,depth:0});ownedIDs.add(child.backendNodeId);assert(ownedIDs.size<=64);}
+      }finally{await cdp.send('Runtime.releaseObject',{objectId:list.result.objectId});}
+    }finally{await cdp.send('Runtime.releaseObject',{objectId:object.objectId});}
+  }
+  for(const backendNodeId of ownedIDs){const partial=await cdp.send('Accessibility.getPartialAXTree',{backendNodeId,fetchRelatives:false});assert(partial.nodes.length<=1);for(const node of partial.nodes){assert((node.name?.value||'').length<=128&&(node.properties||[]).length<=32);ax.push({backendDOMNodeId:node.backendDOMNodeId,ignored:node.ignored,role:{value:node.role?.value},name:{value:node.name?.value},value:node.value?.value,properties:node.properties?.filter(p=>['focused','settable'].includes(p.name))});}}
+  return {...await field.evaluate(node=>({value:node.value,valid:node.validity.valid,active:document.activeElement===node})),ownedIDs:[...ownedIDs],ax};
+}
+
 export function assertJsonHighlight(source,highlight){
   const expected=codeSpans(source,true).map(({kind,text})=>({kind,text}));
   assert.equal(highlight.text,`${source}\n`,'JSON preview text must exactly follow the edited source');
@@ -88,7 +166,7 @@ export async function cleanupPreservingPrimary(cleanup,primaryError,failureDiagn
   }
 }
 export async function probeFailureStateAndPayload(failureDiagnostics,readState,readNativePayload){
-  let currentState=null,nativePayload=failureDiagnostics.presenceNativeEvents??failureDiagnostics.eightFormsNative??null;const errors=[];
+  let currentState=null,nativePayload=failureDiagnostics.presenceNativeEvents??failureDiagnostics.eightFormsNative??failureDiagnostics.nativeDate??null;const errors=[];
   if(failureDiagnostics.presenceCleanupError)errors.push({phase:'cleanup',...failureDiagnostics.presenceCleanupError});
   if(failureDiagnostics.eightFormsNativeError)errors.push({phase:'eight-forms-native-payload',...failureDiagnostics.eightFormsNativeError});
   if(failureDiagnostics.eightFormsCleanupError)errors.push({phase:'eight-forms-cleanup',...failureDiagnostics.eightFormsCleanupError});
@@ -748,8 +826,8 @@ export function requestedStateContract(identity,trashFixture){
   }
   const nativeFormAliasCases={
     'forms/AutoResizeInput':{kind:'TextArea',fixture:{renderKind:'TextArea',initial:'',changed:'one\ntwo\nthree\nfour'},steps:[['autoresize-edit','textarea[data-ely-autoresize]','Trusted native multiline input retains the exact text and grows the exact TextArea alias; no submit or host result'],['autoresize-commit','textarea[data-ely-autoresize]','A trusted native change follows an observed blur; the exact alias remains locally edited, with no host fulfillment']]},
-    'forms/DateTimePicker':{kind:'DatePicker',fixture:{renderKind:'DatePicker',type:'datetime-local',initial:'2026-10-20T12:30',changed:'2026-10-21T13:45'},steps:[['datetime-edit','input[type="datetime-local"]','Trusted native edit changes only the exact date-time field; no scheduling or host result'],['datetime-commit','input[type="datetime-local"]','Trusted native change and blur occur only after focus leaves the exact date-time field; its native value remains valid']]},
-    'forms/WeekPicker':{kind:'MonthPicker',fixture:{renderKind:'MonthPicker',type:'week',initial:'2026-W42',changed:'2026-W43'},steps:[['week-edit','input[type="week"]','Trusted native edit changes only the exact week field; no year range is asserted'],['week-commit','input[type="week"]','Trusted native change and blur follow actual focus leaving the week field; no range or scheduling claim']]},
+    'forms/DateTimePicker':{kind:'DatePicker',fixture:{renderKind:'DatePicker',type:'datetime-local',initial:'2026-10-20T12:30',changed:'2026-10-21T13:45'},steps:[['datetime-edit','input[type="datetime-local"]','Observed unique AX editable segments receive trusted native keys to exact2026-10-21T13:45, with trusted input/change and exact public payloads; no scheduling or host result'],['datetime-commit','input[type="datetime-local"]','After bounded trusted Tabs, actual focus leaves the date-time field with native blur; exact edited value remains valid; the previously observed native change is not fabricated again']]},
+    'forms/WeekPicker':{kind:'MonthPicker',fixture:{renderKind:'MonthPicker',type:'week',initial:'2026-W42',changed:'2026-W43'},steps:[['week-edit','input[type="week"]','Observed unique AX Week editable segment receives trusted ArrowUp to exact2026-W43 with trusted input/change and exact public payloads; no year range is asserted'],['week-commit','input[type="week"]','After bounded trusted Tabs, actual focus leaves the week field with native blur and exact valid value; no extra change, range or scheduling claim']]},
     'forms/YearPicker':{kind:'MonthPicker',fixture:{renderKind:'MonthPicker',type:'number',initial:'2026',changed:'2027',step:'1',noMax:true},steps:[['year-edit','input[type="number"]','Trusted native numeric edit is retained with the qualified fixture step; no year bounds or range are asserted'],['year-commit','input[type="number"]','Trusted native change and blur follow actual focus leaving the year field; only this value’s native validity is checked']]},
     'forms/JsonInput':{kind:'CodeInput',fixture:{renderKind:'CodeInput',initial:'{"caller":"source"}',invalid:'{broken',changed:'{"caller":"changed"}'},steps:[['json-invalid','textarea[data-ely-code-input]','Trusted native edit is retained as text and rejected by the exact JSON validity behavior; no markup or host action'],['json-repair','textarea[data-ely-code-input]','Trusted native edit repairs JSON and clears its local validation status'],['json-commit','textarea[data-ely-code-input]','Trusted native change and blur follow focus leaving the textarea; exact valid JSON text remains, with no host result']]},
     'forms/DurationPicker':{kind:'RelativeDatePicker',fixture:{renderKind:'RelativeDatePicker',type:'number',initial:'30',changed:'31',min:'0',noMax:true,unit:'minutes'},steps:[['duration-edit','input[data-ely-duration="duration"]','Trusted native number edit changes only the nonnegative duration field; no unit switch is tested'],['duration-commit','input[data-ely-duration="duration"]','Trusted native change and blur follow actual focus leaving the duration field; only the edited value is checked locally']]},
@@ -1524,6 +1602,36 @@ export async function runRequestedStateActions(contract,root,runStep,failureDiag
       await local('json-invalid',()=>field.fill(contract.fixtureGuards.invalid),async()=>{assert.equal(await field.inputValue(),contract.fixtureGuards.invalid);assert.equal(await field.evaluate(node=>node.checkValidity()),false);assert.match(await status.textContent(),/Invalid JSON\./);const highlight=assertJsonHighlight(contract.fixtureGuards.invalid,await readHighlight());await assertTrusted(field,'input');return {value:await field.inputValue(),valid:false,highlight,markupInserted:false};});
       await local('json-repair',()=>field.fill(contract.fixtureGuards.changed),async()=>{assert.equal(await field.inputValue(),contract.fixtureGuards.changed);assert.equal(await field.evaluate(node=>node.checkValidity()),true);assert.equal(await status.textContent(),'');const highlight=assertJsonHighlight(contract.fixtureGuards.changed,await readHighlight());await assertTrusted(field,'input');return {value:await field.inputValue(),valid:true,status:'',highlight};});
       await local('json-commit',()=>leaveField(field),async()=>{await assertTrusted(field,'change');await assertTrusted(field,'blur');assert.equal(await field.inputValue(),contract.fixtureGuards.changed);return {value:await field.inputValue(),focusLeft:true,hostRequests:0};});return;
+    }
+    if(identity==='forms/DateTimePicker'||identity==='forms/WeekPicker'){
+      const field=root.locator(contract.steps[0].control);assert.equal(await field.count(),1);assert.equal(await field.inputValue(),nativeDateTargets[identity].initial);
+      assert.equal(await field.getAttribute('type'),contract.fixtureGuards.type);assert.equal(await field.getAttribute('name'),'caller_value');
+      const rootID=await root.getAttribute('id'),fieldID=await field.getAttribute('id');assert(rootID&&fieldID);assert.equal(await root.page().locator(`[id="${fieldID}"]`).count(),1);
+      const cdp=await root.page().context().newCDPSession(root.page());await cdp.send('DOM.enable');await cdp.send('Accessibility.enable');
+      const proof={identity,rootID,fieldID,trace:[],events:[],truncated:false};if(failureDiagnostics)failureDiagnostics.nativeDate=proof;
+      await root.evaluate(node=>{node.__elyDateEvents=[];node.__elyDateTruncated=false;node.__elyDateListener=event=>{
+        if(node.__elyDateEvents.length>=128){node.__elyDateTruncated=true;return;}
+        const value=event.target?.value??null;if(typeof value==='string'&&value.length>64){node.__elyDateTruncated=true;return;}
+        const detail=event.type==='ely:change'?event.detail:null;
+        if(detail&&(Object.keys(detail).length>8||Object.values(detail).some(value=>value!==null&&!['string','boolean','number'].includes(typeof value)||typeof value==='string'&&value.length>128))){node.__elyDateTruncated=true;return;}
+        node.__elyDateEvents.push({type:event.type,trusted:event.isTrusted,targetId:event.target?.id||null,key:event.key||null,value,detail});
+      };for(const type of ['keydown','input','change','blur','ely:change'])node.addEventListener(type,node.__elyDateListener,true);});
+      let cursor=0;
+      const observe=async()=>{
+        const state=await observeOwnedNativeDate(field,cdp),native=await root.evaluate(node=>({events:node.__elyDateEvents,truncated:node.__elyDateTruncated}));
+        Object.assign(proof,state,native);return state;
+      };
+      try{
+        await local(contract.steps[0].id,async()=>{await field.click();await nativeDateKeyboardRoute(identity,'edit',observe,key=>root.page().keyboard.press(key),proof.trace);},async()=>{await observe();return assertNativeDateResult(identity,'edit',{...proof,events:proof.events.slice(cursor),hostRequests:0});});
+        cursor=proof.events.length;proof.trace=[];
+        await local(contract.steps[1].id,()=>nativeDateKeyboardRoute(identity,'commit',observe,key=>root.page().keyboard.press(key),proof.trace),async()=>{await observe();return assertNativeDateResult(identity,'commit',{...proof,events:proof.events.slice(cursor),focusLeft:!proof.active,hostRequests:0});});
+      }catch(error){proof.error={name:error.name,message:error.message};throw error;}
+      finally{
+        try{await root.evaluate(node=>{for(const type of ['keydown','input','change','blur','ely:change'])node.removeEventListener(type,node.__elyDateListener,true);});}
+        catch(error){proof.listenerCleanupError=String(error);if(!proof.error)throw error;}
+        finally{try{await cdp.detach();}catch(error){proof.cdpCleanupError=String(error);if(!proof.error)throw error;}}
+      }
+      return;
     }
     const field=root.locator(contract.steps[0].control);assert.equal(await field.count(),1);assert.equal(await field.getAttribute('type'),contract.fixtureGuards.type);assert.equal(await field.inputValue(),contract.fixtureGuards.initial);
     if(identity==='forms/YearPicker'){assert.equal(await field.getAttribute('step'),contract.fixtureGuards.step);assert.equal(await field.getAttribute('max'),null,'The qualified year fixture has no inherited Max=5 bound');}

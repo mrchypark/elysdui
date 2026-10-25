@@ -5,11 +5,43 @@ import {runInNewContext} from 'node:vm';
 import {assertSpecialInputState} from './visual-state-audit-drivers.mjs';
 import {assertCronNativePreview} from './visual-state-audit-drivers.mjs';
 import {assertJsonHighlight} from './visual-state-audit-drivers.mjs';
+import {nativeDateFocusedSegment,nativeDateKeyboardRoute,assertNativeDateResult} from './visual-state-audit-drivers.mjs';
 import {assertFormTwinWitness,isDurationOwnUnitCommit} from './visual-state-audit-drivers.mjs';
 import {assertEightFormStep,probeFailureStateAndPayload,retainFailurePayload,cleanupPreservingPrimary} from './visual-state-audit-drivers.mjs';
 import {assertActivityLogScopedAuditPage,assertCommunicationCallerRequest,assertDockCallerAction,assertDockNativeEvents,assertEvalLastColumnGeometry,assertNativeEmbedOpen,activatePresenceStep,assertPresenceNativeRequest,assertFoundationPublicEvents,assertPlainInputNativeEvents,assertFormattedInputState,calendarDraftWheelDecision,requestedStateContract,runRequestedStateActions} from './visual-state-audit-drivers.mjs';
 
 const read=path=>readFile(new URL(`../../../../${path}`,import.meta.url),'utf8');
+
+test('exact DateTime Week AX keyboard routes preserve targets trust and bounded actual departure',async()=>{
+  for(const identity of ['forms/DateTimePicker','forms/WeekPicker']){
+    const week=identity==='forms/WeekPicker',names=week?['Week Week','Year Year']:['Month Month','Day Day','Year Year','Hours Hours','Minutes Minutes','AM/PM AM/PM'];
+    let focus=0,active=true,day=20,hour=12,minute=30,weekValue=42;const keys=[],trace=[];
+    const value=()=>week?`2026-W${weekValue}`:`2026-10-${day}T${hour}:${minute}`;
+    const observe=async()=>({active,value:value(),valid:true,ownedIDs:names.map((_,i)=>i+1),ax:names.map((name,i)=>({backendDOMNodeId:i+1,role:{value:'spinbutton'},name:{value:name},properties:[{name:'settable',value:{value:true}},{name:'focused',value:{value:active&&focus===i}}]}))});
+    const press=async key=>{keys.push(key);if(key==='Tab'){focus++;if(focus>names.length)active=false;}else if(key==='Shift+Tab')focus--;else if(key==='ArrowUp'){if(week)weekValue++;else if(names[focus]==='Day Day')day++;else if(names[focus]==='Hours Hours')hour++;else if(names[focus]==='Minutes Minutes')minute++;else assert.fail('Wrong segment edited');}else assert.fail('Unexpected key');};
+    const edited=await nativeDateKeyboardRoute(identity,'edit',observe,press,trace);assert.equal(edited.value,requestedStateContract(identity).fixtureGuards.changed);
+    assert.equal(keys.filter(k=>k==='ArrowUp').length,week?1:17);
+    const departed=await nativeDateKeyboardRoute(identity,'commit',observe,press,[]);assert.equal(departed.active,false);
+    const state=await observe();state.active=true;state.ax[0].properties[1].value.value=true;state.ax[1].properties[1].value.value=true;assert.throws(()=>nativeDateFocusedSegment(state),/ambiguous/);
+    await assert.rejects(()=>nativeDateKeyboardRoute(identity,'edit',async()=>({...state,value:requestedStateContract(identity).fixtureGuards.initial}),async()=>assert.fail('Ambiguous AX must stop before any key'),[]),/ambiguous/);
+    assert.throws(()=>nativeDateFocusedSegment({...state,ax:[]}),/unavailable/);
+    assert.throws(()=>nativeDateFocusedSegment({...state,ownedIDs:[]}),/unavailable/);
+    const payload={identity,rootID:'primary',fieldID:'primary-control',value:edited.value,valid:true,active:true,events:[],truncated:false};
+    const count=week?1:17;
+    for(let i=0;i<count;i++)payload.events.push({type:'keydown',key:'ArrowUp',trusted:true,targetId:payload.fieldID},{type:'input',trusted:true,targetId:payload.fieldID,value:edited.value},{type:'change',trusted:true,targetId:payload.fieldID,value:edited.value},{type:'ely:change',trusted:false,detail:{id:payload.rootID,component:identity,name:'caller_value',value:edited.value,checked:false,type:week?'week':'datetime-local'}});
+    assertNativeDateResult(identity,'edit',payload);
+    for(const mutation of [p=>p.value='wrong',p=>p.events[1].trusted=false,p=>p.events[1].targetId='twin',p=>p.events[3].detail.component='forms/DatePicker',p=>p.events[3].detail.value='stale',p=>p.truncated=true]){const bad=structuredClone(payload);mutation(bad);assert.throws(()=>assertNativeDateResult(identity,'edit',bad));}
+    const commit={...payload,active:false,events:[{type:'keydown',key:'Tab',trusted:true,targetId:payload.fieldID},{type:'blur',trusted:true,targetId:payload.fieldID}]};assertNativeDateResult(identity,'commit',commit);assert.throws(()=>assertNativeDateResult(identity,'commit',{...commit,active:true}));
+    active=true;focus=0;const stuck=async()=>{};await assert.rejects(()=>nativeDateKeyboardRoute(identity,'commit',observe,stuck,[]),/departure/);
+    await assert.rejects(()=>nativeDateKeyboardRoute(identity,'edit',async()=>({...await observe(),value:requestedStateContract(identity).fixtureGuards.initial}),stuck,[]),/navigation bound|must change/);
+  }
+  await assert.rejects(()=>nativeDateKeyboardRoute('forms/DatePicker','edit',()=>{},()=>{},[]),/Exact/);
+  let wrongWeek='2026-W42';const weekAX={active:true,valid:true,ownedIDs:[1],ax:[{backendDOMNodeId:1,role:{value:'spinbutton'},name:{value:'Week Week'},properties:[{name:'settable',value:{value:true}},{name:'focused',value:{value:true}}]}]};
+  await assert.rejects(()=>nativeDateKeyboardRoute('forms/WeekPicker','edit',async()=>({...weekAX,value:wrongWeek}),async()=>{wrongWeek='2026-W44';},[]),/exact fixture target/);
+  const driver=await read('ui/gohtmx/tests/browser/visual-state-audit-drivers.mjs');
+  const branch=driver.slice(driver.indexOf("if(identity==='forms/DateTimePicker'||identity==='forms/WeekPicker'){"),driver.indexOf("const field=root.locator(contract.steps[0].control);assert.equal(await field.count(),1);assert.equal(await field.getAttribute('type')",driver.indexOf("if(identity==='forms/DateTimePicker'||identity==='forms/WeekPicker'){")));
+  assert(branch.includes('nativeDateKeyboardRoute'));assert(branch.includes("context().newCDPSession"));assert(!/\.fill\(|dispatchEvent|\.value\s*=/.test(branch));assert(branch.includes('failureDiagnostics.nativeDate=proof'));
+});
 
 const segmentDiagnosticMaxBytes=1024*1024;
 function boundedSegmentJSON(value,maxBytes=segmentDiagnosticMaxBytes){
@@ -961,7 +993,7 @@ test('Six exact qualified form aliases keep bounded local native contracts and e
   assert.match(template,/eq \.Variant "DateTimePicker"\}\}\s*\{\{template "ely-api-date-field" \(withProps \$p "Type" "datetime-local"\)/);assert.match(template,/eq \.Variant "WeekPicker"\}\}\s*\{\{template "ely-api-date-field" \(withProps \$p "Type" "week"\)/);assert.match(template,/eq \.Variant "YearPicker"\}\}\s*\{\{template "ely-api-date-field" \(withProps \$p "Type" "number" "Step" "1"\)/);assert.match(template,/eq \.Variant "DurationPicker"[\s\S]*?"data-ely-duration" "duration"/);assert.match(template,/eq \.Variant "JsonInput"\) \.Multiline[\s\S]*?data-ely-code-input/);assert.match(template,/eq \.Kind "TextArea"[\s\S]*?data-ely-autoresize/);
   assert.match(forms,/dataset\.elyComponent\.endsWith\('\/JsonInput'\)/);assert.match(forms,/Invalid JSON\./);assert.match(forms,/if\(field\.matches\('\[data-ely-autoresize\]'\)\)\{field\.style\.height='auto'/);
   const execution=runRequestedStateActions.toString(),branch=execution.slice(execution.indexOf("if(contract.focusedSequence==='forms-six-qualified-native-local')"),execution.indexOf("if(contract.focusedSequence==='native-cookie-owner-boundary')"));
-  assert.match(branch,/Only the six exact qualified forms identities/);assert.match(branch,/event\.isTrusted/);assert.match(branch,/field\.press\('Tab'\)/);assert.match(branch,/node===document\.activeElement/);assert.match(branch,/await assertTrusted\(field,'change'\)/);assert.match(branch,/await assertTrusted\(field,'blur'\)/);assert.match(branch,/checkValidity/);assert.match(branch,/assertDeepEqual|assert\.deepEqual/);assert.match(branch,/no host request/);assert.doesNotMatch(branch,/dispatchEvent|new Event|new KeyboardEvent|requestSubmit|\.click\(/,'The contracts use native input/focus and make no host request');
+  assert.match(branch,/Only the six exact qualified forms identities/);assert.match(branch,/event\.isTrusted/);assert.match(branch,/field\.press\('Tab'\)/);assert.match(branch,/node===document\.activeElement/);assert.match(branch,/await assertTrusted\(field,'change'\)/);assert.match(branch,/await assertTrusted\(field,'blur'\)/);assert.match(branch,/checkValidity/);assert.match(branch,/assertDeepEqual|assert\.deepEqual/);assert.match(branch,/no host request/);assert.doesNotMatch(branch.replace('await field.click();',''),/dispatchEvent|new Event|new KeyboardEvent|requestSubmit|\.click\(/,'Only the exact native Playwright field click may precede AX segment editing; no DOM click or host request');
   assert.match(actions,/if\(contract\.requestedStateOnly\)\{\s*await runRequestedStateActions\(contract,root,step,failureDiagnostics\);/,'The existing requested-state path executes exact alias contracts without a new runner');
 });
 
