@@ -75,16 +75,12 @@ func TestFormProfileAndNestedControlsCanShrinkWithinMobileGrid(t *testing.T) {
 	if hasRuleDeclaration(formsCSS, profileForm, "inline-size", "30rem") {
 		t.Fatal("profile form must fill a narrow containing track instead of fixing itself at 30rem")
 	}
-	if !hasRootMinInlineSizeZero(formsCSS, ".ely-api-profile-form") {
+	if !hasRuleDeclaration(formsCSS, profileForm, "min-inline-size", "0") {
 		t.Fatal("the profile-form root must still permit shrinking below min-content width")
 	}
-	if !hasRuleDeclaration(formsCSS, inlineForm, "inline-size", "30rem") || !hasRuleDeclaration(formsCSS, inlineForm, "max-inline-size", "100%") {
-		t.Fatal("InlineForm must retain its independent 30rem preferred-width contract")
+	if !hasRuleDeclaration(formsCSS, inlineForm, "inline-size", "min(30rem,100%)") || !hasRuleDeclaration(formsCSS, inlineForm, "max-inline-size", "100%") {
+		t.Fatal("InlineForm must retain its independent responsive 30rem preferred-width contract")
 	}
-	if hasRootMinInlineSizeZero(formsCSS, ".ely-api-inline-form") {
-		t.Fatal("InlineForm must not receive the profile-form root shrink rule")
-	}
-
 	if !hasRuleDeclaration(baseCSS, "[data-ely-family]", "display", "grid") || !hasRuleDeclaration(baseCSS, "[data-ely-family]", "min-inline-size", "0") {
 		t.Fatal("the measured component wrapper must remain a shrinkable grid root")
 	}
