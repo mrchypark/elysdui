@@ -79,7 +79,7 @@ function dateRangeSamplerFixture(){
   const output=make('',entry,rect(40,10,170,38));output.matches=selector=>selector==='output[data-ely-date-range-label]';output.style.order='0';entry.children=[output];
   for(const node of [root,panel,entry,first,second,focused,end,output])node.style.zoom='1';
   first.clientTop=second.clientTop=0;
-  const base={...f.style,zoom:'1',textShadow:'none',isolation:'auto',willChange:'auto',content:'""',display:'block',width:'16px',height:'16px',backgroundColor:'rgb(100, 100, 100)',backgroundImage:'none',paddingTop:'0px',paddingRight:'0px',paddingBottom:'0px',paddingLeft:'0px',maskSize:'contain',maskPosition:'50% 50%',maskRepeat:'no-repeat',maskClip:'border-box',maskOrigin:'border-box',maskComposite:'add',maskMode:'match-source',marginLeft:'0px',marginTop:'0px',marginBottom:'0px',marginRight:'0px'};
+  const base={...f.style,zoom:'1',textShadow:'none',isolation:'auto',willChange:'auto',content:'""',display:'block',boxSizing:'content-box',width:'16px',height:'16px',backgroundColor:'rgb(100, 100, 100)',backgroundImage:'none',paddingTop:'0px',paddingRight:'0px',paddingBottom:'0px',paddingLeft:'0px',maskSize:'contain',maskPosition:'50% 50%',maskRepeat:'no-repeat',maskClip:'border-box',maskOrigin:'border-box',maskComposite:'add',maskMode:'match-source',marginLeft:'0px',marginTop:'0px',marginBottom:'0px',marginRight:'0px'};
   for(const label of [first,second]){label.style={...label.style,position:'relative',direction:'ltr',writingMode:'horizontal-tb'};Object.assign(label,{clientWidth:150,clientHeight:35,scrollLeft:0,scrollTop:0});label.pseudos['::before']={...base,position:'absolute',zIndex:'1',left:'10.4px',right:'auto',top:'6px',bottom:'auto',maskImage:'url("http://localhost/assets/ely/icons/calendar.svg")'};}
   Object.assign(entry,{clientWidth:170,clientHeight:28,scrollLeft:0,scrollTop:0});Object.assign(entry.style,{display:'flex',flexDirection:'row',flexWrap:'nowrap',alignItems:'center',justifyContent:'normal',textIndent:'0px',direction:'ltr',writingMode:'horizontal-tb',paddingLeft:'10px',paddingTop:'0px',paddingBottom:'0px'});
   entry.pseudos['::before']={...base,position:'static',zIndex:'auto',order:'0',flexGrow:'0',flexShrink:'0',flexBasis:'auto',left:'auto',right:'auto',top:'auto',bottom:'auto',marginRight:'8.8px',maskImage:'url("http://localhost/assets/ely/icons/calendar-range.svg")'};
@@ -92,9 +92,32 @@ function dateRangeSamplerFixture(){
 
 test('DateRange exact finite masked pseudo and independent focused outline reuse strict frame sampler',()=>{
   const f=dateRangeSamplerFixture(),sample=f.sample();assert.equal(sample.eligible,true,JSON.stringify(sample));assert.equal(sample.dateRange.pseudos.length,3);assert.equal(sample.panelID,'');assert.equal(sample.shadows[0].actualOwnedPanel,true);assert.equal(sample.dateRange.outline.outline.status,'bounded');
-  for(const mutate of [f=>f.first.pseudos['::before'].width='17px',f=>f.first.pseudos['::before'].top='7px',f=>f.first.pseudos['::before'].maskImage='url("http://localhost/foreign.svg")',f=>f.first.pseudos['::before'].transform='matrix(2,0,0,2,0,0)',f=>f.first.pseudos['::before'].filter='blur(1px)',f=>f.first.pseudos['::before'].clipPath='inset(1px)',f=>f.first.pseudos['::before'].zIndex='2',f=>f.first.clientWidth=20,f=>f.entry.pseudos['::before'].position='absolute',f=>f.entry.style.justifyContent='space-between',f=>f.entry.style.direction='rtl',f=>f.second.pseudos['::after']={...f.second.pseudos['::before']},f=>f.panel.style.overflowX='hidden',f=>f.grid.style.overflowY='hidden',f=>f.panel.style.transform='matrix(1,0,0,1,2,0)',f=>f.focused.style.boxShadow='rgba(0,0,0,.1) 0px 1px 2px 0px',f=>f.outline.status='unsupported',f=>f.outline.focusedID='foreign',f=>f.outline.outline.paint.left=-1,f=>f.twin.getBoundingClientRect=()=>f.rect(0,50,200,240),f=>f.root.querySelectorAll=selector=>selector==='[data-ely-date-range-panel]'?[f.panel,f.panel]:selector==='*'?[f.entry,f.panel,f.first,f.focused,f.second,f.end]:[f.entry]]){
+  for(const mutate of [f=>f.first.pseudos['::before'].width='17px',f=>f.first.pseudos['::before'].top='7px',f=>f.first.pseudos['::before'].maskImage='url("http://localhost/foreign.svg")',f=>f.first.pseudos['::before'].transform='matrix(2,0,0,2,0,0)',f=>f.first.pseudos['::before'].filter='blur(1px)',f=>f.first.pseudos['::before'].clipPath='inset(1px)',f=>f.first.pseudos['::before'].zIndex='2',f=>f.first.getBoundingClientRect=()=>f.rect(20,50,40,85),f=>f.entry.pseudos['::before'].position='absolute',f=>f.entry.style.justifyContent='space-between',f=>f.entry.style.direction='rtl',f=>f.second.pseudos['::after']={...f.second.pseudos['::before']},f=>f.panel.style.overflowX='hidden',f=>f.grid.style.overflowY='hidden',f=>f.panel.style.transform='matrix(1,0,0,1,2,0)',f=>f.focused.style.boxShadow='rgba(0,0,0,.1) 0px 1px 2px 0px',f=>f.outline.status='unsupported',f=>f.outline.focusedID='foreign',f=>f.outline.outline.paint.left=-1,f=>f.twin.getBoundingClientRect=()=>f.rect(0,50,200,240),f=>f.root.querySelectorAll=selector=>selector==='[data-ely-date-range-panel]'?[f.panel,f.panel]:selector==='*'?[f.entry,f.panel,f.first,f.focused,f.second,f.end]:[f.entry]]){
     const bad=dateRangeSamplerFixture();mutate(bad);assert.equal(bad.sample().eligible,false,mutate.toString());
   }
+});
+
+test('DateRange pseudo accepts authored auto or finite used opposite insets from fractional padding boxes',()=>{
+  const f=dateRangeSamplerFixture(),field=f.first,ps=field.pseudos['::before'];
+  field.getBoundingClientRect=()=>f.rect(20,50,170.203125,85.40625);
+  Object.assign(field.style,{borderLeftWidth:'0.3px',borderRightWidth:'0.4px',borderTopWidth:'0.2px',borderBottomWidth:'0.3px'});
+  Object.assign(field,{clientWidth:150,clientHeight:35});
+  ps.right='123.1px';ps.bottom='12.9px';
+  const sample=f.sample();assert.equal(sample.eligible,true,JSON.stringify(sample));
+  assert(Math.abs(sample.dateRange.pseudos.find(item=>item.role==='date-field').paint.left-30.7)<1e-9,'Fractional border origin is retained');
+  assert(Math.abs(sample.dateRange.pseudos.find(item=>item.role==='date-field').paint.top-56.2)<1e-9,'Fractional border origin is retained');
+  const authoredAuto=dateRangeSamplerFixture();assert.equal(authoredAuto.sample().eligible,true,'Authored auto remains an accepted computed value');
+});
+
+test('DateRange pseudo rejects mismatched and nonfinite used insets while retaining ownership and paint guards',()=>{
+  for(const [property,value]of [['right','124px'],['bottom','13.2px'],['right','NaNpx'],['bottom','Infinitypx']]){
+    const f=dateRangeSamplerFixture();f.first.pseudos['::before'][property]=value;
+    const sample=f.sample();assert.equal(sample.eligible,false,`${property}=${value}`);assert.equal(sample.datePseudoRejection.property,property);
+  }
+  const foreign=dateRangeSamplerFixture();foreign.first.pseudos['::before'].maskImage='url("http://localhost/foreign.svg")';
+  assert.equal(foreign.sample().eligible,false,'Finite inset support does not admit foreign pseudo paint');
+  const clipped=dateRangeSamplerFixture();clipped.panel.style.overflowX='hidden';
+  assert.equal(clipped.sample().eligible,false,'Finite inset support does not waive clipping checks');
 });
 
 test('DateRange first pseudo rejection is exact bounded and persists through capture fallback and cleanup',async()=>{
@@ -103,7 +126,7 @@ test('DateRange first pseudo rejection is exact bounded and persists through cap
   const witness=sample.datePseudoRejection;
   assert.equal(Object.keys(witness).length,8);assert.equal(witness.property,'height','First actual rejection, not a later bad mask');assert.equal(witness.actual,'17px');assert.equal(witness.expected,'16px');assert.equal(witness.pseudo,'::before');assert.equal(witness.node.role,'range-trigger');assert.equal(witness.node.ownedIndex,0);assert.deepEqual(witness.geometry.border,[10,10,180,38]);assert.deepEqual(witness.geometry.client,[0,0,170,28]);
   const huge=dateRangeSamplerFixture();huge.entry.pseudos['::before'].maskImage='x'.repeat(8192);const bounded=huge.sample().datePseudoRejection;assert.equal(bounded.property,'maskImage');assert(bounded.actual.length<=256);assert.match(bounded.actual,/\[truncated\]$/);assert(JSON.stringify(bounded).length<2048);
-  const escaped=dateRangeSamplerFixture();escaped.first.clientWidth=20;const geometry=escaped.sample().datePseudoRejection;assert.equal(geometry.property,'paint.bounds');assert.deepEqual(geometry.geometry.paint,[30.4,56,46.4,72]);
+  const escaped=dateRangeSamplerFixture();escaped.first.getBoundingClientRect=()=>escaped.rect(20,50,40,85);const geometry=escaped.sample().datePseudoRejection;assert.equal(geometry.property,'paint.bounds');assert.deepEqual(geometry.geometry.paint,[30.4,56,46.4,72]);
   const raster=shadowRasterFixture(),require=createRequire(import.meta.url),{PNG}=require(resolve(dirname(require.resolve('playwright-core/package.json')),'lib/utilsBundle.js')),bytes=PNG.sync.write(raster.png);let cleaned=false;
   const root={async scrollIntoViewIfNeeded(){},async evaluate(fn){assert.equal(cleaned,false,'No diagnostic DOM read after cleanup');if(fn===multiSelectShadowFrame)return sample;if(fn===dateRangeFocusedOutline)return f.outline;if(fn===captureForeignPaint)return {foreignDOMIntersections:[],occludedForeignPaint:[]};return {clip:raster.sample.documentFrame,focusOutline:{status:'unsupported',reason:'unbounded focus-within shadow',diagnostic:{focused:{type:'date'}}}};}};
   const page={async evaluate(){return {scroll:{x:0,y:0},viewport:{width:200,height:240}};},async screenshot(){return bytes;}};

@@ -544,7 +544,7 @@ export function multiSelectShadowFrame(node,dateOutline=null){
     for(const [property,expected]of [['width','16px'],['height','16px'],['maskSize','contain'],['maskPosition','50% 50%'],['maskRepeat','no-repeat'],['maskClip','border-box'],['maskOrigin','border-box'],['maskComposite','add'],['maskMode','match-source']])if(!check(property,ps[property],expected))return false;
     const icon=new URL(trigger?'/assets/ely/icons/calendar-range.svg':'/assets/ely/icons/calendar.svg',location.href).href;
     if(!check('maskImage',ps.maskImage,`url("${icon}")`)||!check('zoom',ps.zoom,'normal or 1',['normal','1'].includes(ps.zoom))||!check('owner.direction',parent.direction,'ltr')||!check('owner.writingMode',parent.writingMode,'horizontal-tb')||!check('owner.scrollLeft',element.scrollLeft,0)||!check('owner.scrollTop',element.scrollTop,0))return false;
-    let left,top;
+    let left,top,paintBounds={left:b.left+element.clientLeft,top:b.top+element.clientTop,right:b.left+element.clientLeft+element.clientWidth,bottom:b.top+element.clientTop+element.clientHeight};
     if(trigger){
       const children=[...element.children];
       if(!check('owner.children.length',children.length,1)||!check('owner.child',children[0].localName,'output[data-ely-date-range-label]',children[0].matches('output[data-ely-date-range-label]'))||!check('owner.child.order',getComputedStyle(children[0]).order,'0')||!check('owner.child.position',getComputedStyle(children[0]).position,'static'))return false;
@@ -555,13 +555,31 @@ export function multiSelectShadowFrame(node,dateOutline=null){
       left=b.left+element.clientLeft+parseFloat(parent.paddingLeft);top=b.top+element.clientTop+parseFloat(parent.paddingTop)+(element.clientHeight-parseFloat(parent.paddingTop)-parseFloat(parent.paddingBottom)-16)/2;
     }else{
       if(!check('owner.position',parent.position,'relative'))return false;
-      for(const [property,expected]of [['position','absolute'],['zIndex','1'],['top','6px'],['right','auto'],['bottom','auto']])if(!check(property,ps[property],expected))return false;
+      for(const [property,expected]of [['position','absolute'],['zIndex','1'],['top','6px']])if(!check(property,ps[property],expected))return false;
+      if(!check('boxSizing',ps.boxSizing,'content-box or border-box',['content-box','border-box'].includes(ps.boxSizing)))return false;
+      const pixels=value=>typeof value==='string'&&/^-?(?:\d+|\d*\.\d+)px$/.test(value)?Number.parseFloat(value):NaN;
+      const borderLeft=pixels(parent.borderLeftWidth),borderRight=pixels(parent.borderRightWidth),borderTop=pixels(parent.borderTopWidth),borderBottom=pixels(parent.borderBottomWidth);
+      const paddingWidth=b.width-borderLeft-borderRight,paddingHeight=b.height-borderTop-borderBottom;
+      if(!check('owner.borderWidths',[parent.borderLeftWidth,parent.borderRightWidth,parent.borderTopWidth,parent.borderBottomWidth].join(','),'finite nonnegative px values',Number.isFinite(paddingWidth)&&Number.isFinite(paddingHeight)&&paddingWidth>=0&&paddingHeight>=0&&[borderLeft,borderRight,borderTop,borderBottom].every(value=>Number.isFinite(value)&&value>=0)))return false;
+      const pseudoDimension=(axis,start,end)=>{
+        const size=pixels(ps[axis]),paddingStart=pixels(ps['padding'+start]),paddingEnd=pixels(ps['padding'+end]),borderStart=pixels(ps['border'+start+'Width']),borderEnd=pixels(ps['border'+end+'Width']);
+        const marginStart=pixels(ps['margin'+start]),marginEnd=pixels(ps['margin'+end]);
+        const borderBox=ps.boxSizing==='border-box'?size:size+paddingStart+paddingEnd+borderStart+borderEnd;
+        return {outer:borderBox+marginStart+marginEnd,marginStart,marginEnd};
+      };
+      const inline=pseudoDimension('width','Left','Right'),block=pseudoDimension('height','Top','Bottom');
+      const expectedRight=paddingWidth-font*.65-inline.outer,expectedBottom=paddingHeight-6-block.outer;
+      const insetMatches=(actual,expected)=>actual==='auto'||Number.isFinite(pixels(actual))&&Number.isFinite(expected)&&Math.abs(pixels(actual)-expected)<=.125;
+      const expectedInset=value=>Number.isFinite(value)?`auto or finite padding-box equation (${value}px ± 0.125px)`:'auto or finite padding-box equation';
+      if(!check('right',ps.right,expectedInset(expectedRight),insetMatches(ps.right,expectedRight)))return false;
+      if(!check('bottom',ps.bottom,expectedInset(expectedBottom),insetMatches(ps.bottom,expectedBottom)))return false;
       if(!check('left',ps.left,font*.65+'px within 0.001px',!(Math.abs(parseFloat(ps.left)-font*.65)>.001)))return false;
       for(const side of ['Left','Right','Top','Bottom'])if(!check('margin'+side,ps['margin'+side],'0px'))return false;
-      left=b.left+element.clientLeft+parseFloat(ps.left);top=b.top+element.clientTop+6;
+      paintBounds={left:b.left+borderLeft,top:b.top+borderTop,right:b.left+borderLeft+paddingWidth,bottom:b.top+borderTop+paddingHeight};
+      left=b.left+borderLeft+parseFloat(ps.left);top=b.top+borderTop+6;
     }
     const paint={left,top,right:left+16,bottom:top+16};
-    if(!check('paint.bounds',Object.values(paint).join(','),'finite and contained in actual client box',Object.values(paint).every(Number.isFinite)&&paint.left>=b.left+element.clientLeft&&paint.top>=b.top+element.clientTop&&paint.right<=b.left+element.clientLeft+element.clientWidth&&paint.bottom<=b.top+element.clientTop+element.clientHeight,paint))return false;
+    if(!check('paint.bounds',Object.values(paint).join(','),'finite and contained in actual client box',Object.values(paint).every(Number.isFinite)&&paint.left>=paintBounds.left&&paint.top>=paintBounds.top&&paint.right<=paintBounds.right&&paint.bottom<=paintBounds.bottom,paint))return false;
     datePseudos.push({role:trigger?'range-trigger':'date-field',id:element.id||null,pseudo,maskImage:ps.maskImage,position:ps.position,zIndex:ps.zIndex,paint});return true;
   };
   const containedDisabledLeaf=(element,st,b)=>{
