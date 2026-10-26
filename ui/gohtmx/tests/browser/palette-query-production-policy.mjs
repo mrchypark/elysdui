@@ -43,7 +43,7 @@ export const paletteAuditCandidateAssets = [
 // clean HEAD bytes of the reviewed revision, so they describe the committed
 // candidate rather than the historical strict baseline.
 export const paletteAuditCandidatePins = {
-  'ui/gohtmx/assets/ely-api.js': '840abb51ce1984c927e93b798377a81591415101570cb0a45d2c34c02ee6e14c',
+  'ui/gohtmx/assets/ely-api.js': '351c698ecb18008494027535567cb9dfc7c8ae2e69a2ee9e7eca65529900dafa',
   'ui/gohtmx/assets/ely-api-interaction.js': '53f29f4c6232ee96c7e8fa45a61dba5a900a6bb7544f56c163c72052b2f3f5f6',
   'ui/gohtmx/templates/ely-api-interaction.html': '454e758440f84e866aa70acad4b07a97a98526598f5db79ff6bc0022792a3a4f',
 };
