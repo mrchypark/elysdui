@@ -118,8 +118,8 @@ function start(scope = document) {
     };
     const change = event => {
       if (!belongs(root, event.target) || !event.target.matches('input,textarea,select')) return;
-      // Composite editors commit through their named hidden value control.
-      if (!event.target.name && event.target.matches('[data-ui-pin-slot],[data-ui-tag-entry]')) return;
+      // Composite editors commit through their hidden value control; combobox search changes only filter locally.
+      if (!event.target.name && event.target.matches('[data-ui-pin-slot],[data-ui-tag-entry],input[data-ui-combobox-input]')) return;
       root.dispatchEvent(new CustomEvent('ely:change', { bubbles: true, detail: {
         id: root.id, component: root.dataset.elyComponent, name: event.target.name,
         value: event.target.value, checked: event.target.checked, type: event.target.type,

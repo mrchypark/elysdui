@@ -280,6 +280,110 @@ const apiSource = readFileSync(new URL('../../assets/ely-api.js', import.meta.ur
 runInNewContext(apiSource.replaceAll('export ', '') + '\nregister("audit", () => {}); window.auditMount = mount;', {
   ...context, CustomEvent: DOMEvent, MutationObserver: class { observe() {} },
 });
+
+// FontPicker's unnamed search editor may emit native change on blur, but its
+// selected named value remains the sole host onChange commit.
+const fontChanges = [];
+const fontRoot = element('section', {'data-ely-family': 'audit', 'data-ely-component': 'forms/FontPicker', id: 'font-picker'});
+const fontValue = valueInput('', {name: 'caller_value'});
+fontValue.checked = false;
+const fontSearch = marked('data-ui-combobox-input', 'input', {type: 'text'});
+fontSearch.name = '';
+fontRoot.append(fontValue, fontSearch);
+body.append(fontRoot);
+window.auditMount(fontRoot, {onChange: detail => fontChanges.push({
+  keys: Object.keys(detail).sort(), id: detail.id, component: detail.component,
+  name: detail.name, value: detail.value, checked: detail.checked, type: detail.type,
+})});
+let nativeBlurChanges = 0;
+let bubbledBlurChanges = 0;
+fontSearch.addEventListener('change', () => nativeBlurChanges++);
+fontRoot.addEventListener('change', event => { if (event.target === fontSearch) bubbledBlurChanges++; });
+fontSearch.value = 'Georgia';
+const searchBlurChange = new DOMEvent('change', {bubbles: true});
+assert.equal(fontSearch.dispatchEvent(searchBlurChange), true, 'FontPicker search blur change remains uncancelled');
+assert.equal(searchBlurChange.defaultPrevented, undefined, 'bridge does not prevent the native search change');
+assert.equal(nativeBlurChanges, 1, 'native search listeners still receive blur change');
+assert.equal(bubbledBlurChanges, 1, 'native search change still bubbles to the FontPicker root');
+assert.equal(fontChanges.length, 0, 'unnamed FontPicker search blur does not notify host onChange');
+
+fontValue.value = 'Georgia';
+fontValue.dispatchEvent(new DOMEvent('input', {bubbles: true}));
+const hiddenCommitChange = new DOMEvent('change', {bubbles: true});
+assert.equal(fontValue.dispatchEvent(hiddenCommitChange), true, 'named hidden commit change remains uncancelled');
+assert.equal(hiddenCommitChange.defaultPrevented, undefined, 'bridge does not prevent the native hidden change');
+assert.deepEqual(fontChanges, [{
+  keys: ['checked', 'component', 'id', 'name', 'type', 'value'],
+  id: 'font-picker', component: 'forms/FontPicker', name: 'caller_value',
+  value: 'Georgia', checked: false, type: 'hidden',
+}], 'named selected value emits exactly one six-field host commit');
+const postCommitBlurChange = new DOMEvent('change', {bubbles: true});
+assert.equal(fontSearch.dispatchEvent(postCommitBlurChange), true, 'post-commit FontPicker search blur remains uncancelled');
+assert.equal(postCommitBlurChange.defaultPrevented, undefined, 'post-commit blur does not prevent the native search change');
+assert.equal(nativeBlurChanges, 2, 'native search listeners receive blur before and after selection commit');
+assert.equal(bubbledBlurChanges, 2, 'both native search changes bubble to the FontPicker root');
+assert.equal(fontChanges.length, 1, 'search blur after hidden selection does not emit a second host callback');
+
+// Named searches and ordinary value inputs retain their change callbacks.
+const namedSearch = marked('data-ui-combobox-input', 'input', {type: 'text', name: 'search_query'});
+fontRoot.append(namedSearch);
+namedSearch.value = 'Georgia';
+namedSearch.dispatchEvent(new DOMEvent('change', {bubbles: true}));
+assert.equal(fontChanges.length, 2, 'named search controls retain bridge behavior');
+assert.equal(fontChanges[1].name, 'search_query');
+
+const ordinaryUnnamed = element('input', {type: 'text'});
+ordinaryUnnamed.name = '';
+ordinaryUnnamed.value = 'ordinary';
+fontRoot.append(ordinaryUnnamed);
+ordinaryUnnamed.dispatchEvent(new DOMEvent('change', {bubbles: true}));
+assert.equal(fontChanges.length, 3, 'unmarked unnamed ordinary inputs retain bridge behavior');
+assert.equal(fontChanges[2].name, '');
+assert.equal(fontChanges[2].type, 'text');
+const unnamedHidden = valueInput('unmarked-hidden');
+unnamedHidden.name = '';
+unnamedHidden.checked = false;
+fontRoot.append(unnamedHidden);
+unnamedHidden.dispatchEvent(new DOMEvent('change', {bubbles: true}));
+assert.equal(fontChanges.length, 4, 'unnamed hidden value controls retain bridge behavior');
+assert.equal(fontChanges[3].name, '');
+assert.equal(fontChanges[3].type, 'hidden');
+
+const countryChanges = [];
+const countryRoot = element('section', {'data-ely-family': 'audit', 'data-ely-component': 'forms/CountrySelect', id: 'country-select'});
+const countryValue = valueInput('alpha', {name: 'caller_value'});
+countryValue.checked = false;
+const countrySearch = marked('data-ui-combobox-input', 'input', {type: 'text'});
+countrySearch.name = '';
+countryRoot.append(countryValue, countrySearch);
+body.append(countryRoot);
+window.auditMount(countryRoot, {onChange: detail => countryChanges.push({
+  keys: Object.keys(detail).sort(), id: detail.id, component: detail.component,
+  name: detail.name, value: detail.value, checked: detail.checked, type: detail.type,
+})});
+countryValue.value = 'beta';
+countryValue.dispatchEvent(new DOMEvent('input', {bubbles: true}));
+const countryCommit = new DOMEvent('change', {bubbles: true});
+assert.equal(countryValue.dispatchEvent(countryCommit), true, 'CountrySelect hidden value change remains uncancelled');
+assert.deepEqual(countryChanges, [{
+  keys: ['checked', 'component', 'id', 'name', 'type', 'value'],
+  id: 'country-select', component: 'forms/CountrySelect', name: 'caller_value',
+  value: 'beta', checked: false, type: 'hidden',
+}], 'CountrySelect selection reports the committed value once');
+countrySearch.value = 'Caller Beta';
+let countryNativeChanges = 0;
+let countryBubbledChanges = 0;
+countrySearch.addEventListener('change', () => countryNativeChanges++);
+countryRoot.addEventListener('change', event => { if (event.target === countrySearch) countryBubbledChanges++; });
+const countryBlurChange = new DOMEvent('change', {bubbles: true});
+assert.equal(countrySearch.dispatchEvent(countryBlurChange), true, 'CountrySelect search blur change remains uncancelled');
+assert.equal(countryBlurChange.defaultPrevented, undefined, 'CountrySelect search blur is not prevented');
+assert.equal(countryNativeChanges, 1, 'native CountrySelect search listener receives blur change');
+assert.equal(countryBubbledChanges, 1, 'CountrySelect search blur change bubbles to its root');
+assert.equal(countryChanges.length, 1, 'CountrySelect search blur does not emit a second host callback');
+assert.equal(countryChanges[0].value, 'beta', 'search display Caller Beta does not replace selected value beta');
+console.log('Shared combobox search blur, selected values, and bridge scope passed');
+
 const changes = [], inputEvents = [];
 const fixture = controls('commit-events');
 fixture.tagValue.name = 'tags';
