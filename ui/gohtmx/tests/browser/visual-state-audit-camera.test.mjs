@@ -75,7 +75,7 @@ function dateRangeSamplerFixture(){
   for(const [node,box]of [[record,rect(0,0,200,240)],[grid,rect(0,0,200,240)],[host,rect(0,10,200,200)],[root,rect(10,10,180,40)],[twin,rect(0,210,200,240)],[panel,rect(10,40,180,140)],[entry,rect(10,10,180,38)],[focused,rect(20,50,170,78)]])node.getBoundingClientRect=()=>box;
   root.dataset={elyComponent:'forms/DateRangePicker',elyKind:'DatePicker'};panel.id='';panel.closest=()=>root;entry.closest=()=>root;
   entry.clientTop=0;
-  const first=make('',panel,rect(20,50,170,85)),second=make('',panel,rect(20,95,170,130)),end=make('actual-end',second,rect(20,95,170,123));focused.parentElement=first;focused.id='actual-start';focused.type='date';focused.style.outlineStyle='solid';focused.style.outlineWidth='2px';focused.style.outlineOffset='4px';
+  const first=make('',panel,rect(20,50,170,85)),second=make('',panel,rect(20,95,170,130)),end=make('actual-end',second,rect(20,95,170,123));first.localName=second.localName='label';first.className=second.className='ely-api-date-field';first.control=focused;second.control=end;focused.localName=end.localName='input';focused.parentElement=first;focused.id='actual-start';focused.type=end.type='date';focused.dataDateStart=true;end.dataDateEnd=true;focused.matches=selector=>selector===':focus-visible'||selector==='input[data-ely-date-start]'||selector==='input[type="date"]';end.matches=selector=>selector==='input[data-ely-date-end]'||selector==='input[type="date"]';focused.style.overflowX=focused.style.overflowY=end.style.overflowX=end.style.overflowY='clip';focused.style.outlineStyle='solid';focused.style.outlineWidth='2px';focused.style.outlineOffset='4px';
   const output=make('',entry,rect(40,10,170,38));output.matches=selector=>selector==='output[data-ely-date-range-label]';output.style.order='0';entry.children=[output];
   for(const node of [root,panel,entry,first,second,focused,end,output])node.style.zoom='1';
   first.clientTop=second.clientTop=0;
@@ -83,12 +83,28 @@ function dateRangeSamplerFixture(){
   for(const label of [first,second]){label.style={...label.style,position:'relative',direction:'ltr',writingMode:'horizontal-tb'};Object.assign(label,{clientWidth:150,clientHeight:35,scrollLeft:0,scrollTop:0});label.pseudos['::before']={...base,position:'absolute',zIndex:'1',left:'10.4px',right:'auto',top:'6px',bottom:'auto',maskImage:'url("http://localhost/assets/ely/icons/calendar.svg")'};}
   Object.assign(entry,{clientWidth:170,clientHeight:28,scrollLeft:0,scrollTop:0});Object.assign(entry.style,{display:'flex',flexDirection:'row',flexWrap:'nowrap',alignItems:'center',justifyContent:'normal',textIndent:'0px',direction:'ltr',writingMode:'horizontal-tb',paddingLeft:'10px',paddingTop:'0px',paddingBottom:'0px'});
   entry.pseudos['::before']={...base,position:'static',zIndex:'auto',order:'0',flexGrow:'0',flexShrink:'0',flexBasis:'auto',left:'auto',right:'auto',top:'auto',bottom:'auto',marginRight:'8.8px',maskImage:'url("http://localhost/assets/ely/icons/calendar-range.svg")'};
-  root.querySelector=()=>panel;root.querySelectorAll=selector=>selector==='*'?[entry,output,panel,first,focused,second,end]:selector==='[data-ely-date-range-panel]'?[panel]:[entry];panel.querySelectorAll=()=>[first,second];focused.matches=()=>true;
+  const descendants=[entry,output,panel,first,focused,second,end];
+  root.querySelector=()=>panel;root.querySelectorAll=selector=>selector==='*'?descendants:selector==='[data-ely-date-range-panel]'?[panel]:[entry];panel.querySelectorAll=selector=>selector==='label.ely-api-date-field'||selector==='.ely-api-date-field'?[first,second]:[focused,end].filter(field=>field.matches(selector));
   const outline={status:'bounded-focused-outline-only',focusedID:'actual-start',outline:{status:'bounded',width:2,offset:4,paint:{left:14,top:44,right:176,bottom:84}}};
-  const document={...f.document,activeElement:focused,documentElement:{font:true}};
+  const document={...f.document,activeElement:focused,documentElement:{font:true},querySelectorAll:selector=>selector==='[data-audit-case]'?[record]:[panel,focused,end].filter(node=>selector===`[id="${node.id}"]`)};
   const sample=()=>JSON.parse(JSON.stringify(runInNewContext(`(${multiSelectShadowFrame.toString()})(node,outline)`,{node:root,outline,document,URL,location:{href:'http://localhost/components/audit?family=forms&case=forms%2FDateRangePicker'},getComputedStyle:(node,pseudo)=>node.font?{fontSize:'16px'}:pseudo?node.pseudos[pseudo]??{content:'none'}:node.style,innerWidth:200,innerHeight:240,scrollX:0,scrollY:0})));
-  return {...f,first,second,end,outline,document,sample};
+  return {...f,first,second,end,outline,document,descendants,sample};
 }
+
+test('DateRange allows native overflow clip only on its two contained matching date inputs',()=>{
+  const f=dateRangeSamplerFixture(),sample=f.sample();assert.equal(sample.eligible,true,JSON.stringify(sample));assert.equal(sample.dateRange.pseudos.length,3);assert.equal(sample.shadows[0].actualOwnedPanel,true);
+  const foreign=dateRangeSamplerFixture(),extra=foreign.make('foreign-date',foreign.panel,foreign.rect(25,100,150,123));extra.localName='input';extra.type='date';extra.matches=()=>false;extra.style.overflowX=extra.style.overflowY='clip';foreign.descendants.push(extra);assert.equal(foreign.sample().eligible,false,'An unmarked foreign date input is not an allowed leaf');
+  const wrongType=dateRangeSamplerFixture();wrongType.end.type='text';assert.equal(wrongType.sample().eligible,false,'A marked field with the wrong native type is rejected');
+  const moved=dateRangeSamplerFixture();moved.end.parentElement=moved.panel;assert.equal(moved.sample().eligible,false,'The native input must remain inside its matching label');
+  const outsideLabel=dateRangeSamplerFixture();outsideLabel.end.getBoundingClientRect=()=>outsideLabel.rect(19,95,170,123);assert.equal(outsideLabel.sample().eligible,false,'The input border box must fit its label');
+});
+
+test('DateRange native leaf exception keeps ancestor clips and additional shadow rejection',()=>{
+  for(const mutate of [f=>f.second.style.overflowY='clip',f=>f.panel.style.overflowX='clip',f=>f.end.style.boxShadow='rgba(0,0,0,.2) 0px 1px 2px 0px',f=>f.end.style.clip='rect(0px, 1px, 1px, 0px)',f=>f.first.pseudos['::before'].maskImage='url("http://localhost/foreign.svg")']){
+    const f=dateRangeSamplerFixture();mutate(f);assert.equal(f.sample().eligible,false,mutate.toString());
+  }
+  const f=dateRangeSamplerFixture();f.focused.style.overflowX='hidden';assert.equal(f.sample().eligible,false,'The prior focused-input shortcut cannot waive a non-native clip');
+});
 
 test('DateRange exact finite masked pseudo and independent focused outline reuse strict frame sampler',()=>{
   const f=dateRangeSamplerFixture(),sample=f.sample();assert.equal(sample.eligible,true,JSON.stringify(sample));assert.equal(sample.dateRange.pseudos.length,3);assert.equal(sample.panelID,'');assert.equal(sample.shadows[0].actualOwnedPanel,true);assert.equal(sample.dateRange.outline.outline.status,'bounded');
@@ -126,7 +142,7 @@ test('DateRange first pseudo rejection is exact bounded and persists through cap
   const witness=sample.datePseudoRejection;
   assert.equal(Object.keys(witness).length,8);assert.equal(witness.property,'height','First actual rejection, not a later bad mask');assert.equal(witness.actual,'17px');assert.equal(witness.expected,'16px');assert.equal(witness.pseudo,'::before');assert.equal(witness.node.role,'range-trigger');assert.equal(witness.node.ownedIndex,0);assert.deepEqual(witness.geometry.border,[10,10,180,38]);assert.deepEqual(witness.geometry.client,[0,0,170,28]);
   const huge=dateRangeSamplerFixture();huge.entry.pseudos['::before'].maskImage='x'.repeat(8192);const bounded=huge.sample().datePseudoRejection;assert.equal(bounded.property,'maskImage');assert(bounded.actual.length<=256);assert.match(bounded.actual,/\[truncated\]$/);assert(JSON.stringify(bounded).length<2048);
-  const escaped=dateRangeSamplerFixture();escaped.first.getBoundingClientRect=()=>escaped.rect(20,50,40,85);const geometry=escaped.sample().datePseudoRejection;assert.equal(geometry.property,'paint.bounds');assert.deepEqual(geometry.geometry.paint,[30.4,56,46.4,72]);
+  const escaped=dateRangeSamplerFixture();escaped.first.getBoundingClientRect=()=>escaped.rect(20,50,40,85);escaped.focused.getBoundingClientRect=()=>escaped.rect(20,50,39,78);const geometry=escaped.sample().datePseudoRejection;assert.equal(geometry.property,'paint.bounds');assert.deepEqual(geometry.geometry.paint,[30.4,56,46.4,72]);
   const raster=shadowRasterFixture(),require=createRequire(import.meta.url),{PNG}=require(resolve(dirname(require.resolve('playwright-core/package.json')),'lib/utilsBundle.js')),bytes=PNG.sync.write(raster.png);let cleaned=false;
   const root={async scrollIntoViewIfNeeded(){},async evaluate(fn){assert.equal(cleaned,false,'No diagnostic DOM read after cleanup');if(fn===multiSelectShadowFrame)return sample;if(fn===dateRangeFocusedOutline)return f.outline;if(fn===captureForeignPaint)return {foreignDOMIntersections:[],occludedForeignPaint:[]};return {clip:raster.sample.documentFrame,focusOutline:{status:'unsupported',reason:'unbounded focus-within shadow',diagnostic:{focused:{type:'date'}}}};}};
   const page={async evaluate(){return {scroll:{x:0,y:0},viewport:{width:200,height:240}};},async screenshot(){return bytes;}};

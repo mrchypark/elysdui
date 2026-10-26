@@ -506,6 +506,16 @@ export function multiSelectShadowFrame(node,dateOutline=null){
   if(entries.length!==1||entries[0].getAttribute('aria-expanded')!=='true'||!date&&entries[0].getAttribute('aria-controls')!==panel.id)return fail('shadow panel reference mismatch');
   const focused=document.activeElement;
   if(date&&(root.querySelectorAll('[data-ely-date-range-panel]').length!==1||panel.closest('[data-ely-family]')!==root||entries[0].closest('[data-ely-family]')!==root||!panel.contains(focused)||dateOutline?.status!=='bounded-focused-outline-only'||dateOutline.focusedID!==focused.id))return fail('exact date panel and separate focused outline required');
+  const dateLeaves=new Map();
+  if(date){
+    const starts=[...panel.querySelectorAll('input[data-ely-date-start]')],ends=[...panel.querySelectorAll('input[data-ely-date-end]')],inputs=[...panel.querySelectorAll('input[type="date"]')],labels=[...panel.querySelectorAll('label.ely-api-date-field')],inside=(child,parent)=>[child.left,child.top,child.right,child.bottom,parent.left,parent.top,parent.right,parent.bottom].every(Number.isFinite)&&child.left>=parent.left-.125&&child.top>=parent.top-.125&&child.right<=parent.right+.125&&child.bottom<=parent.bottom+.125,panelRect=panel.getBoundingClientRect();
+    if(starts.length!==1||ends.length!==1||inputs.length!==2||labels.length!==2||inputs[0]===inputs[1]||inputs[0]!==starts[0]&&inputs[0]!==ends[0]||inputs[1]!==starts[0]&&inputs[1]!==ends[0])return fail('DateRange requires exactly its two native date inputs and labels');
+    for(const field of [starts[0],ends[0]]){
+      const matching=labels.filter(label=>label.control===field),fieldRect=field.getBoundingClientRect();
+      if(field.localName!=='input'||field.type!=='date'||!field.id||document.querySelectorAll(`[id="${field.id}"]`).length!==1||matching.length!==1||!panel.contains(field)||!panel.contains(matching[0])||!matching[0].contains(field)||!inside(matching[0].getBoundingClientRect(),panelRect)||!inside(fieldRect,matching[0].getBoundingClientRect()))return fail('DateRange native input border must stay inside its matching owned label and panel');
+      dateLeaves.set(field,matching[0]);
+    }
+  }
   const r=root.getBoundingClientRect(),h=host.getBoundingClientRect(),box=record.getBoundingClientRect(),s=getComputedStyle(record),p=panel.getBoundingClientRect();
   const frame={x:Math.ceil(box.left+record.clientLeft),y:Math.floor(r.top),width:Math.floor(box.right-record.clientLeft)-Math.ceil(box.left+record.clientLeft),height:Math.floor(h.bottom)-Math.floor(r.top)};
   const documentFrame={...frame,x:frame.x+scrollX,y:frame.y+scrollY};
@@ -627,7 +637,7 @@ export function multiSelectShadowFrame(node,dateOutline=null){
       for(let a=element;a;a=a.parentElement){const computed=getComputedStyle(a);ancestorPath.push({selector:selectorFor(a),id:a.id||null,tag:a.localName,style:Object.fromEntries(properties.map(property=>[property,computed[property]]))});if(a===record)break;}
       return {...fail('complex owned shadow-frame paint'),rejectionWitness:{selector:selectorFor(element),ownerID:root.id,ownerComponent:root.dataset.elyComponent,panelID:panel.id,styleRejections,ancestorPath}};
     }
-    if(date&&(element!==focused&&(st.overflowX!=='visible'||st.overflowY!=='visible')||st.clip!=='auto'||st.contain!=='none'||!['normal','1'].includes(st.zoom)||st.boxShadow!=='none'&&element!==panel))return fail('unproven date clip or additional shadow');
+    if(date&&(!(st.overflowX==='visible'&&st.overflowY==='visible'||dateLeaves.has(element)&&st.overflowX==='clip'&&st.overflowY==='clip')||st.clip!=='auto'||st.contain!=='none'||!['normal','1'].includes(st.zoom)||st.boxShadow!=='none'&&element!==panel))return fail('unproven date clip or additional shadow');
     for(const pseudo of ['::before','::after']){const ps=getComputedStyle(element,pseudo);if(!['none','normal'].includes(ps.content)&&!(date&&datePseudo(element,pseudo,ps,b)))return {...fail('generated owned shadow-frame paint'),...(date?{datePseudoRejection}:{})};}
     if(b.width>0&&b.height>0)rects.push({left:b.left-frame.x,top:b.top-frame.y,right:b.right-frame.x,bottom:b.bottom-frame.y});
     if(st.boxShadow!=='none')shadows.push({id:element.id,css:st.boxShadow,left:b.left-frame.x,top:b.top-frame.y,right:b.right-frame.x,bottom:b.bottom-frame.y,...(date?{actualOwnedPanel:element===panel}:{})});
