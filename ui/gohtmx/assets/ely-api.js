@@ -120,6 +120,10 @@ function start(scope = document) {
       if (!belongs(root, event.target) || !event.target.matches('input,textarea,select')) return;
       // Composite editors commit through their hidden value control; combobox search changes only filter locally.
       if (!event.target.name && event.target.matches('[data-ui-pin-slot],[data-ui-tag-entry],input[data-ui-combobox-input]')) return;
+      // SignaturePad's unnamed textarea is an editor for its named hidden value,
+      // not a second host field. Keep its native change event bubbling intact.
+      const signature = event.target.closest('[data-ui-component="signature-pad"]');
+      if (!event.target.name && event.target.tagName === 'TEXTAREA' && signature?.querySelector('textarea') === event.target) return;
       root.dispatchEvent(new CustomEvent('ely:change', { bubbles: true, detail: {
         id: root.id, component: root.dataset.elyComponent, name: event.target.name,
         value: event.target.value, checked: event.target.checked, type: event.target.type,

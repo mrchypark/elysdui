@@ -92,3 +92,75 @@ try {
   if (mutation && error instanceof assert.AssertionError && error.message.includes(expected)) console.log(`Negative control killed: ${mutation}: ${expected}`);
   else throw error;
 }
+
+// The bridge suppresses only SignaturePad's unnamed first textarea. Native
+// change still bubbles, while its named hidden value and ordinary fields stay
+// on the generic host notification path.
+class BridgeElement {
+  constructor(tagName = 'div', attrs = {}, parent = null) {
+    this.tagName = tagName.toUpperCase(); this.parentElement = parent; this.children = [];
+    this.attributes = new Map(Object.entries(attrs)); this.dataset = {};
+    for (const [name, value] of this.attributes) if (name.startsWith('data-')) this.dataset[name.slice(5).replace(/-([a-z])/g, (_, c) => c.toUpperCase())] = value;
+    this.id = attrs.id || ''; this.name = attrs.name || ''; this.type = attrs.type || '';
+    this.value = attrs.value || ''; this.checked = false; this.listeners = new Map(); this.isConnected = true;
+    if (parent) parent.children.push(this);
+  }
+  matches(selector) {
+    return selector.split(',').some(raw => {
+      const part = raw.trim();
+      if (part === '[data-ely-family]') return !!this.dataset.elyFamily;
+      if (part === '[data-ui-component="signature-pad"]') return this.dataset.uiComponent === 'signature-pad';
+      if (['input', 'textarea', 'select'].includes(part)) return this.tagName === part.toUpperCase();
+      return false;
+    });
+  }
+  closest(selector) { for (let node = this; node; node = node.parentElement) if (node.matches(selector)) return node; return null; }
+  querySelector(selector) { return this.querySelectorAll(selector)[0] || null; }
+  querySelectorAll(selector) {
+    const found = [];
+    const visit = node => node.children.forEach(child => { if (child.matches(selector)) found.push(child); visit(child); });
+    visit(this); return found;
+  }
+  contains(node) { return node === this || this.children.some(child => child.contains(node)); }
+  addEventListener(type, fn) { if (!this.listeners.has(type)) this.listeners.set(type, new Set()); this.listeners.get(type).add(fn); }
+  removeEventListener(type, fn) { this.listeners.get(type)?.delete(fn); }
+  dispatchEvent(event) {
+    event.target ||= this;
+    for (const fn of [...this.listeners.get(event.type) || []]) fn(event);
+    if (event.bubbles) this.parentElement?.dispatchEvent(event);
+    return true;
+  }
+}
+const bridgeDocument = new BridgeElement('document');
+bridgeDocument.documentElement = bridgeDocument;
+bridgeDocument.addEventListener = () => {};
+const bridgeRoot = new BridgeElement('section', {id: 'signature-host', 'data-ely-family': 'forms', 'data-ely-component': 'forms/SignaturePad'}, bridgeDocument);
+const signature = new BridgeElement('div', {'data-ui-component': 'signature-pad'}, bridgeRoot);
+const fallback = new BridgeElement('textarea', {}, signature);
+const secondSignatureTextarea = new BridgeElement('textarea', {}, signature);
+const hidden = new BridgeElement('input', {type: 'hidden', name: 'signature_value', value: 'typed'}, signature);
+const ordinary = new BridgeElement('textarea', {}, bridgeRoot);
+let bridgeObserver;
+const bridgeSandbox = {
+  document: bridgeDocument, Element: BridgeElement,
+  CustomEvent: class { constructor(type, options = {}) { Object.assign(this, {type}, options); } },
+  MutationObserver: class { constructor(fn) { bridgeObserver = fn; } observe() {} },
+};
+runInNewContext(source.replaceAll('export function ', 'function ') + '\nglobalThis.api = {register,mount};', bridgeSandbox);
+const bridgeChanges = [], nativeChanges = [];
+bridgeSandbox.api.register('forms', () => {});
+bridgeSandbox.api.mount(bridgeRoot, {onChange: detail => bridgeChanges.push(detail)});
+bridgeRoot.addEventListener('change', event => nativeChanges.push(event.target));
+fallback.dispatchEvent({type: 'change', bubbles: true});
+assert.deepEqual(nativeChanges, [fallback], 'unnamed SignaturePad fallback change remains a native bubbling event');
+assert.deepEqual(bridgeChanges, [], 'unnamed SignaturePad fallback does not create a duplicate host change');
+secondSignatureTextarea.dispatchEvent({type: 'change', bubbles: true});
+assert.deepEqual(bridgeChanges.map(({name, value, type}) => ({name, value, type})), [{name: '', value: '', type: ''}], 'only the owned first textarea is excluded');
+hidden.dispatchEvent({type: 'change', bubbles: true});
+ordinary.dispatchEvent({type: 'change', bubbles: true});
+assert.deepEqual(bridgeChanges.map(({name, value, type}) => ({name, value, type})), [
+  {name: '', value: '', type: ''},
+  {name: 'signature_value', value: 'typed', type: 'hidden'},
+  {name: '', value: '', type: ''},
+], 'named hidden commits and ordinary unnamed fields retain generic notifications');
+console.log('SignaturePad fallback bridge selector regression passed');

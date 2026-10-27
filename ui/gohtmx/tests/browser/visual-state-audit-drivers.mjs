@@ -1395,7 +1395,7 @@ export function assertLocalStudioStep(identity,stage,proof){
     assert.deepEqual(observedState,{value,fallback:stage==='signature-type'?typed:'',strokes:drawn?'1 stroke':'0 strokes',canvasMatchesValue:true,valid:true,hiddenEnabled:true,fallbackName:'',guideHidden:stage!=='signature-clear'});
     const notification=[n('change','hidden',value,null,false),generic('caller_value',value,'hidden')];
     events=stage==='signature-type'?[n('input','fallback',typed),...notification]:stage==='signature-clear'?[n('click','clear',''),...notification]:[
-      n('pointermove','canvas',null),n('pointerdown','canvas',null),n('change','fallback',typed),generic('',typed,'textarea'),n('blur','fallback',typed),
+      n('pointermove','canvas',null),n('pointerdown','canvas',null),n('change','fallback',typed),n('blur','fallback',typed),
       ...Array.from({length:3},()=>n('pointermove','canvas',null)),n('pointerup','canvas',null),...notification,n('click','canvas',null),
     ];
     if(drawn)assert.deepEqual(proof.pointerButtons,[0,1,1,1,1,0],'One native stroke with exactly three in-contact moves');

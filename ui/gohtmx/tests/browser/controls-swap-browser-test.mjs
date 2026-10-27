@@ -56,6 +56,7 @@ try {
     const region = document.createElement('div'); region.id = 'commit-region'; region.dataset.sduiRegion = ''; root.append(region);
     document.body.append(root);
     window.__commitChanges = []; window.__rawCommitChanges = []; window.__commitRequests = [];
+    window.__signatureNativeChanges = [];
     const fetchOriginal = window.fetch;
     window.fetch = (url, options) => {
       if (new URL(url, location.href).pathname !== '/commit-audit') return fetchOriginal(url, options);
@@ -67,6 +68,7 @@ try {
     register('commit-audit', () => {});
     mount(root, {onChange: detail => window.__commitChanges.push({name: detail.name, value: detail.value})});
     root.addEventListener('change', event => window.__rawCommitChanges.push({name: event.target.name, value: event.target.value}));
+    root.addEventListener('change', event => { if (event.target.matches('textarea')) window.__signatureNativeChanges.push({name: event.target.name, value: event.target.value, trusted: event.isTrusted}); });
     document.dispatchEvent(new CustomEvent('htmx:after:swap'));
   });
   const commits = () => page.evaluate(() => ({host: window.__commitChanges, requests: window.__commitRequests}));
@@ -94,6 +96,13 @@ try {
   await tags.fill('delta'); await tags.press('Enter'); await tags.press('Tab');
   expected = [...expected, {name: 'http-tags', value: 'alpha,beta,gamma,delta'}];
   assert.deepEqual(await commits(), {host: expected, requests: expected}, 'repeat swaps preserve one notification per commit');
+  const signature = page.locator('#commit-events [data-ui-component="signature-pad"] textarea');
+  const beforeSignature = await commits();
+  await signature.selectText(); await signature.pressSequentially('Grace'); await signature.press('Tab');
+  expected = [...expected, {name: 'http-signature', value: 'Grace'}];
+  assert.deepEqual(await commits(), {host: expected, requests: beforeSignature.requests.concat({name: 'http-signature', value: 'Grace'})}, 'SignaturePad blur keeps the named hidden commit without a duplicate unnamed host change');
+  assert.equal(await page.locator('#commit-events [data-ui-signature-value]').inputValue(), 'Grace', 'typed fallback commits to the named hidden value');
+  assert.deepEqual(await page.evaluate(() => window.__signatureNativeChanges), [{name: '', value: 'Grace', trusted: true}], 'unnamed fallback native change still bubbles after trusted typing and blur');
   assert(await page.evaluate(() => window.__rawCommitChanges.some(change => !change.name)), 'native editor change still bubbles for custom consumers');
   assert.deepEqual(errors, [], 'Composite browser editing must not throw');
   console.log('Native keyboard/blur and browser ClipboardEvent composite commit regression passed');

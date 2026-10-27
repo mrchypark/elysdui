@@ -3,12 +3,12 @@ import {activationMutationMetadata, activationMutants, activationSHA256} from '.
 
 // Separate candidate pins; the historical activation-repair definition stays exact.
 const candidatePins = {
-  core: {sourceSHA256: '351c698ecb18008494027535567cb9dfc7c8ae2e69a2ee9e7eca65529900dafa', sourceBytes: 11670},
+  core: {sourceSHA256: '8fbd3e85ad2074d47133ecd1d4df4be8c0fc6a9d0dad77f58e50e457228afa3b', sourceBytes: 12051},
   template: {sourceSHA256: '454e758440f84e866aa70acad4b07a97a98526598f5db79ff6bc0022792a3a4f', sourceBytes: 97761},
 };
 const candidateOutputs = {
-  'core-skip-removed': ['5868487000d8d1f85b46b1c90eeeae56738b2e3c6162b1b71c4923c37063b939', 11597],
-  'blanket-palette-submit-prevention': ['bb9435492bd23f1c5755cb87d3c17da1847d67cba365a43552cf532c80805a6b', 11839],
+  'core-skip-removed': ['470d2746a53e720c9c78452ff9dba6d4a41165e03ac0d7760691e5557c8399ce', 11978],
+  'blanket-palette-submit-prevention': ['a21dd13cc2c23710260ea75462adaecece08ce341cce9bd6c9c92c1ce8f0754a', 12220],
   'template-marker-omitted': ['ec55e28c983397fc5b6f5413bc28af0d41ff875ad7efc754c11eaa1785105bec', 97729],
 };
 export function activationAuditCandidateMetadata(mode) {
