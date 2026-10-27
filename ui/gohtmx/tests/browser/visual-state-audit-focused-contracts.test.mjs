@@ -36,7 +36,7 @@ test('local studio two execute nine exact state and complete ordered event windo
         const typed='Caller native signature',drawn=stage==='signature-draw',value=drawn?'data:image/png;base64,YWJj':stage==='signature-type'?typed:'';
         state={value,fallback:stage==='signature-type'?typed:'',strokes:drawn?'1 stroke':'0 strokes',inkPixels:drawn?12:0,canvasMatchesValue:true,valid:true,hiddenEnabled:true,fallbackName:'',guideHidden:stage!=='signature-clear'};
         const notify=[n('change','hidden',value,null,false),generic('caller_value',value,'hidden')];
-        events=stage==='signature-type'?[n('input','fallback',typed),...notify]:stage==='signature-clear'?[n('click','clear',''),...notify]:[n('pointermove','canvas',null),n('pointerdown','canvas',null),n('change','fallback',typed),generic('',typed,'textarea'),n('blur','fallback',typed),n('pointermove','canvas',null),n('pointermove','canvas',null),n('pointermove','canvas',null),n('pointerup','canvas',null),...notify,n('click','canvas',null)];
+        events=stage==='signature-type'?[n('input','fallback',typed),...notify]:stage==='signature-clear'?[n('click','clear',''),...notify]:[n('pointermove','canvas',null),n('pointerdown','canvas',null),n('change','fallback',typed),n('blur','fallback',typed),n('pointermove','canvas',null),n('pointermove','canvas',null),n('pointermove','canvas',null),n('pointerup','canvas',null),...notify,n('click','canvas',null)];
         if(drawn)pointerButtons=[0,1,1,1,1,0];
       }else{
         const stops=(at=null,color='#817f7c',alpha=100)=>[{at:0,color:'#181613',alpha:100},...(at===null?[]:[{at,color,alpha}]),{at:1,color:'#e9e7e5',alpha:100}];

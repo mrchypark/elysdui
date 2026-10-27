@@ -57,7 +57,7 @@ test('StatusSelect due commit retains generic change then task change/action fro
   const entries=[['status','In progress'],['assignee','ana'],['due','2026-10-20']],identity='project/StatusSelect',id='actual-status';
   class FixtureFormData{constructor(form){this.entries=form.entries;}[Symbol.iterator](){return this.entries[Symbol.iterator]();}}
   const form={entries,dataset:{taskId:'brief'},reportValidity:()=>true};
-  const field={name:'due',value:'2026-10-20',type:'date',checked:false,closest:selector=>{assert.equal(selector,'form');return form;},matches:selector=>selector==='input,textarea,select'||selector==='[data-project-property]'};
+  const field={name:'due',value:'2026-10-20',type:'date',checked:false,closest:selector=>{if(selector==='[data-ui-component="signature-pad"]')return null;assert.equal(selector,'form');return form;},matches:selector=>selector==='input,textarea,select'||selector==='[data-project-property]'};
   const root=new EventTarget();root.id=id;root.dataset={elyComponent:identity};const observed=[],nativeListeners=[];
   for(const type of ['ely:change','ely:action'])root.addEventListener(type,event=>{const detail={...event.detail};if(detail.formData instanceof FixtureFormData)detail.formData=[...detail.formData];observed.push({type,detail});});
   nativeListeners.push(new Function('root','belongs',`${generic};return change;`)(root,()=>true));

@@ -85,7 +85,7 @@ test('actual API click/change bodies honor cancellation, disabled and ownership 
   new Function('root','belongs','emit','FormData',`${clickBody};return click;`)(root,()=>false,emit,FormData)(event());assert.deepEqual(recorded,[]);
   root.dataset.elyComponent='forms/TextArea';root.id='actual-textarea';
   const changes=[];root.addEventListener('ely:change',event=>changes.push({type:event.type,detail:event.detail}));
-  const field={name:'caller_value',value:'one\ntwo\nthree\nfour',checked:undefined,type:'textarea',matches:()=>true};
+  const field={name:'caller_value',value:'one\ntwo\nthree\nfour',checked:undefined,type:'textarea',matches:()=>true,closest:selector=>{assert.equal(selector,'[data-ui-component="signature-pad"]');return null;}};
   const change=new Function('root','belongs',`${changeBody};return change;`)(root,()=>true);
   change({target:field});assertFoundationPublicEvents('forms/TextArea',root.id,changes,{value:field.value});
   changes.length=0;field.value='';change({target:field});assertFoundationPublicEvents('forms/TextArea',root.id,changes,{value:''});
