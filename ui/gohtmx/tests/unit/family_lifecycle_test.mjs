@@ -139,6 +139,9 @@ const signature = new BridgeElement('div', {'data-ui-component': 'signature-pad'
 const fallback = new BridgeElement('textarea', {}, signature);
 const secondSignatureTextarea = new BridgeElement('textarea', {}, signature);
 const hidden = new BridgeElement('input', {type: 'hidden', name: 'signature_value', value: 'typed'}, signature);
+const outerSignature = new BridgeElement('div', {'data-ui-component': 'signature-pad'}, bridgeRoot);
+const nestedRoot = new BridgeElement('section', {id: 'nested-host', 'data-ely-family': 'forms', 'data-ely-component': 'forms/Nested'}, outerSignature);
+const nestedOrdinary = new BridgeElement('textarea', {}, nestedRoot);
 const ordinary = new BridgeElement('textarea', {}, bridgeRoot);
 let bridgeObserver;
 const bridgeSandbox = {
@@ -147,9 +150,10 @@ const bridgeSandbox = {
   MutationObserver: class { constructor(fn) { bridgeObserver = fn; } observe() {} },
 };
 runInNewContext(source.replaceAll('export function ', 'function ') + '\nglobalThis.api = {register,mount};', bridgeSandbox);
-const bridgeChanges = [], nativeChanges = [];
+const bridgeChanges = [], nestedChanges = [], nativeChanges = [];
 bridgeSandbox.api.register('forms', () => {});
 bridgeSandbox.api.mount(bridgeRoot, {onChange: detail => bridgeChanges.push(detail)});
+bridgeSandbox.api.mount(nestedRoot, {onChange: detail => nestedChanges.push(detail)});
 bridgeRoot.addEventListener('change', event => nativeChanges.push(event.target));
 fallback.dispatchEvent({type: 'change', bubbles: true});
 assert.deepEqual(nativeChanges, [fallback], 'unnamed SignaturePad fallback change remains a native bubbling event');
@@ -158,9 +162,12 @@ secondSignatureTextarea.dispatchEvent({type: 'change', bubbles: true});
 assert.deepEqual(bridgeChanges.map(({name, value, type}) => ({name, value, type})), [{name: '', value: '', type: ''}], 'only the owned first textarea is excluded');
 hidden.dispatchEvent({type: 'change', bubbles: true});
 ordinary.dispatchEvent({type: 'change', bubbles: true});
+assert.deepEqual(nestedChanges, [], 'nested host changes do not bind to the outer family');
 assert.deepEqual(bridgeChanges.map(({name, value, type}) => ({name, value, type})), [
   {name: '', value: '', type: ''},
   {name: 'signature_value', value: 'typed', type: 'hidden'},
   {name: '', value: '', type: ''},
 ], 'named hidden commits and ordinary unnamed fields retain generic notifications');
+nestedOrdinary.dispatchEvent({type: 'change', bubbles: true});
+assert.deepEqual(nestedChanges.map(({name, value, type}) => ({name, value, type})), [{name: '', value: '', type: ''}], 'an ordinary unnamed textarea in a nested family is not suppressed by an outer SignaturePad');
 console.log('SignaturePad fallback bridge selector regression passed');
