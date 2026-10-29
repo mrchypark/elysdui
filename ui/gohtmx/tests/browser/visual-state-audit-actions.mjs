@@ -588,9 +588,10 @@ try {
   if (options.families.length) cases = cases.filter(item => options.families.includes(item.family));
   if (options.caseIds.length) cases = cases.filter(item => options.caseIds.includes(item.caseId) || options.caseIds.includes(item.componentIdentity));
   if(options.statesOnly&&!basic)cases=cases.filter(item=>requestedStateContract(item.componentIdentity,options.trashFixture));
+  if(options.caseIds.length)assert(options.caseIds.every(id=>cases.some(item=>item.caseId===id||item.componentIdentity===id)),'Every explicitly requested advanced case must support the selected profile, surface, family and state mode');
   if (!basic&&!options.statesOnly && !options.full && !options.families.length && !options.caseIds.length) {
     cases = pilotNames.map(name => matrix.auditCases.find(item => item.componentIdentity === name && item.aliasMapping.relation !== 'alias-shared-check')).filter(Boolean);
-  } else if (!options.full && options.pilot) cases = cases.slice(0, options.pilot);
+  } else if (!options.full && !options.caseIds.length && options.pilot) cases = cases.slice(0, options.pilot);
   }
   assert(cases.length > 0, 'No cases selected');
   assert(new Set(cases.map(item => item.componentIdentity)).size === cases.length, 'pilot cases must use unique component names');
@@ -965,6 +966,7 @@ try {
     comparisonMethod: 'Original and instrumented gallery checks run independently in isolated browser contexts, matching the gallery runner: data-audit-main is the checked root and data-audit-twin is the unchanged peer. Compare exact initial semantic snapshot, returned assertion result, test action payloads including FormData entries, captured ely:action host events, and final semantic state of both component instances. Persist SHA-256 receipts for semantic values, plus real before/after screenshots at each action. Runtime checkpoint count is distinct from manifest static mapping; a site reached at __visualCheckpoint is attributed to the active case even when statically unmapped. Capture failures do not erase checkpoint execution.',
     timingChanged: 'Instrumented driver awaits the exposed checkpoint after each instrumented interaction statement; hook waits two requestAnimationFrame callbacks before pixel capture. This changes test-driver timing; production/runtime timing is untouched.',
     profile, surface: options.surface, output: options.output, maxCaptureBytes: options.maxCaptureBytes, moduleTransforms: transformReports,
+    requestedCaseIDs:options.caseIds,selectedCaseIDs:cases.map(item=>item.caseId),completedCaseIDs:reports.map(item=>item.caseId),
     caseCount: reports.length, checkpointCount: reports.reduce((sum, item) => sum + item.actionSites.length, 0),
     equivalentWithCheckpoints: reports.filter(item => item.comparison.classification.startsWith('passed-equivalent-with-')).length,
     unsupportedCases: reports.filter(item => item.actionCoverage.incompleteCoverage || item.actionCoverage.runtimeCheckpointCountForCase === 0).map(item => ({caseId: item.caseId, coverageStatus: item.actionCoverage.coverageStatus, staticUnsupportedSiteIds: item.actionCoverage.staticallyNamedUnsupportedSiteIds, unsupportedActionsReachedAtRuntime: item.actionCoverage.unsupportedActionsReachedAtRuntime})),

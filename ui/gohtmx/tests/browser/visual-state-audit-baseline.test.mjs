@@ -11,6 +11,7 @@ import {chromium} from 'playwright';
 import {captureBounds} from './visual-state-audit-bounds.mjs';
 import {runInNewContext} from 'node:vm';
 import {EventEmitter} from 'node:events';
+import './visual-state-audit-provenance.test.mjs';
 
 const repo = fileURLToPath(new URL('../../../../', import.meta.url));
 const runner = join(repo, 'ui/gohtmx/tests/browser/visual-state-audit-baseline.mjs');

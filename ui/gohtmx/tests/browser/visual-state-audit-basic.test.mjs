@@ -4,10 +4,37 @@ import test from 'node:test';
 import {readFile} from 'node:fs/promises';
 import {createHash} from 'node:crypto';
 import {EventEmitter} from 'node:events';
+import {runInNewContext} from 'node:vm';
 import {baselineFixture, basicFixturePackage, basicFixtureRoute, basicRootSelector, basicSourcePrefixes, validateBasicMatrix} from './visual-state-audit-basic.mjs';
 import {basicActionContract,basicActionVariants,validateBasicActionMatrix,runBasicActions,basicActionSurface,selectBasicActionCases,requiredBasicActionAssets,fulfillBasicActionAsset,assertBasicActionAssets,assertBasicTableRows,retainBasicFailureEvidence,basicOwnedModal,basicModalCaptureTarget} from './visual-state-audit-basic-actions.mjs';
 
 const source = path => readFile(new URL(`../../../../${path}`, import.meta.url), 'utf8');
+
+test('advanced explicit selection rejects omitted requests and preserves all21 requested cases',async()=>{
+  const runner=await source('ui/gohtmx/tests/browser/visual-state-audit-actions.mjs');
+  const start=runner.indexOf('  let cases = basic?selectBasicActionCases'),end=runner.indexOf('  const preparedByFamily=',start);
+  assert(start>=0&&end>start);
+  const identities=Array.from({length:21},(_,index)=>`forms/Supported${index}`),supported=new Set(identities);
+  // Contract support is an input to selection; do not load the browser runner or parser.
+  const select=(rows,caseIds,overrides={})=>runInNewContext(`(()=>{${runner.slice(start,end)}return cases;})()`,{
+    assert,basic:false,matrix:{auditCases:rows},profile:{id:'live-desktop-dark'},familyModule:{forms:'forms',interaction:'interaction'},pilotNames:[],requestedStateContract:id=>supported.has(id)?{}:null,
+    options:{surface:'live-audit',families:[],caseIds,statesOnly:true,full:false,pilot:20,...overrides},
+  });
+  const row=identity=>({caseId:'case:'+identity,componentIdentity:identity,family:'forms',profileIds:['live-desktop-dark'],surface:['live-audit']});
+  const valid=row(identities[0]),message=/Every explicitly requested advanced case/;
+  assert.throws(()=>select([valid],[valid.componentIdentity,'forms/Unknown']),message);
+  const unsupported=row('forms/Unsupported');
+  assert.throws(()=>select([valid,unsupported],[valid.caseId,unsupported.componentIdentity]),message);
+  for(const excluded of [{...row(identities[1]),profileIds:['static-desktop-dark']},{...row(identities[1]),surface:['static-audit']}]){
+    assert.throws(()=>select([valid,excluded],[valid.componentIdentity,excluded.componentIdentity]),message);
+  }
+  assert.throws(()=>select([valid],[valid.componentIdentity],{families:['interaction']}),message);
+  const rows=identities.map(row);
+  for(const statesOnly of [true,false])assert.deepEqual(Array.from(select(rows,identities,{statesOnly}),item=>item.componentIdentity),identities);
+  assert.equal(select(rows,[],{families:['forms']}).length,20,'Implicit batches retain their pilot limit');
+  assert(runner.includes('requestedCaseIDs:options.caseIds,selectedCaseIDs:cases.map(item=>item.caseId),completedCaseIDs:reports.map(item=>item.caseId)'));
+});
+
 async function metadata() {
   const go = await source('internal/sduicatalogue/basic.go');
   const names = go.match(/return strings\.Fields\(`([^`]+)`\)/)[1].split(/\s+/);

@@ -10,6 +10,7 @@ import {setTimeout as delay} from 'node:timers/promises';
 import {chromium} from 'playwright';
 import {captureBounds} from './visual-state-audit-bounds.mjs';
 import {baselineFixture, basicFixturePackage, basicFixtureRoute, basicRootSelector, basicSourcePrefixes, validateBasicMatrix} from './visual-state-audit-basic.mjs';
+import {captureSourceProvenance} from './visual-state-audit-provenance.mjs';
 
 const repo = fileURLToPath(new URL('../../../../', import.meta.url));
 function pinnedSourceRoot(sourceRoot, revision) {
@@ -180,6 +181,7 @@ function argsFrom(argv) {
   if (options.help) {
     console.log('Usage: node visual-state-audit-baseline.mjs --matrix=/path/to/acceptance-matrix.json [--fixture=advanced|basic] [--source-root=/production/repo --source-revision=<fullSHA>] [--profile=<profile>] [--mode=live|static] [--family=a,b] [--case=id,...] [--context-case=id,...] [--output-dir=path] [--base-url=http://127.0.0.1:port]');
     console.log(`Profiles: ${Object.keys(profiles).join(', ')}`);
+    console.log('With --base-url, served page and asset source provenance is unverified; pinned local source identities describe only the local snapshot.');
     return null;
   }
   if (!options.matrix) {
@@ -217,7 +219,7 @@ async function sourceBaseSnapshot(matrixBytes, matrix) {
   if (options.sourceRoot) assert.equal(currentRevision, options.sourceRevision, 'production source pin changed');
   const branch = execFileSync('git', ['branch', '--show-current'], {cwd: sourceRepo, encoding: 'utf8'}).trim();
   const matrixSHA256 = sha256(await readFile(options.matrix));
-  const harnessFiles = await Promise.all(['visual-state-audit-baseline.mjs', 'visual-state-audit-bounds.mjs', 'visual-state-audit-basic.mjs'].map(async name => ({path: name, sha256: sha256(await readFile(new URL(name, import.meta.url)))})));
+  const harnessFiles = await Promise.all(['visual-state-audit-baseline.mjs', 'visual-state-audit-bounds.mjs', 'visual-state-audit-basic.mjs', 'visual-state-audit-provenance.mjs'].map(async name => ({path: name, sha256: sha256(await readFile(new URL(name, import.meta.url)))})));
   const harnessSource = {root: repo, revision: execFileSync('git', ['rev-parse', 'HEAD'], {cwd: repo, encoding: 'utf8'}).trim(), files: harnessFiles};
   return {
     productionRoot: sourceRepo,
@@ -372,6 +374,7 @@ try {
     origin = `http://127.0.0.1:${port}`;
   }
   assert(/^https?:\/\//.test(origin), '--base-url must be an absolute http(s) URL');
+  const sourceProvenance = captureSourceProvenance({baseURL: options.baseURL, origin, sourceRevision: currentRevision, sourceTreeSHA256: sourceBase.sourceTreeSHA256});
   context = await chromium.launchPersistentContext(userDataDir, {
     executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined,
     viewport: profile.viewport,
@@ -464,8 +467,9 @@ try {
       evidenceKind: 'initial-state-component-pixel-baseline',
       immutableBatch: true,
       batchId: dirName,
-      sourceRevision: currentRevision,
-      sourceTreeSHA256: sourceBase.sourceTreeSHA256,
+      sourceRevision: sourceProvenance.sourceRevision,
+      sourceTreeSHA256: sourceProvenance.sourceTreeSHA256,
+      sourceProvenance,
       profile: {id: options.profile, renderMode: options.mode, viewport: profile.viewport, colorScheme: profile.colorScheme, deviceScaleFactor: profile.deviceScaleFactor},
       sourceBase,
       nodeVersion: process.version,
@@ -764,10 +768,10 @@ try {
   if(finalGate.exitCode)process.exitCode=finalGate.exitCode;
   navigation.captureClosed=true;
   await context.close();
-  await writeFile(join(outputDir, 'profile-summary.json'), JSON.stringify({schemaVersion: 1, status: profileStatus, finalGate, profile: options.profile, mode: options.mode, sourceBase, endingSourceBase, sourceDrift, selected: selectedCaseCount, attempted: captureAttemptCount, captured: captureSuccessCount, blocked: captureFailureCount, unattempted: selectedCaseCount - captureAttemptCount, startedAt: profileRunStartedAt, completedAt: new Date().toISOString(), noActionsExecuted: true, navigationDiagnostics:navigation.documents.map(({generation,url,errors,readiness})=>({generation,url,errors,readiness}))}, null, 2) + '\n', {flag: 'wx'});
+  await writeFile(join(outputDir, 'profile-summary.json'), JSON.stringify({schemaVersion: 1, status: profileStatus, finalGate, profile: options.profile, mode: options.mode, sourceProvenance, sourceBase, endingSourceBase, sourceDrift, selected: selectedCaseCount, attempted: captureAttemptCount, captured: captureSuccessCount, blocked: captureFailureCount, unattempted: selectedCaseCount - captureAttemptCount, startedAt: profileRunStartedAt, completedAt: new Date().toISOString(), noActionsExecuted: true, navigationDiagnostics:navigation.documents.map(({generation,url,errors,readiness})=>({generation,url,errors,readiness}))}, null, 2) + '\n', {flag: 'wx'});
   const elapsedSeconds = (Date.now() - captureStartedAt) / 1000;
   const attempted = captureAttemptCount;
-  console.log(JSON.stringify({runKind: options.caseIds.length || options.families.length ? 'filtered-profile-capture' : 'profile-capture', status: profileStatus, selected: selectedCaseCount, attempted, captured: captureSuccessCount, blocked: captureFailureCount, unattempted: selectedCaseCount - attempted, sourceTreeSHA256: sourceBase.sourceTreeSHA256, profile: options.profile, elapsedSeconds: Math.round(elapsedSeconds), averageSecondsPerCase: attempted ? +(elapsedSeconds / attempted).toFixed(2) : null, chromiumPeakRSSMiB: +(chromiumRssPeak / 1048576).toFixed(1), nodePeakRSSMiB: +(nodeRssPeak / 1048576).toFixed(1), output: outputDir, noActionsExecuted: true, allVisualStatusesPending: true, casesWithConsoleOrErrors: casesWithErrors.size}, null, 2));
+  console.log(JSON.stringify({runKind: options.caseIds.length || options.families.length ? 'filtered-profile-capture' : 'profile-capture', status: profileStatus, selected: selectedCaseCount, attempted, captured: captureSuccessCount, blocked: captureFailureCount, unattempted: selectedCaseCount - attempted, sourceProvenance, sourceTreeSHA256: sourceProvenance.sourceTreeSHA256, profile: options.profile, elapsedSeconds: Math.round(elapsedSeconds), averageSecondsPerCase: attempted ? +(elapsedSeconds / attempted).toFixed(2) : null, chromiumPeakRSSMiB: +(chromiumRssPeak / 1048576).toFixed(1), nodePeakRSSMiB: +(nodeRssPeak / 1048576).toFixed(1), output: outputDir, noActionsExecuted: true, allVisualStatusesPending: true, casesWithConsoleOrErrors: casesWithErrors.size}, null, 2));
 } finally {
   await context?.close();
   await browser?.close().catch(() => {});

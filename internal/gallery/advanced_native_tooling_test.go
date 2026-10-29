@@ -4,6 +4,8 @@ import (
 	"bytes"
 	ui "github.com/mrchypark/elysdui/ui/gohtmx"
 	"html/template"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -65,7 +67,7 @@ func TestNativeToolingFixtures(t *testing.T) {
 				if strings.Contains(html, "<button") {
 					t.Fatal("source gallery is descriptive")
 				}
-				for _, want := range []string{`aria-label="Component gallery"`, `href="/gallery/foundation"`, `href="/gallery/media"`, `href="/gallery/tooling"`} {
+				for _, want := range []string{`aria-label="Component gallery"`, `href="/components/primitives/box-view"`, `href="/components/media/imageviewer"`, `href="/components/tooling/inspectoroverlay"`} {
 					if !strings.Contains(html, want) {
 						t.Errorf("caller gallery fixture missing %q", want)
 					}
@@ -76,5 +78,53 @@ func TestNativeToolingFixtures(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestNativeToolingComponentGalleryLinksResolve(t *testing.T) {
+	server, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	props := map[string]any{}
+	nativeToolingProps("tooling", "ComponentGallery", props)
+	items := props["Items"].([]map[string]any)
+	if len(items) != 3 {
+		t.Fatalf("ComponentGallery link count = %d, want 3", len(items))
+	}
+	var out bytes.Buffer
+	if err := server.templates.ExecuteTemplate(&out, "native-tooling", props); err != nil {
+		t.Fatal(err)
+	}
+	// Use the same story inventory and destinations as ExportStatic.
+	routes := map[string]string{}
+	for _, chapter := range server.components {
+		for _, story := range chapter.Stories {
+			route := componentHref(chapter.Slug, story.Slug)
+			routes[route] = strings.TrimPrefix(route, "/") + "/"
+		}
+	}
+	const base = "/elysdui/go-htmx/"
+	static, err := staticHTML(out.Bytes(), base, routes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range items {
+		href := item["URL"].(string)
+		destination, ok := routes[href]
+		if !ok {
+			t.Fatalf("ComponentGallery link %q is not an exported story route", href)
+		}
+		if !strings.Contains(out.String(), `href="`+href+`"`) {
+			t.Errorf("ComponentGallery did not render link %q", href)
+		}
+		response := httptest.NewRecorder()
+		server.ServeHTTP(response, httptest.NewRequest(http.MethodGet, href, nil))
+		if response.Code != http.StatusOK {
+			t.Errorf("ComponentGallery link %q returned %d", href, response.Code)
+		}
+		if !strings.Contains(string(static), `href="`+base+destination+`"`) {
+			t.Errorf("ComponentGallery link %q was not rewritten to the static story", href)
+		}
 	}
 }
