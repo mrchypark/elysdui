@@ -10,8 +10,7 @@ We are deeply grateful to the **[Ely GPUI project](https://elygpui.com/)** and i
 
 This monorepo separates the standalone Go/htmx UI library, the renderer-neutral
 SDUI core and platform adapters. The Go module is `github.com/mrchypark/elysdui`.
-This is a breaking, unreleased layout; use this checkout until a release containing
-these paths is published. The historical v0.1.0 release does not contain this
+v0.2.0 introduces this breaking module layout. The historical v0.1.0 release does not contain this
 module layout or SDUI. There is no GPUI runtime adapter.
 
 ## Packages and boundaries
@@ -42,7 +41,13 @@ Start with the [documentation map](docs/README.md), [consumer quickstart](docs/g
 
 ## Install and try
 
-Go **1.26+**. From this repository checkout:
+Go **1.26+**. Install the pinned module in your application:
+
+```sh
+go get github.com/mrchypark/elysdui@v0.2.0
+```
+
+From this repository checkout, run the examples:
 
 ```sh
 go run ./examples/gohtmx/minimal
@@ -53,9 +58,8 @@ go run ./examples/gohtmx/gallery
 # http://127.0.0.1:8091/components
 ```
 
-For a separate application, follow the [local consumer setup](docs/gohtmx/getting-started.md).
-After a release or reviewed published revision contains the new module, pin that
-revision. Do not substitute `v0.1.0` into new-path install commands.
+For a separate application or contributor checkout, follow the [consumer setup](docs/gohtmx/getting-started.md).
+Commit the pinned dependency and `go.sum`. Do not substitute `v0.1.0` into new-path install commands.
 
 The [form example](examples/gohtmx/form) demonstrates server validation, an htmx HTML-fragment response, composite controls initialized after a swap, and a full-page fallback when JavaScript is unavailable. It does not store submitted data.
 

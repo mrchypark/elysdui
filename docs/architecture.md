@@ -69,5 +69,5 @@ visual/component reference with its attribution retained.
 - `adapters/gohtmx/tests/unit`, `tests/browser`: web SDUI checks.
 
 Run the [contributor checks](contributing.md). A successful server test does not
-establish browser or native-device behavior. This breaking layout is unreleased;
+establish browser or native-device behavior. v0.2.0 introduces this breaking layout;
 v0.1.0 verification remains historical evidence only.

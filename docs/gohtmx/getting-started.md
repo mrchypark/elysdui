@@ -7,10 +7,13 @@ need Go 1.26+ and do **not** need Node, Tailwind or a React build.
 ## Choose and pin a revision
 
 The current module is `github.com/mrchypark/elysdui`. Import the standalone UI as
-`ui "github.com/mrchypark/elysdui/ui/gohtmx"`. This layout is unreleased; the
-historical v0.1.0 tag has neither these package paths nor SDUI. Use a local
-checkout now. Once a reviewed release or commit containing the new module is
-published, pin it in `go.mod` and commit `go.sum`; never silently upgrade an app.
+`ui "github.com/mrchypark/elysdui/ui/gohtmx"`. Pin v0.2.0 in `go.mod` and commit
+`go.sum`; never silently upgrade an app. The historical v0.1.0 tag has neither
+these package paths nor SDUI.
+
+```sh
+go get github.com/mrchypark/elysdui@v0.2.0
+```
 
 Repository-relative commands below run from this checkout, not a consumer app.
 
@@ -36,16 +39,23 @@ app=$(mktemp -d)
 cp "$repo/examples/gohtmx/minimal/main.go" "$repo/examples/gohtmx/minimal/main_test.go" "$app/"
 cd "$app"
 go mod init example.com/ely-starter
-go mod edit -require github.com/mrchypark/elysdui@v0.0.0
-go mod edit -replace github.com/mrchypark/elysdui="$repo"
+go get github.com/mrchypark/elysdui@v0.2.0
 go mod tidy
 go test ./...
 go run .
 ```
 
-The local replacement points to the reviewed checkout without claiming an
-unpublished release is available from a module proxy. Dependencies must already
-be cached for offline use. Confirm it with `go list -m github.com/mrchypark/elysdui`.
+For contributor work against a local checkout, use these commands instead of
+`go get` in the setup above:
+
+```sh
+go mod edit -require github.com/mrchypark/elysdui@v0.0.0
+go mod edit -replace github.com/mrchypark/elysdui="$repo"
+```
+
+Then run `go mod tidy` and the example as above. Dependencies must already be
+cached for offline use. Confirm the selected version or local replacement with
+`go list -m github.com/mrchypark/elysdui`.
 
 Initialize `ui.NewTemplates()`, add app templates with `Parse`/`ParseFS`, and call
 `ui.BindAssets(mux)` once before serving. Do not modify the template set after its

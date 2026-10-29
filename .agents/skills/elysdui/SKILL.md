@@ -14,9 +14,10 @@ source/docs if this skill has been copied into a different repository. Do not
 assume relative paths outside this skill exist in a consumer checkout.
 
 Go 1.26+ is required. The v0.1.0 release has the original template/component
-surface, not SDUI. This module layout is unreleased; use the local-checkout setup, then pin a
-reviewed new-module revision when available. Never silently
-upgrade an application. Node/Tailwind are contributor tools, not consumer runtime
+surface, not SDUI. v0.2.0 introduces the current module layout and SDUI; pin
+`github.com/mrchypark/elysdui@v0.2.0` for new consumers, or use the local-checkout
+setup for contributor work. Never silently upgrade an application.
+Node/Tailwind are contributor tools, not consumer runtime
 requirements. New docs and example copy are English.
 
 ## Pick the rendering surface

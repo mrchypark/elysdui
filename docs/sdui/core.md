@@ -2,8 +2,9 @@
 
 Import `"github.com/mrchypark/elysdui/sdui"` for screen decoding, semantic
 contracts, compilation and resolution. This package does not import the UI
-library, render HTML or serve browser assets. The module layout is unreleased;
-use a reviewed local checkout as described in [setup](../gohtmx/getting-started.md).
+library, render HTML or serve browser assets. This package is included in
+`github.com/mrchypark/elysdui@v0.2.0`; see the pinned release and local contributor
+[setup](../gohtmx/getting-started.md). The historical v0.1.0 release does not include SDUI.
 
 ## Compile and resolve
 

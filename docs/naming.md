@@ -20,8 +20,9 @@ fields. See [architecture](architecture.md) for dependency direction.
 
 ## Release history
 
-The monorepo layout is unreleased. Use the [local checkout setup](gohtmx/getting-started.md)
-until a reviewed new-module revision is available. The historical v0.1.0 release
+v0.2.0 introduces the monorepo layout under `github.com/mrchypark/elysdui`.
+Use the [pinned release or local contributor setup](gohtmx/getting-started.md).
+The historical v0.1.0 release
 used the former module identity and had no SDUI. It does not acquire new paths
 or APIs retroactively. Historical verification, published revisions and copyright
 notices remain evidence about their original revisions.
