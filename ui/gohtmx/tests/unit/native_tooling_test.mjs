@@ -1,5 +1,33 @@
 import assert from 'node:assert/strict';
+import test from 'node:test';
 import {frameStats,missedFrames,recordInput,rgba,contrastResult,contourPixels,validSurfaceFrame,initNativeTooling} from '../../assets/ely-api-native-tooling.js';
+
+test('ComponentGallery check follows fixture destinations on live and static sites and rejects stale or foreign links',async()=>{
+ const {readFile}=await import('node:fs/promises');
+ const read=path=>readFile(new URL(path,import.meta.url),'utf8');
+ const checks=await read('../../../../internal/gallery/assets/advanced-native-tooling-checks.js');
+ const fixture=await read('../../../../internal/gallery/advanced_native_tooling_fixtures.go');
+ const section=fixture.slice(fixture.indexOf('case "ComponentGallery":'),fixture.indexOf('case "PlaygroundPanel":'));
+ const destinations=[...section.matchAll(/"Label": "([^"]+)"[^\n]+"URL": "([^"]+)"/g)].map(([,label,path])=>({label,path}));
+ assert.equal(destinations.length,3,'Exercise all actual fixture links, not a copied old fixture');
+ const body=checks.slice(checks.indexOf('const gallery=async'),checks.indexOf('const playground=async'));
+ for(const moduleURL of ['http://127.0.0.1:19874/assets/advanced-native-tooling-checks.js','https://example.test/elysdui/go-htmx/assets/advanced-native-tooling-checks.js']){
+  const document={activeElement:null},base=new URL('../',moduleURL),isStatic=base.pathname!=='/';
+  const makeLinks=transform=>destinations.map(({label,path},index)=>({textContent:label,href:transform(new URL(path.slice(1)+(isStatic?'/':''),base).href,index),focus(){document.activeElement=this;}}));
+  const run=links=>{
+   const root={querySelector:selector=>selector==='[data-native-kind="ComponentGallery"]'?{}:null,querySelectorAll:()=>links};
+   const need=(node,selector)=>{const result=node.querySelector(selector);assert(result);return result;};
+   // Only supply the module URL environment; run the actual exported-page check body.
+   return new Function('need','assert','document','moduleURL',body.replaceAll('import.meta.url','moduleURL')+';return gallery;')(need,assert,document,moduleURL)({root});
+  };
+  await run(makeLinks(href=>href));
+  for(let index=0;index<3;index++){
+   await assert.rejects(run(makeLinks((href,i)=>i===index?new URL(['/gallery/foundation','/gallery/media','/gallery/tooling'][i],base).href:href)),/caller link/);
+   await assert.rejects(run(makeLinks((href,i)=>i===index?href.replace(new URL(href).origin,'https://foreign.test'):href)),/caller link/);
+  }
+  if(isStatic)await assert.rejects(run(makeLinks(href=>href.replace('/elysdui/go-htmx/','/wrong-base/'))),/caller link/);
+ }
+});
 // A deterministic DOM/clock boundary; exercises the real initializer, not copied dispatch logic.
 class Node {
  constructor(tag='div',attrs={}){this.tagName=tag.toUpperCase();this.attrs={};this.dataset={};this.children=[];this.listeners=new Map();this.style={};this.hidden=false;this.textContent='';this.value='';this.classList={add:()=>{}};for(const[k,v]of Object.entries(attrs))this.setAttribute(k,v);}

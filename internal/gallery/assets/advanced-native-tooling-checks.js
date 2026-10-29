@@ -67,7 +67,8 @@ const capture=async({root})=>{
 };
 const gallery=async({root})=>{
  need(root,'[data-native-kind="ComponentGallery"]');assert(!root.querySelector('button,input,select,canvas'),'Descriptive source gallery fabricated operations');
- const links=[...root.querySelectorAll('.ely-tooling-catalog a')];assert(links.length===3,'Caller catalogue fixture was hidden or lost');assert(links.some(link=>link.getAttribute('href')==='/gallery/foundation'&&link.textContent==='Foundation'),'Foundation caller link missing');
+ const links=[...root.querySelectorAll('.ely-tooling-catalog a')],base=new URL('../',import.meta.url);assert(links.length===3,'Caller catalogue fixture was hidden or lost');
+ for(const [label,path] of [['Foundation','components/primitives/box-view'],['Media','components/media/imageviewer'],['Tooling','components/tooling/inspectoroverlay']]){const live=new URL(path,base).href,staticURL=new URL(path+'/',base).href;assert(links.some(link=>link.textContent===label&&(link.href===live||link.href===staticURL)),`${label} caller link has the wrong route, origin or base`);}
  links[0].focus();assert(document.activeElement===links[0],'Caller catalogue link is not focusable');
 };
 const playground=async({root})=>{
