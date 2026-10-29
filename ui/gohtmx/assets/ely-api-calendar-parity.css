@@ -200,8 +200,14 @@
 }
 [data-ely-family='communication'] .ely-calendar-grid details[data-calendar-overflow] {
   position:absolute;
+  margin:0;
   left:4px;
   right:4px;
+}
+[data-ely-family='communication'] .ely-calendar-grid details[data-calendar-overflow] > summary {
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
 }
 [data-ely-family='communication'] .ely-calendar-grid details[data-calendar-overflow][open] { right:auto;height:auto;min-width:180px; }
 [data-ely-family='communication'] .ely-calendar-grid details[data-calendar-overflow] .ely-calendar-chip { width:100%; }

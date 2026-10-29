@@ -181,6 +181,54 @@ func TestSharedRadioGroupHasNativeLabelsAndCheckedState(t *testing.T) {
 	}
 }
 
+func TestSharedRadioGroupOptionDisabledUsesNativeAttribute(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		options      any
+		disabled     bool
+		value        string
+		wantDisabled []bool
+	}{
+		{"typed-options", []Option{{Value: "alpha", Label: "Alpha"}, {Value: "beta", Label: "Beta", Disabled: true, Selected: true}, {Value: "gamma", Label: "Gamma"}}, false, "alpha", []bool{false, true, false}},
+		{"map-options", []map[string]any{{"Value": "alpha", "Label": "Alpha"}, {"Value": "beta", "Label": "Beta", "Disabled": true}, {"Value": "gamma", "Label": "Gamma", "Disabled": false}}, false, "alpha", []bool{false, true, false}},
+		{"group-disabled", []Option{{Value: "alpha", Label: "Alpha"}, {Value: "beta", Label: "Beta", Disabled: true}, {Value: "gamma", Label: "Gamma"}}, true, "alpha", []bool{true, true, true}},
+		{"enabled-default", []Option{{Value: "alpha", Label: "Alpha"}, {Value: "beta", Label: "Beta"}, {Value: "gamma", Label: "Gamma"}}, false, "beta", []bool{false, false, false}},
+		{"selected-disabled-value-retained", []Option{{Value: "alpha", Label: "Alpha"}, {Value: "beta", Label: "Beta", Disabled: true}, {Value: "gamma", Label: "Gamma"}}, false, "beta", []bool{false, true, false}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			doc := renderSharedForm(t, "radio-group", "Name", "purpose", "Value", tc.value, "Required", true, "Disabled", tc.disabled, "Options", tc.options)
+			inputs := formNodes(doc, "input")
+			if len(inputs) != 3 {
+				t.Fatalf("radio count%d", len(inputs))
+			}
+			for i, n := range inputs {
+				requireFormAttr(t, n, "type", "radio")
+				requireFormAttr(t, n, "name", "purpose")
+				_, disabled := formAttr(n, "disabled")
+				if disabled != tc.wantDisabled[i] {
+					t.Errorf("option%d native disabled=%v want%v", i, disabled, tc.wantDisabled[i])
+				}
+				value, _ := formAttr(n, "value")
+				_, checked := formAttr(n, "checked")
+				if checked != (value == tc.value) {
+					t.Errorf("value%q checked%v; caller Value must remain authoritative", value, checked)
+				}
+				if _, required := formAttr(n, "required"); !required {
+					t.Error("native required lost")
+				}
+				for _, attribute := range []string{"tabindex", "onclick", "onkeydown"} {
+					if _, exists := formAttr(n, attribute); exists {
+						t.Errorf("unexpected native radio override %s", attribute)
+					}
+				}
+				if n.Parent == nil || n.Parent.Data != "label" {
+					t.Error("native label activation association lost")
+				}
+			}
+		})
+	}
+}
+
 func TestSharedFieldLabelAndDatalistEscapeText(t *testing.T) {
 	hostile := `"><script>자료</script>&`
 	for _, required := range []bool{false, true} {

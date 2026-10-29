@@ -205,9 +205,9 @@ register('forms', root => {
   const mentionActiveOption=()=>{const options=mentionOptions();return mentionActiveIndex>=0&&mentionActiveIndex<options.length?options[mentionActiveIndex]:null;};
   const setMentionActive=index=>{const options=mentionOptions(),input=q('[data-ely-mention]'),active=options[index];mentionActiveIndex=active?index:-1;all('[data-ely-mention-value]').forEach(option=>{if(option===active)option.setAttribute('aria-selected','true');else option.removeAttribute('aria-selected');});if(input){if(active?.id)input.setAttribute('aria-activedescendant',active.id);else input.removeAttribute('aria-activedescendant');}};
   const click = event => {
-    const button=event.target.closest('button');if(!button||button.disabled||button.closest('[data-ely-family]')!==root)return;
+    const button=event.target.closest('button');if(!button||button.matches(':disabled')||button.getAttribute('aria-disabled')==='true'||root.dataset.elyDisabled==='true'||button.closest('[data-ely-family]')!==root)return;
     if(button.matches('[data-ely-unit]')){const units=all('[data-ely-unit-option]').map(option=>option.dataset.elyUnitOption),unit=units[(units.indexOf(button.dataset.elyUnit)+1)%units.length];if(unit){button.dataset.elyUnit=unit;button.textContent=unit;changed(root,{value:q('input').value,unit});}return;}
-    if(button.matches('[data-ely-pick-screen-color]')){emit(root,'sample-color',{value:q('[data-ely-color]').value});return;}
+    if(button.matches('[data-ely-pick-screen-color]')){if(!emit(root,'sample-color',{value:q('[data-ely-color]').value}))event.preventDefault();return;}
     if(button.matches('[data-ely-cron-preset]')){const field=q('[data-ely-cron]');field.value=button.value;notify(field);return;}
     if(button.matches('[data-ely-gradient-stop]')){gradientSelected=Number(button.dataset.elyGradientStop);gradient();return;}
     if(button.matches('[data-ely-gradient-add]')){const box=button.getBoundingClientRect(),at=event.detail===0?50:Math.max(0,Math.min(100,Math.round((event.clientX-box.left)/Math.max(1,box.width)*100)));gradientStops.push({at,...gradientColorAt(at)});gradientSelected=gradientStops.length-1;gradient(true);q(`[data-ely-gradient-stop="${gradientSelected}"]`).focus();return;}
@@ -246,7 +246,7 @@ register('forms', root => {
     if(button.matches('[data-ely-settings-tab]')){showSettingsPanel(button.dataset.elySettingsTab);return;}
     if(button.matches('[data-ely-color-choice]')){color(button.dataset.elyColorChoice);return;}
     if(button.matches('[data-ely-icon-option]')){q('[data-ely-icon-value]').value=button.value;all('[data-ely-icon-option]').forEach(item=>{item.setAttribute('aria-selected',String(item===button));item.tabIndex=item===button?0:-1;});q('[data-ely-picker-preview]').value=button.value;changed(root,{value:button.value});return;}
-    if(button.dataset.elyAction){const path=button.closest('.ely-api-path-input')?.querySelector('[data-ely-path]'),groupValue=button.closest('.ely-api-input-group')?.querySelector('input');emit(root,button.dataset.elyAction,{value:path?.value??groupValue?.value??button.value});return;}
+    if(button.dataset.elyAction&&button.type!=='submit'){const path=button.closest('.ely-api-path-input')?.querySelector('[data-ely-path]'),groupValue=button.closest('.ely-api-input-group')?.querySelector('input'),formData=button.form?new FormData(button.form):null;if(!emit(root,button.dataset.elyAction,{value:path?.value??groupValue?.value??button.value,...(formData?{formData,values:[...formData]}:{})}))event.preventDefault();return;}
   };
   const input = event => {
     const field=event.target;if(field.closest('[data-ely-family]')!==root)return;

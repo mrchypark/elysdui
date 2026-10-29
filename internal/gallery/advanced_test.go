@@ -47,7 +47,7 @@ func TestEveryAdvancedAPIAndAliasRenders(t *testing.T) {
 			c := fixture.Component
 			c.Name = name
 			c.ID = fmt.Sprintf("case-%d", len(seen))
-			c.Props = aliasFixtureProps(c.Props, name)
+			c.Props = aliasFixtureProps(c.Props, key)
 			var output bytes.Buffer
 			if err := ui.RenderComponent(server.templates, &output, c); err != nil {
 				t.Errorf("%s: %v", key, err)

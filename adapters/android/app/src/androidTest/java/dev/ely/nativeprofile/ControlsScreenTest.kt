@@ -18,9 +18,10 @@ class ControlsScreenTest {
     @get:Rule val compose = createComposeRule()
     @Test fun multipleFieldsAndNativeSelectionsPersistThroughGo() {
         lateinit var focusManager: FocusManager
+        lateinit var profileViewModel: ProfileViewModel
         compose.setContent {
             focusManager = LocalFocusManager.current
-            val model = remember { ProfileViewModel("http://10.0.2.2:8095/native/profile") }
+            val model = remember { ProfileViewModel("http://10.0.2.2:8095/native/profile").also { profileViewModel = it } }
             val state by model.state.collectAsState()
             MaterialTheme { ProfileScreen(state, model::edit, model::save, model::retry, model::reload) }
         }
@@ -33,7 +34,18 @@ class ControlsScreenTest {
         compose.onNodeWithTag("color-theme").performScrollTo().performClick()
         compose.onNodeWithTag("color-theme-option-dark").performClick()
         compose.onNodeWithTag("save-profile").performScrollTo().assertIsEnabled().performClick()
-        compose.waitUntil(timeoutMillis = 30_000) { compose.onAllNodesWithText("Profile saved.").fetchSemanticsNodes().isNotEmpty() }
+        compose.waitUntil(timeoutMillis = 30_000) {
+            val state = profileViewModel.state.value
+            (state.pending == null && state.loadingID == null) || state.pending?.inFlight == false ||
+                state.hardError != null || state.retryMessage != null
+        }
+        val saved = profileViewModel.state.value
+        val details = "Save state: message=${saved.message}, hardError=${saved.hardError}, retryMessage=${saved.retryMessage}, pendingInFlight=${saved.pending?.inFlight}"
+        assertEquals(details, "Profile saved.", saved.message)
+        assertNull(details, saved.pending)
+        assertNull(details, saved.hardError)
+        assertNull(details, saved.retryMessage)
+        compose.onNodeWithText("Profile saved.").assertExists()
         compose.onNodeWithTag("company").performScrollTo().assertTextContains("Android Controls")
         compose.onNodeWithTag("notifications").performScrollTo().assertIsOn()
         compose.onNodeWithTag("digest-consent").performScrollTo().assertIsOn()

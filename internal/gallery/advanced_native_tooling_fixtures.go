@@ -212,6 +212,14 @@ func nativeToolingProps(chapter, name string, props map[string]any) {
 		props["Items"] = nativeToolingContrastPairs()
 	case "ScreenshotTest Harness":
 		props["Command"] = "cargo run --example gallery -- --page tooling --capture shots"
+	case "ComponentGallery":
+		props["Label"] = "Component gallery"
+		props["Content"] = "Browse the available component examples."
+		props["Items"] = []map[string]any{
+			{"Label": "Foundation", "Content": "Primitives and layout", "URL": "/components/primitives/box-view"},
+			{"Label": "Media", "Content": "Images, playback, and devices", "URL": "/components/media/imageviewer"},
+			{"Label": "Tooling", "Content": "Inspection and catalogues", "URL": "/components/tooling/inspectoroverlay"},
+		}
 	case "PlaygroundPanel":
 		choice := func(name string, values []string, selected string) map[string]any {
 			options := []map[string]any{}

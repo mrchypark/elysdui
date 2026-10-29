@@ -21,7 +21,7 @@ env:
   PALETTE_QUERY_PRODUCTION_POLICY: audit-candidate
 jobs:
   palette-query:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:

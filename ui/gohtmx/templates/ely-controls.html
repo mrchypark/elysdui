@@ -62,7 +62,7 @@
 {{end}}
 
 {{define "hotkey-input"}}
-<div id="{{.ID}}" data-ui-component="hotkey-input"{{range $k, $v := .Attrs}} {{attrName $k}}="{{attrValue $k $v}}"{{end}}>{{if .Label}}<label for="{{.ID}}-input">{{.Label}}</label>{{end}}{{template "input" (dict "ID" (printf "%s-input" .ID) "Name" .Name "Value" .Value "Placeholder" .Placeholder "Required" .Required "Disabled" .Disabled "Attrs" (dict "data-ui-hotkey" "true"))}}</div>
+<div id="{{.ID}}" data-ui-component="hotkey-input"{{range $k, $v := .Attrs}} {{attrName $k}}="{{attrValue $k $v}}"{{end}}>{{if .Label}}<label for="{{.ID}}-input">{{.Label}}</label>{{end}}{{$input := dict "ID" (printf "%s-input" .ID) "Name" .Name "Value" .Value "Placeholder" .Placeholder "Required" .Required "Disabled" .Disabled "Attrs" (dict "data-ui-hotkey" "true")}}{{if .Glyph}}<div class="ely-api-hotkey-control"><span class="ely-api-hotkey-glyph" aria-hidden="true">⌘</span>{{template "input" $input}}</div>{{else}}{{template "input" $input}}{{end}}</div>
 {{end}}
 
 {{define "signature-pad"}}
@@ -107,7 +107,7 @@
 {{define "tabs"}}
 <div id="{{.ID}}" data-ui-component="tabs"{{range $k, $v := .Attrs}} {{attrName $k}}="{{attrValue $k $v}}"{{end}}>
   {{if .Label}}<p id="{{.ID}}-label" class="ely-control-label">{{.Label}}</p>{{end}}
-  <div role="tablist"{{if .Label}} aria-labelledby="{{.ID}}-label"{{end}}>{{range $i, $item := .Items}}{{template "button" (dict "ID" (printf "%s-tab-%d" $.ID $i) "Type" "button" "Role" "tab" "Label" $item.Label "Disabled" $.Disabled "Attrs" (dict "data-ui-tab" "true" "aria-controls" (printf "%s-panel-%d" $.ID $i) "aria-selected" (printf "%t" (or (eq $item.Value $.Value) (and (not $.Value) (eq $i 0))))))}}{{end}}</div>
+  <div role="tablist"{{if .Label}} aria-labelledby="{{.ID}}-label"{{end}}>{{range $i, $item := .Items}}{{template "button" (dict "ID" (printf "%s-tab-%d" $.ID $i) "Type" "button" "Variant" "ghost" "Role" "tab" "Label" $item.Label "Disabled" $.Disabled "Attrs" (dict "data-ui-tab" "true" "aria-controls" (printf "%s-panel-%d" $.ID $i) "aria-selected" (printf "%t" (or (eq $item.Value $.Value) (and (not $.Value) (eq $i 0))))))}}{{end}}</div>
   {{range $i, $item := .Items}}<section id="{{$.ID}}-panel-{{$i}}" role="tabpanel" aria-labelledby="{{$.ID}}-tab-{{$i}}" data-ui-tab-panel{{if not (or (eq $item.Value $.Value) (and (not $.Value) (eq $i 0)))}} hidden{{end}}>{{$item.Content}}</section>{{end}}
 </div>
 {{end}}

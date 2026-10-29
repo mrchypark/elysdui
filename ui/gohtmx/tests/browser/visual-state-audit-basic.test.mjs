@@ -1,0 +1,480 @@
+// Deliberately pure source/metadata checks: no runner import, subprocess, server or browser.
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import {readFile} from 'node:fs/promises';
+import {createHash} from 'node:crypto';
+import {EventEmitter} from 'node:events';
+import {runInNewContext} from 'node:vm';
+import {baselineFixture, basicFixturePackage, basicFixtureRoute, basicRootSelector, basicSourcePrefixes, validateBasicMatrix} from './visual-state-audit-basic.mjs';
+import {basicActionContract,basicActionVariants,validateBasicActionMatrix,runBasicActions,basicActionSurface,selectBasicActionCases,requiredBasicActionAssets,fulfillBasicActionAsset,assertBasicActionAssets,assertBasicTableRows,retainBasicFailureEvidence,basicOwnedModal,basicModalCaptureTarget} from './visual-state-audit-basic-actions.mjs';
+
+const source = path => readFile(new URL(`../../../../${path}`, import.meta.url), 'utf8');
+
+test('advanced explicit selection rejects omitted requests and preserves all21 requested cases',async()=>{
+  const runner=await source('ui/gohtmx/tests/browser/visual-state-audit-actions.mjs');
+  const start=runner.indexOf('  let cases = basic?selectBasicActionCases'),end=runner.indexOf('  const preparedByFamily=',start);
+  assert(start>=0&&end>start);
+  const identities=Array.from({length:21},(_,index)=>`forms/Supported${index}`),supported=new Set(identities);
+  // Contract support is an input to selection; do not load the browser runner or parser.
+  const select=(rows,caseIds,overrides={})=>runInNewContext(`(()=>{${runner.slice(start,end)}return cases;})()`,{
+    assert,basic:false,matrix:{auditCases:rows},profile:{id:'live-desktop-dark'},familyModule:{forms:'forms',interaction:'interaction'},pilotNames:[],requestedStateContract:id=>supported.has(id)?{}:null,
+    options:{surface:'live-audit',families:[],caseIds,statesOnly:true,full:false,pilot:20,...overrides},
+  });
+  const row=identity=>({caseId:'case:'+identity,componentIdentity:identity,family:'forms',profileIds:['live-desktop-dark'],surface:['live-audit']});
+  const valid=row(identities[0]),message=/Every explicitly requested advanced case/;
+  assert.throws(()=>select([valid],[valid.componentIdentity,'forms/Unknown']),message);
+  const unsupported=row('forms/Unsupported');
+  assert.throws(()=>select([valid,unsupported],[valid.caseId,unsupported.componentIdentity]),message);
+  for(const excluded of [{...row(identities[1]),profileIds:['static-desktop-dark']},{...row(identities[1]),surface:['static-audit']}]){
+    assert.throws(()=>select([valid,excluded],[valid.componentIdentity,excluded.componentIdentity]),message);
+  }
+  assert.throws(()=>select([valid],[valid.componentIdentity],{families:['interaction']}),message);
+  const rows=identities.map(row);
+  for(const statesOnly of [true,false])assert.deepEqual(Array.from(select(rows,identities,{statesOnly}),item=>item.componentIdentity),identities);
+  assert.equal(select(rows,[],{families:['forms']}).length,20,'Implicit batches retain their pilot limit');
+  assert(runner.includes('requestedCaseIDs:options.caseIds,selectedCaseIDs:cases.map(item=>item.caseId),completedCaseIDs:reports.map(item=>item.caseId)'));
+});
+
+async function metadata() {
+  const go = await source('internal/sduicatalogue/basic.go');
+  const names = go.match(/return strings\.Fields\(`([^`]+)`\)/)[1].split(/\s+/);
+  const revision = 'a'.repeat(40), hash = 'b'.repeat(64);
+  const profiles = ['live', 'static'].flatMap(mode => ['desktop', 'mobile'].flatMap(size => ['light', 'dark'].map(theme => `${mode}-${size}-${theme}`)));
+  return {
+    revision,
+    manifest: {basicNames: names, cases: names.map(name => ({name: `basic/${name}`, template: name, propsSHA256: hash})),assetHashes:Object.fromEntries(requiredBasicActionAssets.map(path=>[path,hash]))},
+    matrix: {fixture: 'basic', source: {revision}, auditCases: names.map(name => ({caseId: `basic:${name}`, componentIdentity: `basic/${name}`, fixtureIdentity: `basic-fixture:basic/${name}`, template: name, fixturePropsSHA256: hash, family: 'basic', sourceSHA: revision, surface: ['live-basic', 'static-basic'], profileIds: profiles, aliasMapping: {requestedName: `basic/${name}`, relation: 'canonical-basic-template'}}))},
+  };
+}
+
+test('basic fixture routing is explicit and default advanced path stays distinct', () => {
+  assert.equal(baselineFixture(), 'advanced');
+  assert.equal(baselineFixture('basic'), 'basic');
+  for (const value of ['all', 'stories', '', null, 'basic/']) assert.throws(() => baselineFixture(value));
+  assert.equal(basicFixturePackage, './adapters/gohtmx/tests/fixtures/basic-audit');
+  assert.equal(basicFixtureRoute, '/basic-audit/');
+  assert.equal(basicRootSelector, '[data-audit-main] > [data-basic-component]');
+  assert(basicSourcePrefixes.includes('internal/sduicatalogue/'));
+});
+
+test('exact48 source-defined identities and eight profiles are required independently of selection', async () => {
+  const {matrix, manifest, revision} = await metadata();
+  assert.equal(validateBasicMatrix(matrix, manifest, revision), true);
+  for (const mutate of [
+    m => m.auditCases.pop(),
+    m => m.auditCases.push(m.auditCases[0]),
+    m => m.auditCases[1].caseId = m.auditCases[0].caseId,
+    m => m.auditCases[0].componentIdentity = 'forms/Input',
+    m => m.auditCases[0].fixturePropsSHA256 = 'c'.repeat(64),
+    m => m.auditCases[0].profileIds = ['live-desktop-light'],
+    m => m.auditCases[0].surface = ['live-audit', 'static-audit'],
+    m => m.auditCases[0].sourceSHA = 'c'.repeat(40),
+    m => m.auditCases[0].aliasMapping.relation = 'alias',
+    m => m.source.revision = 'c'.repeat(40),
+    m => m.fixture = 'advanced',
+  ]) {
+    const bad = structuredClone(matrix); mutate(bad);
+    assert.throws(() => validateBasicMatrix(bad, manifest, revision));
+  }
+  const bad = structuredClone(manifest); bad.basicNames[1] = bad.basicNames[0];
+  assert.throws(() => validateBasicMatrix(matrix, bad, revision));
+});
+
+test('test-only Go fixture reuses canonical props and renders directly without trusted caller markup', async () => {
+  const go = await source('adapters/gohtmx/tests/fixtures/basic-audit/main.go');
+  assert(go.includes('sduicatalogue.BasicNames()') && go.includes('sduicatalogue.BasicFixtures()'));
+  assert(go.includes('tpl.ExecuteTemplate(w, f.Template, instanceProps(f, scope))'));
+  assert(!go.includes('template.HTML('));
+  assert(!go.includes('"github.com/mrchypark/elysdui/sdui"'));
+  assert(!go.includes('props["Options"] ='));
+  assert(go.includes('native-dialog-closed-context-only'));
+  assert(go.includes('native-datalist-nonvisual-context-only'));
+  assert(go.includes('export requires a new owned directory'));
+  assert(go.includes('ui.BindAssets(mux)'));
+  assert(go.includes('fs.WalkDir(ui.Files'));
+});
+
+test('basic adapter retains owned lifecycle, exact source/loaded-byte proof and advanced route branch', async () => {
+  const runner = await source('ui/gohtmx/tests/browser/visual-state-audit-baseline.mjs');
+  for (const text of [
+    'validateBasicMatrix(matrix, await manifestResponse.json(), currentRevision)',
+    "assert.equal(sourceBase.sourceFiles.length, 0, 'basic captures require committed fixture and production sources')",
+    'basicSourcePrefixes.some(prefix => path.startsWith(prefix))',
+    "basicRootSelector : '[data-audit-main] > [data-ely-family]'",
+    "new URL('/components/audit', origin)",
+    "? basicFixturePackage : './examples/gohtmx/gallery'",
+    'const response = await route.fetch()',
+    'await route.fulfill({response, body: bytes})',
+    'candidate === request',
+    'await completed',
+    "loadedProof: 'owned-route identical bytes; exact browser requestfinished'",
+    'actualSHA256 !== loaded.sha256',
+    'chromium.launchPersistentContext(userDataDir',
+    'source pin changed',
+    'metadata.basicFixture',
+    'visualAssessment: \'pending; capture success is not a component visual pass\'',
+  ]) assert(runner.includes(text), text);
+  assert(runner.includes('basic phase1 requires an owned compiled fixture/export, not --base-url'));
+  assert(runner.includes("metadata.captureIdentity = {requested: item.componentIdentity, rendered: await root.getAttribute(options.fixture === 'basic' ? 'data-basic-component' : 'data-ely-component')"));
+});
+
+test('canonical hook includes only the separate pure test file, not a new test/browser command', async () => {
+  const pkg = JSON.parse(await source('package.json'));
+  const argument = ' ui/gohtmx/tests/browser/visual-state-audit-basic.test.mjs';
+  assert.equal(pkg.scripts['test:visual-regressions'].split(argument).length, 2);
+  const ownSource = await readFile(new URL('./visual-state-audit-basic.test.mjs', import.meta.url), 'utf8');
+  assert(!/^import .*from ['"](?:node:child_process|playwright)['"]/m.test(ownSource));
+});
+
+test('phase2 source-only classification is exact48, with datalist conditional and actual data-table controls',async()=>{
+  const {manifest}=await metadata(),contracts=manifest.basicNames.map(name=>basicActionContract(`basic/${name}`));
+  assert(contracts.every(Boolean));
+  assert.equal(contracts.filter(c=>c.classification==='noninteractive-canonical-fixture').length,17);
+  assert.equal(contracts.filter(c=>c.classification==='finite-actions').length,30);
+  assert.equal(contracts.filter(c=>c.classification==='conditional-no-associated-input').length,1);
+  assert.equal(basicActionContract('basic/data-table').steps.length,7);
+  for(const identity of ['input','forms/Input','basic/unknown','basic/input@second-enabled-option','basic/select@other'])assert.equal(basicActionContract(identity),null);
+  for(const c of contracts){assert(c.source);assert(c.scope);for(const s of c.steps)assert.equal(s.sourceSiteId,`basic-action:${c.identity}:${s.id}`);}
+  assert.match(basicActionContract('basic/file-dropzone').boundaries.join(' '),/not OS file-picker/);
+  assert.match(basicActionContract('basic/coordinate-display').boundaries.join(' '),/never writes to the user clipboard/);
+  assert.match(basicActionContract('basic/dialog').boundaries.join(' '),/fixture-host/);
+  const driver=runBasicActions.toString();assert(!driver.includes('force:true'));assert(!driver.includes('requestSubmit'));
+  assert(driver.includes('Disabled Beta must actually be rendered unavailable'));
+});
+
+test('phase2 source-only named variants have independent identities/hashes, never canonical promotion',async()=>{
+  const {matrix,manifest,revision}=await metadata();matrix.actionFixture=true;manifest.variants=[];
+  for(const template of basicActionVariants){
+    const identity=`basic/${template}@second-enabled-option`,canonical=matrix.auditCases.find(c=>c.template===template);
+    manifest.variants.push({name:identity,template,propsSHA256:'c'.repeat(64)});
+    matrix.auditCases.push({...structuredClone(canonical),caseId:`basic:${template}@second-enabled-option`,componentIdentity:identity,fixtureIdentity:`basic-fixture:${identity}`,fixturePropsSHA256:'c'.repeat(64),aliasMapping:{requestedName:identity,relation:'named-basic-action-variant'}});
+    assert.equal(basicActionContract(identity).variant,'second-enabled-option');
+  }
+  validateBasicActionMatrix(matrix,manifest,revision);
+  for(const mutate of [m=>m.auditCases.pop(),m=>m.actionFixture=false,m=>m.auditCases.at(-1).fixturePropsSHA256='d'.repeat(64),m=>m.auditCases.at(-1).componentIdentity='basic/select',m=>m.auditCases.at(-1).profileIds=['live-desktop-light'],m=>m.auditCases.at(-1).sourceSHA='d'.repeat(40)]){const bad=structuredClone(matrix);mutate(bad);assert.throws(()=>validateBasicActionMatrix(bad,manifest,revision));}
+  const bad=structuredClone(manifest);bad.variants[0].propsSHA256=bad.cases[0].propsSHA256;assert.throws(()=>validateBasicActionMatrix(matrix,bad,revision));
+});
+
+test('phase2 source-only runner routes basic without advanced registries and preserves fail-closed ownership',async()=>{
+  const runner=await source('ui/gohtmx/tests/browser/visual-state-audit-actions.mjs'),go=await source('adapters/gohtmx/tests/fixtures/basic-audit/main.go');
+  assert(runner.includes('if(!basic){\n  assert.equal(coverageManifest.source?.revision'));
+  assert(runner.includes('validateBasicActionMatrix(matrix,coverageManifest,expectedRevision)'));
+  assert(runner.includes('basic?basicFixturePackage'));
+  assert(runner.includes('sourceBefore.status===\'\'&&sourceAfter.status===\'\''));
+  assert(runner.includes('Every finite action requires owned before/after pixels'));
+  assert(runner.includes("if(result.status==='failed')break"));
+  assert(runner.includes('canvases:[...n.querySelectorAll(\'canvas\')].map(c=>c.toDataURL())'));
+  assert(runner.includes("fullRunGate:{safe:false,fullMatrixComplete:false"));
+  assert(go.includes('f.Name += "@second-enabled-option"'));
+  assert(go.includes('"Value": "gamma", "Label": "Caller Gamma"'));
+  assert(!go.includes('"Disabled"] = false'));
+  const camera=await source('ui/gohtmx/tests/browser/visual-state-audit-drivers.mjs');
+  assert(camera.includes('[data-audit-main]>[data-basic-component],[data-audit-twin]>[data-basic-component]'));
+});
+
+test('phase2 source-only basic native button cannot pass a synthetic click or unexpected event',async()=>{
+  const contract=basicActionContract('basic/button');
+  for(const [trusted,unexpected,passes]of [[true,false,true],[false,false,false],[true,true,false]]){
+    const state={__basicEvents:[],__basicCursor:0,__basicClicks:[],__basicClickCursor:0};
+    const root={page:()=>({}),evaluate:async fn=>fn(state),locator:()=>({click:async()=>{state.__basicClicks.push({trusted});if(unexpected)state.__basicEvents.push({type:'ely:action'});}})};
+    const execute=()=>runBasicActions(contract,root,async(id,control,action,verify)=>{assert.equal(id,'activate');assert.equal(control,'button');await action();await verify();});
+    if(passes)await execute();else await assert.rejects(execute);
+  }
+});
+
+test('phase2 source-only PIN requires exact four-event native/runtime sequence, digits and next focus',async()=>{
+  const contract=basicActionContract('basic/pin-input'),base='basic-pin-input-main',name=base+'_value';
+  for(const defect of [null,'missing-slot-change','wrong-order','trusted-hidden','untrusted-slot','wrong-id','wrong-name','wrong-aggregate','wrong-digits','wrong-focus','extra-event']){
+    const state={__basicEvents:[],__basicCursor:0};let digits=['1','2','3','4'],aggregate='1234',focused=false;
+    const slots={count:async()=>4,evaluateAll:async fn=>fn(digits.map(value=>({value}))),nth:i=>({evaluate:async()=>i===1&&focused}),first:()=>({fill:async text=>{
+      assert.equal(text,'9');digits=['9','2','3','4'];aggregate='9234';focused=true;
+      state.__basicEvents=[{type:'input',target:base+'-pin-0',name:null,value:'9',checked:false,trusted:true,detail:0},{type:'input',target:base+'-value',name,value:'9234',checked:false,trusted:false,detail:null},{type:'change',target:base+'-value',name,value:'9234',checked:false,trusted:false,detail:null},{type:'change',target:base+'-pin-0',name:null,value:'9',checked:false,trusted:true,detail:null}];
+      if(defect==='missing-slot-change')state.__basicEvents.pop();if(defect==='wrong-order')state.__basicEvents.reverse();if(defect==='trusted-hidden')state.__basicEvents[1].trusted=true;if(defect==='untrusted-slot')state.__basicEvents[0].trusted=false;
+      if(defect==='wrong-id')state.__basicEvents[0].target='twin-pin-0';if(defect==='wrong-name')state.__basicEvents[1].name='twin_value';if(defect==='wrong-aggregate')state.__basicEvents[1].value='9235';
+      if(defect==='wrong-digits')digits[3]='5';if(defect==='wrong-focus')focused=false;if(defect==='extra-event')state.__basicEvents.push({...state.__basicEvents[3]});
+    }})};
+    const root={page:()=>({}),evaluate:async fn=>fn(state),locator:s=>s==='[data-ui-pin-slot]'?slots:s==='[data-ui-component="pin-input"]'?{getAttribute:async()=>base}:{getAttribute:async()=>name,inputValue:async()=>aggregate}};
+    const execute=()=>runBasicActions(contract,root,async(id,control,action,verify)=>{assert.equal(id,'replace-digit');await action();return verify();});
+    if(defect)await assert.rejects(execute,undefined,defect);else await execute();
+  }
+});
+
+test('phase2 source-only map zoom derives exact projection while reset retains exact seed and event cardinality',async()=>{
+  const contract=basicActionContract('basic/map-view'),id='basic-map-view-main',center='37.5665, 126.9780';
+  // Independently pinned binary64 result for two centered Mercator round trips, not a browser-event read.
+  const projected={latitude:37.566500000000005,longitude:126.97800000000007,zoom:2};
+  for(const defect of [null,'latitude','longitude','zoom','id','component','value','reset-projected','reset-zoom','reset-missing','reset-duplicate','oversized','clamped']){
+    const state={__basicEvents:[],__basicCursor:0};let zoom=1,active='zoom',completed=0;
+    const detail=(reset=false)=>({action:'change-viewport',viewport:reset?{latitude:37.5665,longitude:126.978,zoom:1}:{...projected},value:center,id,component:'maps/MapView'});
+    const emit=reset=>{
+      const payload=detail(reset);
+      if(!reset){
+        if(defect==='latitude')payload.viewport.latitude+=1e-10;
+        if(defect==='longitude')payload.viewport.longitude+=1e-10;
+        if(defect==='zoom')payload.viewport.zoom=3;
+        if(defect==='id')payload.id='basic-map-view-twin';
+        if(defect==='component')payload.component='maps/MapPopup';
+        if(defect==='value')payload.value='0.0000, 0.0000';
+      }else{
+        if(defect==='reset-projected')payload.viewport={...projected,zoom:1};
+        if(defect==='reset-zoom')payload.viewport.zoom=2;
+      }
+      state.__basicEvents=reset&&defect==='reset-missing'?[]:[{type:'ely:action',detail:payload}];
+      if(reset&&defect==='reset-duplicate')state.__basicEvents.push(structuredClone(state.__basicEvents[0]));
+    };
+    const map={getAttribute:async key=>({'data-map-zoom':String(zoom),'data-map-center':center,id,'data-map-latitude':'37.5665','data-map-longitude':'126.978'})[key]};
+    const canvas={evaluate:async fn=>fn.toString().includes('clientHeight')?(defect==='oversized'?1025:defect==='clamped'?1000:360):active==='canvas'};
+    const plus={click:async()=>{zoom=2;active='zoom';emit(false);},evaluate:async()=>active==='zoom'};
+    const stop=new Error('stop before unrelated marker actions');
+    const root={page:()=>({keyboard:{press:async key=>{if(key==='Shift+Tab'){active='canvas';return;}assert.equal(key,'0');zoom=1;emit(true);}}}),evaluate:async fn=>fn(state),locator:selector=>{
+      if(selector==='[data-ui-component="map-view"]')return map;
+      if(selector==='[data-map-canvas]')return canvas;
+      if(selector==='[data-map-zoom="in"]')return plus;
+      if(selector==='[data-map-zoom="reset"]')return {count:async()=>0};
+      throw new Error('Unexpected locator '+selector);
+    }};
+    const execute=()=>runBasicActions(contract,root,async(action,selector,act,verify)=>{
+      if(completed===2)throw stop;
+      assert.equal(action,['zoom-in','reset-view'][completed]);state.__basicCursor=0;
+      await act();await verify();completed++;
+    });
+    await assert.rejects(execute,error=>defect?error!==stop:error===stop,defect??'positive');
+    if(!defect)assert.equal(completed,2);
+  }
+  // A successful map payload cannot make an independently changed twin safe.
+  const result={initialTwinSHA256:'a'.repeat(64),receipts:[{beforeCaptureOwnership:{ownedStateEvidence:true}}]};
+  await retainBasicFailureEvidence(result,new Error('map twin drift'),async()=>'b'.repeat(64),async()=>({ownedStateEvidence:true}));
+  assert.equal(result.status,'failed');assert.equal(result.failureEvidence.gaps.length,2);
+});
+
+test('phase2 source-only textarea uses explicit native newline edits with exact intermediate events and blur commit',async()=>{
+  const contract=basicActionContract('basic/textarea');assert.deepEqual(contract.steps.map(s=>s.id),['edit','commit']);
+  for(const defect of [null,'wrong-intermediate','untrusted','wrong-input-type','wrong-data','missing-final','extra-input','early-change','wrong-final-value','missing-commit','wrong-commit']){
+    const state={__basicEvents:[],__basicCursor:0},id='basic-textarea-main',name=id+'_value',calls=[],receipts=[];let current='Caller text';
+    const emit=type=>{const event={type,target:id,name,value:current,checked:null,trusted:true,detail:type==='input'?0:null,inputType:type==='input'?(current.endsWith('\n')?'insertLineBreak':'insertText'):null,data:type==='input'&&!current.endsWith('\n')?current.split('\n').at(-1):null};
+      if(defect==='wrong-intermediate'&&current==='first\n')event.value='first';if(defect==='untrusted')event.trusted=false;
+      if(defect==='wrong-commit'&&type==='change')event.value='wrong';
+      if(defect==='wrong-input-type'&&type==='input')event.inputType='insertFromPaste';if(defect==='wrong-data'&&type==='input')event.data='wrong';
+      if(!(defect==='missing-final'&&current.endsWith('fourth'))&&!(defect==='missing-commit'&&type==='change'))state.__basicEvents.push(event);
+      if(defect==='extra-input'&&current==='first')state.__basicEvents.push({...event});
+      if(defect==='early-change'&&current==='first')state.__basicEvents.push({...event,type:'change',detail:null});};
+    const control={getAttribute:async key=>({id,name})[key],inputValue:async()=>current,
+      fill:async text=>{assert.equal(text,'first','Do not reintroduce ambiguous multiline fill');calls.push(['fill',text]);current=text;emit('input');},
+      press:async key=>{calls.push(key);if(key==='Enter'){current+='\n';emit('input');}else{assert.equal(key,'Tab');emit('change');}}};
+    const root={page:()=>({keyboard:{insertText:async text=>{calls.push(['insertText',text]);current+=defect==='wrong-final-value'&&text==='fourth'?'wrong':text;emit('input');}}}),locator:selector=>{assert.equal(selector,'textarea');return control;},evaluate:async fn=>fn(state)};
+    const execute=()=>runBasicActions(contract,root,async(action,selector,act,verify)=>{assert.equal(action,contract.steps[receipts.length].id);const receipt={action};receipts.push(receipt);state.__basicCursor=state.__basicEvents.length;try{await act(receipt);receipt.assertedState=await verify();}finally{receipt.events=state.__basicEvents.slice(state.__basicCursor);}});
+    if(defect){await assert.rejects(execute,undefined,defect);assert(receipts[0].nativeEditObservations.length>0,'Raw observations survive failed assertions');
+      if(defect==='wrong-final-value')assert.equal(receipts[0].nativeEditObservations.at(-1).value,'first\nsecond\nthird\nwrong');
+      if(defect==='untrusted')assert.equal(receipts[0].events[0].trusted,false);
+      if(defect==='wrong-intermediate')assert.equal(receipts[0].nativeEditObservations[1].events[1].value,'first');}
+    else{await execute();assert.deepEqual(calls,[['fill','first'],'Enter',['insertText','second'],'Enter',['insertText','third'],'Enter',['insertText','fourth'],'Tab']);
+      assert.deepEqual(receipts[0].events.map(e=>e.value),['first','first\n','first\nsecond','first\nsecond\n','first\nsecond\nthird','first\nsecond\nthird\n','first\nsecond\nthird\nfourth']);
+      assert.equal(receipts[1].events.length,1);assert.equal(receipts[1].events[0].type,'change');assert.equal(receipts[1].events[0].value,'first\nsecond\nthird\nfourth');}
+  }
+});
+
+test('phase2 source-only basic failure receipt retains native events even when action or verification throws',async()=>{
+  const runner=await source('ui/gohtmx/tests/browser/visual-state-audit-actions.mjs');
+  assert(runner.includes('try{await action(receipt);await sleepFrames(page);receipt.events=await root.evaluate(n=>n.__basicEvents.slice(n.__basicCursor));receipt.assertedState=await verify();receipt.assertionsPassed=true;}'));
+  assert(runner.includes('catch(error){actionError=error;throw error;}'));
+  assert(runner.includes('receipt.eventReadError=String(error);if(!actionError)throw error;'));
+  assert(runner.includes("e.target.tagName==='TEXTAREA'?{inputType:e.inputType??null,data:e.data??null}:{}"));
+  const driver=runBasicActions.toString();assert(driver.includes("await nativeTypes(t==='date-picker'?['input','change']:['input'])"),'Input keeps its one-event edit oracle');
+});
+
+test('phase2 source-only failure twin/camera proofs never mask the original error or approve failed actions',async()=>{
+  const initial='a'.repeat(64),changed='b'.repeat(64),original=new Error('original functional assertion');
+  for(const defect of [null,'before-twin-read','after-twin-read','before-twin-changed','camera-mutates-twin','lost-root','context-only','missing-before','raw-events-lost','missing-initial']){
+    const result={status:'running',initialTwinSHA256:initial,receipts:[{beforeCaptureOwnership:{ownedStateEvidence:true}}]};
+    if(defect==='missing-before')delete result.receipts[0].beforeCaptureOwnership;
+    if(defect==='raw-events-lost')result.receipts[0].eventReadError='original page lost';
+    if(defect==='missing-initial')delete result.initialTwinSHA256;
+    const calls=[];let reads=0;
+    await retainBasicFailureEvidence(result,original,async()=>{
+      reads++;calls.push('twin');if((defect==='before-twin-read'&&reads===1)||(defect==='after-twin-read'&&reads===2))throw new Error('secondary twin read');
+      return defect==='before-twin-changed'||(defect==='camera-mutates-twin'&&reads===2)?changed:initial;
+    },async()=>{calls.push('camera');if(defect==='lost-root')throw new Error('secondary root lost');return {ownedStateEvidence:defect!=='context-only',component:{path:'retained-failure-after.png'}};});
+    assert.deepEqual(calls,['twin','camera','twin'],'Both independent twin observations and camera are attempted despite secondary failures');
+    assert.equal(result.status,'failed');assert.equal(result.error,String(original));assert.equal(result.failureEvidence.originalError,String(original));
+    assert.equal(result.failureEvidence.gaps.length>0,Boolean(defect));assert.equal(result.failureEvidence.safe,undefined);
+    if(!defect){assert.equal(result.finalTwinSHA256,initial);assert.equal(result.failureEvidence.afterCaptureOwnership.ownedStateEvidence,true);}
+    if(defect==='camera-mutates-twin')assert.equal(result.finalTwinSHA256,changed);
+    if(defect==='lost-root')assert.match(result.failureEvidence.gaps.find(g=>g.stage==='after-camera').error,/secondary root lost/);
+  }
+  const runner=await source('ui/gohtmx/tests/browser/visual-state-audit-actions.mjs');
+  assert(runner.includes('await retainBasicFailureEvidence(result,error,peer,async()=>'));
+  assert(runner.includes("phase:'failure-after'"));assert(runner.includes("'Failed action root must still exist'"));
+  assert(runner.includes("assert.equal(await root.getAttribute('data-basic-props-sha256'),item.fixturePropsSHA256)"));
+  assert(runner.includes('result.assetError=String(error);result.error??=String(error)'));
+  assert(runner.includes('result.contextCloseError=String(error);result.error??=String(error)'));
+});
+
+test('phase2 source-only radio variant records Gamma, disabled pointer, then native ArrowLeft skipping Beta',async()=>{
+  const contract=basicActionContract('basic/radio-group@second-enabled-option');
+  assert.deepEqual(contract.steps.map(s=>s.id),['select-gamma','disabled-beta-pointer','keyboard-skip-beta']);
+  assert.deepEqual(basicActionContract('basic/radio-group').steps.map(s=>s.id),['selected-option']);
+  for(const defect of [null,'already-focused','pointer-change','pointer-occluded','beta-enabled','beta-checked','skip-beta-focus','wrong-order','untrusted','wrong-value','wrong-name','extra-event','tab-change','tab-unreachable']){
+    const name='basic-radio-group-second-enabled-option-main_value',state={__basicEvents:[],__basicCursor:0};
+    const nodes=Object.fromEntries(['alpha','beta','gamma'].map(value=>[value,{id:'',tagName:'INPUT',name,value,disabled:value==='beta',checked:value==='alpha'}]));
+    let focus=null;const calls=[],asserted=[];
+    const emit=value=>{const events=['input','change'].map(type=>({type,target:null,name,value,checked:true,trusted:true,detail:null}));
+      if(defect==='wrong-order')events.reverse();if(defect==='untrusted')events[0].trusted=false;if(defect==='wrong-value')events[0].value='beta';if(defect==='wrong-name')events[0].name='twin_value';if(defect==='extra-event')events.push({...events[0]});state.__basicEvents.push(...events);};
+    const select=value=>{for(const n of Object.values(nodes))n.checked=n.value===value;focus=nodes[value];};
+    // Evaluate only the driver's two focus observations; no DOM/browser globals are installed.
+    const locator=value=>({count:async()=>1,isDisabled:async()=>nodes[value].disabled,isChecked:async()=>nodes[value].checked,
+      getAttribute:async key=>nodes[value][key],boundingBox:async()=>({x:10,y:20,width:12,height:12}),
+      evaluate:async fn=>fn.toString().includes('elementFromPoint')?defect!=='pointer-occluded':fn.toString().includes('document.activeElement')?focus===nodes[value]:fn(nodes[value]),
+      click:async()=>{calls.push('select-gamma');select('gamma');emit('gamma');if(defect==='beta-enabled')nodes.beta.disabled=false;if(defect==='beta-checked')nodes.beta.checked=true;}});
+    const page={mouse:{click:async(x,y)=>{calls.push(['pointer',x,y]);if(defect==='pointer-change'){select('beta');emit('beta');}else if(defect!=='already-focused')focus=null;}},
+      keyboard:{press:async key=>{calls.push(key);if(key==='Tab'){if(defect!=='tab-unreachable')focus=nodes.gamma;if(defect==='tab-change'){select('alpha');emit('alpha');}}else if(key==='ArrowLeft'){select('alpha');emit('alpha');if(defect==='skip-beta-focus')focus=nodes.beta;}else assert.fail('Unexpected native key');}}};
+    const root={page:()=>page,locator:selector=>locator(selector.match(/value="(\w+)"/)[1]),evaluate:async fn=>fn.toString().includes('document.activeElement')?{id:focus?.id||null,value:focus?.value??null,tag:focus?.tagName||'BODY'}:fn(state)};
+    const execute=()=>runBasicActions(contract,root,async(id,control,action,verify)=>{
+      assert.equal(id,contract.steps[asserted.length].id);state.__basicCursor=state.__basicEvents.length;await action();asserted.push(await verify());
+    });
+    if(defect&&defect!=='already-focused')await assert.rejects(execute,undefined,defect);
+    else{await execute();assert.deepEqual(calls,['select-gamma',['pointer',16,26],...(defect==='already-focused'?[]:['Tab']),'ArrowLeft']);
+      assert.deepEqual(asserted[1],{pointer:{x:16,y:26},selected:'gamma',betaDisabled:true,betaChecked:false});
+      assert.deepEqual(asserted[2],{tabSetup:defect==='already-focused'?[]:[{id:null,value:'gamma',tag:'INPUT'}],preselection:'gamma',preArrowFocus:'gamma',key:'ArrowLeft',selected:'alpha',focused:'alpha',betaDisabled:true,betaChecked:false});}
+  }
+  const driver=runBasicActions.toString(),radio=driver.slice(driver.indexOf("if(t==='radio-group'&&variant)"),driver.indexOf("}else if(t==='button')"));
+  assert(!radio.includes('.focus('));assert(!radio.includes('force:'));assert(!radio.includes("press('ArrowRight')"));assert(radio.includes("press('ArrowLeft')"));
+});
+
+test('phase2 source-only profile/surface agreement and exact explicit selection precede allocation',async()=>{
+  const {matrix}=await metadata();
+  for(const mode of ['live','static'])for(const size of ['desktop','mobile'])for(const theme of ['light','dark']){
+    const profileId=`${mode}-${size}-${theme}`;basicActionSurface(profileId,`${mode}-basic`);
+    assert.throws(()=>basicActionSurface(profileId,`${mode==='live'?'static':'live'}-basic`));
+  }
+  const options={profileId:'live-desktop-light',surface:'live-basic',families:[],caseIds:matrix.auditCases.slice(0,21).map(c=>c.caseId),full:false,pilot:20};
+  assert.deepEqual(selectBasicActionCases(matrix,options).map(c=>c.caseId),options.caseIds,'Implicit default pilot must preserve all21 explicit IDs');
+  assert.equal(selectBasicActionCases(matrix,{...options,caseIds:[]}).length,20);
+  assert.equal(selectBasicActionCases(matrix,{...options,caseIds:[],full:true}).length,48);
+  const expanded=structuredClone(matrix);for(let i=0;i<5;i++)expanded.auditCases.push({...matrix.auditCases[0],caseId:`variant:${i}`,componentIdentity:`variant/${i}`});
+  assert.equal(selectBasicActionCases(expanded,{...options,caseIds:[],full:true}).length,53);
+  assert.throws(()=>selectBasicActionCases(matrix,{...options,caseIds:[...options.caseIds,'basic:missing']}));
+  const sourceRunner=await source('ui/gohtmx/tests/browser/visual-state-audit-actions.mjs');
+  assert(sourceRunner.includes('if(!basic){\n  if (options.families.length)'));
+  assert(sourceRunner.includes('isDeepStrictEqual(reports.map(c=>c.caseId),cases.map(c=>c.caseId))'));
+});
+
+test('phase2 source-only map reset preserves canonical absence and uses actual native canvas keyboard path',async()=>{
+  const driver=runBasicActions.toString(),template=await source('ui/gohtmx/templates/ely-map.html'),runtime=await source('ui/gohtmx/assets/ely-map.js');
+  assert(template.includes('{{if .ShowReset}}'));
+  assert(driver.includes("assert.equal(await one('[data-map-zoom=\"reset\"]').count(),0"));
+  assert(driver.includes("page.keyboard.press('Shift+Tab')"));assert(driver.includes("page.keyboard.press('0')"));
+  assert(!driver.includes("one('[data-map-zoom=\"reset\"]').click()"));
+  assert(runtime.includes("event.target !== canvas"));assert(runtime.includes("event.key === '0'"));
+  assert(runtime.includes('center = initialCenter.slice(); zoom = initialZoom; apply(true)'));
+});
+
+test('phase2 pure table oracle rejects wrong filtered row and no-op descending sort',()=>{
+  const alice=['Caller Alice','Ready'],bob=['Caller Bob','Pending'];
+  assertBasicTableRows([alice],[alice]);assertBasicTableRows([bob,alice],[bob,alice]);
+  assert.throws(()=>assertBasicTableRows([bob],[alice]));
+  assert.throws(()=>assertBasicTableRows([alice,bob],[bob,alice]));
+  assert(basicActionContract('basic/data-table').steps.some(s=>s.id==='sort-descending'));
+});
+
+test('phase2 pure loaded-asset gate rejects missing wrong failed and incomplete delivery',()=>{
+  assert.equal(requiredBasicActionAssets.length,11);assert.equal(requiredBasicActionAssets.at(-1),'/assets/basic-audit-actions.css');
+  const expected=Object.fromEntries(requiredBasicActionAssets.map(path=>[path,'a'.repeat(64)]));
+  const good=requiredBasicActionAssets.map(path=>({path,bytes:8,sha256:expected[path],expectedSHA256:expected[path],loadedProof:'owned-route identical bytes; exact browser requestfinished'}));
+  assertBasicActionAssets(good,expected);
+  for(const mutate of [rows=>rows.pop(),rows=>rows[0].sha256='b'.repeat(64),rows=>rows[0].error='failed',rows=>delete rows[0].loadedProof,rows=>rows[0].bytes=0,rows=>rows[0].expectedSHA256='b'.repeat(64),rows=>rows.push({path:'/assets/unmapped.js',bytes:8,loadedProof:rows[0].loadedProof})]){
+    const bad=structuredClone(good);mutate(bad);assert.throws(()=>assertBasicActionAssets(bad,expected));
+  }
+});
+
+test('phase2 pure delivery mechanism requires the exact requestfinished object and unchanged response bytes',async()=>{
+  for(const path of ['/assets/app.css','/assets/basic-audit-actions.css']){
+    const bytes=Buffer.from('owned asset'),url='http://owned.test'+path,sha=createHash('sha256').update(bytes).digest('hex');
+    for(const mode of ['ok','wrong-bytes','missing','wrong-request','failed','closed','http-error','redirect']){
+      const page=new EventEmitter(),context=new EventEmitter();page.context=()=>context;
+      const request={url:()=>url,failure:()=>mode==='failed'?{errorText:'failed'}:null};let delivered;
+      const route={request:()=>request,fetch:async()=>({ok:()=>mode!=='http-error',url:()=>mode==='redirect'?url+'?redirected':url,body:async()=>bytes}),fulfill:async options=>{delivered=options.body;
+        if(mode==='missing')return;
+        if(mode==='closed'){context.emit('close');return;}
+        page.emit(mode==='failed'?'requestfailed':'requestfinished',mode==='wrong-request'?{...request}:request);
+      }};
+      const run=()=>fulfillBasicActionAsset(route,page,{[path]:mode==='wrong-bytes'?'b'.repeat(64):sha},5);
+      if(mode==='ok'){const proof=await run();assert.equal(proof.sha256,sha);assert.deepEqual(delivered,bytes);}
+      else await assert.rejects(run(),undefined,mode);
+      assert.equal(page.listenerCount('requestfinished'),0);assert.equal(page.listenerCount('requestfailed'),0);assert.equal(context.listenerCount('close'),0);
+    }
+  }
+  const runner=await source('ui/gohtmx/tests/browser/visual-state-audit-actions.mjs');
+  assert(runner.includes('fulfillBasicActionAsset(route,page,expectedAssets)'));
+  assert(runner.includes('assertBasicActionAssets(result.productionAssets,expectedAssets)'));
+  assert(runner.includes("c.status!=='failed'&&c.assetsVerified"));
+  assert(runner.includes("sourceBefore.files.find(f=>f.path==='ui/gohtmx'+path)?.sha256"));
+});
+
+test('phase2 source-only slider calibration requires independent same-geometry RGBA and old-clip loss proof',async()=>{
+  const camera=await source('ui/gohtmx/tests/browser/visual-state-audit-camera.browser.test.mjs');
+  for(const guard of [
+    "test('action camera slider checked-frame allocation contains native paint in four profiles'",
+    "for(const value of [0,50,100])for(const focused of [false,true])",
+    "await page.keyboard.press('Tab')",
+    'assert.equal(stage.allocated.rect.width,stage.unallocated.rect.width',
+    'assert.equal(stage.allocated.rect.height,stage.unallocated.rect.height',
+    'assert.equal(stage.allocated.rect.x,stage.unallocated.rect.x',
+    'assert.deepEqual(stage.allocated.metrics,stage.unallocated.metrics',
+    'assert.deepEqual(captured.bounds.camera.clip,frameClip',
+    'assert.deepEqual(stage.afterCamera,stage.beforeCamera',
+    'frameClip.x>0&&frameClip.y>0&&frameClip.x+frameClip.width<viewport.width',
+    '#basic-slider-main::-webkit-slider-thumb{opacity:0!important}',
+    'new OffscreenCanvas(bitmap.width,bitmap.height)',
+    'assert(stage.pixels.changed>0',
+    'assert(stage.pixels.outsideOld>0',
+    'assert.equal(stage.pixels.outsideFrame,0',
+    'assert.equal(stage.pixels.atReferenceEdge,0',
+    'assert.equal(stage.pixels.cropMismatch,0',
+    'assert(stage.pixels.trackChanged>0',
+    'assert.equal(stage.pixels.trackOutsideFrame,0)',
+    'stage.pixels.focusChanged>0&&stage.pixels.focusOutsideOld>0',
+    'assert.deepEqual(stage.refocused,before',
+    'assert.deepEqual(await twin(),peer)',
+    'assert.equal(receipt.states.length,24)',
+  ])assert(camera.includes(guard),guard);
+  assert(camera.includes('NOT11-asset requestfinished production delivery proof'));
+  assert(camera.includes('<span data-slot="slider" class="${wrapperClass}">'));
+});
+
+test('phase2 source-only spacing CSS is action-only and required by the existing frozen asset proof',async()=>{
+  const fixture=await source('adapters/gohtmx/tests/fixtures/basic-audit/main.go');
+  const css=fixture.match(/const fixtureCSS = `([^`]+)`/)[1];
+  assert.equal(createHash('sha256').update(css).digest('hex'),'70dcc04d1c99b164f180c10049674f54af2bdcdb5b8a001686809c7a263e8b65');
+  assert(fixture.includes('const actionCSS = `.basic-record{margin-block-end:100vh}.basic-pair{row-gap:100vh}.basic-frame[data-basic-component="basic/slider"]{padding:1rem .5rem;margin-inline:-.5rem}`'));
+  assert(fixture.includes('{{if .Actions}}<link rel="stylesheet" href="/assets/basic-audit-actions.css">'));
+  assert(fixture.includes('add("assets/basic-audit-actions.css", []byte(actionCSS))'));
+  const allocation=fixture.match(/const actionCSS = `([^`]+)`/)[1];
+  assert.equal(allocation.split('basic/slider').length,2,'Only the exact slider host receives allocation');
+  assert(!/overflow|clip|opacity|input|focus|height|width/.test(allocation),'Allocation must not restyle or hide the component');
+  const expected=Object.fromEntries(requiredBasicActionAssets.map(path=>[path,'a'.repeat(64)]));
+  const delivered=requiredBasicActionAssets.map(path=>({path,bytes:8,sha256:expected[path],expectedSHA256:expected[path],loadedProof:'owned-route identical bytes; exact browser requestfinished'}));
+  assert.throws(()=>assertBasicActionAssets(delivered.filter(r=>!r.path.endsWith('basic-audit-actions.css')),expected));
+  const bad=structuredClone(delivered);bad.at(-1).sha256='b'.repeat(64);assert.throws(()=>assertBasicActionAssets(bad,expected));
+  const runner=await source('ui/gohtmx/tests/browser/visual-state-audit-actions.mjs');
+  assert(runner.includes("['/assets/basic-audit.css','/assets/basic-audit-actions.js','/assets/basic-audit-actions.css']"));
+});
+
+test('phase2 pure modal selector rejects foreign, multiple, nonmodal and duplicate-ID targets; framing preserves focus',async()=>{
+  for(const defect of [null,'closed','foreign','nested-root','multiple','nonmodal','peer-root','missing-id','missing-root-id','duplicate-panel-id','duplicate-root-id','foreign-owner','focus-changed','ownership-changed']){
+    const active={id:'native-close'},peer={id:'peer'},node={id:'main-frame'};let scrolled=0;
+    const panel={id:'owned-dialog',open:defect!=='closed',getAttribute:()=>defect==='foreign-owner'?'peer':null,matches:()=>defect!=='nonmodal',closest:()=>['foreign','nested-root'].includes(defect)?peer:node};
+    const doc={activeElement:active,querySelectorAll:selector=>selector==='dialog[open]'?(panel.open?[panel,...(defect==='multiple'?[{id:'foreign-dialog',open:true}]:[])]:[]):[node,panel,...(defect==='duplicate-panel-id'?[{id:panel.id}]:[]),...(defect==='duplicate-root-id'?[{id:node.id}]:[])]};
+    Object.assign(node,{ownerDocument:doc,matches:()=>defect!=='peer-root',contains:element=>element===panel&&defect!=='foreign',scrollIntoView:options=>{assert.deepEqual(options,{block:'start',inline:'nearest',behavior:'instant'});scrolled++;if(defect==='focus-changed')doc.activeElement=peer;if(defect==='ownership-changed')panel.open=false;}});
+    if(defect==='missing-id')panel.id='';
+    if(defect==='missing-root-id')node.id='';
+    if(defect==='closed'){assert.equal(basicOwnedModal(node),null);continue;}
+    if(defect&&!['focus-changed','ownership-changed'].includes(defect)){assert.throws(()=>basicOwnedModal(node),undefined,defect);continue;}
+    const selection=basicOwnedModal(node);assert.deepEqual(selection,{id:'owned-dialog',checkedRootID:'main-frame'});
+    const target={count:async()=>1},root={evaluate:async fn=>fn(node),page:()=>({locator:selector=>{assert.equal(selector,'[id="owned-dialog"]');return target;}})};
+    const frame=()=>basicModalCaptureTarget(root,selection);
+    if(defect)await assert.rejects(frame,undefined,defect);else{assert.equal(await frame(),target);assert.equal(doc.activeElement,active);assert.equal(scrolled,1);}
+  }
+  const runner=await source('ui/gohtmx/tests/browser/visual-state-audit-actions.mjs');
+  assert(runner.includes('await basicModalCaptureTarget(root,modal)'));assert(runner.includes('captureComponent(page,target,componentPath,modal?.checkedRootID)'));
+  assert(runner.includes("scope:'viewport-context-before-framing',countsAsOwnedEvidence:false"));
+});

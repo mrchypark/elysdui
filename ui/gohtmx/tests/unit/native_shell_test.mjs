@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import {mock} from 'node:test';
+import {readFileSync} from 'node:fs';
 import {zoomStep,zoomSteps,resizeEdge,moveTab,validShellItems,initNativeShell} from '../../assets/ely-api-native-shell.js';
+const nativeCSS=readFileSync(new URL('../../assets/ely-api-native.css',import.meta.url),'utf8');
+assert.match(nativeCSS,/\.ely-native-app-mark\{[^}]*background:var\(--surface-sunken,#f5f3f0\);color:inherit;/,'large shell app marks must inherit their theme foreground after setting a sunken surface');
 assert.deepEqual(zoomSteps,[50,67,75,80,90,100,110,125,150,175,200]);
 assert.equal(zoomStep(67,-1),50);assert.equal(zoomStep(83.125,1),90);assert.equal(zoomStep(83.125,-1),80);assert.equal(zoomStep(200,1),200);assert.equal(zoomStep(50,-1),50);assert.equal(zoomStep(150,0),100);
 for(const [point,edge] of [[[0,0],'nw'],[[50,0],'n'],[[99,0],'ne'],[[99,50],'e'],[[99,99],'se'],[[50,99],'s'],[[0,99],'sw'],[[0,50],'w'],[[50,50],''],[[-1,0],'']])assert.equal(resizeEdge(...point,100,100),edge);

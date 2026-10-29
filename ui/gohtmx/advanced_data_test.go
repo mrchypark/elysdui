@@ -139,3 +139,35 @@ func TestDrawingToolsMountsTheRenderedSVG(t *testing.T) {
 		t.Fatal("DrawingTools rendered no mountable drawing surface")
 	}
 }
+
+func TestChartSVGViewBoxIsValidWhenOmittedAndEscapesCallerValue(t *testing.T) {
+	tpl, err := NewTemplates()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		name, viewBox, want string
+	}{
+		{name: "missing", want: `viewBox="0 0 320 120"`},
+		{name: "empty", viewBox: "", want: `viewBox="0 0 320 120"`},
+		{name: "custom", viewBox: `0 0 240 80&"`, want: `viewBox="0 0 240 80&amp;&#34;"`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			props := map[string]any{"Chapter": "charts", "Kind": "LineChart", "Points": "0,90 80,40 160,60", "GridPath": "M0 100H160"}
+			if test.viewBox != "" || test.name == "empty" {
+				props["ViewBox"] = test.viewBox
+			}
+			var body bytes.Buffer
+			if err := tpl.ExecuteTemplate(&body, "ely-api-chart", props); err != nil {
+				t.Fatal(err)
+			}
+			markup := body.String()
+			if !strings.Contains(markup, test.want) {
+				t.Fatalf("SVG viewBox missing/preserved: want %q in %s", test.want, markup)
+			}
+			if strings.Contains(markup, `viewBox=""`) || !strings.Contains(markup, `points="0,90 80,40 160,60"`) {
+				t.Fatalf("invalid or geometry-free chart SVG: %s", markup)
+			}
+		})
+	}
+}

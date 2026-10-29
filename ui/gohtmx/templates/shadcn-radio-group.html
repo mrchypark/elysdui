@@ -1,6 +1,6 @@
-{{/* Native radios share a Name. Options contain Value and Label. */}}
+{{/* Native radios share a Name. Options contain Value, Label and optional Disabled. */}}
 {{define "radio-group"}}
 <div data-slot="radio-group" role="group" aria-label="{{.AriaLabel}}">
-{{range .Options}}<label data-slot="radio-item"><input data-slot="radio" type="radio" name="{{$.Name}}" value="{{.Value}}"{{if eq .Value $.Value}} checked{{end}}{{if $.Required}} required{{end}}{{if $.Disabled}} disabled{{end}}><span>{{.Label}}</span></label>{{end}}
+{{range .Options}}<label data-slot="radio-item"><input data-slot="radio" type="radio" name="{{$.Name}}" value="{{.Value}}"{{if eq .Value $.Value}} checked{{end}}{{if $.Required}} required{{end}}{{if or $.Disabled .Disabled}} disabled{{end}}><span>{{.Label}}</span></label>{{end}}
 </div>
 {{end}}

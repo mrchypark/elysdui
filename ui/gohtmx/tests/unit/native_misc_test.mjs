@@ -41,9 +41,22 @@ const declarations=css=>Object.fromEntries([...css.matchAll(/(--[\w-]+)\s*:\s*([
 const baseTokens={...declarations(inputCSS.match(/@theme\s*\{([^}]+)\}/)[1]),...declarations(inputCSS.match(/:root\s*\{([^}]+)\}/)[1]),...declarations(apiCSS.slice(0,apiCSS.indexOf('}')))};
 const darkTokens={...baseTokens,...declarations(inputCSS.match(/:root\[data-theme='dark'\]\s*\{([^}]+)\}/)[1])};
 const resolve=(value,tokens,depth=0)=>{assert.ok(depth<12,'token cycle');const key=value.match(/^var\((--[\w-]+)\)$/)?.[1];return key?resolve(tokens[key],tokens,depth+1):value};
+// Match the base button:not([data-slot]) specificity, then win by source order.
+const cookieSelector="[data-ely-family='native'] button[data-cookies='all']";
+const cookieRule=miscCSS.slice(miscCSS.indexOf(cookieSelector)).match(/^[^{]+\{([^}]+)\}/)?.[1];
+assert.ok(cookieRule,'cookie primary rule must include button to beat the native base background');
+const nativeBaseIndex=miscCSS.lastIndexOf("[data-ely-family='native'] button:not([data-slot='button']){");
+assert.ok(nativeBaseIndex>=0,'native base button rule must exist for the specificity regression');
+assert.ok(miscCSS.indexOf(cookieSelector)>nativeBaseIndex,'cookie primary paint must follow the equally specific base rule');
+assert.match(cookieRule,/(?:^|;)background:var\(--color-primary\);/);
+assert.match(cookieRule,/(?:^|;)color:var\(--color-primary-foreground,var\(--on-accent\)\);/);
+assert.match(cookieRule,/(?:^|;)border-color:var\(--color-primary\)/);
 const luminance=hex=>{assert.match(hex,/^#[\da-f]{6}$/i);return [1,3,5].map(i=>parseInt(hex.slice(i,i+2),16)/255).map(c=>c<=.04045?c/12.92:((c+.055)/1.055)**2.4).reduce((n,c,i)=>n+c*[.2126,.7152,.0722][i],0)};
+for(const [name,tokens] of [['light',baseTokens],['dark',darkTokens]]){const bg=luminance(resolve('var(--color-primary)',tokens)),fg=luminance(resolve('var(--color-primary-foreground)',tokens));assert.ok((Math.max(bg,fg)+.05)/(Math.min(bg,fg)+.05)>=7,`${name} cookie primary contrast must be at least 7:1`)}
 for(const [name,tokens] of [['light',baseTokens],['dark',darkTokens]]){const bg=luminance(resolve('var(--surface-sunken)',tokens)),fg=luminance(resolve('var(--foreground)',tokens)),ratio=(Math.max(bg,fg)+.05)/(Math.min(bg,fg)+.05);assert.ok(ratio>=7,`${name} license contrast ${ratio} is below 7:1`)}
 assert.match(miscCSS,/component-examples:has\(> \[data-ely-family='native'\] \[data-misc-clock\]\)\{[^}]*align-items:flex-end/);
 assert.match(miscCSS,/component-examples:has\(> \[data-ely-family='native'\] \[data-misc-transfer\]\)\{[^}]*gap:8px/);
-assert.equal(fixture.BarcodeDisplay.SourceDescriptionOnly,true);assert.equal(fixture.PrintButton.SourceNote,'PrintButton: gpui has no print API.');assert.equal(fixture.PrintButton.SourceWarning,true);
-console.log('Native misc visual regression: light/dark license contrast ≥7:1, scoped source rows, description-only barcode and short print warning passed.');
+assert.equal(fixture.BarcodeDisplay.SourceDescriptionOnly,undefined);assert.match(fixture.BarcodeDisplay.SourceNote,/source-only in this native demo/);assert.equal(fixture['Rating Widget'],undefined);assert.equal(fixture.ShareSheet,undefined);assert.equal(fixture.PrintButton.SourceNote,'PrintButton: gpui has no print API.');assert.equal(fixture.PrintButton.SourceWarning,true);
+for(const props of Object.values(fixture))assert.equal(Object.hasOwn(props,'GallerySourceOnlyNotice'),false,'gallery fixture flag must not become caller/schema data');
+assert.doesNotMatch(readFileSync('ui/gohtmx/templates/ely-api-native.html','utf8'),/GallerySourceOnlyNotice/,'public templates must render SourceNote without a gallery-specific property');
+console.log('Native misc visual regression: light/dark license contrast ≥7:1, scoped gallery-only notices, caller SourceNote preservation, and ShareSheet action rendering passed.');

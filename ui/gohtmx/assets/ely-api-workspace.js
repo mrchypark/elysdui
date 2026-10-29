@@ -389,10 +389,11 @@ register('workspace', root => {
   onRoot('click', event => {
     const button=event.target.closest('[data-ws-trash-confirm]');
     if(!button||button.disabled)return;
-    if(button.dataset.confirming!=='true'){event.preventDefault();event.stopImmediatePropagation();button.dataset.confirming='true';button.dataset.confirmLabel=button.textContent;button.textContent='Confirm '+button.textContent.toLowerCase();}
-    else {button.dataset.confirming='false';button.textContent=button.dataset.confirmLabel;}
+    const label=button.querySelector('[data-ws-trash-label]')||button;
+    if(button.dataset.confirming!=='true'){event.preventDefault();event.stopImmediatePropagation();button.dataset.confirming='true';button.dataset.confirmLabel=label.textContent;label.textContent='Confirm '+label.textContent.toLowerCase();}
+    else {button.dataset.confirming='false';label.textContent=button.dataset.confirmLabel;}
   }, true);
-  onRoot('focusout', event => {const button=event.target.closest('[data-ws-trash-confirm]');if(button?.dataset.confirming==='true'){button.dataset.confirming='false';button.textContent=button.dataset.confirmLabel;}});
+  onRoot('focusout', event => {const button=event.target.closest('[data-ws-trash-confirm]');if(button?.dataset.confirming==='true'){button.dataset.confirming='false';(button.querySelector('[data-ws-trash-label]')||button).textContent=button.dataset.confirmLabel;}});
   onRoot('click', event => {
     const cover=event.target.closest('[data-ws-cover-change]');if(cover&&!cover.disabled){const choices=root.querySelector('[data-ws-cover-choices]');choices.hidden=!choices.hidden;cover.setAttribute('aria-expanded',String(!choices.hidden));}
     if(event.target.closest('[data-ws-template-use]'))root.querySelector('[data-ws-template][aria-selected="true"]:not([hidden]) [data-ely-action="select-template"]')?.click();

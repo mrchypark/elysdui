@@ -319,13 +319,30 @@ final class ElyProfileUITests: XCTestCase {
         field.tap()
         let old = field.value as? String ?? ""
         field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: old.count) + text)
+        let keyboard = app.keyboards.firstMatch
+        XCTAssertTrue(keyboard.isHittable, "Expected the software keyboard to be hittable before Return.")
         // The return key may be a checkmark rather than a localized "Done" button.
         // Send Return to the actual control so UITextFieldDelegate handles dismissal.
         field.typeText("\n")
+        // iOS can retain a non-visible keyboard node in the accessibility tree after dismissal.
         let dismissed = XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "exists == false"), object: app.keyboards.firstMatch
+            predicate: NSPredicate(format: "exists == false OR hittable == false"), object: keyboard
         )
-        XCTAssertEqual(XCTWaiter.wait(for: [dismissed], timeout: 5), .completed,
-                       "The native Return key must dismiss the keyboard before saving or taking screenshots.")
+        let result = XCTWaiter.wait(for: [dismissed], timeout: 5)
+        if result != .completed {
+            let diagnostic = "Keyboard dismissal did not become visible within 5s. " +
+                "exists=\(keyboard.exists); hittable=\(keyboard.isHittable); " +
+                "keyboardFrame=\(String(describing: keyboard.frame)); " +
+                "appFrame=\(String(describing: app.frame))"
+            let attachment = XCTAttachment(string: diagnostic)
+            attachment.name = "Keyboard dismissal accessibility state"
+            attachment.lifetime = .keepAlways
+            add(attachment)
+        }
+        XCTAssertEqual(result, .completed,
+                       "The native Return key must dismiss the visible keyboard before saving or taking screenshots. " +
+                       "exists=\(keyboard.exists); hittable=\(keyboard.isHittable); " +
+                       "keyboardFrame=\(String(describing: keyboard.frame)); " +
+                       "appFrame=\(String(describing: app.frame))")
     }
 }

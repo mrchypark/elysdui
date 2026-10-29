@@ -1,0 +1,3663 @@
+import {resolveCaseActionSites} from './visual-state-audit-instrument.mjs';
+import assert from 'node:assert/strict';
+import {readFile,writeFile} from 'node:fs/promises';
+import {createHash} from 'node:crypto';
+import {captureBounds} from './visual-state-audit-bounds.mjs';
+import {createRequire} from 'node:module';
+import {dirname,resolve} from 'node:path';
+import {codeSpans} from '../../assets/ely-code.js';
+
+export function requestedStateProofSafe(proof){
+  return proof?.status==='passed'&&Array.isArray(proof.receipts)&&proof.receipts.length>0&&Array.isArray(proof.visualActionabilityGaps)&&proof.visualActionabilityGaps.length===0;
+}
+
+// Chromium143 retained cause diagnostic090dd21e…71fc41: observed AX names, not locale-position guesses.
+const nativeDateTargets={
+  'forms/DateTimePicker':{initial:'2026-10-20T12:30',target:'2026-10-21T13:45',edits:[['Day Day',1],['Hours Hours',1],['Minutes Minutes',15]]},
+  'forms/WeekPicker':{initial:'2026-W42',target:'2026-W43',edits:[['Week Week',1]]},
+};
+const temporalAXCases={
+  'forms/MonthPicker':{kind:'MonthPicker',type:'month',field:'input[type="month"]',initial:'2026-10',steps:['period-edit','period-commit'],edits:{'period-edit':{initial:'2026-10',values:['2026-11'],segment:'Month Month',key:'ArrowUp'}}},
+  'forms/TimePicker':{kind:'DatePicker',type:'time',field:'input[type="time"]',initial:'12:30',steps:['period-edit','period-commit'],edits:{'period-edit':{initial:'12:30',values:['13:30'],segment:'Hours Hours',key:'ArrowUp'}}},
+  'forms/DateRangePicker':{kind:'DatePicker',type:'date',field:'input[data-ely-date-start]',initial:'2026-10-20',steps:['date-range-open','date-range-start','date-range-invalid','date-range-repair','date-range-close','date-range-reopen','date-range-escape'],edits:{'date-range-start':{initial:'2026-10-20',values:['2026-10-21'],segment:'Day Day',key:'ArrowUp'},'date-range-invalid':{initial:'2026-10-22',values:['2026-10-21','2026-10-20'],segment:'Day Day',key:'ArrowDown'},'date-range-repair':{initial:'2026-10-20',values:['2026-10-21','2026-10-22','2026-10-23'],segment:'Day Day',key:'ArrowUp'}}},
+};
+
+export async function temporalAXKeyboardRoute(identity,stage,observe,press,trace){
+  const fixture=temporalAXCases[identity];assert(fixture,'Exact temporal identity required');
+  const read=async label=>{const state=await observe();assert(trace.length<32,'Temporal AX trace cap');trace.push({label,...state});return state;};
+  let state=await read('initial');
+  if(stage==='period-commit'){
+    const target=fixture.edits['period-edit'].values[0],{segments}=nativeDateFocusedSegment(state);
+    for(let i=0;i<=segments.length&&state.active;i++){assert.equal(state.value,target);await press('Tab');state=await read('departure');}
+    assert.equal(state.active,false,'Temporal native Tab departure failed');assert.equal(state.value,target);return state;
+  }
+  const edit=fixture.edits[stage];assert(edit,'Exact temporal edit required');assert.equal(state.value,edit.initial);
+  for(let i=0;;i++){
+    const {focused,segments}=nativeDateFocusedSegment(state),target=segments.findIndex(n=>n.name?.value===edit.segment);assert(target>=0,'Owned temporal segment unavailable');
+    if(focused.name.value===edit.segment)break;
+    assert(i<8,'Temporal segment navigation cap');await press(segments.indexOf(focused)<target?'Tab':'Shift+Tab');state=await read('segment');assert.equal(state.value,edit.initial,'Navigation alone must not edit the value');
+  }
+  for(const value of edit.values){assert.equal(nativeDateFocusedSegment(state).focused.name.value,edit.segment);await press(edit.key);state=await read('edit');assert.equal(state.value,value,'Exact native temporal intermediate value');assert.equal(state.valid,!(stage==='date-range-invalid'&&value==='2026-10-20'),'Exact range validity at every native edit');}
+  return state;
+}
+
+export function assertTemporalAXStep(identity,stage,proof){
+  const fixture=temporalAXCases[identity];assert(fixture?.steps.includes(stage));assert.equal(proof.identity,identity);assert(proof.rootID);assert.equal(proof.truncated,false);assert.equal(proof.foreign,false);
+  const range=identity==='forms/DateRangePicker',control=stage==='date-range-invalid'||stage==='date-range-repair'?'end':'start',edit=fixture.edits[stage];
+  const native=(type,control,value,key=null)=>({type,control,value,key,trusted:true});
+  if(edit){
+    let cursor=0;
+    const events=proof.events;
+    if(stage==='date-range-invalid'){assert.deepEqual(events[cursor++],native('blur','start','2026-10-21'));assert.deepEqual(events[cursor++],native('click','end','2026-10-22'));}
+    else if(!range)assert.deepEqual(events[cursor++],native('click','start',edit.initial));
+    let prior=edit.initial;
+    while(events[cursor]?.type==='keydown'&&['Tab','Shift+Tab'].includes(events[cursor].key)){assert.deepEqual(events[cursor],native('keydown',control,prior,events[cursor].key));cursor++;}
+    for(const value of edit.values){
+      assert.deepEqual(events.slice(cursor,cursor+4),[native('keydown',control,prior,edit.key),native('input',control,value),native('change',control,value),{type:'ely:change',detail:{id:proof.rootID,component:identity,name:control==='end'?'caller_value_end':'caller_value',value,checked:false,type:fixture.type}}]);cursor+=4;prior=value;
+    }
+    assert.equal(cursor,events.length,'No extra temporal events or duplicate payloads');assert.equal(proof.value,prior);
+  }else if(stage==='period-commit'){
+    const value=fixture.edits['period-edit'].values[0];assert.equal(proof.value,value);assert.equal(proof.active,false);
+    assert(proof.events.length>=2&&proof.events.length<=9);assert.deepEqual(proof.events.at(-1),native('blur','start',value));
+    for(const event of proof.events.slice(0,-1))assert.deepEqual(event,native('keydown','start',value,'Tab'));
+  }else{
+    const events=stage==='date-range-close'?[native('blur','end','2026-10-23'),native('click','trigger','')]:stage==='date-range-escape'?[native('keydown','start','2026-10-21','Escape'),native('blur','start','2026-10-21')]:[native('click','trigger',''),native('blur','trigger','')];assert.deepEqual(proof.events,events);
+  }
+  if(range){const opened=['date-range-open','date-range-start','date-range-invalid','date-range-repair','date-range-reopen'].includes(stage);assert.deepEqual(proof.range,{start:stage==='date-range-open'?'2026-10-20':'2026-10-21',end:['date-range-open','date-range-start'].includes(stage)?'2026-10-22':stage==='date-range-invalid'?'2026-10-20':'2026-10-23',endValid:stage!=='date-range-invalid',validationMessage:stage==='date-range-invalid'?'End must not be before start.':'',expanded:opened,hidden:!opened});}
+  return proof;
+}
+export function nativeDateFocusedSegment(observation){
+  assert(observation.active,'Native date field lost focus before editing');
+  const segments=observation.ax.filter(n=>!n.ignored&&n.role?.value==='spinbutton'&&observation.ownedIDs.includes(n.backendDOMNodeId));
+  assert(segments.length>0&&segments.length<=8,'Native date AX segments unavailable');
+  assert.equal(new Set(segments.map(n=>n.name?.value)).size,segments.length,'Ambiguous native date segment names');
+  const focused=segments.filter(n=>n.properties?.some(p=>p.name==='focused'&&p.value?.value===true));
+  assert.equal(focused.length,1,'Native date focused editable segment ambiguous or unavailable');
+  assert(focused[0].properties?.some(p=>p.name==='settable'&&p.value?.value===true),'Native date focused segment is not editable');
+  return {focused:focused[0],segments};
+}
+export function assertNativeDateResult(identity,stage,proof){
+  const fixture=nativeDateTargets[identity];assert(fixture,'Only exact DateTimePicker and WeekPicker use AX keyboard editing');
+  assert.equal(proof.value,fixture.target,'Native date must reach the original exact target');assert.equal(proof.valid,true);
+  const events=proof.events;assert(events.length<=128&&!proof.truncated,'Native date event collection truncated');
+  assert(events.filter(e=>['keydown','input','change','blur'].includes(e.type)).every(e=>e.trusted&&e.targetId===proof.fieldID),'Native date event trust/target mismatch');
+  const changes=events.filter(e=>e.type==='change');
+  if(stage==='edit'){
+    assert.equal(events.filter(e=>e.type==='keydown'&&e.key==='ArrowUp').length,fixture.edits.reduce((n,[,count])=>n+count,0));
+    assert.equal(changes.length,fixture.edits.reduce((n,[,count])=>n+count,0));
+    assert.deepEqual(events.filter(e=>e.type==='input').map(e=>e.value),changes.map(e=>e.value),'Native input/change values must agree');
+    assert.deepEqual(events.filter(e=>e.type==='ely:change').map(e=>e.detail),changes.map(e=>({id:proof.rootID,component:identity,name:'caller_value',value:e.value,checked:false,type:identity==='forms/WeekPicker'?'week':'datetime-local'})),'Exact native changes must have exact component public payloads');
+    assert.equal(proof.active,true);
+  }else{
+    assert.equal(stage,'commit');assert.equal(proof.active,false,'Bounded native Tabs must actually leave the field');
+    assert(events.some(e=>e.type==='keydown'&&e.key==='Tab'));assert(events.some(e=>e.type==='blur'));
+    assert(!events.some(e=>['input','change','ely:change'].includes(e.type)),'Tab-only departure must not fabricate another edit');
+  }
+  return proof;
+}
+export async function nativeDateKeyboardRoute(identity,stage,observe,press,trace){
+  const fixture=nativeDateTargets[identity];assert(fixture,'Exact native date identity required');
+  const read=async label=>{const state=await observe();trace.push({label,...state});assert(trace.length<=48,'Native date observation bound');return state;};
+  let state=await read(stage+'-start');
+  if(stage==='commit'){
+    const {segments}=nativeDateFocusedSegment(state);
+    for(let i=0;i<segments.length+1&&state.active;i++){await press('Tab');state=await read('leave-'+i);assert.equal(state.value,fixture.target);}
+    assert.equal(state.active,false,'Native date bounded Tab departure failed');return state;
+  }
+  assert.equal(stage,'edit');assert.equal(state.value,fixture.initial);
+  for(const [name,count]of fixture.edits){
+    for(let n=0;;n++){
+      const {focused,segments}=nativeDateFocusedSegment(state),target=segments.findIndex(node=>node.name?.value===name);assert(target>=0,'Observed native segment identity unavailable: '+name);
+      if(focused.name.value===name)break;
+      assert(n<8,'Native date segment navigation bound');await press(segments.indexOf(focused)<target?'Tab':'Shift+Tab');state=await read('navigate-'+name);
+    }
+    for(let n=0;n<count;n++){
+      assert.equal(nativeDateFocusedSegment(state).focused.name.value,name);
+      const before=state.value;await press('ArrowUp');state=await read('increment-'+name+'-'+n);assert.notEqual(state.value,before,'Native ArrowUp must change the actual DOM value');assert.equal(state.valid,true);
+    }
+  }
+  assert.equal(state.value,fixture.target,'AX keyboard edits must reach exact fixture target');return state;
+}
+
+async function observeOwnedNativeDate(field,cdp){
+  const id=await field.evaluate(node=>CSS.escape(node.id));assert(id);
+  const {root}=await cdp.send('DOM.getDocument',{depth:0});
+  const {nodeId}=await cdp.send('DOM.querySelector',{nodeId:root.nodeId,selector:'#'+id});assert(nodeId);
+  const {node}=await cdp.send('DOM.describeNode',{nodeId,depth:0});assert((node.shadowRoots||[]).length<=2);
+  const ownedIDs=new Set(),ax=[];
+  for(const backendNodeId of [node.backendNodeId,...(node.shadowRoots||[]).map(n=>n.backendNodeId)]){
+    const {object}=await cdp.send('DOM.resolveNode',{backendNodeId});assert(object.objectId);
+    try{
+      const list=await cdp.send('Runtime.callFunctionOn',{objectId:object.objectId,functionDeclaration:`function(){const nodes=[],queue=[this];while(queue.length){const node=queue.shift();if(nodes.length+queue.length+node.childNodes.length>=64)throw Error('Native date DOM bound');nodes.push(node);for(const child of node.childNodes)queue.push(child);}return nodes;}`});
+      assert(!list.exceptionDetails&&list.result.objectId,'Native date UA shadow traversal unavailable');
+      try{const properties=await cdp.send('Runtime.getProperties',{objectId:list.result.objectId,ownProperties:true});assert(properties.result.length<=66);
+        for(const property of properties.result.filter(p=>/^\d+$/.test(p.name))){const {node:child}=await cdp.send('DOM.describeNode',{objectId:property.value.objectId,depth:0});ownedIDs.add(child.backendNodeId);assert(ownedIDs.size<=64);}
+      }finally{await cdp.send('Runtime.releaseObject',{objectId:list.result.objectId});}
+    }finally{await cdp.send('Runtime.releaseObject',{objectId:object.objectId});}
+  }
+  for(const backendNodeId of ownedIDs){const partial=await cdp.send('Accessibility.getPartialAXTree',{backendNodeId,fetchRelatives:false});assert(partial.nodes.length<=1);for(const node of partial.nodes){assert((node.name?.value||'').length<=128&&(node.properties||[]).length<=32);ax.push({backendDOMNodeId:node.backendDOMNodeId,ignored:node.ignored,role:{value:node.role?.value},name:{value:node.name?.value},value:node.value?.value,properties:node.properties?.filter(p=>['focused','settable'].includes(p.name))});}}
+  return {...await field.evaluate(node=>({value:node.value,valid:node.validity.valid,active:document.activeElement===node})),ownedIDs:[...ownedIDs],ax};
+}
+
+export function assertJsonHighlight(source,highlight){
+  const expected=codeSpans(source,true).map(({kind,text})=>({kind,text}));
+  assert.equal(highlight.text,`${source}\n`,'JSON preview text must exactly follow the edited source');
+  assert.deepEqual(highlight.tokens,expected,'JSON preview token classes and text must match the source highlighter');
+  assert.equal(highlight.elementCount,expected.length,'JSON preview must contain only the expected direct token spans');
+  return expected;
+}
+
+export const isDurationOwnUnitCommit=(identity,stepId)=>identity==='forms/DurationPicker'&&stepId==='duration-commit';
+
+export function assertFormTwinWitness(before,after,{allowPairedNativeCommitFocus=false,allowPairedNativeCommitReturn=false,allowOwnUnitSelectCommitFocus=false}={}){
+  assert(before&&typeof before==='object'&&after&&typeof after==='object','Native form twin witness is required');
+  assert(before.snapshot&&typeof before.snapshot==='object'&&after.snapshot&&typeof after.snapshot==='object','Native form twin snapshot is required');
+  assert.equal(typeof before.focusWithin,'boolean','Native form twin before-focus state is required');
+  assert.equal(typeof after.focusWithin,'boolean','Native form twin after-focus state is required');
+  assert(Array.isArray(before.events),'Native form twin before-event list is required');
+  assert(Array.isArray(after.events),'Native form twin after-event list is required');
+  assert.deepEqual(after.snapshot,before.snapshot,'Native form action must preserve the independent twin snapshot');
+  if(allowPairedNativeCommitReturn){
+    assert.equal(allowPairedNativeCommitFocus,false,'Paired focus entry and return cannot be combined');
+    assert.equal(before.focusWithin,true);assert.equal(after.focusWithin,false);
+    const focus=before.focusTarget;
+    assert(Array.isArray(before.snapshot.controls),'Paired return requires the exact twin control inventory');
+    assert(focus?.id&&focus.matchesExpectedControl&&focus.matchingControlCount===1&&before.snapshot.controls.some(control=>control.id===focus.id),'Return requires the previously authorized exact paired control');
+    assert.deepEqual(before.events,[]);
+    assert.deepEqual(after.events,[{type:'focusout',isTrusted:true,target:focus.eventTarget,targetId:focus.id}],'Returning from paired native Tab may emit only its trusted focusout');
+    return true;
+  }
+  assert.equal(before.focusWithin,false,'Native form action must start outside the independent twin');
+  assert.deepEqual(before.events,[],'Native form twin must have no pre-action events');
+  if(allowPairedNativeCommitFocus){
+    if(after.focusWithin){
+      assert(Array.isArray(before.snapshot.controls),'Native commit requires the exact twin control inventory');
+      const focus=after.focusTarget;
+      assert(focus&&focus.id&&before.snapshot.controls.some(control=>control.id===focus.id),'Native commit focus must target a control in the exact independent twin');
+      assert.equal(focus.matchesExpectedControl,true,'Native commit focus must target the paired form control');
+      assert.equal(focus.matchingControlCount,1,'The paired form control must be unique in the independent twin');
+      assert.deepEqual(after.events,[{type:'focusin',isTrusted:true,target:focus.eventTarget,targetId:focus.id}],'Native commit may dispatch only one trusted focusin on the paired twin control');
+    }else if(allowOwnUnitSelectCommitFocus){
+      assert.deepEqual(after.events,[],'Duration own-unit focus route must leave the independent twin event-free');
+      const destination=after.outsideFocusTarget;
+      assert(destination&&destination.id&&destination.name,'Duration commit must prove its actual own unit-select focus destination');
+      assert.equal(destination.matchesExpectedControl,true,'Duration commit must focus its own exact unit select');
+      assert.equal(destination.matchingControlCount,1,'Duration own unit select must be unique');
+      assert.match(destination.name,/_unit$/,'Duration focus destination must be the component unit selector');
+    }else{
+      assert.equal(after.focusWithin,true,'Native commit Tab must focus the paired control in the independent twin');
+    }
+  }else{
+    assert.equal(after.focusWithin,false,'Native form action must not move focus into the independent twin');
+    assert.deepEqual(after.events,before.events,'Native form action must not dispatch events in the independent twin');
+  }
+  return true;
+}
+
+export async function inventoryReceipt(path){
+  const bytes=await readFile(path);
+  return {path,sha256:createHash('sha256').update(bytes).digest('hex'),data:JSON.parse(bytes)};
+}
+export async function inventoryDrift(initial){
+  const ending=await inventoryReceipt(initial.path);
+  return {path:initial.path,initialSHA256:initial.sha256,endingSHA256:ending.sha256,stable:initial.sha256===ending.sha256};
+}
+export async function persistDirectCaseFailure({caseId,error,receipts,currentState,nativePayload,diagnosticError},writeReceipt){
+  const receipt={caseId,error:{name:error?.name??'Error',message:error?.message??String(error),stack:error?.stack??null},receipts,
+    currentState:currentState??null,nativePayload:nativePayload??null,...(diagnosticError?{diagnosticError}: {})};
+  await writeReceipt(receipt);
+  return receipt;
+}
+export async function retainFailurePayload(failureDiagnostics,key,readPayload){
+  try{failureDiagnostics[key]=await readPayload();}
+  catch(error){failureDiagnostics[`${key}Error`]={name:error?.name??'Error',message:error?.message??String(error),stack:error?.stack??null};}
+}
+export async function cleanupPreservingPrimary(cleanup,primaryError,failureDiagnostics,key='presenceCleanupError'){
+  try{await cleanup();}
+  catch(error){
+    failureDiagnostics[key]={name:error?.name??'Error',message:error?.message??String(error),stack:error?.stack??null};
+    if(!primaryError)throw error;
+  }
+}
+export async function probeFailureStateAndPayload(failureDiagnostics,readState,readNativePayload){
+  let currentState=null,nativePayload=failureDiagnostics.localPicker??failureDiagnostics.temporalAX??failureDiagnostics.rangeNative??failureDiagnostics.pathNative??failureDiagnostics.regionalForms??failureDiagnostics.localStudio??failureDiagnostics.complexForms??failureDiagnostics.presenceNativeEvents??failureDiagnostics.eightFormsNative??failureDiagnostics.nativeDate??failureDiagnostics.durationNative??null;const errors=[];
+  for(const [key,cleanup,phase] of [['localPicker','localPickerCleanupError','local-picker'],['temporalAX','temporalAXCleanupError','temporal-ax'],['rangeNative','rangeCleanupError','range-native'],['pathNative','pathCleanupError','path-native'],['regionalForms','regionalCleanupError','regional-forms']]){
+    if(failureDiagnostics[key+'Error'])errors.push({phase:phase+'-payload',...failureDiagnostics[key+'Error']});
+    if(failureDiagnostics[cleanup])errors.push({phase:phase+'-cleanup',...failureDiagnostics[cleanup]});
+  }
+  if(failureDiagnostics.localStudioError)errors.push({phase:'local-studio-payload',...failureDiagnostics.localStudioError});
+  if(failureDiagnostics.localStudioCleanupError)errors.push({phase:'local-studio-cleanup',...failureDiagnostics.localStudioCleanupError});
+  if(failureDiagnostics.complexFormsError)errors.push({phase:'complex-forms-payload',...failureDiagnostics.complexFormsError});
+  if(failureDiagnostics.complexCleanupError)errors.push({phase:'complex-forms-cleanup',...failureDiagnostics.complexCleanupError});
+  if(failureDiagnostics.presenceCleanupError)errors.push({phase:'cleanup',...failureDiagnostics.presenceCleanupError});
+  if(failureDiagnostics.presenceNativeEventsError)errors.push({phase:'presence-native-payload',...failureDiagnostics.presenceNativeEventsError});
+  if(failureDiagnostics.eightFormsNativeError)errors.push({phase:'eight-forms-native-payload',...failureDiagnostics.eightFormsNativeError});
+  if(failureDiagnostics.eightFormsCleanupError)errors.push({phase:'eight-forms-cleanup',...failureDiagnostics.eightFormsCleanupError});
+  if(failureDiagnostics.durationNativeError)errors.push({phase:'duration-native-payload',...failureDiagnostics.durationNativeError});
+  if(failureDiagnostics.durationNativeCleanupError)errors.push({phase:'duration-native-cleanup',...failureDiagnostics.durationNativeCleanupError});
+  try{currentState=await readState();}catch(error){errors.push({phase:'current-state',name:error?.name??'Error',message:error?.message??String(error),stack:error?.stack??null});}
+  if(nativePayload===null&&!['complexForms','localStudio','localPicker','temporalAX','rangeNative','pathNative','regionalForms','presenceNativeEvents','eightFormsNative','durationNative'].some(key=>failureDiagnostics[key+'Error']))try{nativePayload=await readNativePayload();}catch(error){errors.push({phase:'native-payload',name:error?.name??'Error',message:error?.message??String(error),stack:error?.stack??null});}
+  return {currentState,nativePayload,...(errors.length?{diagnosticError:errors}:{})};
+}
+// No unhandled page error has a verified exception in this audit.
+export const unhandledBrowserErrors=errors=>errors.filter(error=>error.type==='pageerror');
+
+// Playwright's default caret hiding writes inline styles on every control,
+// including twins; its cleanup can leave an added empty style attribute.
+// Avoid that preparation rather than restoring over real application changes.
+export const screenshotWithoutCaretMutation=(surface,options)=>surface.screenshot({...options,caret:'initial'});
+
+// Keep the frozen baseline geometry helper; adapt only proven empty CSS clips,
+// without changing the DOM, computed styles, or the baseline capture path.
+const actionBounds=new Function('node',`
+  const nativeStyle=window.getComputedStyle.bind(window);
+  const getComputedStyle=element=>{
+    const style=nativeStyle(element);
+    return /^inset\\(50%(?: 50%){0,3}\\)$/.test(style.clipPath)?{display:'none'}:style;
+  };
+  return (${activeOutlineBounds.toString()})(node, (${captureBounds.toString()})(node));
+`);
+
+// Measured owned focus outlines, including focus-within ancestors; never generic paint padding.
+export function activeOutlineBounds(node,bounds){
+  const focused=document.activeElement;
+  if(!focused||!node.contains(focused))return bounds;
+  let result=outline(focused,bounds);
+  if(result.focusOutline?.status==='unsupported')return result;
+  const envelopes=[];
+  for(let parent=focused.parentElement;parent&&node.contains(parent);parent=parent.parentElement){
+    if(!parent.matches?.(':focus-within'))continue;
+    const next=outline(parent,result);
+    if(next.focusOutline?.status==='unsupported')return next;
+    if(next!==result)envelopes.push({tag:parent.localName,id:parent.id||null,outline:next.focusOutline});
+    result=next;
+  }
+  return envelopes.length?{...result,focusWithinOutlines:envelopes}:result;
+
+  function outline(active,bounds){
+  const style=getComputedStyle(active);
+  if(style.display==='none')return bounds;
+  const width=parseFloat(style.outlineWidth),offset=parseFloat(style.outlineOffset);
+  const alpha=style.outlineColor.match(/\/\s*([\d.]+%?)\s*\)$/)?.[1]??style.outlineColor.match(/^rgba\([^,]+,[^,]+,[^,]+,\s*([\d.]+%?)\s*\)$/)?.[1];
+  const rectJSON=rect=>rect?{left:rect.left,top:rect.top,right:rect.right,bottom:rect.bottom,width:rect.width,height:rect.height}:null;
+  const identity=element=>element?{tag:element.localName,namespace:element.namespaceURI,id:element.id||null,dataCsMinimap:element.hasAttribute?.('data-cs-minimap')??false,rect:rectJSON(element.getBoundingClientRect?.())}:null;
+  const diagnostic=(extra={})=>{
+    const ancestors=[];
+    for(let element=active;element;element=element.parentElement){
+      const s=getComputedStyle(element);
+      ancestors.push({...identity(element),position:s.position,overflowX:s.overflowX,overflowY:s.overflowY,overflowClipMargin:s.overflowClipMargin,clip:s.clip,clipPath:s.clipPath,transform:s.transform,translate:s.translate,rotate:s.rotate,scale:s.scale,perspective:s.perspective,filter:s.filter,contain:s.contain});
+    }
+    const offsetParent=identity(active.offsetParent);
+    const focusStyle=getComputedStyle(focused);
+    const owner=node.closest('[data-ely-family]');let dateRangePanelWitness;
+    if(owner?.dataset?.elyComponent==='forms/DateRangePicker'&&owner.dataset.elyKind==='DatePicker'){
+      const panels=[...owner.querySelectorAll('[data-ely-date-range-panel]')],selected=panels.length===1?panels[0]:null;
+      dateRangePanelWitness={ownerID:owner.id,panelCount:panels.length,selectedPanelOwned:!!selected&&selected.closest('[data-ely-family]')===owner,activeIsSelectedPanel:!!selected&&active===selected};
+    }
+    return {focused:{...identity(focused),type:focused.type||null,matchesFocusVisible:focused.matches?.(':focus-visible')??false,outlineStyle:focusStyle.outlineStyle,outlineWidth:focusStyle.outlineWidth,outlineOffset:focusStyle.outlineOffset,outlineColor:focusStyle.outlineColor,boxShadow:focusStyle.boxShadow,clientRects:[...(focused.getClientRects?.()??[])].map(rectJSON)},focusedOutline:active===focused?null:bounds.focusOutline??null,active:{...identity(active),matchesFocusVisible:active.matches?.(':focus-visible')??false,outlineStyle:style.outlineStyle,outlineWidth:style.outlineWidth,outlineOffset:style.outlineOffset,outlineColor:style.outlineColor,boxShadow:style.boxShadow,clientRects:[...(active.getClientRects?.()??[])].map(rectJSON)},offsetParent,ancestors,...(dateRangePanelWitness?{dateRangePanelWitness}:{}),...extra};
+  };
+  const gap=(reason,extra)=>({...bounds,focusOutline:{status:'unsupported',reason,diagnostic:diagnostic(extra)}});
+  const positioned=[];
+  if(active.closest('[data-ely-family]')!==node.closest('[data-ely-family]'))return gap('nested component focus ownership');
+  if(active!==focused&&style.boxShadow&&style.boxShadow!=='none')return gap('unbounded focus-within shadow');
+  if(style.outlineStyle==='none'||style.outlineStyle==='hidden'||width===0||style.outlineColor==='transparent'||(alpha!==undefined&&parseFloat(alpha)===0))return bounds;
+  if(style.outlineStyle==='auto'||!Number.isFinite(width)||!Number.isFinite(offset))return gap('unbounded outline style');
+  const rects=[...active.getClientRects()],fragmented=rects.length>1;
+  if(rects.length!==1&&!(fragmented&&active===focused&&active.localName==='a'&&active.namespaceURI==='http://www.w3.org/1999/xhtml'&&active.hasAttribute('href')&&style.display==='inline'&&style.position==='static'))return gap('fragmented focus outline');
+  if(fragmented&&style.boxShadow!=='none')return gap('unbounded inline focus shadow');
+  const margin=Math.max(0,width+offset);
+  if(fragmented&&rects.some(r=>![r.left,r.top,r.right,r.bottom].every(Number.isFinite)||r.right<=r.left||r.bottom<=r.top))return gap('invalid inline outline fragment');
+  const fragments=(fragmented?rects:[active.getBoundingClientRect()]).map(r=>({left:r.left-margin,top:r.top-margin,right:r.right+margin,bottom:r.bottom+margin}));
+  const paints=fragments.map(rect=>({...rect}));
+  for(let ancestor=active;ancestor;ancestor=ancestor.parentElement){
+    const s=getComputedStyle(ancestor);
+    if(['absolute','fixed'].includes(s.position))positioned.push({node:ancestor,containingBlock:s.position==='absolute'?ancestor.offsetParent:null});
+    if(s.display==='none'||Number(s.opacity)===0||s.contentVisibility==='hidden'||(ancestor===active&&s.visibility!=='visible'))return bounds;
+    if(ancestor!==active&&s.visibility!=='visible')return gap('ancestor visibility overridden by visible focused child');
+    // A self-only 2D translation is already included in the measured rectangle; outline width is unchanged.
+    const matrix=ancestor===active&&active===focused&&s.transform.match(/^matrix\(([^()]+)\)$/)?.[1].split(',').map(value=>value.trim());
+    const translated=matrix&&matrix.length===6&&matrix.every(value=>value!==''&&Number.isFinite(Number(value)))&&matrix.slice(0,4).every((value,index)=>Number(value)===[1,0,0,1][index]);
+    if(s.transform!=='none'&&!translated||s.translate !== 'none'||s.rotate !== 'none'||s.scale !== 'none'||s.perspective!=='none'||s.filter !== 'none'||s.clipPath!=='none'||s.clip!=='auto'||s.maskImage!=='none'||s.contain.split(/\s+/).some(value=>['paint','strict','content'].includes(value))||(s.zoom!=='normal'&&Number(s.zoom)!==1))return gap('complex outline geometry or clipping');
+    if(ancestor===active)continue;
+    const clipX=s.overflowX!=='visible',clipY=s.overflowY!=='visible';
+    if(!clipX&&!clipY)continue;
+    const clipRelationships=positioned.map(item=>{
+      const itemStyle=getComputedStyle(item.node),parent=item.node.parentElement,parentStyle=parent&&getComputedStyle(parent),containingBlockContained=!!item.containingBlock&&ancestor.contains(item.containingBlock);
+      const directSVGChild=item.node.namespaceURI==='http://www.w3.org/2000/svg'&&item.node.localName==='svg'&&parent===ancestor;
+      const directSVGParentNonStatic=!!parentStyle&&parentStyle.position!=='static';
+      const containingBlockState=item.containingBlock===null?'null':item.containingBlock===undefined?'undefined':'element';
+      const directSVGParentFallback=(item.containingBlock===null||item.containingBlock===undefined)&&itemStyle.position==='absolute'&&directSVGChild&&directSVGParentNonStatic;
+      const sameAsClipAncestor=item.node===ancestor;
+      return {node:identity(item.node),position:itemStyle.position,namespace:item.node.namespaceURI,offsetParent:identity(item.containingBlock),containingBlockState,directParent:identity(parent),clippingAncestor:identity(ancestor),clippingAncestorPosition:s.position,overflowX:s.overflowX,overflowY:s.overflowY,sameAsClipAncestor,containingBlockContained,directSVGChild,directSVGParentNonStatic,directSVGParentFallback,proven:sameAsClipAncestor||containingBlockContained||directSVGParentFallback};
+    });
+    const rejectedClipRelationships=clipRelationships.filter(item=>!item.proven);
+    if(rejectedClipRelationships.length)return gap('unproven positioned outline overflow clip relationship',{clipRelationships,rejectedClipRelationships});
+    if((s.overflowX==='clip'||s.overflowY==='clip')&&s.overflowClipMargin!=='0px')return gap('nonzero overflow clip margin');
+    // The border box over-approximates the padding and rounded overflow clip.
+    const box=ancestor.getBoundingClientRect();
+    for(const paint of paints){
+      if(clipX){paint.left=Math.max(paint.left,box.left);paint.right=Math.min(paint.right,box.right);}
+      if(clipY){paint.top=Math.max(paint.top,box.top);paint.bottom=Math.min(paint.bottom,box.bottom);}
+    }
+  }
+  if(fragmented&&paints.some(paint=>paint.right<=paint.left||paint.bottom<=paint.top))return gap('inline outline fragment fully clipped',{fragments,clippedFragments:paints});
+  const paint={left:Math.min(...paints.map(p=>p.left)),top:Math.min(...paints.map(p=>p.top)),right:Math.max(...paints.map(p=>p.right)),bottom:Math.max(...paints.map(p=>p.bottom))};
+  if(paint.right<=paint.left||paint.bottom<=paint.top)return bounds;
+  if(paint.left+scrollX<0||paint.top+scrollY<0)return gap('outline extends outside document camera');
+  const left=Math.min(bounds.clip.x,Math.floor(paint.left+scrollX)),top=Math.min(bounds.clip.y,Math.floor(paint.top+scrollY));
+  const right=Math.max(bounds.clip.x+bounds.clip.width,Math.ceil(paint.right+scrollX)),bottom=Math.max(bounds.clip.y+bounds.clip.height,Math.ceil(paint.bottom+scrollY));
+  return {...bounds,clip:{x:left,y:top,width:right-left,height:bottom-top},
+    extendsRoot:bounds.extendsRoot||paint.left<bounds.root.left||paint.right>bounds.root.right||paint.top<bounds.root.top||paint.bottom>bounds.root.bottom,
+    viewportTruncated:bounds.viewportTruncated||paint.left<0||paint.top<0||paint.right>innerWidth||paint.bottom>innerHeight,
+    focusOutline:{status:'bounded',width,offset,paint,...(fragmented?{fragments,clippedFragments:paints}:{})}};
+  }
+}
+
+export function visualCaptureGap(before,after){
+  if(before?.ownedStateEvidence&&after?.ownedStateEvidence)return null;
+  const gaps=[];
+  for(const [phase,state]of [['before',before],['after',after]]){
+    const entries=[['component',state?.component],...(state?.ownedOverlays||[]).map((overlay,index)=>[`overlay ${index+1}`,overlay])];
+    for(const [label,capture]of entries){
+      const witnesses=capture?.foreignDOMIntersections||[];
+      if(witnesses.length)gaps.push(`${phase} ${label} has foreign-painted witness${witnesses.length===1?'':'es'}: ${witnesses.map(item=>item.id||item.component||'unidentified peer').join(', ')}`);
+      if(capture?.focusOutlineGap)gaps.push(`${phase} ${label} focus-outline ownership is unproven: ${capture.focusOutlineGap}`);
+    }
+  }
+  return gaps.length?`Visual evidence withheld: ${gaps.join('; ')}`:'Visual evidence withheld: ownership gate failed without a recorded foreign-paint witness or focus-outline gap';
+}
+
+export function lastPaintedLicenseFragment(rects,clip,hasContent=true){
+  const rect=hasContent?[...rects].reverse().find(item=>['left','top','right','bottom','width','height'].every(key=>Number.isFinite(item[key]))&&item.width>0&&item.height>0):null;
+  return {rect:rect??null,visible:!!rect&&clip.right>clip.left&&clip.bottom>clip.top&&rect.left>=clip.left-1&&rect.right<=clip.right+1&&rect.top>=clip.top-1&&rect.bottom<=clip.bottom+1};
+}
+
+// A layout box is not painted evidence. Only an opaque, higher-stacked owned
+// panel can cover foreign paint; rounded/transparent corners remain checked.
+export function captureForeignPaint(node,{clip,checkedRootID}){
+  const box=r=>({x:r.left+scrollX,y:r.top+scrollY,width:r.width,height:r.height});
+  const intersect=(a,b)=>{const x=Math.max(a.x,b.x),y=Math.max(a.y,b.y),width=Math.min(a.x+a.width,b.x+b.width)-x,height=Math.min(a.y+a.height,b.y+b.height)-y;return width>0&&height>0?{x,y,width,height}:null;};
+  const opaque=color=>/^rgb\(/.test(color)||/^rgba\([^)]*,\s*1\)$/.test(color);
+  const emptyClip=e=>{for(let p=e;p;p=p.parentElement)if(/^inset\(50%(?: 50%){0,3}\)$/.test(getComputedStyle(p).clipPath))return true;return false;};
+  const style=getComputedStyle(node),r=box(node.getBoundingClientRect());
+  const radius=Math.max(...['borderTopLeftRadius','borderTopRightRadius','borderBottomLeftRadius','borderBottomRightRadius'].map(key=>{
+    const value=style[key];return /%/.test(value)?Infinity:Math.max(...value.split(' ').map(parseFloat));
+  }));
+  const covers=opaque(style.backgroundColor)&&style.backgroundImage==='none'&&style.backgroundClip==='border-box'&&style.clipPath==='none'&&style.maskImage==='none'&&style.position!=='static'&&(Number(style.zIndex)>0||node.matches(':modal,:popover-open'))&&Number.isFinite(radius)?[
+    {x:r.x+radius,y:r.y,width:r.width-2*radius,height:r.height},
+    {x:r.x,y:r.y+radius,width:r.width,height:r.height-2*radius},
+  ].filter(b=>b.width>0&&b.height>0):[];
+  const subtract=(a,b)=>{const i=intersect(a,b);if(!i)return [a];return [
+    {x:a.x,y:a.y,width:a.width,height:i.y-a.y},
+    {x:a.x,y:i.y+i.height,width:a.width,height:a.y+a.height-i.y-i.height},
+    {x:a.x,y:i.y,width:i.x-a.x,height:i.height},
+    {x:i.x+i.width,y:i.y,width:a.x+a.width-i.x-i.width,height:i.height},
+  ].filter(b=>b.width>0.01&&b.height>0.01);};
+  const pseudoPaintIsBounded=(element,paintNode)=>{
+    const styles=['::before','::after'].map(pseudo=>getComputedStyle(element,pseudo));
+    const generated=styles.filter(s=>s.display!=='none'&&s.content!=='none'&&s.content!=='normal');
+    if(!generated.length)return true;
+    if(element!==paintNode)return false;
+    const parent=getComputedStyle(element);
+    if(!['hidden','clip'].includes(parent.overflowX)||!['hidden','clip'].includes(parent.overflowY))return false;
+    if((parent.overflowX==='clip'||parent.overflowY==='clip')&&parent.overflowClipMargin!=='0px')return false;
+    return generated.every(s=>{
+      const outlineWidth=parseFloat(s.outlineWidth);
+      return s.position==='static'&&s.zIndex==='auto'&&Number(s.opacity)===1&&s.transform==='none'&&s.translate==='none'&&s.rotate==='none'&&s.scale==='none'&&s.filter==='none'&&s.perspective==='none'&&s.maskImage==='none'&&s.backdropFilter==='none'&&s.containerType==='normal'&&s.isolation==='auto'&&s.mixBlendMode==='normal'&&s.contain==='none'&&s.willChange==='auto'&&s.clipPath==='none'&&s.boxShadow==='none'&&s.textShadow==='none'&&(['none','hidden'].includes(s.outlineStyle)||Number.isFinite(outlineWidth)&&outlineWidth===0);
+    });
+  };
+  const visiblePseudoStyles=element=>['::before','::after'].map(pseudo=>getComputedStyle(element,pseudo)).filter(s=>s.display!=='none'&&s.content!=='none'&&s.content!=='normal');
+  const boundedMaskedLeaf=(element,text)=>{
+    if(text||element.childElementCount!==0||element.textContent!==''||visiblePseudoStyles(element).length)return false;
+    const s=getComputedStyle(element),outlineWidth=parseFloat(s.outlineWidth);
+    return s.position==='static'&&s.zIndex==='auto'&&s.maskImage!=='none'&&s.maskClip==='border-box'&&s.display!==('list-'+'item')&&s.backgroundImage==='none'&&s.backgroundClip==='border-box'&&Number(s.opacity)===1&&s.transform==='none'&&s.translate==='none'&&s.rotate==='none'&&s.scale==='none'&&s.filter==='none'&&s.perspective==='none'&&s.backdropFilter==='none'&&s.containerType==='normal'&&s.isolation==='auto'&&s.mixBlendMode==='normal'&&s.contain==='none'&&s.willChange==='auto'&&s.clipPath==='none'&&s.clip==='auto'&&s.boxShadow==='none'&&s.textShadow==='none'&&(['none','hidden'].includes(s.outlineStyle)||Number.isFinite(outlineWidth)&&outlineWidth===0);
+  };
+  const plainChain=(start,end,{inactiveForeignPaint=false,belowZIndex=null}={})=>{
+    let lowerForeignZSeen=false,unboundedForeignPaintSeen=false;
+    for(let p=start;p&&p!==end;p=p.parentElement){
+      const s=getComputedStyle(p),outlineWidth=parseFloat(s.outlineWidth),inactiveZ=inactiveForeignPaint&&p===start&&s.position==='static'&&Number.isFinite(Number(s.zIndex))&&Number(s.zIndex)>0&&p.parentElement&&getComputedStyle(p.parentElement).display==='block'&&[s.overflowX,s.overflowY].every(value=>['visible','hidden','clip'].includes(value))&&(s.overflowX==='hidden'||s.overflowX==='clip'||s.overflowY==='hidden'||s.overflowY==='clip'),lowerForeignZ=inactiveForeignPaint&&belowZIndex!==null&&!lowerForeignZSeen&&['absolute','relative'].includes(s.position)&&Number.isFinite(Number(s.zIndex))&&Number(s.zIndex)<belowZIndex&&[s.overflowX,s.overflowY].every(value=>['visible','hidden','clip'].includes(value))&&s.overflowClipMargin==='0px',unboundedForeignPaint=inactiveForeignPaint&&(p===document.activeElement||p.contains(document.activeElement)||s.boxShadow!=='none'||s.textShadow!=='none'||!['none','hidden'].includes(s.outlineStyle)&&(!Number.isFinite(outlineWidth)||outlineWidth>0));
+      if((lowerForeignZSeen||lowerForeignZ)&&unboundedForeignPaint||lowerForeignZ&&unboundedForeignPaintSeen||p.matches(':modal,:popover-open')||['sticky','fixed'].includes(s.position)||s.zIndex!=='auto'&&!inactiveZ&&!lowerForeignZ||Number(s.opacity)!==1||s.transform!=='none'||s.translate!=='none'||s.rotate!=='none'||s.scale!=='none'||s.filter !== 'none'||s.perspective!=='none'||s.maskImage!=='none'||s.backdropFilter!=='none'||s.containerType!=='normal'||s.isolation !== 'auto'||s.mixBlendMode!=='normal'||s.contain!=='none'||s.willChange!=='auto'||s.clipPath!=='none'||(s.overflowX!=='visible'||s.overflowY!=='visible')&&!inactiveZ&&!lowerForeignZ||inactiveZ&&(p===document.activeElement||s.boxShadow!=='none'||s.textShadow!=='none'||!['none','hidden'].includes(s.outlineStyle)&&(!Number.isFinite(outlineWidth)||outlineWidth>0))||inactiveForeignPaint&&!pseudoPaintIsBounded(p,start))return false;
+      if(unboundedForeignPaint)unboundedForeignPaintSeen=true;
+      if(lowerForeignZ)lowerForeignZSeen=true;
+    }
+    return true;
+  };
+  // Even a shared ancestor can clip the purported opaque cover. Decline the
+  // proof instead of attempting to model ancestor paint clips or masks.
+  const unclippedAncestors=()=>{for(let p=node.parentElement;p;p=p.parentElement){const s=getComputedStyle(p);if(s.overflowX!=='visible'||s.overflowY!=='visible'||s.clipPath!=='none'||s.clip!=='auto'||s.maskImage!=='none'||s.filter !== 'none'||s.backdropFilter!=='none'||s.perspective!=='none')return false;}return true;};
+  const canCover=paint=>{
+    let common=node.parentElement;while(common&&!common.contains(paint))common=common.parentElement;
+    const coverZ=Number(style.zIndex);
+    return common&&covers.length&&unclippedAncestors()&&Number(style.opacity)===1&&style.transform==='none'&&style.translate==='none'&&style.rotate==='none'&&style.scale==='none'&&style.filter==='none'&&style.mixBlendMode==='normal'&&plainChain(node.parentElement,common)&&plainChain(paint,common,{inactiveForeignPaint:true,belowZIndex:Number.isFinite(coverZ)?coverZ:null});
+  };
+  // Trim text/control boxes only for measurable clips with ordinary flow or a
+  // positioned descendant whose containing block proves the clip applies.
+  const clippedPaintRect=(element,rect,text)=>{
+    const clipped={...rect},positioned=[];
+    for(let p=element;p;p=p.parentElement){
+      const s=getComputedStyle(p),position=s.position;
+      if(p.matches(':modal,:popover-open')||!['static','relative','absolute'].includes(position)||s.zIndex !== 'auto'&&position!=='absolute'||Number(s.opacity) !== 1||s.transform !== 'none'||s.translate !== 'none'||s.rotate !== 'none'||s.scale !== 'none'||s.filter !== 'none'||s.perspective !== 'none'||s.maskImage !== 'none'&&!(p===element&&boundedMaskedLeaf(element,text))||s.backdropFilter !== 'none'||s.containerType !== 'normal'||s.isolation !== 'auto'||s.mixBlendMode !== 'normal'||s.contain !== 'none'||s.willChange !== 'auto'||s.clipPath !== 'none'||s.clip !== 'auto'||(s.zoom !== 'normal'&&Number(s.zoom) !== 1)||s.contentVisibility !== 'visible')return rect;
+      if(position==='absolute')positioned.push({node:p,containingBlock:p.offsetParent});
+      if(p===element&&!text)continue;
+      const clipX=s.overflowX!=='visible',clipY=s.overflowY!=='visible';
+      if(clipX||clipY){
+        if(s.overflowClipMargin!=='0px')return rect;
+        for(const item of positioned){
+          let containingBlock=item.containingBlock;
+          // Some engines expose no offsetParent for an absolutely positioned SVG viewport.
+          if(!containingBlock&&item.node.namespaceURI==='http://www.w3.org/2000/svg'&&item.node.localName==='svg'&&item.node.parentElement===p&&position!=='static')containingBlock=p;
+          if(item.node!==p&&(!containingBlock||!p.contains(containingBlock)))return rect;
+        }
+        const r=p.getBoundingClientRect(),left=r.left+scrollX,top=r.top+scrollY;
+        if(clipX){const right=clipped.x+clipped.width;clipped.x=Math.max(clipped.x,left);clipped.width=Math.min(right,r.right+scrollX)-clipped.x;}
+        if(clipY){const bottom=clipped.y+clipped.height;clipped.y=Math.max(clipped.y,top);clipped.height=Math.min(bottom,r.bottom+scrollY)-clipped.y;}
+      }
+    }
+    return clipped.width>0&&clipped.height>0?clipped:null;
+  };
+  const rootSelector='[data-audit-main]>[data-ely-family],[data-audit-twin]>[data-ely-family],[data-audit-main]>[data-basic-component],[data-audit-twin]>[data-basic-component]';
+  const checkedRoot=checkedRootID?document.getElementById(checkedRootID):node.closest(rootSelector);
+  const owners=new Set(checkedRoot?[checkedRoot.id,...[...checkedRoot.querySelectorAll('[id]')].map(e=>e.id)]:[]);
+  const references=new Set(checkedRoot?[...checkedRoot.querySelectorAll('[aria-controls]')].flatMap(e=>(e.getAttribute('aria-controls')||'').split(/\s+/)):[]);
+  const foreignRoots=[...document.querySelectorAll(rootSelector)].filter(peer=>peer!==checkedRoot&&peer!==node&&!node.contains(peer)&&!peer.contains(node));
+  // Detached portals can paint inside this camera even when their root is far away.
+  for(const portal of document.querySelectorAll('[data-ely-portal],dialog[open],:popover-open,[role=menu],[role=dialog],[role=region]')){
+    if(portal===node||node.contains(portal)||portal.contains(node)||portal.closest(rootSelector))continue;
+    const explicit=portal.getAttribute('data-ely-owner')?.replace(/^#/,'');
+    if(explicit?owners.has(explicit):references.has(portal.id))continue;
+    foreignRoots.push(portal);
+  }
+  const intersections=[],occluded=[];
+  for(const peer of foreignRoots){
+    const painted=[];
+    for(const e of [peer,...peer.querySelectorAll('*')]){
+      if(!e.checkVisibility({checkOpacity:true,checkVisibilityCSS:true})||emptyClip(e))continue;
+      const s=getComputedStyle(e),rect=box(e.getBoundingClientRect());
+      // Native controls/media and nontrivial effects are conservative boxes.
+      if(e.matches('button,input,select,textarea,img,canvas,svg,video,iframe')||s.backgroundImage!=='none'||s.backgroundColor!=='rgba(0, 0, 0, 0)'||s.boxShadow!=='none'||['Top','Right','Bottom','Left'].some(side=>parseFloat(s[`border${side}Width`])>0))painted.push({e,rect:box(e.getBoundingClientRect()),text:false});
+      for(const text of e.childNodes){if(text.nodeType!==Node.TEXT_NODE||!text.textContent.trim())continue;const range=document.createRange();range.selectNodeContents(text);for(const part of range.getClientRects())painted.push({e,rect:box(part),text:true});}
+    }
+    let exposedArea=0,coveredArea=0;const witnesses=[];
+    for(const {e,rect,text} of painted){const visible=clippedPaintRect(e,rect,text);if(!visible)continue;const overlap=intersect(visible,clip);if(!overlap)continue;
+      const residual=canCover(e)?covers.reduce((parts,cover)=>parts.flatMap(part=>subtract(part,cover)),[overlap]):[overlap];
+      const remaining=residual.reduce((sum,b)=>sum+b.width*b.height,0);
+      exposedArea+=remaining;coveredArea+=overlap.width*overlap.height-remaining;
+      if(remaining>0.01&&witnesses.length<3)witnesses.push({tag:e.tagName,id:e.id||null,className:e.getAttribute('class'),paintBox:rect,residual});
+    }
+    const bounds=box(peer.getBoundingClientRect());
+    if(exposedArea>0.01)intersections.push({id:peer.id,component:peer.dataset.elyComponent||null,...bounds,exposedPaintArea:exposedArea,witnesses});
+    else if(coveredArea>0)occluded.push({id:peer.id,coveredPaintArea:coveredArea,proof:'opaque owned panel interior above non-stacking foreign paint'});
+  }
+  return {foreignDOMIntersections:intersections,occludedForeignPaint:occluded};
+}
+
+// This is a finite audit-frame proof, not a CSS blur-radius approximation.
+export function multiSelectShadowFrame(node,dateOutline=null){
+  const root=node.closest('[data-audit-main]>[data-ely-family]');
+  const date=root?.dataset.elyComponent==='forms/DateRangePicker'&&root.dataset.elyKind==='DatePicker';
+  if(root?.dataset.elyComponent!=='forms/MultiSelect'&&!date)return null;
+  const panel=root.querySelector(date?'[data-ely-date-range-panel]:not([hidden])':'[data-ely-multi-source].is-open [data-ui-multi-list][role=group]');
+  if(!panel)return null;
+  const fail=reason=>({eligible:false,reason});
+  if((date?new URL(location.href).searchParams.get('case')!=='forms/DateRangePicker':new URL(location.href).searchParams.get('case')!=='forms/MultiSelect')||document.querySelectorAll('[data-audit-case]').length!==1)return fail('shadow proof requires exact-case audit');
+  const host=root.closest('[data-audit-main]'),record=root.closest('[data-audit-case]'),twin=record?.querySelector('[data-audit-twin]');
+  if(!host||!record||!twin||(!date&&document.querySelectorAll(`[id="${panel.id}"]`).length!==1))return fail('ambiguous shadow frame owner');
+  const entries=[...root.querySelectorAll(date?'[data-ely-date-range-trigger]':'[data-ely-multi-entry][role=combobox]')];
+  if(entries.length!==1||entries[0].getAttribute('aria-expanded')!=='true'||!date&&entries[0].getAttribute('aria-controls')!==panel.id)return fail('shadow panel reference mismatch');
+  const focused=document.activeElement;
+  if(date&&(root.querySelectorAll('[data-ely-date-range-panel]').length!==1||panel.closest('[data-ely-family]')!==root||entries[0].closest('[data-ely-family]')!==root||!panel.contains(focused)||dateOutline?.status!=='bounded-focused-outline-only'||dateOutline.focusedID!==focused.id))return fail('exact date panel and separate focused outline required');
+  const dateLeaves=new Map();
+  if(date){
+    const starts=[...panel.querySelectorAll('input[data-ely-date-start]')],ends=[...panel.querySelectorAll('input[data-ely-date-end]')],inputs=[...panel.querySelectorAll('input[type="date"]')],labels=[...panel.querySelectorAll('label.ely-api-date-field')],inside=(child,parent)=>[child.left,child.top,child.right,child.bottom,parent.left,parent.top,parent.right,parent.bottom].every(Number.isFinite)&&child.left>=parent.left-.125&&child.top>=parent.top-.125&&child.right<=parent.right+.125&&child.bottom<=parent.bottom+.125,panelRect=panel.getBoundingClientRect();
+    if(starts.length!==1||ends.length!==1||inputs.length!==2||labels.length!==2||inputs[0]===inputs[1]||inputs[0]!==starts[0]&&inputs[0]!==ends[0]||inputs[1]!==starts[0]&&inputs[1]!==ends[0])return fail('DateRange requires exactly its two native date inputs and labels');
+    for(const field of [starts[0],ends[0]]){
+      const matching=labels.filter(label=>label.control===field),fieldRect=field.getBoundingClientRect();
+      if(field.localName!=='input'||field.type!=='date'||!field.id||document.querySelectorAll(`[id="${field.id}"]`).length!==1||matching.length!==1||!panel.contains(field)||!panel.contains(matching[0])||!matching[0].contains(field)||!inside(matching[0].getBoundingClientRect(),panelRect)||!inside(fieldRect,matching[0].getBoundingClientRect()))return fail('DateRange native input border must stay inside its matching owned label and panel');
+      dateLeaves.set(field,matching[0]);
+    }
+  }
+  const r=root.getBoundingClientRect(),h=host.getBoundingClientRect(),box=record.getBoundingClientRect(),s=getComputedStyle(record),p=panel.getBoundingClientRect();
+  const frame={x:Math.ceil(box.left+record.clientLeft),y:Math.floor(r.top),width:Math.floor(box.right-record.clientLeft)-Math.ceil(box.left+record.clientLeft),height:Math.floor(h.bottom)-Math.floor(r.top)};
+  const documentFrame={...frame,x:frame.x+scrollX,y:frame.y+scrollY};
+  const fits=frame.x>=0&&frame.y>=0&&frame.x+frame.width<=innerWidth&&frame.y+frame.height<=innerHeight;
+  const camera={fullPage:!fits,clip:fits?frame:documentFrame};
+  const color=s.backgroundColor.match(/^rgb\((\d+),\s*(\d+),\s*(\d+)\)$/);
+  if(!color||s.backgroundImage!=='none'||documentFrame.x<0||documentFrame.y<0||frame.x+frame.width>innerWidth||frame.width<=0||frame.height<=0||twin.getBoundingClientRect().top<frame.y+frame.height)return fail('no isolated uniform authored shadow frame');
+  let reachedRecord=false;
+  for(let a=root;a;a=a.parentElement){
+    const st=getComputedStyle(a);
+    if(st.opacity!=='1'||st.transform!=='none'||st.translate!=='none'||st.rotate!=='none'||st.scale!=='none'||st.perspective!=='none'||st.filter !== 'none'||st.backdropFilter!=='none'||st.clipPath!=='none'||st.clip!=='auto'||st.contain!=='none'||st.maskImage!=='none'||st.mixBlendMode!=='normal'||st.overflowX!=='visible'||st.overflowY!=='visible')return fail('unproven shadow frame backdrop/clip');
+    if(a===record)reachedRecord=true;
+    // The record supplies the opaque backdrop; intervening wrappers must add no paint.
+    if(a!==root&&!reachedRecord&&(st.backgroundColor!=='rgba(0, 0, 0, 0)'||st.backgroundImage!=='none'||st.boxShadow!=='none'||!['none','hidden'].includes(st.outlineStyle)&&parseFloat(st.outlineWidth)!==0||['Top','Right','Bottom','Left'].some(side=>parseFloat(st[`border${side}Width`])!==0)))return fail('ambiguous intervening audit backdrop paint');
+    for(const pseudo of ['::before','::after'])if(!['none','normal'].includes(getComputedStyle(a,pseudo).content))return fail('generated audit backdrop paint');
+  }
+  if(!reachedRecord)return fail('shadow frame record is not an ancestor');
+  const rects=[],shadows=[],compositedDisabledLeaves=[],datePseudos=[];let datePseudoRejection=null;
+  const datePseudo=(element,pseudo,ps,b)=>{
+    const trigger=element===entries[0],fields=[...panel.querySelectorAll('.ely-api-date-field')];
+    const check=(property,actual,expected,valid=actual===expected,paint=null)=>{
+      if(!valid&&!datePseudoRejection){
+        const text=value=>value===null?null:String(value).length<=256?String(value):String(value).slice(0,240)+'...[truncated]';
+        const number=value=>Number.isFinite(value)?value:null;
+        datePseudoRejection={scope:'exact-DateRange-pseudo',ownerID:text(root.id),node:{tag:text(element.localName),id:text(element.id||null),role:trigger?'range-trigger':fields.includes(element)?'date-field':'unsupported-owned-node',ownedIndex:[...root.querySelectorAll('*')].indexOf(element)},pseudo:text(pseudo),property:text(property),actual:text(actual),expected:text(expected),geometry:{border:[b.left,b.top,b.right,b.bottom].map(number),client:[element.clientLeft,element.clientTop,element.clientWidth,element.clientHeight].map(number),paint:paint?Object.values(paint).map(number):null}};
+      }
+      return valid;
+    };
+    if(!check('pseudo',pseudo,'::before')||!check('owner',trigger?'actual-trigger':fields.indexOf(element),'actual trigger or one of exactly two actual date fields',trigger||fields.includes(element)&&fields.length===2)||!check('content',ps.content,'""')||!check('display',ps.display,'not none',ps.display!=='none'))return false;
+    const parent=getComputedStyle(element),font=parseFloat(getComputedStyle(document.documentElement).fontSize);
+    const none=['transform','translate','rotate','scale','perspective','filter','backdropFilter','clipPath','boxShadow','textShadow'];
+    for(const property of none)if(!check(property,ps[property],'none'))return false;
+    for(const [property,expected]of [['opacity','1'],['mixBlendMode','normal'],['isolation','auto'],['contain','none'],['willChange','auto'],['clip','auto'],['backgroundImage','none']])if(!check(property,ps[property],expected))return false;
+    if(!check('backgroundColor',ps.backgroundColor,'opaque rgb()',/^rgb\(\d+,\s*\d+,\s*\d+\)$/.test(ps.backgroundColor))||!check('outline',ps.outlineStyle+'/'+ps.outlineWidth,'none, hidden, or zero width',['none','hidden'].includes(ps.outlineStyle)||parseFloat(ps.outlineWidth)===0))return false;
+    for(const side of ['Top','Right','Bottom','Left'])for(const property of ['border'+side+'Width','padding'+side])if(!check(property,ps[property],'zero px',parseFloat(ps[property])===0))return false;
+    for(const [property,expected]of [['width','16px'],['height','16px'],['maskSize','contain'],['maskPosition','50% 50%'],['maskRepeat','no-repeat'],['maskClip','border-box'],['maskOrigin','border-box'],['maskComposite','add'],['maskMode','match-source']])if(!check(property,ps[property],expected))return false;
+    const icon=new URL(trigger?'/assets/ely/icons/calendar-range.svg':'/assets/ely/icons/calendar.svg',location.href).href;
+    if(!check('maskImage',ps.maskImage,`url("${icon}")`)||!check('zoom',ps.zoom,'normal or 1',['normal','1'].includes(ps.zoom))||!check('owner.direction',parent.direction,'ltr')||!check('owner.writingMode',parent.writingMode,'horizontal-tb')||!check('owner.scrollLeft',element.scrollLeft,0)||!check('owner.scrollTop',element.scrollTop,0))return false;
+    let left,top,paintBounds={left:b.left+element.clientLeft,top:b.top+element.clientTop,right:b.left+element.clientLeft+element.clientWidth,bottom:b.top+element.clientTop+element.clientHeight};
+    if(trigger){
+      const children=[...element.children];
+      if(!check('owner.children.length',children.length,1)||!check('owner.child',children[0].localName,'output[data-ely-date-range-label]',children[0].matches('output[data-ely-date-range-label]'))||!check('owner.child.order',getComputedStyle(children[0]).order,'0')||!check('owner.child.position',getComputedStyle(children[0]).position,'static'))return false;
+      for(const [property,expected]of [['display','flex'],['flexDirection','row'],['flexWrap','nowrap'],['alignItems','center'],['textIndent','0px']])if(!check('owner.'+property,parent[property],expected))return false;
+      if(!check('owner.justifyContent',parent.justifyContent,'normal or flex-start',['normal','flex-start'].includes(parent.justifyContent)))return false;
+      for(const [property,expected]of [['position','static'],['zIndex','auto'],['order','0'],['flexGrow','0'],['flexShrink','0'],['flexBasis','auto'],['left','auto'],['right','auto'],['top','auto'],['bottom','auto'],['marginLeft','0px'],['marginTop','0px'],['marginBottom','0px']])if(!check(property,ps[property],expected))return false;
+      if(!check('marginRight',ps.marginRight,font*.55+'px within 0.001px',!(Math.abs(parseFloat(ps.marginRight)-font*.55)>.001)))return false;
+      left=b.left+element.clientLeft+parseFloat(parent.paddingLeft);top=b.top+element.clientTop+parseFloat(parent.paddingTop)+(element.clientHeight-parseFloat(parent.paddingTop)-parseFloat(parent.paddingBottom)-16)/2;
+    }else{
+      if(!check('owner.position',parent.position,'relative'))return false;
+      for(const [property,expected]of [['position','absolute'],['zIndex','1'],['top','6px']])if(!check(property,ps[property],expected))return false;
+      if(!check('boxSizing',ps.boxSizing,'content-box or border-box',['content-box','border-box'].includes(ps.boxSizing)))return false;
+      const pixels=value=>typeof value==='string'&&/^-?(?:\d+|\d*\.\d+)px$/.test(value)?Number.parseFloat(value):NaN;
+      const borderLeft=pixels(parent.borderLeftWidth),borderRight=pixels(parent.borderRightWidth),borderTop=pixels(parent.borderTopWidth),borderBottom=pixels(parent.borderBottomWidth);
+      const paddingWidth=b.width-borderLeft-borderRight,paddingHeight=b.height-borderTop-borderBottom;
+      if(!check('owner.borderWidths',[parent.borderLeftWidth,parent.borderRightWidth,parent.borderTopWidth,parent.borderBottomWidth].join(','),'finite nonnegative px values',Number.isFinite(paddingWidth)&&Number.isFinite(paddingHeight)&&paddingWidth>=0&&paddingHeight>=0&&[borderLeft,borderRight,borderTop,borderBottom].every(value=>Number.isFinite(value)&&value>=0)))return false;
+      const pseudoDimension=(axis,start,end)=>{
+        const size=pixels(ps[axis]),paddingStart=pixels(ps['padding'+start]),paddingEnd=pixels(ps['padding'+end]),borderStart=pixels(ps['border'+start+'Width']),borderEnd=pixels(ps['border'+end+'Width']);
+        const marginStart=pixels(ps['margin'+start]),marginEnd=pixels(ps['margin'+end]);
+        const borderBox=ps.boxSizing==='border-box'?size:size+paddingStart+paddingEnd+borderStart+borderEnd;
+        return {outer:borderBox+marginStart+marginEnd,marginStart,marginEnd};
+      };
+      const inline=pseudoDimension('width','Left','Right'),block=pseudoDimension('height','Top','Bottom');
+      const expectedRight=paddingWidth-font*.65-inline.outer,expectedBottom=paddingHeight-6-block.outer;
+      const insetMatches=(actual,expected)=>actual==='auto'||Number.isFinite(pixels(actual))&&Number.isFinite(expected)&&Math.abs(pixels(actual)-expected)<=.125;
+      const expectedInset=value=>Number.isFinite(value)?`auto or finite padding-box equation (${value}px ± 0.125px)`:'auto or finite padding-box equation';
+      if(!check('right',ps.right,expectedInset(expectedRight),insetMatches(ps.right,expectedRight)))return false;
+      if(!check('bottom',ps.bottom,expectedInset(expectedBottom),insetMatches(ps.bottom,expectedBottom)))return false;
+      if(!check('left',ps.left,font*.65+'px within 0.001px',!(Math.abs(parseFloat(ps.left)-font*.65)>.001)))return false;
+      for(const side of ['Left','Right','Top','Bottom'])if(!check('margin'+side,ps['margin'+side],'0px'))return false;
+      paintBounds={left:b.left+borderLeft,top:b.top+borderTop,right:b.left+borderLeft+paddingWidth,bottom:b.top+borderTop+paddingHeight};
+      left=b.left+borderLeft+parseFloat(ps.left);top=b.top+borderTop+6;
+    }
+    const paint={left,top,right:left+16,bottom:top+16};
+    if(!check('paint.bounds',Object.values(paint).join(','),'finite and contained in actual client box',Object.values(paint).every(Number.isFinite)&&paint.left>=paintBounds.left&&paint.top>=paintBounds.top&&paint.right<=paintBounds.right&&paint.bottom<=paintBounds.bottom,paint))return false;
+    datePseudos.push({role:trigger?'range-trigger':'date-field',id:element.id||null,pseudo,maskImage:ps.maskImage,position:ps.position,zIndex:ps.zIndex,paint});return true;
+  };
+  const containedDisabledLeaf=(element,st,b)=>{
+    if(st.opacity!=='0.55'||element.localName!=='input'||element.type!=='checkbox'||!element.disabled||!element.matches(':disabled')||element.children.length||!element.id||element.closest('[data-ui-multi-list]')!==panel)return false;
+    const matchingIDs=document.querySelectorAll(`[id="${element.id}"]`);
+    if(matchingIDs.length!==1||matchingIDs[0]!==element)return false;
+    const option=element.closest('[data-ui-multi-option]');
+    if(!option||!panel.contains(option)||!panel.contains(element))return false;
+    const ps=getComputedStyle(panel);
+    if(ps.opacity!=='1'||!/^rgb\(\d+,\s*\d+,\s*\d+\)$/.test(ps.backgroundColor)||ps.backgroundImage!=='none')return false;
+    const radii=['borderTopLeftRadius','borderTopRightRadius','borderBottomLeftRadius','borderBottomRightRadius'].map(property=>ps[property].split(' '));
+    if(radii.some(pair=>pair.length>2||pair.some(value=>!/^\d*\.?\d+px$/.test(value))))return false;
+    const rx=Math.max(...radii.map(pair=>parseFloat(pair[0]))),ry=Math.max(...radii.map(pair=>parseFloat(pair[1]??pair[0])));
+    const interior={left:p.left+panel.clientLeft,top:p.top+panel.clientTop,right:p.left+panel.clientLeft+panel.clientWidth,bottom:p.top+panel.clientTop+panel.clientHeight};
+    if(!(b.width>0&&b.height>0&&b.left>=interior.left&&b.top>=interior.top&&b.right<=interior.right&&b.bottom<=interior.bottom&&(b.left>=interior.left+rx&&b.right<=interior.right-rx||b.top>=interior.top+ry&&b.bottom<=interior.bottom-ry)))return false;
+    const ancestors=[];let reachedPanel=false,reachedRecord=false;
+    for(let a=element.parentElement;a;a=a.parentElement){
+      const as=getComputedStyle(a);if(as.opacity!=='1')return false;
+      if(a===panel)reachedPanel=true;
+      if(!reachedPanel&&(as.overflowX!=='visible'||as.overflowY!=='visible'||as.clip!=='auto'||as.contain!=='none'))return false;
+      ancestors.push({id:a.id||null,opacity:as.opacity});if(a===record){reachedRecord=true;break;}
+    }
+    if(!reachedPanel||!reachedRecord)return false;
+    compositedDisabledLeaves.push({id:element.id,type:element.type,disabled:element.disabled,opacity:st.opacity,panelID:panel.id,panelBackground:ps.backgroundColor,clientInterior:interior,cornerRadii:{x:rx,y:ry},rect:{left:b.left,top:b.top,right:b.right,bottom:b.bottom},ancestors});
+    return true;
+  };
+  for(const element of [root,...root.querySelectorAll('*')]){
+    if(!element.checkVisibility({checkOpacity:true,checkVisibilityCSS:true}))continue;
+    const st=getComputedStyle(element),b=element.getBoundingClientRect();
+    const containedAlpha=st.opacity!=='1'&&containedDisabledLeaf(element,st,b);
+    if(st.transform!=='none'||st.translate!=='none'||st.rotate!=='none'||st.scale!=='none'||st.perspective!=='none'||st.filter !== 'none'||st.backdropFilter!=='none'||st.clipPath!=='none'||st.maskImage!=='none'||st.mixBlendMode!=='normal'||st.opacity!=='1'&&!containedAlpha||st.position==='fixed'||st.position==='sticky'||!['none','hidden'].includes(st.outlineStyle)&&parseFloat(st.outlineWidth)!==0&&!(date&&element===focused)){
+      // Diagnostic only: preserve the exact rejecting predicate and its DOM provenance.
+      const selectorFor=target=>{
+        if(target.id)return `[id=${JSON.stringify(target.id)}]`;
+        const segments=[];
+        for(let a=target;a;a=a.parentElement){
+          if(a.id){segments.unshift(`[id=${JSON.stringify(a.id)}]`);break;}
+          segments.unshift(`${a.localName}:nth-child(${a.parentElement?[...a.parentElement.children].indexOf(a)+1:1})`);
+        }
+        return segments.join(' > ');
+      };
+      const properties=['transform','translate','rotate','scale','perspective','filter','backdropFilter','clipPath','maskImage','mixBlendMode','opacity','position','outlineStyle','outlineWidth'];
+      const styleRejections=properties.filter(property=>property==='position'?['fixed','sticky'].includes(st[property]):property==='opacity'?st.opacity!=='1'&&!containedAlpha:property==='outlineStyle'||property==='outlineWidth'?!['none','hidden'].includes(st.outlineStyle)&&parseFloat(st.outlineWidth)!==0:st[property]!==({mixBlendMode:'normal'}[property]??'none')).map(property=>({property,value:st[property]}));
+      const ancestorPath=[];
+      for(let a=element;a;a=a.parentElement){const computed=getComputedStyle(a);ancestorPath.push({selector:selectorFor(a),id:a.id||null,tag:a.localName,style:Object.fromEntries(properties.map(property=>[property,computed[property]]))});if(a===record)break;}
+      return {...fail('complex owned shadow-frame paint'),rejectionWitness:{selector:selectorFor(element),ownerID:root.id,ownerComponent:root.dataset.elyComponent,panelID:panel.id,styleRejections,ancestorPath}};
+    }
+    if(date&&(!(st.overflowX==='visible'&&st.overflowY==='visible'||dateLeaves.has(element)&&st.overflowX==='clip'&&st.overflowY==='clip')||st.clip!=='auto'||st.contain!=='none'||!['normal','1'].includes(st.zoom)||st.boxShadow!=='none'&&element!==panel))return fail('unproven date clip or additional shadow');
+    for(const pseudo of ['::before','::after']){const ps=getComputedStyle(element,pseudo);if(!['none','normal'].includes(ps.content)&&!(date&&datePseudo(element,pseudo,ps,b)))return {...fail('generated owned shadow-frame paint'),...(date?{datePseudoRejection}:{})};}
+    if(b.width>0&&b.height>0)rects.push({left:b.left-frame.x,top:b.top-frame.y,right:b.right-frame.x,bottom:b.bottom-frame.y});
+    if(st.boxShadow!=='none')shadows.push({id:element.id,css:st.boxShadow,left:b.left-frame.x,top:b.top-frame.y,right:b.right-frame.x,bottom:b.bottom-frame.y,...(date?{actualOwnedPanel:element===panel}:{})});
+  }
+  const fs=focused&&getComputedStyle(focused);
+  if(!focused||!root.contains(focused)||!date&&!['none','hidden'].includes(fs.outlineStyle)&&parseFloat(fs.outlineWidth)!==0)return fail('visible focused outline requires separate proof');
+  if(date){
+    if(datePseudos.length!==3||dateOutline.outline?.status!=='bounded'||fs.outlineStyle!=='solid'||parseFloat(fs.outlineWidth)!==dateOutline.outline.width||parseFloat(fs.outlineOffset)!==dateOutline.outline.offset)return fail('incomplete finite date pseudo or focused outline proof');
+    const paint=dateOutline.outline.paint;if(!paint||paint.left<frame.x||paint.top<frame.y||paint.right>frame.x+frame.width||paint.bottom>frame.y+frame.height)return fail('focused date outline escapes frame');
+    rects.push({left:paint.left-frame.x,top:paint.top-frame.y,right:paint.right-frame.x,bottom:paint.bottom-frame.y});
+  }
+  return {eligible:true,ownerID:root.id,panelID:panel.id,frame,documentFrame,camera,background:[...color.slice(1).map(Number),255],rects,shadows,compositedDisabledLeaves,...(date?{dateRange:{panelReference:{selector:'[data-ely-date-range-panel]',unique:true,ownerID:root.id,rect:{left:p.left,top:p.top,right:p.right,bottom:p.bottom,width:p.width,height:p.height}},pseudos:datePseudos,outline:dateOutline}}:{}),panel:{left:p.left-frame.x,top:p.top-frame.y,right:p.right-frame.x,bottom:p.bottom-frame.y},focused:{id:focused.id,type:focused.type,matchesFocusVisible:focused.matches(':focus-visible'),outlineStyle:fs.outlineStyle,boxShadow:fs.boxShadow}};
+}
+
+// Diagnostic only until the exact panel's decorative paint has an independent raster proof.
+// Measuring the focused input alone still traverses its real ancestor clip/transform chain.
+export const dateRangeFocusedOutline=new Function('node','bounds',`
+  if(node.dataset.elyComponent!=='forms/DateRangePicker'||node.dataset.elyKind!=='DatePicker')return null;
+  const fail=reason=>({status:'unsupported',reason,ownershipPromotion:false});
+  if(new URL(location.href).searchParams.get('case')!=='forms/DateRangePicker'||document.querySelectorAll('[data-audit-case]').length!==1||!node.matches('[data-audit-main]>[data-ely-family]')||!node.id||document.querySelectorAll('[id="'+node.id+'"]').length!==1)return fail('exact unique date-range audit owner required');
+  const panels=[...node.querySelectorAll('[data-ely-date-range-panel]')],triggers=[...node.querySelectorAll('[data-ely-date-range-trigger]')];
+  if(panels.length!==1||triggers.length!==1||panels[0].closest('[data-ely-family]')!==node||triggers[0].closest('[data-ely-family]')!==node)return fail('ambiguous date-range panel/trigger');
+  const panel=panels[0];if(panel.hidden)return null;
+  const focused=document.activeElement,fields=[...panel.querySelectorAll('input[data-ely-date-start],input[data-ely-date-end]')];
+  if(triggers[0].getAttribute('aria-expanded')!=='true'||fields.length!==2||fields.filter(field=>field.matches('[data-ely-date-start]')).length!==1||fields.filter(field=>field.matches('[data-ely-date-end]')).length!==1||!fields.includes(focused)||focused.type!=='date'||focused.closest('[data-ely-family]')!==node)return fail('focused input is not one of the two actual owned date fields');
+  if(!focused.id||document.querySelectorAll('[id="'+focused.id+'"]').length!==1||document.querySelectorAll('[id="'+focused.id+'"]')[0]!==focused)return fail('focused date field ID must resolve uniquely');
+  const measured=(${activeOutlineBounds.toString()})(focused,bounds);
+  return {status:measured.focusOutline?.status==='bounded'?'bounded-focused-outline-only':'unsupported',ownershipPromotion:false,panel:{id:panel.id||null,selector:'[data-ely-date-range-panel]',unique:true},focusedID:focused.id||null,outline:measured.focusOutline??null};
+`);
+
+export function proveMultiSelectShadowRaster({width,height,data},sample){
+  assert.equal(width,sample.frame.width);assert.equal(height,sample.frame.height);assert.equal(data.length,width*height*4);
+  assert(sample.rects.every(r=>r.left>=0&&r.top>=0&&r.right<=width&&r.bottom<=height),'Owned boxes escape the measured frame');
+  let panelShadow=false;
+  for(const shadow of sample.shadows){
+    const pattern=/rgba?\(0,\s*0,\s*0(?:,\s*([\d.]+))?\) (-?[\d.]+)px (-?[\d.]+)px ([\d.]+)px ([\d.]+)px/g;
+    const parts=[...shadow.css.matchAll(pattern)];assert(parts.length&&shadow.css.replace(pattern,'').replaceAll(',','').trim()==='','Unknown shadow form');
+    const visible=parts.filter(m=>Number(m[1]??1)>0);assert(visible.length<=1,'Multiple visible shadows are unresolved');
+    for(const m of visible){const [alpha,x,y,blur,spread]=[Number(m[1]??1),...m.slice(2).map(Number)];assert([alpha,x,y,blur,spread].every(Number.isFinite)&&alpha<=1&&blur>0&&spread===0,'Only ordinary outer black blur with zero spread is supported');assert(shadow.left+x>0&&shadow.top+y>0&&shadow.right+x<width&&shadow.bottom+y<height,'Shadow origin escapes measured frame');if(sample.dateRange?shadow.actualOwnedPanel===true:shadow.id===sample.panelID)panelShadow=true;}
+  }
+  assert(panelShadow,'Actual visible panel shadow required');
+  let ink=0,shadowPixels=0;
+  for(let y=0;y<height;y++)for(let x=0;x<width;x++){
+    const at=(y*width+x)*4,different=sample.background.some((value,k)=>data[at+k]!==value);
+    if(!different)continue;
+    assert(x>0&&y>0&&x<width-1&&y<height-1,'Shadow/owned paint touches raster boundary');ink++;
+    if(!sample.rects.some(r=>x+.5>=r.left&&x+.5<r.right&&y+.5>=r.top&&y+.5<r.bottom))shadowPixels++;
+  }
+  assert(ink>0&&shadowPixels>0,'Native shadow pixels outside layout boxes must be retained');
+  return {status:'bounded-native-raster',inkPixels:ink,shadowPixels,frame:sample.documentFrame,panelID:sample.panelID,focused:sample.focused,compositedDisabledLeaves:sample.compositedDisabledLeaves??[],...(sample.dateRange?{dateRange:sample.dateRange}:{})};
+}
+
+export async function captureTargetPNG(page,root,path,{checkedRootID}={}){
+  // This finite menu fixture otherwise opens across the following audit row.
+  // Ordinary scrolling selects its existing upward collision placement; no DOM isolation.
+  if(await root.evaluate(node=>node.dataset.elyComponent==='menus/RadioMenuItem'))await root.evaluate(node=>node.scrollIntoView({block:'end',inline:'nearest',behavior:'instant'}));
+  else await root.scrollIntoViewIfNeeded();
+  await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+  let bounds=await root.evaluate(actionBounds);
+  if(bounds.focusOutline?.reason==='unbounded focus-within shadow'&&bounds.focusOutline.diagnostic?.focused?.type==='date'){
+    const measurement=await root.evaluate(dateRangeFocusedOutline,bounds);
+    if(measurement)bounds={...bounds,dateRangeFocusedOutline:measurement};
+  }
+  const shadowSample=await root.evaluate(multiSelectShadowFrame,bounds.dateRangeFocusedOutline??null);
+  if(shadowSample&&typeof shadowSample.eligible==='boolean'){
+    let candidate;
+    try{
+      assert(shadowSample.eligible,shadowSample.reason);
+      const owner=await root.evaluate(captureForeignPaint,{clip:shadowSample.documentFrame,checkedRootID:shadowSample.ownerID});assert.equal(owner.foreignDOMIntersections.length,0,'Foreign paint in shadow frame');
+      const png=candidate=await screenshotWithoutCaretMutation(page,{...shadowSample.camera,animations:'disabled',scale:'css'});
+      const require=createRequire(import.meta.url),{PNG}=require(resolve(dirname(require.resolve('playwright-core/package.json')),'lib/utilsBundle.js'));
+      const proof=proveMultiSelectShadowRaster(PNG.sync.read(png),shadowSample);
+      const afterDateOutline=shadowSample.dateRange?await root.evaluate(dateRangeFocusedOutline,bounds):null;
+      if(shadowSample.dateRange)assert.deepEqual(afterDateOutline,bounds.dateRangeFocusedOutline,'Focused date outline changed during capture');
+      assert.deepEqual(await root.evaluate(multiSelectShadowFrame,afterDateOutline),shadowSample,'Shadow frame/source geometry changed during capture');
+      assert.deepEqual(await root.evaluate(captureForeignPaint,{clip:shadowSample.documentFrame,checkedRootID:shadowSample.ownerID}),owner,'Foreign paint changed during shadow capture');
+      if(shadowSample.dateRange){
+        assert.deepEqual(bounds.focusOutline?.diagnostic?.dateRangePanelWitness,{ownerID:shadowSample.ownerID,panelCount:1,selectedPanelOwned:true,activeIsSelectedPanel:true},'The unbounded focus ancestor must equal the unique actual selected DateRange panel node');
+        assert.equal(bounds.focusOutline?.reason,'unbounded focus-within shadow');assert.equal(bounds.focusOutline.diagnostic.active.tag,'div');assert.equal(bounds.focusOutline.diagnostic.active.id,shadowSample.panelID||null);
+        assert.deepEqual(bounds.focusOutline.diagnostic.active.rect,shadowSample.dateRange.panelReference.rect,'The unbounded ancestor must be the actual unique sampled panel, not another idless node');
+      }else assert(!bounds.focusOutline||bounds.focusOutline.status!=='unsupported'||bounds.focusOutline.reason==='unbounded focus-within shadow'&&bounds.focusOutline.diagnostic.active.id===shadowSample.panelID,'Unrelated focus gap cannot be resolved by a shadow frame');
+      const {scroll,viewport}=await page.evaluate(()=>({scroll:{x:scrollX,y:scrollY},viewport:{width:innerWidth,height:innerHeight}}));
+      if(path)await writeFile(path,png,{flag:'wx'});
+      return {bounds:{...bounds,clip:shadowSample.documentFrame,decorativeShadowProof:proof,focusOutline:shadowSample.dateRange?shadowSample.dateRange.outline.outline:{status:'not-painted',diagnostic:bounds.focusOutline?.diagnostic},scroll,viewport,camera:shadowSample.camera,coordinateSpace:'document receipt; native authored-audit shadow frame'},png,...owner};
+    }catch(error){
+      const retainedPath=path&&candidate?`${path}.shadow-proof.png`:null;
+      if(retainedPath)await writeFile(retainedPath,candidate,{flag:'wx'});
+      const retainedRaster=candidate?{path:retainedPath,sha256:createHash('sha256').update(candidate).digest('hex'),bytes:candidate.length,width:candidate.readUInt32BE(16),height:candidate.readUInt32BE(20),role:'failed-shadow-proof-context-only'}:null;
+      bounds={...bounds,focusOutline:{status:'unsupported',reason:bounds.dateRangeFocusedOutline?'unproven DateRange shadow raster':'unproven MultiSelect shadow raster',diagnostic:{prior:bounds.focusOutline,shadowSample,retainedPath,retainedRaster,error:String(error)}}};
+    }
+  }
+  assert(bounds.clip.width>0&&bounds.clip.height>0,'Target painted union must have positive dimensions');
+  assert(!bounds.negativePageOverflow,'Target painted content extends beyond capturable document coordinates');
+  const {scroll,viewport}=await page.evaluate(()=>({scroll:{x:scrollX,y:scrollY},viewport:{width:innerWidth,height:innerHeight}}));
+  // Same camera rule as the frozen baseline: document capture is only the fallback.
+  const viewportClip={...bounds.clip,x:bounds.clip.x-scroll.x,y:bounds.clip.y-scroll.y};
+  const fits=viewportClip.x>=0&&viewportClip.y>=0&&viewportClip.x+bounds.clip.width<=viewport.width&&viewportClip.y+bounds.clip.height<=viewport.height;
+  const camera={fullPage:!fits,clip:fits?viewportClip:bounds.clip};
+  const ownership=await root.evaluate(captureForeignPaint,{clip:bounds.clip,checkedRootID});
+  const png=await screenshotWithoutCaretMutation(page,{path,...camera,animations:'disabled',scale:'css'});
+  assert.equal(png.readUInt32BE(16),bounds.clip.width,'PNG width equals painted union');
+  assert.equal(png.readUInt32BE(20),bounds.clip.height,'PNG height equals painted union');
+  return {bounds:{...bounds,scroll,viewport,camera,coordinateSpace:'document clip; camera.clip is viewport-relative when fullPage=false'},png,...ownership};
+}
+
+// Choose an actually reachable owned pixel, never a forced click through a twin.
+export async function clickVisibleControl(control,{allowKeyboard=false}={}){
+  await control.scrollIntoViewIfNeeded();
+  const position=await control.evaluate(node=>{
+    const rect=node.getBoundingClientRect();
+    for(const fy of [.5,.15,.85])for(const fx of [.05,.5,.95]){
+      const x=rect.left+rect.width*fx,y=rect.top+rect.height*fy,hit=document.elementFromPoint(x,y);
+      if(hit&&(hit===node||node.contains(hit)))return {x:rect.width*fx,y:rect.height*fy};
+    }
+    return null;
+  });
+  if(!position&&allowKeyboard){
+    await control.focus();await control.press('Enter');
+    return {method:'native keyboard Enter',pointerActionabilityGap:'Requested control has no reachable owned pixel in the audit fixture; visual/actionability completion remains blocked'};
+  }
+  assert(position,'Requested control has no reachable owned pixel; keep this as an actionability gap');
+  await control.click({position});
+  return {method:'hit-tested native click',position};
+}
+
+const step=(id,owner,control,method,event,expectedState)=>({id,owner,control,method,event,expectedState});
+const registeredCanvasIDs=['canvas/InfiniteCanvas','canvas/CanvasGrid','canvas/Guides','canvas/Ruler','canvas/ArtboardFrame','canvas/ZoomControls','canvas/ZoomIndicator','canvas/MiniMap'];
+const contracts={
+  'canvas/InfiniteCanvas':{entry:'canvas',kind:'InfiniteCanvas',steps:[
+    step('zoom-in','canvasScene','[data-cs-zoom-in]','click','click','zoom=.75; center held; public view equals rendered transform'),
+    step('minimap-arrow-right','canvasScene','[data-cs-minimap]','dispatchEvent','keydown','ArrowRight adds 40/.75 to viewport x; y and zoom unchanged'),
+  ]},
+  'files/ArchiveViewer':{entry:'domain',kind:'ArchiveViewer',steps:[
+    step('expand-folder','domain','folder','click','click','aria-expanded=true; child list visible'),
+    step('open-entry','domain','[data-ws-archive-node="Atrium/Design/Palette.json"]','dispatchEvent','keydown','open-archive-entry.path=Atrium/Design/Palette.json'),
+  ]},
+  'forms/PasswordInput':{entry:'forms/PasswordInput',kind:'PasswordInput',steps:[
+    step('password-input','input','node','dispatchEvent','input','value=Changed caller value; native validity=true; type=password'),
+    step('password-change','input','node','dispatchEvent','change','retained value=Changed caller value; change event delivered'),
+    step('password-toggle','forms/PasswordInput','toggle','click','click','type=text; retained value=Changed caller value'),
+  ]},
+  'editor/CodeEditor':{entry:'code',kind:'CodeEditor',steps:[
+    step('fold','code','fold','click','click','fold aria-expanded=true; toggle-code-fold.line=2'),
+    step('code-lens','code','[data-ws-code-lens="references"]','click','click','run-code-lens.lens=references'),
+    step('minimap','code','[data-ws-editor-tool="toggle-minimap"]','click','click','editor-tool.tool=toggle-minimap'),
+    step('breadcrumb','code','[data-ws-editor-breadcrumb="src/worker.go"]','click','click','open-code-location.location=src/worker.go'),
+    step('multiline-input','code','editor','dispatchEvent','input','submitted content=first line\\nnew browser line'),
+    step('submit-multiline','submitData','button[type="submit"]','click','click','one host submission; FormData contains exact multiline content'),
+    step('reject-line-number-only','code','button[type="submit"]','click','click','aria-invalid=true; no additional host action'),
+    step('changed-input','code','editor','dispatchEvent','input','submitted content=changed caller code'),
+    step('submit-changed','submitData','button[type="submit"]','click','click','one host submission; FormData contains changed caller code'),
+    step('empty-input','checkRequiredEditor','editor','dispatchEvent','input','submitted content is empty; caret remains observable'),
+    step('reject-empty','checkRequiredEditor','button[type="submit"]','click','click','aria-invalid=true; required error visible; no additional host action'),
+  ]},
+};
+
+export function caseActionContract(identity,source,filename){
+  // MiniMap deliberately renders a different read-only control and takes an early return.
+  const editorAliases=['EditorGutter','LineNumbers','FoldingControl','Ruler','IndentGuide','BracketMatcher','RainbowBrackets','MultiCursor','SelectionHighlight','StickyScroll','Breadcrumb','InlayHints','CodeLens','InlineDecoration'];
+  const editor=identity==='editor/CodeEditor'||editorAliases.some(name=>identity===`editor/${name}`);
+  const canvas=registeredCanvasIDs.includes(identity);
+  const definition=contracts[canvas?'canvas/InfiniteCanvas':editor?'editor/CodeEditor':identity];if(!definition)return null;
+  const facts={root:{dataset:{elyKind:definition.kind,elyComponent:identity}},kind:definition.kind,variant:identity.split('/')[1],twin:true,
+    selectors:{'[data-ws-devtools-source]':false,'[data-ws-canvas-scene]':canvas},form:{dataset:{wsRequired:'true'}},node:{tagName:'INPUT',type:'password',...(identity==='forms/PasswordInput'?{name:'caller_value'}:{})}};
+  const resolved=resolveCaseActionSites(source,filename,{entry:definition.entry,facts});
+  const mappingGaps=[...resolved.mappingGaps];
+  if(resolved.sites.length!==definition.steps.length)mappingGaps.push({reason:'exact-action-count-changed',expected:definition.steps.length,actual:resolved.sites.length});
+  const steps=definition.steps.map((expected,index)=>{
+    const actual=resolved.sites[index];
+    if(!actual||actual.owner!==expected.owner||(actual.controlSelector||actual.control)!==expected.control||actual.method!==expected.method||actual.event!==expected.event)mappingGaps.push({reason:'action-source-mapping-changed',stepId:expected.id,actualSiteId:actual?.siteId||null});
+    return {...expected,source:actual||null};
+  });
+  return {identity,entry:definition.entry,kind:definition.kind,steps,mappingGaps,
+    ...(canvas?{registeredCanvas:true}:{}),
+    // advancedFormsCases supplies Name=caller_value; this is not an alias/default assumption.
+    fixtureGuards:{component:identity,kind:definition.kind,devtoolsSourceAbsent:identity!=='forms/PasswordInput',canvasSceneAbsent:identity==='files/ArchiveViewer',requiredEditor:editor,...(identity==='forms/PasswordInput'?{passwordInputName:'caller_value'}:{})}};
+}
+
+export function assertRegisteredCanvasTransition(label,before,after,detail){
+  assert.deepEqual(before.stage,{width:820,height:460});
+  assert.deepEqual(after.stage,before.stage);
+  assert.equal(detail.action,'change-viewport');
+  const view=before.view;
+  const expected=label==='zoom-in'?{zoom:.75,x:view.x+410/view.zoom-410/.75,y:view.y+230/view.zoom-230/.75}
+    :label==='minimap-arrow-right'?{zoom:view.zoom,x:view.x+40/view.zoom,y:view.y}:null;
+  assert(expected,'Unknown registered canvas action');
+  for(const key of ['x','y','zoom']){
+    assert(Number.isFinite(detail.view?.[key])&&Math.abs(detail.view[key]-expected[key])<=1e-6,`Public canvas ${key} differs from independent transition`);
+    assert(Number.isFinite(after.view[key])&&Math.abs(after.view[key]-expected[key])<=1e-6,`Rendered canvas ${key} differs from independent transition`);
+  }
+  return expected;
+}
+
+export function assertCanvasRulerPan(before,after,detail,{inputs,beforePaint,afterPaint}){
+  assert.deepEqual(after.stage,before.stage,'Native ruler pan must not change the stage');
+  assert.deepEqual(after.artboards,before.artboards,'Native ruler pan must preserve the artboards');
+  assert.equal(after.shapes,before.shapes,'Native ruler pan must preserve shapes');
+  assert.equal(after.guides,before.guides,'Native ruler pan must preserve guides');
+  assert(before.grid.count>0&&after.grid.count>0,'Native ruler pan must retain painted grid points');
+  assert.deepEqual(after.grid.configuration,before.grid.configuration,'Native ruler pan must preserve grid spacing and appearance');
+  assert(before.rulers.count>0&&after.rulers.count>0,'Native ruler pan must retain painted ruler ticks');
+  assert.deepEqual(after.rulers.configuration,before.rulers.configuration,'Native ruler pan must preserve ruler spacing and appearance');
+  assert.equal(inputs.length,1,'Ruler pan must observe exactly one native wheel');
+  const input=inputs[0];
+  assert.equal(input.type,'wheel','Ruler pan must be a native wheel event');
+  assert.equal(input.trusted,true,'Ruler pan must be a trusted native wheel');
+  assert.equal(input.targetStage,true,'Ruler pan must target an owned point in the exact SVG stage');
+  assert.equal(input.deltaX,48,'Ruler pan must use the one bounded horizontal delta');
+  assert.equal(input.deltaY,0,'Ruler pan must not request vertical movement');
+  assert.equal(input.defaultPrevented,true,'The stage must consume the wheel rather than scroll an ancestor');
+  assert.equal(detail.action,'change-viewport');
+  const expected={x:before.view.x+input.deltaX/before.view.zoom,y:before.view.y,zoom:before.view.zoom};
+  for(const key of ['x','y','zoom']){
+    assert(Number.isFinite(detail.view?.[key])&&Math.abs(detail.view[key]-expected[key])<=1e-6,`Public canvas ${key} differs from the native ruler pan`);
+    assert(Number.isFinite(after.view[key])&&Math.abs(after.view[key]-expected[key])<=1e-6,`Rendered canvas ${key} differs from the native ruler pan`);
+  }
+  const partial=(paint,label)=>{
+    assert.equal(paint.count,1,`${label} must measure exactly one painted ruler tick`);
+    assert.equal(paint.text,'1100',`${label} must measure the exact ruler tick`);
+    assert(paint.rect&&paint.clip,`${label} must retain the ruler tick and stage clip rectangles`);
+    const {rect,clip}=paint;
+    for(const value of [rect.left,rect.top,rect.right,rect.bottom,clip.left,clip.top,clip.right,clip.bottom])assert(Number.isFinite(value),`${label} must contain finite paint and clip geometry`);
+    const width=Math.max(0,Math.min(rect.right,clip.right)-Math.max(rect.left,clip.left));
+    const height=Math.max(0,Math.min(rect.bottom,clip.bottom)-Math.max(rect.top,clip.top));
+    const area=width*height,fullArea=Math.max(0,rect.right-rect.left)*Math.max(0,rect.bottom-rect.top);
+    assert(fullArea>0&&area>0,`${label} must have nonzero visible painted area`);
+    return {area,fullArea};
+  };
+  const initial=partial(beforePaint,'Initial ruler tick');
+  assert(initial.area<initial.fullArea,'Initial 1100 tick must be genuinely partially clipped');
+  const final=partial(afterPaint,'Final ruler tick');
+  assert.equal(final.area,final.fullArea,'Final 1100 tick must be fully inside the SVG stage clip');
+  return {expected,primitiveCounts:{grid:[before.grid.count,after.grid.count],rulers:[before.rulers.count,after.rulers.count]},initialVisibleArea:initial.area,initialFullArea:initial.fullArea,finalVisibleArea:final.area,finalFullArea:final.fullArea};
+}
+
+export async function deliverDirectActionVerification(receipt,verify){
+  receipt.assertedTarget=await verify(receipt.afterState,receipt.beforeState,receipt);
+  receipt.assertionsPassed=true;
+}
+
+export function installCanvasNativeInputObservers(node){
+  node.__visualCanvasClicks=[];
+  node.__visualCanvasClickObserver=event=>{if(event.target.closest?.('[data-cs-minimap]'))node.__visualCanvasClicks.push({trusted:event.isTrusted,x:event.clientX,y:event.clientY});};
+  node.addEventListener('click',node.__visualCanvasClickObserver,true);
+  const scene=node.querySelector('[data-ws-canvas-scene]'),pinnedStage=scene?.querySelector('[data-cs-stage]')??null;
+  const pinnedStageOwned=!!pinnedStage&&scene.contains(pinnedStage)&&node.contains(pinnedStage);
+  node.__visualCanvasWheels=[];
+  // View rendering detaches SVG children before this root bubble listener runs; preserve dispatch ancestry.
+  node.__visualCanvasWheelObserver=event=>{
+    const path=event.composedPath?.()??[],pathHasPinnedRoot=path.includes(node),pathHasPinnedStage=!!pinnedStage&&path.includes(pinnedStage);
+    const target=event.target,currentStage=node.querySelector('[data-ws-canvas-scene] [data-cs-stage]');
+    node.__visualCanvasWheels.push({type:event.type,trusted:event.isTrusted,deltaX:event.deltaX,deltaY:event.deltaY,
+      targetStage:pinnedStageOwned&&pathHasPinnedRoot&&pathHasPinnedStage,defaultPrevented:event.defaultPrevented,
+      pathHasPinnedRoot,pathHasPinnedStage,target:{tag:target?.localName??target?.tagName?.toLowerCase()??null,id:target?.id||null,
+        connected:target?.isConnected===true,currentStageContainsTarget:!!currentStage&&!!target&&currentStage.contains(target)}});
+  };
+  node.addEventListener('wheel',node.__visualCanvasWheelObserver);
+}
+
+// Separate fresh two-action replay; the three supplemental fit/pointer actions stay distinct.
+export async function runRegisteredCanvasActions(contract,root,runStep){
+  assert(registeredCanvasIDs.includes(contract.identity)&&contract.registeredCanvas===true);
+  assert.equal(await root.getAttribute('data-ely-component'),contract.identity);
+  const scene=()=>root.evaluate(node=>{
+    const host=node.querySelector('[data-ws-canvas-scene]'),stage=host?.querySelector('[data-cs-stage]'),world=host?.querySelector('[data-cs-world]');
+    if(host?.dataset.sceneKind!=='InfiniteCanvas'||!stage||!world)throw new Error('Exact InfiniteCanvas scene required');
+    const match=(world.getAttribute('transform')||'').match(/^scale\(([-+\d.e]+)\) translate\(([-+\d.e]+) ([-+\d.e]+)\)$/);
+    if(!match)throw new Error('Unknown canvas world transform');
+    return {stage:{width:stage.viewBox.baseVal.width,height:stage.viewBox.baseVal.height},view:{zoom:Number(match[1]),x:-Number(match[2]),y:-Number(match[3])},artboards:host.querySelectorAll('[data-cs-artboard]').length,shapes:host.querySelectorAll('[data-cs-shape]').length};
+  });
+  const initial=await scene();
+  assert.deepEqual(initial,{stage:{width:820,height:460},view:{zoom:.7,x:-60,y:-60},artboards:2,shapes:8});
+  const id=await root.getAttribute('id');
+  await root.evaluate(node=>{
+    node.__registeredCanvasInput=[];
+    node.__registeredCanvasObserver=event=>{const target=event.target.closest('[data-cs-zoom-in],[data-cs-minimap]');if(target)node.__registeredCanvasInput.push({type:event.type,key:event.key||null,trusted:event.isTrusted,control:target.hasAttribute('data-cs-zoom-in')?'zoom':'minimap'});};
+    node.addEventListener('click',node.__registeredCanvasObserver,true);node.addEventListener('keydown',node.__registeredCanvasObserver,true);
+  });
+  try{
+    for(const label of ['zoom-in','minimap-arrow-right']){
+      let before;
+      await runStep(label,async()=>{
+        before=await scene();
+        if(label==='zoom-in')return clickVisibleControl(root.locator('[data-cs-zoom-in]'));
+        const map=root.locator('[data-cs-minimap]');await map.focus();await map.press('ArrowRight');
+      },async(state,previous)=>{
+        const events=state.actions.slice(previous.actions.length);assert.equal(events.length,1);
+        const detail=events[0];assert.equal(detail.id,id);assert.equal(detail.component,contract.identity);
+        const after=await scene(),expected=assertRegisteredCanvasTransition(label,before,after,detail);
+        assert.equal(after.artboards,2);assert.equal(after.shapes,8);
+        const inputs=await root.evaluate(node=>node.__registeredCanvasInput);
+        assert.deepEqual(inputs,label==='zoom-in'?[{type:'click',key:null,trusted:true,control:'zoom'}]:[{type:'click',key:null,trusted:true,control:'zoom'},{type:'keydown',key:'ArrowRight',trusted:true,control:'minimap'}]);
+        return {expected,rendered:after.view,input:inputs.at(-1)};
+      });
+    }
+  }finally{await root.evaluate(node=>{node.removeEventListener('click',node.__registeredCanvasObserver,true);node.removeEventListener('keydown',node.__registeredCanvasObserver,true);delete node.__registeredCanvasInput;delete node.__registeredCanvasObserver;});}
+}
+
+const settingsTargets={KeyboardShortcutsList:[1,'Keyboard'],ProxySettings:[2,'Network'],PrivacySettings:[3,'Privacy','telemetry'],NotificationSettings:[4,'Notifications','quiet'],StartupSettings:[5,'Startup','login'],StorageSettings:[6,'Storage'],ResetToDefault:[6,'Storage'],AdvancedSettings:[7,'Advanced','developer'],'DeveloperMode Toggle':[7,'Advanced','developer']};
+export function calendarDraftWheelDecision(metrics){
+  const fail=reason=>({axis:'unreachable',deltaX:0,deltaY:0,reason});
+  if(!metrics.textRects.length)return fail('Calendar draft has no painted text fragments');
+  const left=Math.min(...metrics.textRects.map(rect=>rect.left)),right=Math.max(...metrics.textRects.map(rect=>rect.right));
+  const top=Math.min(...metrics.textRects.map(rect=>rect.top)),bottom=Math.max(...metrics.textRects.map(rect=>rect.bottom));
+  if(right-left>metrics.clientWidth)return fail(`Calendar draft text spans ${right-left}px, wider than the owned ${metrics.clientWidth}px horizontal scrollport`);
+  if(bottom-top>metrics.clientHeight)return fail(`Calendar draft text spans ${bottom-top}px, taller than the owned ${metrics.clientHeight}px vertical scrollport`);
+  const scrollMaxX=Math.max(0,metrics.scrollWidth-metrics.clientWidth),scrollMaxY=Math.max(0,metrics.scrollHeight-metrics.clientHeight);
+  if(left<metrics.clip.left){
+    if(metrics.scrollLeft<=0)return fail('Calendar draft remains clipped at the horizontal start endpoint');
+    return {axis:'horizontal',deltaX:-Math.min(120,Math.max(1,Math.ceil(metrics.clip.left-left))),deltaY:0};
+  }
+  if(right>metrics.clip.right){
+    if(metrics.scrollLeft>=scrollMaxX)return fail('Calendar draft remains clipped at the horizontal end endpoint');
+    return {axis:'horizontal',deltaX:Math.min(120,Math.max(1,Math.ceil(right-metrics.clip.right))),deltaY:0};
+  }
+  if(top<metrics.clip.top){
+    if(metrics.scrollTop<=0)return fail('Calendar draft remains clipped at the vertical start endpoint');
+    return {axis:'vertical',deltaX:0,deltaY:-Math.min(120,Math.max(1,Math.ceil(metrics.clip.top-top)))};
+  }
+  if(bottom>metrics.clip.bottom){
+    if(metrics.scrollTop>=scrollMaxY)return fail('Calendar draft remains clipped at the vertical end endpoint');
+    return {axis:'vertical',deltaX:0,deltaY:Math.min(120,Math.max(1,Math.ceil(bottom-metrics.clip.bottom)))};
+  }
+  return {axis:'visible',deltaX:0,deltaY:0};
+}
+
+export function assertPresenceNativeRequest(step,events,actions,{id,component}){
+  const escape=step==='presence-stop-escape',follow=step==='presence-follow-ada'||step==='presence-follow-ada-again';
+  assert(follow||step==='presence-stop-button'||escape,`Unknown presence step: ${step}`);
+  const native={type:escape?'keydown':'click',trusted:true,key:escape?'Escape':null,control:step==='presence-stop-button'?'stop':'ada'};
+  const request=follow?{id,component,action:'follow-user',value:'ada',following:'ada'}:{id,component,action:'stop-following'};
+  assert.deepEqual(events,[native],`${step} must be exactly one trusted native input to its actual target`);
+  assert.deepEqual(actions,[request],`${step} must emit exactly its expected alias-scoped host request`);
+  return {native:events[0],request:actions[0]};
+}
+
+export function activatePresenceStep(step,{ada,stop}){
+  if(step==='presence-follow-ada'||step==='presence-follow-ada-again')return ada.click();
+  if(step==='presence-stop-button')return stop.click();
+  if(step==='presence-stop-escape')return ada.press('Escape');
+  throw new Error(`Unknown presence step: ${step}`);
+}
+
+export function requestedStateContract(identity,trashFixture){
+  const studio=localStudioCases[identity];
+  if(studio)return {identity,kind:studio.kind,family:'forms',requestedStateOnly:true,focusedSequence:'forms-local-studio-native',nativeFormTwinWitness:true,twinFocusSelector:studio.field,mappingGaps:[],fixtureGuards:{component:identity,...studio},steps:studio.steps.map(([id,control])=>({id,control,event:'trusted native input/pointer/keyboard; exact source-generated synthetic notifications',expectedState:`Exact ${identity} ${id} local state, paint/data and ordered complete event window`,source:{siteId:`local-studio:${identity}:${id}`,sourceAnchor:'advanced_forms_fixtures.go; ely-api-forms.html; ely-controls.html; ely-api-forms.js; ely-controls.js',provenance:'Exact authored root fixture; fifty alpha keypresses are one grouped checkpoint with every intermediate event retained'}})),scope:'Local typed/drawn signature and finite gradient edits only; no signature authenticity, persistence, provider or arbitrary props'};
+  const picker=localPickerCases[identity];
+  if(picker)return {identity,kind:picker.kind,family:'forms',requestedStateOnly:true,focusedSequence:'forms-local-picker-native',nativeFormTwinWitness:true,twinFocusSelector:picker.field,mappingGaps:[],fixtureGuards:{component:identity,...picker},steps:picker.steps.map(id=>({id,control:id==='picker-select'?'[data-ely-icon-option]:not([hidden])':picker.field,event:'trusted native search and keyboard; production notifications retain synthetic provenance',expectedState:`Exact ${identity} ${id} local state and entire event window`,source:{siteId:`local-picker:${identity}:${id}`,sourceAnchor:'advanced_forms_fixtures.go; advanced.go EmojiPicker override; ely-api-forms.html; ely-api-forms.js; ely-controls.js',provenance:'Canonical/qualified root only, not PreviewExamples'}})),scope:'Finite local search/selection/focus only; no provider, arbitrary options, font availability guarantee or registered equivalence'};
+  const temporal=temporalAXCases[identity];
+  if(temporal)return {identity,kind:temporal.kind,family:'forms',requestedStateOnly:true,focusedSequence:'forms-temporal-ax-native',nativeFormTwinWitness:true,twinFocusSelector:temporal.field,mappingGaps:[],fixtureGuards:{component:identity,...temporal},steps:temporal.steps.map(id=>({id,control:id==='date-range-invalid'||id==='date-range-repair'?'input[data-ely-date-end]':id.includes('open')||id==='date-range-close'?'[data-ely-date-range-trigger]':temporal.field,nativeTabCommit:id==='period-commit',event:'trusted native pointer/observed-owned-AX segment keyboard only',expectedState:`Exact ${identity} ${id}; every intermediate value, validity and public payload retained`,source:{siteId:`temporal-ax:${identity}:${id}`,sourceAnchor:'advanced_forms_fixtures.go; advanced.go qualified date/time values; ely-api-forms.html; ely-api-forms.js dateRange/key; ely-api.js change',provenance:'Unique owned editable AX segment required; no fill, value assignment, locale-order guess or host fulfillment'}})),scope:'Finite source-backed date-range/month/time controls only; unavailable or ambiguous AX fails closed'};
+  const complexForm=complexFormCases[identity];
+  if(complexForm)return {identity,kind:complexForm.kind,family:'forms',requestedStateOnly:true,focusedSequence:'forms-complex-eight-native',nativeFormTwinWitness:true,twinFocusSelector:complexForm.field,mappingGaps:[],fixtureGuards:{component:identity,...complexForm},steps:complexForm.steps.map(id=>({id,control:id==='form-submit'?'form.ely-api-inline-form button[type="submit"]':id==='array-add'?'[data-ely-array-add]':id==='array-remove'?'[data-ely-array-remove]':id==='tag-remove'?'[data-ui-action="remove-tag"][value="NewCallerTag"]':id==='mention-select'?'[data-ely-mention-value][value="beta"]':complexForm.field,nativeTabCommit:id==='email-commit',event:'trusted native input/Tab/Enter/button; source-generated notifications remain synthetic',expectedState:`Exact ${identity} ${id} ordered native/public window, state and independent twin witness`,source:{siteId:`complex-eight:${identity}:${id}`,sourceAnchor:'advanced_forms_fixtures.go Form/InlineForm/TagInput/MentionInput; ely-api-forms.html; ely-controls.html; ely-api-forms.js; ely-controls.js; ely-api.js',provenance:'Exact canonical/qualified root fixture only; no PreviewExamples or inherited runtime receipt'}})),scope:'Only listed finite root transitions; InlineForm emits save intent only, not subscription/persistence; no arbitrary props, provider or registered equivalence'};
+  const rangeForm=rangeFormCases[identity];
+  if(rangeForm)return {identity,kind:rangeForm.kind,family:'forms',requestedStateOnly:true,focusedSequence:'forms-range-native',nativeFormTwinWitness:true,mappingGaps:[],fixtureGuards:{component:identity,...rangeForm},steps:rangeForm.steps.map(([id,control,key,value])=>({id,control,event:key?'trusted native keyboard; knob-generated notifications are synthetic':'trusted native button click; generated notifications are synthetic',expectedState:`Exact ${identity} ${id}: ${value}; native/public event, value, bounds, output and independent twin proof`,source:{siteId:`range-native:${identity}:${id}`,sourceAnchor:'advanced_forms_fixtures.go canonical Slider/Knob/RelativeDatePicker; ely-api-forms.html; ely-api-forms.js range/key/click; ely-api.js change',provenance:'Exact qualified root and inherited Max5; never preview Max100/Max10 or basic Slider transfer'}})),scope:'Only listed default local keyboard/button transitions; no drag, arbitrary bounds, disabled fixture variants, host fulfillment or registered equivalence'};
+  if(identity==='forms/PathInput')return {identity,kind:'PathInput',family:'forms',requestedStateOnly:true,focusedSequence:'forms-path-native',nativeFormTwinWitness:true,twinFocusSelector:'input[data-ely-path]',mappingGaps:[],fixtureGuards:{component:identity,initial:'alpha',changed:'~/Projects/ely',name:'caller_value',action:'choose-path'},steps:['path-edit','path-commit','path-request'].map(id=>({id,control:id==='path-request'?'.ely-api-path-input button[data-ely-action="choose-path"]':'input[data-ely-path]',nativeTabCommit:id==='path-commit',event:'trusted native input, Tab departure or button activation',expectedState:`Exact ${id}; retain current typed path and emit only the documented local change/request`,source:{siteId:`path-native:${id}`,sourceAnchor:'advanced_forms_fixtures.go PathInput; ely-api-forms.html PathInput; ely-api-forms.js generic action owner; ely-api.js change',provenance:'Exact advanced PathInput alpha root, not Browse preview'}})),scope:'Native path edit/commit and one choose-path request only; no OS chooser, filesystem change or provider fulfillment'};
+  if(regionalFormIDs.includes(identity))return {identity,kind:'LanguageSelect',family:'forms',requestedStateOnly:true,focusedSequence:'forms-regional-native',nativeFormTwinWitness:true,mappingGaps:[],fixtureGuards:{component:identity,initial:'alpha',name:'caller_value',options:[['alpha','Caller Alpha'],['beta','Caller Beta']]},steps:['regional-search','regional-select','regional-unmatched','regional-escape'].map(id=>({id,control:'[data-ui-combobox-input]',event:id==='regional-search'||id==='regional-unmatched'?'trusted native text input':'trusted native keyboard; production hidden selection notifications are synthetic',expectedState:`Exact ${identity} ${id}; beta selection, unmatched filtering or Escape restore; no host request`,source:{siteId:`regional:${identity}:${id}`,sourceAnchor:'advanced_forms_fixtures.go; ely-api-forms.html LanguageSelect; ely-controls.html combobox; ely-controls.js selectCombo; ely-api.js change',provenance:'Exact root alpha/Caller Alpha,Beta fixture only; no preview catalogue or alias receipt transfer'}})),scope:'Exact regional root search, keyboard selection, unmatched query and Escape label restoration only; no provider, locale change, arbitrary options or registered equivalence'};
+  const eight=nextEightFormCases[identity];
+  if(eight)return {identity,kind:eight.kind,family:'forms',requestedStateOnly:true,focusedSequence:'forms-eight-explicit-native',nativeFormTwinWitness:true,twinFocusSelector:eight.mode==='number'?'input[data-ely-number]':eight.mode==='group'?'input:not([type="hidden"])':null,fixtureGuards:{component:identity,...eight},mappingGaps:[],steps:eight.steps.map(id=>({id,control:eight.mode==='pin'?`input[data-ui-pin-slot][id$="-pin-${id==='pin-replace-first'?0:1}"]`:eight.mode==='inline'?(id==='inline-open'||id==='inline-reopen'?'[data-ely-inline-open]':id==='inline-cancel'?'[data-ely-inline-cancel]':id==='inline-save'?'[data-ely-inline-save]':eight.selector):eight.selector,event:id.startsWith('commit-')?'trusted native Tab/change/blur':eight.mode==='scrub'?'trusted native arrow key; production input/change are synthetic':eight.mode==='pin'?'trusted native slot input; named hidden notifications are synthetic':'trusted native input or pointer activation',expectedState:`Exact ${identity} ${id} transition; per-action native/public payload and independent twin witness required`,nativeTabCommit:id.startsWith('commit-'),source:{siteId:`forms-eight:${identity}:${id}`,sourceAnchor:'internal/gallery/advanced_forms_fixtures.go; internal/gallery/advanced.go aliasFixtureProps; ely-api-forms.html; ely-controls.html; ely-api-forms.js; ely-controls.js; ely-api.js',provenance:`Exact ${identity} root fixture, not PreviewExamples; no host fulfillment or persistence`}})),scope:'Finite explicit native root sequence only; Scrub pointer drag, OTP authentication, clipboard paste, arbitrary props and host fulfillment are not covered'};
+  const nativeFormCases={
+    'forms/DatePicker':{kind:'DatePicker',fixture:{type:'date',initial:'2026-10-20',changed:'2026-10-21'},steps:[['date-edit','input[type="date"]','Native date entry changes only the canonical single-date field; no range alias or host result'],['date-commit','input[type="date"]','Native Tab commits the same date value; no host request or persistence claim']]},
+    'forms/CodeInput':{kind:'CodeInput',fixture:{type:'text',initial:'alpha',changed:'const x = "<img>";'},steps:[['code-edit','[data-ely-code-input]','Native caller text is retained exactly and highlighted as text; no markup is created'],['code-commit','[data-ely-code-input]','Native Tab leaves the exact source text and highlight synchronized; no host result']]},
+    'forms/ColorPicker':{kind:'ColorPicker',fixture:{initial:'#3772bb',palette:'#228855'},steps:[['color-palette','[data-ely-color-choice="#228855"]','Native palette activation updates only the local selected color and synchronized color channels'],['color-hue-key','input[data-ely-color-hue]','Native range-key input changes the local hue and keeps the selected color, hex field and status synchronized; screen-color host action excluded']]},
+    'forms/CronEditor':{kind:'CronEditor',fixture:{initial:'*/5 * * * *',edited:'0 9 * * 1-5',preset:'0 9 * * *',now:'2026-09-25T12:00:00Z'},steps:[['cron-edit','[data-ely-cron]','Native valid expression edit replaces the initial preview with the exact next three weekday09:00 UTC runs after the frozen clock'],['cron-preset','[data-ely-cron-preset][value="0 9 * * *"]','Native preset replaces the weekday preview with exact next three daily09:00 UTC runs; no scheduler execution']]},
+    'forms/ExpressionInput':{kind:'ExpressionInput',fixture:{initial:'price * quantity',changed:'price + quantity',result:'11',invalid:'price / 0',invalidResult:'Division by zero.'},steps:[['expression-edit','[data-ely-expression]','Native arithmetic edit evaluates only caller variables locally to 11'],['expression-invalid','[data-ely-expression]','Division by zero remains a local validation error; no code execution or host result']]},
+    'forms/Form':{kind:'Form',fixture:{field:'name',initial:'',changed:'Grace Hopper',arrayName:'links',initialRows:0},steps:[['form-edit','form[data-ely-form] input[name="name"]','Native name edit updates the local dirty indicator; no submit or save result'],['form-add-array-row','[data-ely-array-add]','Native Add link creates one local blank array row and leaves the form dirty; no submit or persistence claim']]},
+    'forms/MultiSelect':{kind:'MultiSelect',fixture:{initial:['alpha'],filter:'beta',added:['alpha','beta'],removed:['alpha'],disabled:'locked'},steps:[['multi-filter','[data-ely-multi-entry]','Native filter reveals only matching enabled options without changing selection'],['multi-select-beta','[data-ui-multi-option] input[value="beta"]','Native checkbox selection adds Beta as a local chip and preserves Alpha and disabled Locked'],['multi-remove-last','[data-ely-multi-entry]','Native Backspace invokes the component removal behavior for the last selected chip; production-generated checkbox click is not mislabeled native']]},
+  }[identity];
+  if(nativeFormCases){
+    const sourceAnchor='internal/gallery/advanced_forms_fixtures.go exact forms story; ui/gohtmx/templates/ely-api-forms.html; ui/gohtmx/assets/ely-api-forms.js';
+    return {identity,kind:nativeFormCases.kind,family:'forms',requestedStateOnly:true,focusedSequence:'forms-seven-native-local',mappingGaps:[],fixtureGuards:{component:identity,kind:nativeFormCases.kind,...nativeFormCases.fixture},steps:nativeFormCases.steps.map(([id,control,expectedState])=>({id,control,expectedState,event:id==='form-edit'||id==='date-edit'||id==='code-edit'||id==='cron-edit'||id==='expression-edit'||id==='multi-filter'?'trusted native input':'trusted native keyboard or pointer activation',source:{siteId:`forms-state:${identity}:${id}`,sourceAnchor,provenance:`Exact canonical gallery identity ${identity}; root fixture only, no PreviewName transfer. Component-local behavior only; no host/provider fulfillment.`}})),scope:`Only exact ${identity} default fixture and listed local native state transitions. No family alias, PreviewName sample, save, provider, scheduler, or persistence result is claimed.`};
+  }
+  const nativeFormAliasCases={
+    'forms/AutoResizeInput':{kind:'TextArea',fixture:{renderKind:'TextArea',initial:'',changed:'one\ntwo\nthree\nfour'},steps:[['autoresize-edit','textarea[data-ely-autoresize]','Trusted native multiline input retains the exact text and grows the exact TextArea alias; no submit or host result'],['autoresize-commit','textarea[data-ely-autoresize]','A trusted native change follows an observed blur; the exact alias remains locally edited, with no host fulfillment']]},
+    'forms/DateTimePicker':{kind:'DatePicker',fixture:{renderKind:'DatePicker',type:'datetime-local',initial:'2026-10-20T12:30',changed:'2026-10-21T13:45'},steps:[['datetime-edit','input[type="datetime-local"]','Observed unique AX editable segments receive trusted native keys to exact2026-10-21T13:45, with trusted input/change and exact public payloads; no scheduling or host result'],['datetime-commit','input[type="datetime-local"]','After bounded trusted Tabs, actual focus leaves the date-time field with native blur; exact edited value remains valid; the previously observed native change is not fabricated again']]},
+    'forms/WeekPicker':{kind:'MonthPicker',fixture:{renderKind:'MonthPicker',type:'week',initial:'2026-W42',changed:'2026-W43'},steps:[['week-edit','input[type="week"]','Observed unique AX Week editable segment receives trusted ArrowUp to exact2026-W43 with trusted input/change and exact public payloads; no year range is asserted'],['week-commit','input[type="week"]','After bounded trusted Tabs, actual focus leaves the week field with native blur and exact valid value; no extra change, range or scheduling claim']]},
+    'forms/YearPicker':{kind:'MonthPicker',fixture:{renderKind:'MonthPicker',type:'number',initial:'2026',changed:'2027',step:'1',noMax:true},steps:[['year-edit','input[type="number"]','Trusted native numeric edit is retained with the qualified fixture step; no year bounds or range are asserted'],['year-commit','input[type="number"]','Trusted native change and blur follow actual focus leaving the year field; only this value’s native validity is checked']]},
+    'forms/JsonInput':{kind:'CodeInput',fixture:{renderKind:'CodeInput',initial:'{"caller":"source"}',invalid:'{broken',changed:'{"caller":"changed"}'},steps:[['json-invalid','textarea[data-ely-code-input]','Trusted native edit is retained as text and rejected by the exact JSON validity behavior; no markup or host action'],['json-repair','textarea[data-ely-code-input]','Trusted native edit repairs JSON and clears its local validation status'],['json-commit','textarea[data-ely-code-input]','Trusted native change and blur follow focus leaving the textarea; exact valid JSON text remains, with no host result']]},
+    'forms/DurationPicker':{kind:'RelativeDatePicker',fixture:{renderKind:'RelativeDatePicker',type:'number',initial:'30',changed:'31',min:'0',noMax:true,unit:'minutes'},steps:[['duration-edit','input[data-ely-duration="duration"]','Trusted native number edit changes only the nonnegative duration field; no unit switch is tested'],['duration-commit','input[data-ely-duration="duration"]','Trusted native change and blur follow actual focus leaving the duration field; only the edited value is checked locally']]},
+  }[identity];
+  if(nativeFormAliasCases){
+    const sourceAnchor='internal/gallery/advanced.go aliasFixtureProps and exact forms story fixture; ui/gohtmx/templates/ely-api-forms.html; ui/gohtmx/assets/ely-api-forms.js';
+    return {identity,kind:nativeFormAliasCases.kind,family:'forms',requestedStateOnly:true,focusedSequence:'forms-six-qualified-native-local',mappingGaps:[],fixtureGuards:{component:identity,kind:nativeFormAliasCases.kind,...nativeFormAliasCases.fixture},steps:nativeFormAliasCases.steps.map(([id,control,expectedState])=>({id,control,expectedState,event:id.endsWith('-edit')||id==='json-invalid'||id==='json-repair'?'trusted native input':'trusted native input followed by observed native change and blur',source:{siteId:`forms-qualified-state:${identity}:${id}`,sourceAnchor,provenance:identity==='forms/AutoResizeInput'?'Exact catalogue alias forms/AutoResizeInput resolves to the TextArea story and its exact root fixture; no PreviewExamples transfer. Component-local behavior only; no host/provider fulfillment.':`Exact qualified gallery identity ${identity}; aliasFixtureProps supplies its documented native type/value from its exact base story. No PreviewExamples transfer, inferred range, or host/provider fulfillment.`}})),scope:`Only exact ${identity} qualified fixture and listed finite local transitions. Date/time commits require observed native focus leave, change and blur. No year range, duration unit switch, provider, scheduler, or persistence result is claimed.`};
+  }
+  if(identity==='misc/CookieBanner'){
+    const steps=[
+      ['cookies-accept-all','[data-misc-cookies] [data-cookies="all"]','Accept all sends the optional cookie values and necessary=true to the owner; no local dismissal or persistence is claimed'],
+      ['cookies-reject-all','[data-misc-cookies] [data-cookies="none"]','Reject all sends an empty optional-value list and necessary=true to the owner; no local dismissal or persistence is claimed'],
+      ['cookies-open-choices','[data-misc-cookies] [data-cookies="choose"]','Choose reveals the local cookie options and changes its label to Save choices without sending a request'],
+      ['cookies-select-analytics','[data-misc-cookies] input[value="Analytics"]','Selecting Analytics updates only the local checkbox; no host request or dismissal is claimed'],
+      ['cookies-save-choices','[data-misc-cookies] [data-cookies="choose"]','Save choices sends only the selected optional values and necessary=true to the owner; no local dismissal or persistence is claimed'],
+    ];
+    return {identity,kind:'Terms',family:'native',behaviorKey:'misc/Terms',fixtureIdentity:'execution-fixture:misc/Terms',requestedStateOnly:true,focusedSequence:'native-cookie-owner-boundary',mappingGaps:[],fixtureGuards:{component:identity,kind:'Terms',variant:'CookieBanner',cookieValues:['Analytics','Video']},steps:steps.map(([id,control,expectedState])=>({id,control,expectedState,event:id==='cookies-select-analytics'?'native checkbox activation; local state only':'trusted native Playwright control activation',source:{siteId:`focused-state:${identity}:${id}`,sourceAnchor:'internal/gallery/assets/native-misc-fixtures.json Terms; ui/gohtmx/templates/ely-api-native.html Terms/CookieBanner; ui/gohtmx/assets/ely-api-native-misc.js data-misc-cookies click handler; ui/gohtmx/assets/ely-api.js emit',provenance:'Exact gallery:misc/CookieBanner identity; Terms is the shared behavior key. Cookie choices are owner requests, not local consent persistence or banner dismissal.'}})),scope:'Only the exact CookieBanner gallery case using the Terms fixture/handler; accept-all, reject-all, reveal/select/save. Host requests do not prove storage, policy fulfillment or local dismissal.'};
+  }
+  if(identity==='generative/PromptPlayground'){
+    const steps=[
+      ['prompt-fill-topic','[data-native-variable="topic"]','Typing topic updates the local variable and preview while the unresolved tone slot remains highlighted; Run stays disabled'],
+      ['prompt-fill-tone','[data-native-variable="tone"]','Typing tone fills both template variables, removes unresolved highlights and enables Run locally'],
+      ['prompt-run-request','[data-native-run]','Native Run emits the exact filled prompt/template/variables request and enters pending state; no host output is fabricated'],
+    ];
+    return {identity,kind:'PromptPlayground',family:'native',requestedStateOnly:true,focusedSequence:'native-prompt-owner-boundary',mappingGaps:[],fixtureGuards:{component:identity,kind:'PromptPlayground',template:'Write three short notes on {topic} in a {tone} voice.',templateField:'native_value',variables:{},action:'run-prompt',hideTemperature:true,hideRuns:true},steps:steps.map(([id,control,expectedState])=>({id,control,expectedState,event:id==='prompt-run-request'?'trusted native submit-button activation':'trusted native text input',source:{siteId:`focused-state:${identity}:${id}`,sourceAnchor:'internal/gallery/advanced_native_generative_fixtures.go PromptPlayground; ui/gohtmx/templates/ely-api-native.html PromptPlayground; ui/gohtmx/assets/ely-api-native-generative-tools.js promptVariables/fillPrompt/render/submit/ely:prompt-output',provenance:`Exact ${identity} default fixture and local variable/highlight/pending behavior; Run is a host request only. No generated output or provider fulfillment is supplied.`}})),scope:'Only generative/PromptPlayground default fixture; typed variables, unresolved-slot highlight, and one run request to pending. No synthetic host response, generated answer, or provider claim.'};
+  }
+  if(identity==='agent/SubAgentTree'){
+    const steps=[
+      ['tree-collapse-code','[data-ely-value="code"]','Native disclosure activation collapses the initially open Code subtree while every caller status and progress value remains unchanged'],
+      ['tree-expand-code','[data-ely-value="code"]','Native disclosure activation reopens the same subtree while every caller status and progress value remains unchanged'],
+      ['tree-select-code','[data-ely-value="code"]','Native selection marks only Code selected and emits the exact select request; caller statuses and progress remain unchanged'],
+    ];
+    return {identity,kind:'SubAgentTree',family:'communication',requestedStateOnly:true,focusedSequence:'communication-subagent-tree-local',mappingGaps:[],fixtureGuards:{component:identity,kind:'SubAgentTree',nestedValue:'code',initiallyOpen:true},steps:steps.map(([id,control,expectedState])=>({id,control,expectedState,event:id==='tree-select-code'?'trusted native Playwright button click; host request only':'trusted native disclosure summary activation',source:{siteId:`focused-state:${identity}:${id}`,sourceAnchor:'internal/gallery/advanced_communication_fixtures.go SubAgentTree; ui/gohtmx/templates/ely-api-communication.html ely-api-agent-tree-node; ui/gohtmx/assets/ely-api-communication.js native details and data-ely-select handling',provenance:'Exact agent/SubAgentTree default nested fixture; native disclosure is local. Selection emits a host request; source caller status/progress is not advanced or persisted.'}})),scope:'Only agent/SubAgentTree default fixture; native Code disclosure collapse/expand and local selection with stable caller status/progress. No agent execution or host fulfillment claim.'};
+  }
+  if(identity==='collab/ActivityLog'){
+    const hrefs=['#gamma-space','#lift','#on-lift','#lift'];
+    const steps=hrefs.map((href,index)=>{
+      const entry=index+1,id=`activity-focus-entry-${entry}`;
+      return {id,control:`li[data-ws-activity-entry]:nth-child(${entry}) a[href="${href}"]`,expectedState:`Native Tab traversal focuses ActivityLog entry ${entry}'s existing ${href} target without activating it or emitting a host request.`,event:'trusted native Tab key; no synthetic focus or anchor activation',source:{siteId:`focused-state:${identity}:${id}`,sourceAnchor:'internal/gallery/advanced_workspace_fixtures.go collab/ActivityLog; ui/gohtmx/templates/ely-api-workspace.html ws-activity; ui/gohtmx/assets/ely-api-workspace.css ActivityLog responsive text/time grid; internal/gallery/advanced.go exact-case audit filter',provenance:`Exact default ${identity} fixture link ${entry} in the opt-in single-case audit pair; native Tab starts at untouched body and traverses the short page chrome into source-order anchors, without focus injection or activation.`}};
+    });
+    return {identity,kind:'ActivityLog',family:'workspace',requestedStateOnly:true,focusedSequence:'workspace-activity-native-link-focus',mappingGaps:[],fixtureGuards:{component:identity,entryHrefs:hrefs},steps,scope:'Only the exact collab/ActivityLog default fixture in an opt-in single-case audit page with its independent twin; native keyboard focus from untouched body through all four primary target links in DOM order. No link activation, navigation, host request, or external target fulfillment is claimed.'};
+  }
+  if(identity==='misc/IframeEmbed'||identity==='misc/EmbedCard'){
+    const stepId=identity==='misc/IframeEmbed'?'iframe-open-host':'embedcard-open-host',url='https://example.com';
+    return {identity,kind:'IframeEmbed',family:'native',requestedStateOnly:true,focusedSequence:'native-embed-open-host',mappingGaps:[],fixtureGuards:{component:identity,kind:'IframeEmbed',url,sourceNote:'Web views need macOS for now.'},steps:[{id:stepId,control:'header button[data-ely-action="open"][data-value="https://example.com"]',expectedState:'One trusted native click emits exactly open with this root ID, alias-preserving component identity, and exact URL; the source note and iframe-free local state remain unchanged.',event:'trusted native Playwright button click; one host request only; no navigation',source:{siteId:`native-state:${identity}:${stepId}`,sourceAnchor:'ui/gohtmx/components.json IframeEmbed/EmbedCard; internal/gallery/assets/native-misc-fixtures.json IframeEmbed; ui/gohtmx/templates/ely-api-native.html IframeEmbed; ui/gohtmx/assets/ely-api.js generic click emitter',provenance:`Exact default native identity ${identity}; EmbedCard keeps its own alias identity; the fixture source note and local state are preserved, with no provider or navigation claim`}}],scope:'One default header-button action for each of the two catalogue identities; no external provider, browser navigation, alias-family, or registered-check approval claim'};
+  }
+  const presenceAliases=['collab/PresenceAvatars','collab/LiveIndicator','collab/FollowMode','collab/RemoteSelection','collab/RemoteCursor'];
+  if(presenceAliases.includes(identity)){
+    const steps=[
+      ['presence-follow-ada','[data-ws-follow][value="ada"]','Local follow state selects Ada and shows the following banner; emits one exact follow-user request'],
+      ['presence-stop-button','[data-ws-follow-stop]','Local follow state clears and hides the banner; emits one exact stop-following request'],
+      ['presence-follow-ada-again','[data-ws-follow][value="ada"]','Local follow state selects Ada again; emits one exact follow-user request'],
+      ['presence-stop-escape','[data-ws-follow][value="ada"]','Native Escape clears local follow state and emits one exact stop-following request'],
+    ];
+    return {identity,kind:'PresenceAvatars',family:'workspace',fixtureIdentity:'execution-fixture:collab/PresenceAvatars',behaviorKey:'collab/PresenceAvatars',requestedStateOnly:true,focusedSequence:'workspace-native-presence-follow',mappingGaps:[],fixtureGuards:{component:identity,kind:'PresenceAvatars'},steps:steps.map(([id,control,expectedState])=>({id,control,expectedState,event:id==='presence-stop-escape'?'trusted native Escape key on the focused Ada follow button':'trusted native Playwright button click',source:{siteId:`presence-state:${identity}:${id}`,sourceAnchor:'ui/gohtmx/components.json PresenceAvatars aliases; internal/gallery/advanced_workspace_fixtures.go collab/PresenceAvatars; ui/gohtmx/templates/ely-api-workspace.html ws-presence; ui/gohtmx/assets/ely-api-workspace.js follow/stop/Escape; ui/gohtmx/assets/ely-api.js emit',provenance:`Exact rendered gallery identity ${identity}; shared PresenceAvatars fixture and handler. Following state/banner are local optimistic presentation; events are host requests only, with no provider fulfillment claim.`}})),scope:'Only the five exact collab presence gallery identities and their shared default fixture; four trusted native follow/stop steps per alias, with exact alias identity, unchanged fixture source and independent twin; no provider fulfillment or registered-check approval claim'};
+  }
+  if(identity==='layout/Dock')return {identity,kind:'Dock',family:'foundation',requestedStateOnly:true,focusedSequence:'dock-native-actions',mappingGaps:[],fixtureGuards:{component:identity,kind:'Dock'},steps:[
+    ['dock-click-files','.ely-foundation__dock-left [data-foundation-dock-tab]:nth-of-type(1)','Native click selects Files in the left zone and updates its local output','trusted native Playwright pointer click'],
+    ['dock-click-outline','.ely-foundation__dock-left [data-foundation-dock-tab]:nth-of-type(2)','Native click selects Outline in the left zone and updates its local output','trusted native Playwright pointer click'],
+    ['dock-click-search','.ely-foundation__dock-right [data-foundation-dock-tab]','Native click selects Search in the right zone and updates its local output','trusted native Playwright pointer click'],
+    ['dock-click-terminal','.ely-foundation__dock-bottom [data-foundation-dock-tab]','Native click selects Terminal in the bottom zone and updates its local output','trusted native Playwright pointer click'],
+    ['dock-key-enter-search','.ely-foundation__dock-right [data-foundation-dock-tab]','Native Enter activates the focused Search button using browser button semantics','trusted native Playwright keyboard activation; browser-generated click'],
+    ['dock-key-space-search','.ely-foundation__dock-right [data-foundation-dock-tab]','Native Space activates the focused Search button using browser button semantics','trusted native Playwright keyboard activation; browser-generated click'],
+    ['dock-drag-files-center','.ely-foundation__dock-left [data-foundation-dock-tab]:nth-of-type(1) → [data-foundation-dock-zone="center"]','Native HTML drag moves the existing Files tab into the center zone and updates that zone; no external operation','trusted native Playwright HTML drag-and-drop; no synthetic event dispatch'],
+  ].map(([id,control,expectedState,event])=>({id,control,expectedState,event,source:{siteId:`dock-state:${identity}:${id}`,sourceAnchor:'internal/gallery/advanced_foundation_fixtures.go Dock; ui/gohtmx/templates/ely-api-foundation.html Dock; ui/gohtmx/assets/ely-api-foundation.js dock click/drag handlers',provenance:'Exact shipped layout/Dock default fixture and its local UI state only; no provider, persistence, or business-effect claim'}})),scope:'Four default-fixture tab clicks, native Enter and Space activation, and one native same-component move to center. This is requested-state coverage, separate from registered instrumentation and visual approval.'};
+  if(identity==='layout/ResizeHandle')return {identity,kind:'ResizeHandle',family:'foundation',requestedStateOnly:true,focusedSequence:'foundation-native-resize',mappingGaps:[],fixtureGuards:{component:identity,kind:'ResizeHandle',disabled:false},steps:[
+    ['resize-horizontal-pointer','[data-foundation-split].ely-foundation__resize-line--horizontal [data-foundation-split-handle]','Trusted pointer drag moves the horizontal split divider and range together within 25–75; one or more bounded change actions report this exact identity'],
+    ['resize-vertical-range-home','.ely-foundation__resize-line--vertical input[type="range"]','Native Home sets the vertical range and separator to 25 and emits one bounded change action'],
+    ['resize-horizontal-range-end','.ely-foundation__resize-line--horizontal input[type="range"]','Native End sets the horizontal range and separator to 75 and emits one bounded change action'],
+    ['resize-separator-arrow-up','.ely-foundation__resize-line--horizontal [data-foundation-split-handle]','Native ArrowUp exercises the separator-specific custom handler and decreases the bounded value by five'],
+    ['resize-separator-arrow-down','.ely-foundation__resize-line--horizontal [data-foundation-split-handle]','Native ArrowDown exercises the separator-specific custom handler and increases the bounded value by five'],
+    ['resize-separator-home','.ely-foundation__resize-line--horizontal [data-foundation-split-handle]','Native Home on the separator exercises the custom handler and sets both controls to minimum 25'],
+    ['resize-separator-end','.ely-foundation__resize-line--horizontal [data-foundation-split-handle]','Native End on the separator exercises the custom handler and sets both controls to maximum 75'],
+  ].map(([id,control,expectedState])=>({id,control,expectedState,event:id.includes('pointer')?'trusted native pointer drag':'trusted native range keyboard input',source:{siteId:`resize-state:${identity}:${id}`,sourceAnchor:'internal/gallery/advanced_foundation_fixtures.go layout/ResizeHandle; ui/gohtmx/templates/ely-api-foundation.html ResizeHandle; ui/gohtmx/assets/ely-api-foundation.js setSplit/onChange/onKey/onPointerMove',provenance:'Exact enabled default fixture; range and separator controls are both checked for synchronized bounded state; no nested SplitPane or MasterDetail promotion'}})),scope:'Only layout/ResizeHandle canonical default fixture; native range and separator pointer behavior, no aliases, nested split, registered-check approval, or all-catalog claim'};
+  if(identity==='feedback/Notification'||identity==='feedback/NotificationCenter')return {identity,kind:'Notification',family:'interaction',requestedStateOnly:true,focusedSequence:'interaction-notification-actions',mappingGaps:[],fixtureGuards:{component:identity,kind:'Notification',items:5,unread:2},steps:[
+    ['notification-scroll-last-row','.ely-interaction__notification ol','Native wheel reaches the final fixture notification within its list clip when overflow requires it; no host event is emitted'],
+    ['notification-open-review','.ely-interaction__notification [data-ely-action="review"]','Trusted native click emits exactly review("") with this gallery root identity'],
+    ['notification-mark-all-read','.ely-interaction__notification [data-interaction-notification-read]','Native click removes both unread markers, clears the count, and hides Mark all read; all five rows remain'],
+    ['notification-clear','.ely-interaction__notification [data-interaction-notification-clear]','Native click removes notification rows and reveals the local empty state'],
+    ['notification-reset','[data-interaction-notification-reset]','Native click restores the exact five source rows and two unread markers'],
+  ].map(([id,control,expectedState])=>({id,control,expectedState,event:id==='notification-scroll-last-row'?'conditional trusted native wheel or passive reachability read; no host request':'trusted native Playwright input',source:{siteId:`notification-state:${identity}:${id}`,sourceAnchor:'internal/gallery/advanced_interaction_fixtures.go Notification; ui/gohtmx/templates/ely-api-interaction.html Notification; ui/gohtmx/assets/ely-api-interaction.js feedbackNotifications/click notification controls',provenance:`Exact ${identity} fixture and root identity; review is a local host request only, while read/clear/reset remain component-local state changes; no persistence claim`}})),scope:`Only ${identity} exact default fixture; five native/passive checkpoints, with separately asserted review host request and local read/clear/reset changes; no alias verdict transfer or persistence claim`};
+  if(identity==='interaction/ScrollSync'||identity==='interaction/VirtualScroller'){
+    const virtual=identity==='interaction/VirtualScroller';
+    const steps=virtual?[['virtual-scroller-advance','.ely-interaction__scroller[data-direct-count]','Native wheel advances the rendered virtual row window while retaining a bounded set of rows'],['virtual-sync-before-to-after','[data-direct-sync] > :nth-child(1)','Native wheel on Before synchronizes After scroll position'],['virtual-sync-after-to-before','[data-direct-sync] > :nth-child(2)','Native wheel on After synchronizes Before scroll position']]:[['scrollsync-before-to-after','[data-direct-sync] > :nth-child(1)','Native wheel on Before synchronizes After scroll position'],['scrollsync-after-to-before','[data-direct-sync] > :nth-child(2)','Native wheel on After synchronizes Before scroll position']];
+    return {identity,kind:'VirtualScroller',family:'interaction',requestedStateOnly:true,focusedSequence:'interaction-scroll-sync',mappingGaps:[],fixtureGuards:{component:identity,kind:'VirtualScroller',count:virtual?10000:undefined,panes:2},steps:steps.map(([id,control,expectedState])=>({id,control,expectedState,event:'trusted native wheel on the exact local scroll owner; no host action expected',source:{siteId:`scroll-state:${identity}:${id}`,sourceAnchor:'internal/gallery/advanced_interaction_fixtures.go VirtualScroller (ScrollSync alias fixture); ui/gohtmx/templates/ely-api-interaction.html VirtualScroller panes; ui/gohtmx/assets/ely-api-interaction.js directWindow and data-direct-sync scroll listeners',provenance:`Exact ${identity} case identity and default VirtualScroller fixture; local native scrolling only, with no networking or application callback claim`}})),scope:`Only ${identity} exact fixture identity; ${virtual?'three':'two'} local scroll checkpoints, no alias verdict transfer, external scrolling, or registered-check approval`};
+  }
+  if(identity==='i18n/RTL layout')return {identity,kind:'RTL layout',family:'native',requestedStateOnly:true,focusedSequence:'native-rtl-locale-host',mappingGaps:[],fixtureGuards:{component:identity,kind:'RTL layout',initialLocale:'en-US',initialDirection:'ltr'},steps:[
+    ['rtl-locale-he','[data-native-locale-scope]','Documented root-targeted ely:locale host input he-IL updates this scope to RTL without mutating its independent twin'],
+    ['rtl-locale-en-restore','[data-native-locale-scope]','Documented root-targeted ely:locale host input en-US restores this scope to LTR and preserves the twin'],
+  ].map(([id,control,expectedState])=>({id,control,expectedState,event:'programmatic documented host API input (not a native user toggle)',source:{siteId:`rtl-state:${identity}:${id}`,sourceAnchor:'internal/gallery/advanced_native_fixtures.go RTL layout; ui/gohtmx/templates/ely-api-native.html RTL layout; ui/gohtmx/assets/ely-api-native-theme.js data-native-locale-scope/ely:locale',provenance:'Exact default English LTR specimen; direction changes are driven through the documented instance-local host event, not an invented UI toggle'}})),scope:'Only i18n/RTL layout exact default specimen; two host-fed locale transitions and restoration; not a user-toggle, full locale matrix, alias, or all-catalog claim'};
+  const verticalRangeKind={'layout/Scrollbar':'Scrollbar','layout/StickyHeader':'StickyHeader'}[identity];
+  if(verticalRangeKind)return {identity,kind:verticalRangeKind,family:'foundation',requestedStateOnly:true,focusedSequence:'vertical-range-native-scroll',mappingGaps:[],fixtureGuards:{component:identity,kind:verticalRangeKind},
+    steps:[['range-center-pointer','Trusted pointer at track center selects an interior value and scroll position'],['range-top-min-pointer','Trusted pointer at physical track top selects value 0 and scrollTop 0'],['range-bottom-max-pointer','Trusted pointer at physical track bottom selects value 1000 and scrollTop max'],['range-home-min','Trusted Home on the native range selects value 0 and scrollTop 0'],['range-end-max','Trusted End on the native range selects value 1000 and scrollTop max'],['content-wheel-up','Trusted content wheel-up from max moves content upward and synchronizes the range'],['scroll-home-min','Trusted Home on the scroll region selects scrollTop 0 and range value 0'],['scroll-end-max','Trusted End on the scroll region selects scrollTop max and range value 1000']].map(([id,expectedState])=>({id,control:id.startsWith('range-')?'input[type="range"][data-foundation-scrollbar]':'[data-foundation-scroll]',expectedState,event:id==='content-wheel-up'?'trusted native wheel; range input is not required':'trusted native pointer or keyboard input; no public host event expected',source:{siteId:`vertical-range-state:${identity}:${id}`,sourceAnchor:'advanced_foundation_fixtures.go Scrollbar/StickyHeader; ely-api-foundation.html native range; ely-api-foundation.js onThumb/update/onKey/scroll update; ely-api-foundation.css writing-mode/direction',provenance:'Exact canonical layout identity and its own fixture; direct native range/content state, no alias assumption'}})),scope:'Only layout/Scrollbar and layout/StickyHeader; eight direct native states each; no aliases, registered-check approval, CSS approval, or full-catalog claim'};
+  if(identity==='git/ThreeWayMerge')return {identity,kind:'ThreeWayMerge',requestedStateOnly:true,focusedSequence:'threeway-native-submit',mappingGaps:[],fixtureGuards:{component:identity,kind:'ThreeWayMerge',action:'operate',required:true,disabled:false},
+    steps:[['choose-theirs','input[name="resolution"][value="theirs"]','Only theirs checked; merged=return callerNew; Selected theirs.'],['edit-merged','textarea[name="merged"]','Trusted native fill then Tab commits resolved caller value'],['submit-merged','button[type="submit"]','One operate host request with exact actual FormData; no persistence claim']].map(([id,control,expectedState])=>({id,control,expectedState,event:'trusted native Playwright action',source:{siteId:`threeway-state:${id}`,sourceAnchor:'advanced_workspace_fixtures.go ThreeWayMerge; ely-api-workspace.html ws-conflict; ely-api-workspace.js resolution change; ely-api.js submit',provenance:'Canonical behavioral primary only, excluding nested source previews; not registered submitData coverage'}})),scope:'Three canonical steps only; four live profiles require 12 steps, 24 primary images and at most 24 context images. Aliases and registered submitData site remain unapproved.'};
+  if(identity==='misc/LicenseViewer'){
+    const labels=['inspect-license','pick-inter','next-jetbrains','wrap-first','wrap-last','home-first','next-lucide','end-last','scroll-license-horizontal','scroll-license-text'];
+    return {identity,kind:'LicenseViewer',requestedStateOnly:true,focusedSequence:'license-native-selection-scroll',mappingGaps:[],fixtureGuards:{component:identity,kind:'LicenseViewer'},
+      steps:labels.map(id=>({id,control:'[data-misc-licenses]',event:id==='inspect-license'?'passive exact fixture inspection':id.startsWith('scroll-')?'bounded native wheel, at most six attempts':'trusted native click or keyboard',expectedState:'Exact source-pinned package text/events, independent twin, measured local accessibility',source:{siteId:`license-state:${id}`,sourceAnchor:'ely-api-native-misc.js:32; ely-api-native.html:106',provenance:'Only misc/LicenseViewer requested states; no aliases or registered-site approval'}})),
+      captureLimits:{stepsPerRow:10,primaryPerRow:20,viewportContextsPerRow:20,totalRows:5,totalPNGs:200,wheelAttemptsPerAxis:6},scope:'Five independently verified rows only; initial baseline35 separate; no OS, persistence or production CSS approval'};
+  }
+  const communicationBehavior={
+    'agent/EvalResultTable':{kind:'TraceViewer',sequence:'communication-eval-sort',fixture:'agent/EvalResultTable',steps:[
+      ['sort-tokens-ascending','[data-ely-eval-sort][value="tokens"]','Trusted native sort click orders numeric token counts ascending, updates aria-sort, and emits sort-evaluations(tokens,ascending)'],
+      ['sort-tokens-descending','[data-ely-eval-sort][value="tokens"]','Second trusted native sort click orders numeric token counts descending, updates aria-sort, and emits sort-evaluations(tokens,descending)'],
+      ['eval-scroll-last-column','.ely-agent-evals','Native horizontal wheel exposes the final Time column within this local scroll owner; if it already fits, assert it passively. No host action is expected.'],
+    ]},
+    'calendar/CalendarMonthView':{kind:'CalendarMonthView',sequence:'communication-calendar-month',fixture:'calendar/CalendarMonthView',steps:[
+      ['month-page-down','[data-ely-calendar-day][aria-pressed="true"]','Native PageDown selects and visibly focuses the clamped target date; calendar-navigation carries that exact date'],
+      ['month-open-day','[data-ely-calendar-day][aria-pressed="true"]','Native Enter requests open-day for the selected date; no application navigation is fabricated'],
+    ]},
+    'calendar/CalendarWeekView':{kind:'CalendarWeekView',sequence:'communication-calendar-week',fixture:'calendar/CalendarWeekView',steps:[
+      ['week-scroll-late-events','.ely-calendar-time-grid','Native wheel scroll changes the grid scroll position and makes the 15:00 and 17:00 fixture event controls reachable'],
+      ['week-open-samples','.ely-calendar-time-grid [data-ely-calendar-event][value="samples"]','Native click requests open-event(samples)'],
+      ['week-open-client','.ely-calendar-time-grid [data-ely-calendar-event][value="client"]','Native click requests open-event(client)'],
+      ['week-create-event','.ely-calendar-time-slot[data-ely-date="2026-10-13"][data-ely-time="16:00"]','Native drag from the exact Tuesday 16:00 slot to 16:30 requests create-event(start,end)'],
+      ['week-open-allday','.ely-calendar-allday [data-ely-action="open-event"][value="offsite"]','Native click requests open-event(offsite) from the all-day row'],
+    ]},
+    'calendar/TimeGrid':{kind:'CalendarWeekView',sequence:'communication-calendar-week',fixture:'calendar/CalendarWeekView',sharedBehaviorKey:'calendar/CalendarWeekView'},
+    'calendar/AllDayRow':{kind:'CalendarWeekView',sequence:'communication-calendar-week',fixture:'calendar/CalendarWeekView',sharedBehaviorKey:'calendar/CalendarWeekView'},
+    'calendar/CurrentTimeIndicator':{kind:'CalendarWeekView',sequence:'communication-calendar-week',fixture:'calendar/CalendarWeekView',sharedBehaviorKey:'calendar/CalendarWeekView',directControlRole:'display-only indicator within the shared week fixture'},
+    'calendar/CalendarDayView':{kind:'CalendarDayView',sequence:'communication-calendar-day',fixture:'calendar/CalendarDayView',steps:[
+      ['day-scroll-late-events','.ely-calendar-time-grid','Native wheel scroll changes the grid scroll position and makes the 15:00 and 17:00 fixture event controls reachable'],
+      ['day-open-samples','.ely-calendar-time-grid [data-ely-calendar-event][value="samples"]','Native click requests open-event(samples)'],
+      ['day-open-client','.ely-calendar-time-grid [data-ely-calendar-event][value="client"]','Native click requests open-event(client)'],
+      ['day-create-event','.ely-calendar-time-slot[data-ely-date="2026-10-13"][data-ely-time="16:00"]','Native drag from the exact Tuesday 16:00 slot to 16:30 requests create-event(start,end)'],
+      ['day-reveal-created-draft','.ely-calendar-time-grid [data-calendar-draft]','After the create-event request, trusted native wheel on the owned time grid leaves its scroll range valid and makes the complete painted “New event · 16:00 – 16:30” draft visible; no second host action'],
+    ]},
+    'calendar/TimezoneOverlay':{kind:'CalendarDayView',sequence:'communication-calendar-day',fixture:'calendar/CalendarDayView',sharedBehaviorKey:'calendar/CalendarDayView',directControlRole:'display-only overlay within the shared day fixture'},
+    'calendar/EventPopover':{kind:'EventPopover',sequence:'communication-event-popover',fixture:'calendar/EventPopover',steps:[
+      ['popover-open','[data-calendar-popover-open]','Native click opens the default Design review details and exposes aria-expanded=true'],
+      ['popover-edit','[data-calendar-popover] [data-ely-action="edit-event"]','Native click emits exactly the local edit-event request for review; no provider or persistence result is asserted'],
+      ['popover-delete','[data-calendar-popover] [data-ely-action="delete-event"]','Native click emits exactly the local delete-event request for review; no provider or persistence result is asserted'],
+      ['popover-close','[data-calendar-popover-close]','Native Close hides the panel, clears aria-expanded and restores focus to the trigger'],
+      ['popover-reopen','[data-calendar-popover-open]','Native click reopens the same details panel'],
+      ['popover-escape','[data-calendar-popover]','Native Escape closes the panel and restores focus to the trigger'],
+    ]},
+    'calendar/AttendeeList':{kind:'EventPopover',sequence:'communication-event-popover',fixture:'calendar/EventPopover',sharedBehaviorKey:'calendar/EventPopover',directControlRole:'display-only attendee content within the shared popover fixture'},
+  }[identity];
+  if(communicationBehavior){
+    const behavior=communicationBehavior.sharedBehaviorKey?requestedStateContract(communicationBehavior.sharedBehaviorKey):communicationBehavior;
+    const steps=behavior.steps.map(step=>{const [id,control,expectedState]=Array.isArray(step)?step:[step.id,step.control,step.expectedState];return {id,control,expectedState,event:id==='eval-scroll-last-column'?'conditional trusted native horizontal wheel or passive geometry read; no host action expected':'trusted native Playwright pointer, keyboard, or wheel input',source:{siteId:`communication-state:${identity}:${id}`,sourceAnchor:`internal/gallery/advanced_communication_fixtures.go ${communicationBehavior.fixture}; ui/gohtmx/templates/ely-api-communication.html; ui/gohtmx/assets/ely-api-communication.js`,provenance:`Exact gallery identity ${identity}; shared behavior is retained under its canonical fixture identity${communicationBehavior.sharedBehaviorKey?` ${communicationBehavior.sharedBehaviorKey}`:''}; caller requests only, no external service or persistence result`}};});
+    return {identity,kind:communicationBehavior.kind,variant:identity.split('/')[1],fixtureIdentity:`execution-fixture:${communicationBehavior.fixture}`,requestedStateOnly:true,focusedSequence:communicationBehavior.sequence,mappingGaps:[],fixtureGuards:{component:identity,kind:communicationBehavior.kind},behaviorKey:communicationBehavior.sharedBehaviorKey||identity,directControlRole:communicationBehavior.directControlRole||'interactive local control in the default fixture',steps,
+      scope:'Only this shipped communication gallery identity and its documented default fixture. Alias roots keep distinct case/profile evidence but reuse the canonical handler sequence; no external provider, persistence, locale matrix, or unrelated nested-content claim.'};
+  }
+  if(identity==='documents/TrashBin'){
+    if(!trashFixture)return null;
+    assert(['default','empty','longpath'].includes(trashFixture),'Unknown explicit Trash fixture');
+    const steps=[['inspect-layout','[data-ws-trash]','Full readable default/empty/long-path state stays inside its own card']];
+    if(trashFixture!=='empty')steps.push(
+      ['restore','[data-ely-action="restore-file"]','One exact restore request; caller records remain'],
+      ['delete-arm','[data-ely-action="delete-file-permanently"]','First press only exposes complete Confirm delete label'],
+      ['delete-blur-restore','[data-ely-action="restore-file"]','Native focus loss cancels delete; only restore request emitted'],
+      ['delete-rearm','[data-ely-action="delete-file-permanently"]','First press after blur arms again without delete'],
+      ['delete-confirm','[data-ely-action="delete-file-permanently"]','Second press emits exactly one delete request; caller records remain'],
+      ['empty-arm','[data-ely-action="empty-trash"]','First press only exposes complete Confirm empty trash label'],
+      ['empty-blur-restore','[data-ely-action="restore-file"]','Native focus loss cancels empty; only restore request emitted'],
+      ['empty-rearm','[data-ely-action="empty-trash"]','First press after blur arms again without empty request'],
+      ['empty-confirm','[data-ely-action="empty-trash"]','Second press emits exactly one empty request; caller records remain']);
+    return {identity,kind:'TrashBin',trashFixture,requestedStateOnly:true,mappingGaps:[],fixtureGuards:{component:identity,kind:'TrashBin'},steps:steps.map(([id,control,expectedState])=>({id,control,expectedState,event:id==='inspect-layout'?'passive rendered-state inspection':'trusted native pointer click',source:{siteId:`trash-state:${trashFixture}:${id}`,sourceAnchor:'ely-api-workspace.html ws-trash; ely-api-workspace.js capture confirmation/focusout; ely-api.js action dispatch',provenance:'Explicit action-only Trash fixture; no alias, canonical initial inventory or host persistence approval'}})),scope:'Only selected opt-in Trash fixture; passive empty-state inspection is not an action; restore/delete/empty are host requests, never local persistence'};
+  }
+  const canvasIdentity=['canvas/InfiniteCanvas','canvas/CanvasGrid','canvas/Guides','canvas/Ruler','canvas/ArtboardFrame','canvas/ZoomControls','canvas/ZoomIndicator','canvas/MiniMap'].includes(identity);
+  const focused={
+    'devtools/WebSocketConsole':{kind:'WebSocketConsole',sequence:'websocket-public-host-boundary',steps:[
+      ['empty-enter','[data-dt-socket-draft]','Empty Enter emits no request'],
+      ['type-ping','[data-dt-socket-draft]','Trusted typing enables Send without sending'],
+      ['send-enter','[data-dt-socket-draft]','Enter sends ping once and clears draft without fabricating messages'],
+      ['type-pong','[data-dt-socket-draft]','Trusted typing enables Send again'],
+      ['send-button','[data-dt-socket-send]','Native Send sends pong once and clears draft'],
+      ['request-disconnect','[data-dt-socket-toggle]','Request carries current open state; no optimistic disconnect'],
+      ['host-ack-closed','root ely:result','Explicit synthetic host acknowledgement rerenders closed state'],
+      ['type-closed-draft','[data-dt-socket-draft]','Closed draft queued is retained; Send stays disabled'],
+      ['closed-enter','[data-dt-socket-draft]','Closed Enter cannot send or clear queued draft'],
+      ['clear-closed-draft','[data-dt-socket-draft]','Native select-all/Backspace clears draft without a request'],
+      ['request-connect','[data-dt-socket-toggle]','Request carries current closed state; no optimistic connection'],
+      ['host-ack-open','root ely:result','Explicit synthetic acknowledgement restores open state and original messages'],
+      ['history-wheel-reveal','[data-dt-socket-log]','If the native log overflows at a nonzero scroll position, trusted upward wheel reaches scrollTop zero and reveals the complete first history row without changing messages or emitting an action'],
+    ]},
+    'buttons/ActionSheet':{kind:'ActionSheet',sequence:'sheet-native-actions',steps:[
+      ...['wallpaper','duplicate','delete'].flatMap(value=>[[`open-${value}`,'[data-interaction-dialog]','Native pointer opens the owned modal and focuses its enabled header Close control in actual DOM order'],[`choose-${value}`,`[data-interaction-sheet-action][value="${value}"]`,'One exact public action; native dialog closes and focus returns to its opener']]),
+      ['open-cancel','[data-interaction-dialog]','Open the owned modal again and focus its header Close control'],['cancel-sheet','.ely-interaction__sheet-cancel','Native Cancel closes without any public action'],
+      ['open-close','[data-interaction-dialog]','Open the owned modal again and focus its header Close control'],['close-sheet','dialog [aria-label="Close"]','Native close button closes without any public action'],
+    ]},
+    'buttons/BulkActionBar':{kind:'BulkActionBar',sequence:'bulk-canonical-zero',steps:[
+      ['select-first','[data-interaction-bulk-add]','Actual initial zero becomes one; all count surfaces agree and bar is visible'],
+      ['select-second','[data-interaction-bulk-add]','Selection becomes two through a second native pointer activation, not an initial-Value2 fixture'],
+      ['move-selection','[data-ely-action="move"]','Exact move action/value; count remains two, no persistence claimed'],
+      ['delete-selection','[data-ely-action="delete"]','Exact delete action/value; count remains two, no deletion fabricated'],
+      ['clear-selection','[data-interaction-bulk-clear]','All counts become zero and bar hides; exact bulk change'],
+      ['select-again','[data-interaction-bulk-add]','Hidden bar reopens with one selected'],
+      ['clear-again','[data-interaction-bulk-clear]','Repeated clear restores zero consistently'],
+    ]},
+    'layout/Collapsible':{kind:'Collapsible',sequence:'native-disclosure',steps:[
+      ['open-disclosure','summary','Native pointer opens the initially closed details; await captured native toggle and exact public open=true'],
+      ['close-disclosure','summary','Native pointer closes details; await captured native toggle and exact public open=false'],
+    ]},
+    ...Object.fromEntries(['layout/Accordion','layout/AccordionItem'].map(identity=>[identity,{kind:'Accordion',sequence:'native-disclosure',steps:[
+      ['open-second','details:nth-child(2) > summary','Second opens and first closes exclusively; await both exact public toggle actions'],
+      ['open-third','details:nth-child(3) > summary','Third opens and second closes exclusively; await both exact public toggle actions'],
+      ['close-third','details:nth-child(3) > summary','Third closes; all items closed; exact public toggle action'],
+      ['reopen-first','details:nth-child(1) > summary','First reopens alone; exact public toggle action with actual selected alias identity'],
+    ]}])),
+    'buttons/Button':{kind:'Button',sequence:'button-public-boundary',steps:[
+      ...['primary','secondary','outline','ghost','subtle','danger','link'].map(value=>[`click-${value}`,`button[value="${value}"]`,'Native click emits exactly the caller action/value; no form or persistence fabricated']),
+      ['cancel-primary','button[value="primary"]','Canceling the public action prevents the originating native click default; no host operation is asserted'],
+      ...['primary','secondary','outline','ghost','subtle','danger','link'].map(value=>[`disabled-${value}`,`button[value="${value}-disabled"]`,'Native HTMLButtonElement.click on an actually disabled control emits neither click nor public events']),
+    ]},
+    'forms/TextArea':{kind:'TextArea',sequence:'textarea-public-multiline',steps:[
+      ['fill-multiline','textarea[data-ely-autoresize]','Native input preserves exact multiline caller text and grows height; no change before commit'],
+      ['commit-multiline','textarea[data-ely-autoresize]','Native blur commits exactly one public change with actual name/type/value'],
+      ['clear-text','textarea[data-ely-autoresize]','Native input clears caller text without fabricating required validation or host action'],
+      ['commit-empty','textarea[data-ely-autoresize]','Native blur commits the exact empty value; optional field remains valid'],
+    ]},
+    ...Object.fromEntries(['forms/Input','forms/TextField','forms/ClearableInput'].map(identity=>[identity,{kind:'Input',sequence:'input-public-edit-clear',steps:[
+      ['fill-text','input[name="caller_value"]','Trusted native input retains the exact caller value without premature public change'],
+      ['commit-text','input[name="caller_value"]','Native Tab blur commits one exact alias-preserving public change'],
+      ['clear-text',identity==='forms/ClearableInput'?'button[data-ui-action="clear"]':'input[name="caller_value"]',identity==='forms/ClearableInput'?'Trusted Clear click empties the field; production-generated input/change remain explicitly synthetic':'Native keyboard select-all and Backspace clear the field without premature public change'],
+      ['commit-empty','input[name="caller_value"]',identity==='forms/ClearableInput'?'Native blur preserves the already committed empty value without duplicate public change':'Native Tab blur commits one exact empty public change'],
+    ]}])),
+    ...Object.fromEntries(Object.entries(nextInputCases).map(([identity,fixture])=>[identity,{kind:fixture.kind,sequence:'input-public-special',inputFixture:fixture,steps:fixture.stages.map(stage=>[stage,stage==='clear-text'?'button[data-ui-action="clear"]':stage.endsWith('-password')?'button[data-ui-action="password-toggle"]':fixture.selector,stage.startsWith('fill-')?'Native input retains the exact source-backed value; no premature public event':stage==='commit-text'?'Native Tab commits one exact alias-preserving public change':stage==='clear-text'?'Trusted Clear click emits explicitly synthetic production input/change; no history or host fulfillment':'Trusted toggle changes only password visibility and its exact label; no input/change or host event'])}])),
+    ...Object.fromEntries(Object.entries(formattedInputCases).map(([identity,fixture])=>[identity,{kind:fixture.kind,sequence:'input-public-validity',inputFixture:fixture,steps:[
+      ['fill-valid',`:scope > .ely-api-format-field input[name="caller_value"][type="${fixture.type}"]`,'Trusted native input retains exact valid caller value; no premature public change'],
+      ['commit-valid','input[name="caller_value"]','Native Tab commits one exact alias-preserving typed public change'],
+      ['fill-invalid','input[name="caller_value"]',`Native input retains exact invalid value with only ${fixture.invalidFlag}; no host action or validity popup`],
+      ['commit-invalid','input[name="caller_value"]',`Native Tab commits the invalid value; ${fixture.invalidFlag} remains true without submission`],
+    ]}])),
+    'tooling/EventLogger':{kind:'EventLogger',sequence:'eventlogger-public-timestamps',steps:[
+      ['coalesce-pointer','[data-tool-event-target]','Two public pointer moves coalesce; exact observed-event elapsed display'],
+      ['capture-consumed-key','[data-tool-event-target] input','Capture-phase Ctrl+K survives child stopPropagation'],
+      ['wheel-units','[data-tool-event-target]','Wheel delta and line units remain exact'],
+      ['retain-fifty-keys','[data-tool-event-target] input','55 keys retain exactly newest 50 rows and their observed timestamps'],
+    ]},
+    'project/StatusSelect':{kind:'StatusSelect',sequence:'task-due-submit',steps:[
+      ['change-due','input[type="date"][name="due"][data-project-property]','Native due edit emits current task property and complete form values; peers unchanged'],
+      ['reveal-update','button[type="submit"]','Real Tab navigation from due reveals the focus-visible Update button; painted owned pixels are reachable'],
+      ['submit-current-due','button[type="submit"]','Native Enter on the keyboard-revealed Update submits exact current values; unfocused pointer activation unsupported'],
+    ]},
+    'data/Tag':{kind:'Tag',sequence:'remove-four-tags',steps:[
+      ['remove-design','[data-ely-tag-remove][value="design"]','Only Design removed; exact tag-remove payload'],
+      ['remove-motion','[data-ely-tag-remove][value="motion"]','Only Motion removed; exact tag-remove payload'],
+      ['remove-accessibility','[data-ely-tag-remove][value="accessibility"]','Only Accessibility removed; exact tag-remove payload'],
+      ['remove-rust','[data-ely-tag-remove][value="rust"]','Only static Research, Pinned, Urgent remain'],
+    ]},
+    'menus/RadioMenuItem':{kind:'CheckboxMenuItem',sequence:'radio-groups-reselection',steps:[
+      ['select-default','[data-interaction-menu-radio="default"][value="minimap"]','Exclusive default selection; density unchanged; settled change then action'],
+      ['reselect-default','[data-interaction-menu-radio="default"][value="minimap"]','Reselection remains selected and notifies again'],
+      ['select-density','[data-interaction-menu-radio="density"][value="compact"]','Exclusive density selection; default unchanged; settled change then action'],
+      ['reselect-density','[data-interaction-menu-radio="density"][value="compact"]','Reselection remains selected and notifies again'],
+    ]},
+    'forms/HotkeyInput':{kind:'HotkeyInput',sequence:'hotkey-record-clear-restore',steps:[
+      ['record-shortcut','[data-ui-hotkey]','Control+K is recorded; glyph remains visible and text inset clears its painted bounds'],
+      ['clear-shortcut','[data-ui-hotkey]','Backspace clears the recorded shortcut'],
+      ['restore-shortcut','[data-ui-hotkey]','Escape restores the value present when the input received focus'],
+    ]},
+    'forms/ShortcutRecorder':{kind:'HotkeyInput',sequence:'hotkey-record-clear-restore',steps:[
+      ['record-shortcut','[data-ui-hotkey]','Control+K is recorded; glyph remains visible and text inset clears its painted bounds'],
+      ['clear-shortcut','[data-ui-hotkey]','Backspace clears the recorded shortcut'],
+      ['restore-shortcut','[data-ui-hotkey]','Escape restores the value present when the input received focus'],
+    ]},
+    'account/SignupForm':{kind:'SignupForm',sequence:'signup-terms-label',steps:[
+      ['fill-name','input[name="name"]','Caller name is entered'],
+      ['fill-email','input[name="email"]','Valid email is entered'],
+      ['fill-password','input[name="password"]','Password rules pass while required unchecked terms keep the form invalid'],
+      ['accept-terms-label','label.ely-suite-terms','Hit-tested visible label checks the required checkbox, focuses it, and completes form validity'],
+    ]},
+    'navigation/Tabs':{kind:'Tabs',sequence:'tabs-panel-selection',steps:[
+      ['select-tab','[data-interaction-tab]:not(:disabled)','A different enabled tab selects and reveals only its associated panel'],
+      ['keyboard-select-tab','[data-interaction-tab]:not(:disabled)','Orientation-aware arrow key selects another enabled tab and its associated panel'],
+    ]},
+    'motion/Lottie Player':{kind:'ParticleBackground',sequence:'lottie-play-pause-frame-reset',steps:[
+      ['play-animation','[data-interaction-lottie-play]','Visible deterministic SVG animation enters playing state'],
+      ['pause-animation','[data-interaction-lottie-pause]','Visible SVG animation enters paused state'],
+      ['seek-visible-frame','[data-interaction-lottie-seek]','Frame control and progress output both show 50%; SVG remains visible'],
+      ['reset-visible-frame','[data-interaction-lottie-seek]','Frame control and progress output return to 0%; SVG remains painted'],
+    ]},
+    'canvas/InfiniteCanvas':{kind:'InfiniteCanvas',sequence:'canvas-minimap-zoom-fit-hit-test',steps:[
+      ['zoom-in','[data-cs-zoom-in]','Native hit-tested zoom action increases zoom and keeps the rendered world transform in sync'],
+      ['fit-canvas','[data-cs-fit]','Fit centers and scales the actual rendered artboard union within the actual stage viewBox'],
+      ['navigate-minimap','[data-cs-minimap]','Trusted pointer hit navigates to the point represented by the rendered minimap; target remains reachable'],
+    ]},
+  }[canvasIdentity?'canvas/InfiniteCanvas':identity];
+  if(focused){
+    const provenance={
+      'devtools/WebSocketConsole':'Only canonical source-backed Devtools WebSocketConsole fixture; advanced_workspace_devtools.go and ely-api-workspace-devtools.js socket(); native edits/keys/clicks plus separately labelled synthetic root host acknowledgements; no registered-site or networking approval',
+      'buttons/ActionSheet':'internal/gallery/advanced_interaction_fixtures.go ActionSheet; ely-api-interaction.html native dialog/actions; ely-api.js interactionSheetAction dispatch exclusion; ely-api-interaction.js sheetAction/closeDialog; no host application callback execution',
+      'buttons/BulkActionBar':'internal/gallery/advanced_interaction_fixtures.go explicitly SelectedCount0; ely-api-interaction.html effective-count rendering; ely-api-interaction.js bulk add/clear; separate initial Value2 render proof is TestBulkActionBarEffectiveInitialCount, NOT this gallery runtime fixture',
+      'layout/Collapsible':'internal/gallery/advanced_foundation_fixtures.go Collapsible; ely-api-foundation.html native details; ely-api-foundation.js captured nonbubbling toggle emits change action asynchronously',
+      'layout/Accordion':'internal/gallery/advanced_foundation_fixtures.go three AccordionItems; ely-api-foundation.html first details open; ely-api-foundation.js captured toggle enforces single-open before emitting change action',
+      'layout/AccordionItem':'Explicit separate layout/AccordionItem inventory row resolves Accordion fixture; public identity remains layout/AccordionItem; no other alias promotion; ely-api-foundation.js native captured toggle contract',
+      'buttons/Button':'internal/gallery/advanced_interaction_fixtures.go Button Groups; ui/gohtmx/templates/ely-api-interaction.html ely-api-buttons; ui/gohtmx/assets/ely-api.js click/emit; public cancelable event boundary only, not application onClick execution',
+      'forms/TextArea':'internal/gallery/advanced_forms_fixtures.go TextArea; ui/gohtmx/templates/ely-api-forms.html TextArea; ui/gohtmx/assets/ely-api-forms.js input autoresize; ui/gohtmx/assets/ely-api.js change; no disabled/readOnly/required fixture is claimed',
+      ...Object.fromEntries(['forms/Input','forms/TextField','forms/ClearableInput'].map(identity=>[identity,'internal/gallery/advanced_forms_fixtures.go Input; internal/gallery/advanced.go aliasFixtureProps; ui/gohtmx/templates/ely-api-forms.html Input; ely-controls.html clearable-input; ely-controls.js clear handler; ely-api.js public change. Exact '+identity+' only; native Clear click triggers explicitly synthetic production input/change; no host fulfillment.'])),
+      ...Object.fromEntries(Object.keys(nextInputCases).map(identity=>[identity,'internal/gallery/advanced_forms_fixtures.go canonical SearchInput/PasswordInput/PhoneInput (not PreviewExamples); internal/gallery/advanced.go qualified forms/MaskedInput aliasFixtureProps mask/value override; ely-api-forms.html exact alias/type/mask; ely-controls.js clear/password-toggle; ely-api-forms.js input mask; ely-api.js public change. Exact '+identity+' only; no host fulfillment, recent-search persistence or country selection.'])),
+      'tooling/EventLogger':'internal/gallery/advanced_native_tooling_fixtures.go EventLogger; ui/gohtmx/templates/ely-api-native-tooling.html EventLogger; ui/gohtmx/assets/ely-api-native-tooling.js receive/recordInput; exact global trace calibration remains separate',
+      ...Object.fromEntries(Object.keys(formattedInputCases).map(identity=>[identity,'internal/gallery/advanced_forms_fixtures.go EmailInput/CurrencyInput canonical root (not PreviewExamples); internal/gallery/advanced.go UrlInput exact alias value/type; ely-api-forms.html typed format field; ely-api.js public change. Exact '+identity+' caller bounds and native validity only; no unit switching, popup, submission or host fulfillment.'])),
+      'project/StatusSelect':'ui/gohtmx/templates/ely-api-communication.html:108,115; ui/gohtmx/assets/ely-api-communication.css:296-297 focus-visible-only Update; ui/gohtmx/assets/ely-api-communication.js:258; ui/gohtmx/assets/ely-api.js submit handler',
+      'data/Tag':'internal/gallery/advanced_data_fixtures.go Tag; ui/gohtmx/templates/ely-api-data.html ely-api-tag; ui/gohtmx/assets/ely-api-data.js tag-remove handler',
+      'menus/RadioMenuItem':'docs/gohtmx/menu-alias-contracts.md; internal/gallery/assets/advanced-interaction-checks.js radioMenuItemCheck; ui/gohtmx/assets/ely-api-interaction.js radio handler',
+      'forms/HotkeyInput':'Explicit focused action contract from ui/gohtmx/templates/ely-controls.html, ui/gohtmx/assets/ely-controls.js and ui/gohtmx/assets/ely-api-forms.css',
+      'forms/ShortcutRecorder':'Explicit alias action contract from ui/gohtmx/components.json and the HotkeyInput template, handler and stylesheet',
+      'account/SignupForm':'Explicit focused form contract from ui/gohtmx/templates/ely-api-forms.html and ui/gohtmx/assets/ely-api-forms.js',
+      'navigation/Tabs':'Explicit selected-tab/panel contract from ui/gohtmx/templates/ely-api-interaction.html and ui/gohtmx/assets/ely-api-interaction.js',
+      'motion/Lottie Player':'Explicit deterministic player contract from internal/gallery/advanced_interaction_fixtures.go, ui/gohtmx/templates/ely-api-interaction.html and ui/gohtmx/assets/ely-api-interaction.js',
+      'canvas/InfiniteCanvas':'Eight explicit canvas inventory IDs resolve the canonical InfiniteCanvas fixture via internal/gallery/advanced.go with no canvas aliasFixtureProps overrides; ui/gohtmx/component.go preserves actual alias identity and canonical Kind; action behavior from ui/gohtmx/assets/ely-api-workspace-canvas.js; action geometry is read from rendered SVG, not a presumed fit percentage; each alias and profile requires its own runtime evidence',
+    }[canvasIdentity?'canvas/InfiniteCanvas':identity];
+    const canvasPan=canvasIdentity&&['canvas/CanvasGrid','canvas/Guides'].includes(identity);
+    const focusedSteps=canvasPan?[['pan-ruler-1100','[data-cs-stage]','One trusted horizontal wheel (deltaX=48, deltaY=0) over an owned stage point fully reveals the initially partial 1100 ruler tick; x advances by 48/zoom, y/zoom and scene content stay unchanged'],...focused.steps]:focused.steps;
+    const steps=focusedSteps.map(([id,control,expectedState])=>({id,control,expectedState,event:id==='pan-ruler-1100'?'one trusted native horizontal wheel over the exact owned SVG stage; no programmatic scroll or viewport mutation':identity==='devtools/WebSocketConsole'&&id.startsWith('host-ack-')?'synthetic controlled host acknowledgement, not trusted user input':identity==='tooling/EventLogger'?'synthetic public DOM event via Playwright':id.startsWith('disabled-')?'native HTMLButtonElement.click (disabled negative; not trusted pointer input)':'native Playwright action',source:{siteId:`focused-state:${identity}:${id}`,sourceAnchor:null,provenance}}));
+    return {identity,kind:focused.kind,target:null,variant:identity.split('/')[1],focusedSequence:focused.sequence,steps,mappingGaps:[],requestedStateOnly:true,...(focused.inputFixture?{inputFixture:focused.inputFixture}:{}),
+      fixtureGuards:{component:identity,kind:focused.kind},...(identity==='project/StatusSelect'?{inputSupport:{submit:'real Tab reveal followed by native Enter',unfocusedPointer:'unsupported: Update is 1px and clipped until focus-visible'}}:{}),scope:canvasIdentity?`Only the separate gallery:${identity} ${steps.length}-action focused sequence; CanvasGrid and Guides include a native ruler pan; source-defined contract is not runtime approval; all eight IDs across four profiles require 32 separate case/profile runs`: 'Explicit finite focused sequence from the case fixture; separate from registered-check coverage, aliases, and all-catalog approval'+(identity==='tooling/EventLogger'?'; four grouped scenario checkpoints, not per-event pixel coverage or trusted physical input; exact trace calibration remains separate':identity==='project/StatusSelect'?'; keyboard-only submit; no unfocused pointer activation approval':'')};
+  }
+  const variant=identity.split('/')[1],target=identity.startsWith('settings/')?settingsTargets[variant]:null;
+  if(identity!=='maps/MapPopup'&&!target)return null;
+  const steps=[];
+  const add=(id,control,expectedState)=>steps.push({id,control,expectedState,event:'native Playwright action',source:{siteId:`requested-state:${identity}:${id}`,sourceAnchor:null,
+    provenance:'Explicit target-state contract; selectors come from frozen ely-api-forms.html and advanced_forms_fixtures.go, not inferred from unrelated registered-check branches'}});
+  if(!target)add('open-popup','button[data-map-point]:not([hidden])','map popup visible with caller content and select-marker host action');
+  else{
+    if(variant==='ResetToDefault')add('dirty-font','input[name="size"]','font size=18; reset becomes available');
+    add('open-target-section',`[data-ely-settings-tab="${target[0]}"]`,`Only ${target[1]} panel visible; requested alias content present`);
+    if(target[2])add('toggle-target',`[data-ely-settings-panel="${target[0]}"] input[name="${target[2]}"]`,'checked differs from initial value; exact selected panel remains visible');
+    if(variant==='ProxySettings')add('manual-proxy','[data-suite-proxy-mode]','manual proxy fields visible; invalid empty proxy cannot apply');
+    if(variant==='ResetToDefault')add('reset-defaults','[data-suite-reset-defaults]','font size restored to 14; reset disabled');
+  }
+  return {identity,kind:target?'SettingsLayout':'MapView',target,variant,steps,mappingGaps:[],requestedStateOnly:true,
+    fixtureGuards:{component:identity,kind:target?'SettingsLayout':'MapView'},scope:'Finite requested target state; independent from registered-check ending state and all-property coverage'};
+}
+
+// Independent finite expected rows, not production recordInput or a clock override.
+export function assertEventLoggerPublicState(stage,observation){
+  const {rawEvents,rows,initialEmpty,consumedKeys,bubbledKeys}=observation;
+  const counts={'coalesce-pointer':2,'capture-consumed-key':3,'wheel-units':4,'retain-fifty-keys':59};
+  assert(Object.hasOwn(counts,stage),'Unknown EventLogger stage');
+  assert.equal(initialEmpty,true,'An existing row makes the internal timestamp origin unobservable');
+  assert.equal(rawEvents.length,counts[stage],'Unexpected public events cannot be silently ignored');
+  assert(rawEvents.every(event=>event.isTrusted===false),'This finite contract covers synthetic public events only');
+  assert(rawEvents.every((event,index)=>Number.isFinite(event.timeStamp)&&event.timeStamp>=0&&(!index||event.timeStamp>=rawEvents[index-1].timeStamp)),'Public event timestamps must be finite, nonnegative and ordered');
+  assert.deepEqual(rawEvents.slice(0,2).map(event=>[event.type,event.x,event.y]),[['pointermove',10,12],['pointermove',11,13]]);
+  const expected=[{event:rawEvents[1],message:'move to 11, 13 ×2'}];
+  if(rawEvents.length>=3){
+    assert.deepEqual([rawEvents[2].type,rawEvents[2].key,rawEvents[2].ctrlKey],['keydown','K',true]);
+    assert.equal(consumedKeys,1);assert.equal(bubbledKeys,stage==='retain-fifty-keys'?55:0,'Ctrl+K must not reach the root bubble listener');
+    expected.unshift({event:rawEvents[2],message:'key down ctrl+K'});
+  }
+  if(rawEvents.length>=4){
+    assert.deepEqual([rawEvents[3].type,rawEvents[3].deltaX,rawEvents[3].deltaY,rawEvents[3].deltaMode],['wheel',0,4,1]);
+    expected.unshift({event:rawEvents[3],message:'wheel 0, 4 lines'});
+  }
+  if(stage==='retain-fifty-keys'){
+    assert.deepEqual(rawEvents.slice(4).map(event=>[event.type,event.key,event.ctrlKey]),Array.from({length:55},(_,index)=>['keydown',String(index),false]));
+    expected.splice(0,expected.length,...Array.from({length:50},(_,index)=>({event:rawEvents[58-index],message:`key down ${54-index}`})));
+  }
+  assert.equal(rows.length,expected.length,'Exact retention/coalescing row count');
+  expected.forEach(({event,message},index)=>{
+    const time=`+${(Math.max(0,event.timeStamp-rawEvents[0].timeStamp)/1000).toFixed(2)}s`;
+    assert.deepEqual(rows[index],{time,message,text:time+message},'Displayed timestamp and message must match the observed event; no normalization or tolerance');
+  });
+  return {...observation,timestampOrigin:rawEvents[0].timeStamp,timestampRule:'first accepted public event.timeStamp; exact two-decimal elapsed seconds',eventProvenance:'Synthetic public DOM events through actual component listeners; trusted physical input is not established'};
+}
+
+const localStudioCases={
+  'forms/SignaturePad':{kind:'SignaturePad',field:'textarea',steps:[['signature-type','textarea'],['signature-draw','canvas[data-ui-signature]'],['signature-clear','button[data-ui-signature-clear]']]},
+  'forms/GradientEditor':{kind:'GradientEditor',field:'input[data-ely-gradient-angle]',steps:[['gradient-angle','input[data-ely-gradient-angle]'],['gradient-add','button[data-ely-gradient-add]'],['gradient-hex','input[data-ely-color-hex]'],['gradient-alpha','input[data-ely-color-alpha]'],['gradient-stop-right','button[data-ely-gradient-stop][value="50"]'],['gradient-delete','button[data-ely-gradient-stop][value="51"]']]},
+};
+
+export function assertLocalStudioStep(identity,stage,proof){
+  assert(localStudioCases[identity]?.steps.some(([id])=>id===stage),'Exact local studio stage required');
+  assert.equal(proof.identity,identity);assert(proof.rootID);assert.equal(proof.truncated,false);assert.equal(proof.foreign,false);
+  const n=(type,control,value,key=null,trusted=true)=>({type,control,value,key,trusted});
+  const p=detail=>({type:'ely:change',detail:{id:proof.rootID,component:identity,...detail}});
+  const generic=(name,value,type)=>p({name,value,...(type==='textarea'?{}:{checked:false}),type});
+  let events;
+  if(identity==='forms/SignaturePad'){
+    const typed='Caller native signature',drawn=stage==='signature-draw',value=drawn?proof.canvasDataURL:stage==='signature-type'?typed:'';
+    assert.equal(typeof value,'string');assert(value.length<=131072,'Signature data URL cap');
+    assert.equal(proof.state.value,value,'Observed hidden signature must equal independently expected typed/empty value or actual canvas serialization');
+    if(drawn){assert.match(value,/^data:image\/png;base64,[A-Za-z0-9+/]+=*$/);assert.equal(proof.state.canvasMatchesValue,true);assert(proof.state.inkPixels>0);}
+    else assert.equal(proof.state.inkPixels,0);
+    const {inkPixels,...observedState}=proof.state;
+    assert.deepEqual(observedState,{value,fallback:stage==='signature-type'?typed:'',strokes:drawn?'1 stroke':'0 strokes',canvasMatchesValue:true,valid:true,hiddenEnabled:true,fallbackName:'',guideHidden:stage!=='signature-clear'});
+    const notification=[n('change','hidden',value,null,false),generic('caller_value',value,'hidden')];
+    events=stage==='signature-type'?[n('input','fallback',typed),...notification]:stage==='signature-clear'?[n('click','clear',''),...notification]:[
+      n('pointermove','canvas',null),n('pointerdown','canvas',null),n('change','fallback',typed),n('blur','fallback',typed),
+      ...Array.from({length:3},()=>n('pointermove','canvas',null)),n('pointerup','canvas',null),...notification,n('click','canvas',null),
+    ];
+    if(drawn)assert.deepEqual(proof.pointerButtons,[0,1,1,1,1,0],'One native stroke with exactly three in-contact moves');
+  }else{
+    const stops=(middleAt=null,color='#817f7c',alpha=100)=>[{at:0,color:'#181613',alpha:100},...(middleAt===null?[]:[{at:middleAt/100,color,alpha}]),{at:1,color:'#e9e7e5',alpha:100}];
+    const css=items=>`linear-gradient(180deg, ${items.map(s=>`${s.color}${s.alpha<100?Math.round(s.alpha/100*255).toString(16).padStart(2,'0'):''} ${s.at*100}%`).join(', ')})`;
+    const aggregate=items=>p({value:css(items),stops:items});
+    const red=stage!=='gradient-angle'&&stage!=='gradient-add',alpha=['gradient-alpha','gradient-stop-right'].includes(stage)?50:100;
+    const items=stage==='gradient-angle'||stage==='gradient-delete'?stops():stops(stage==='gradient-stop-right'?51:50,red?'#ff0000':'#817f7c',alpha);
+    const selected=stage==='gradient-angle'||stage==='gradient-delete'?0:1;
+    assert.deepEqual(proof.state,{value:css(items),angle:'180',stops:items.map((s,index)=>({...s,selected:index===selected})),hex:selected===0?'#181613':red?'#ff0000':'#817f7c',alpha:String(selected===0?100:alpha),start:'#181613',end:'#e9e7e5',previewMatches:true});
+    const redNotifications=[n('input','color','#ff0000',null,false),aggregate(stops(50,'#ff0000')),n('change','color','#ff0000',null,false),generic('caller_value_color','#ff0000','color'),aggregate(stops(50,'#ff0000'))];
+    if(stage==='gradient-angle')events=[n('input','angle','180'),aggregate(stops())];
+    else if(stage==='gradient-add')events=[n('change','angle','180'),generic('','180','number'),aggregate(stops()),n('blur','angle','180'),n('keydown','add','','Enter'),n('click','add',''),aggregate(stops(50)),n('blur','add','')];
+    else if(stage==='gradient-hex')events=[n('blur','stop','50'),n('input','hex','#ff0000'),...redNotifications];
+    else if(stage==='gradient-alpha'){
+      events=[n('change','hex','#ff0000'),generic('','#ff0000','text'),...redNotifications,n('blur','hex','#ff0000')];
+      for(let value=99;value>=50;value--)events.push(n('keydown','alpha',String(value+1),'ArrowLeft'),n('input','alpha',String(value)),aggregate(stops(50,'#ff0000',value)),n('change','alpha',String(value)),generic('caller_value_color_alpha',String(value),'range'),aggregate(stops(50,'#ff0000',value)));
+    }else if(stage==='gradient-stop-right'){
+      events=[n('blur','alpha','50'),n('keydown','stop','50','ArrowRight'),{...n('blur','stop','50'),originalStop:true},aggregate(stops(51,'#ff0000',50))];
+      const transition=proof.stopTransition;assert(transition,'Measured original/replacement stop identity required');
+      assert.equal(transition.originalID,null);assert.equal(transition.replacementID,null);assert.equal(transition.replacementValue,'51');
+      for(const key of ['originalDetached','replacementUnique','replacementOwned','replacementIsActive','replacementSelected'])assert.equal(transition[key],true,key);
+      const related=transition.rawRelatedTarget;assert(related&&typeof related.isNull==='boolean'&&typeof related.owned==='boolean','Raw relatedTarget record required without an assumed destination');
+      for(const key of ['id','name','value','tag'])assert(related[key]===null||typeof related[key]==='string'&&related[key].length<=256,'Bounded raw relatedTarget '+key);
+      if(related.isNull){assert.equal(related.owned,false);for(const key of ['id','name','value','tag'])assert.equal(related[key],null);}
+    }
+    else events=[n('keydown','stop','51','Delete'),aggregate(stops())];
+  }
+  assert.deepEqual(proof.events,events,'Full ordered studio window including all intermediate notifications; no deduplication or extra requests');
+  return proof;
+}
+
+const localPickerCases={
+  'forms/FontPicker':{kind:'FontPicker',mode:'font',field:'input[data-ui-combobox-input]',initial:'Inter',query:'geor',first:'Georgia',second:'Courier New',steps:['font-search','font-select']},
+  'forms/IconPicker':{kind:'IconPicker',mode:'icon',field:'input[data-ely-icon-search]',initial:'alpha',query:'alpha',first:'alpha',second:'beta',steps:['picker-search','picker-focus','picker-select','picker-unmatched','picker-clear','picker-focus-second']},
+  'forms/EmojiPicker':{kind:'IconPicker',mode:'icon',field:'input[data-ely-icon-search]',initial:'✨',query:'sparkles',first:'✨',second:'👩‍💻',steps:['picker-search','picker-focus','picker-select','picker-unmatched','picker-clear','picker-focus-second']},
+};
+
+export function assertLocalPickerStep(identity,stage,proof){
+  const fixture=localPickerCases[identity];assert(fixture?.steps.includes(stage),'Exact local picker stage required');
+  assert.equal(proof.identity,identity);assert(proof.rootID);assert.equal(proof.truncated,false);assert.equal(proof.foreign,false);
+  const n=(type,control,value,key=null,trusted=true)=>({type,control,value,key,trusted});
+  const p=detail=>({type:'ely:change',detail:{id:proof.rootID,component:identity,...detail}});
+  let events;
+  if(fixture.mode==='font'){
+    const selected=stage==='font-select';
+    assert.deepEqual(proof.state,{value:selected?'Georgia':'Inter',search:selected?'Georgia':'geor',selected:[selected?'Georgia':'Inter'],visible:['Georgia'],expanded:!selected,listHidden:selected,font:selected?'Georgia':'Inter',text:'The quick brown fox jumps over the lazy dog.',fontFamily:[selected?'Georgia':'Inter','Geist','Pretendard','system-ui','sans-serif'],focused:'search'});
+    events=selected?[n('keydown','search','geor','Enter'),n('input','hidden','Georgia',null,false),n('change','hidden','Georgia',null,false),p({name:'caller_value',value:'Georgia',checked:false,type:'hidden'})]:[n('input','search','geor')];
+  }else{
+    const first=fixture.first,query=fixture.query,unmatched='no-matching-picker-option';
+    const value=stage==='picker-search'||stage==='picker-focus'?fixture.initial:first;
+    const search=stage==='picker-unmatched'?unmatched:stage==='picker-clear'||stage==='picker-focus-second'?'':query;
+    const visible=stage==='picker-unmatched'?[]:stage==='picker-clear'||stage==='picker-focus-second'?[first,fixture.second]:[first];
+    assert.deepEqual(proof.state,{value,search,preview:value,selected:[value],visible,empty:stage==='picker-unmatched',focused:stage==='picker-focus'||stage==='picker-select'?'first':stage==='picker-focus-second'?'second':'search'});
+    const committed=(text)=>[n('change','search',text),p({name:'',value:text,checked:false,type:'search'}),n('blur','search',text)];
+    if(stage==='picker-search')events=[n('input','search',query)];
+    else if(stage==='picker-focus')events=[n('keydown','search',query,'ArrowDown'),...committed(query)];
+    else if(stage==='picker-select')events=[n('keydown','first',first,'Enter'),n('click','first',first),p({value:first})];
+    else if(stage==='picker-unmatched')events=[n('blur','first',first),n('input','search',unmatched)];
+    else if(stage==='picker-clear')events=[n('keydown','search',unmatched,'Delete'),n('input','search','')];
+    else events=[n('keydown','search','','ArrowDown'),...committed(''),n('keydown','first',first,'ArrowRight'),n('blur','first',first)];
+  }
+  assert.deepEqual(proof.events,events,'Entire local picker event window; no ignored public changes, requests or extra notifications');
+  return proof;
+}
+
+const complexFormCases={
+  ...Object.fromEntries(['FormField','FormSection'].map(name=>['forms/'+name,{kind:'Form',mode:'field',field:'input[name="email"]',steps:['email-edit','email-commit']}])),
+  'forms/InlineForm':{kind:'InlineForm',mode:'inline',field:'input[name="email"]',steps:['email-edit','email-commit','form-submit']},
+  'forms/FieldArray':{kind:'Form',mode:'array',field:'[data-ely-array-row] input[name="links"]',steps:['array-add','array-edit','array-remove']},
+  ...Object.fromEntries(['TagInput','TokenInput'].map(name=>['forms/'+name,{kind:'TagInput',mode:'tag',field:'input[data-ui-tag-entry]',steps:['tag-edit','tag-add','tag-remove']}])),
+  ...Object.fromEntries(['MentionInput','HashtagInput'].map(name=>['forms/'+name,{kind:'MentionInput',mode:'mention',field:'textarea[data-ely-mention]',steps:['mention-edit','mention-select']}])),
+};
+
+export function assertComplexFormStep(identity,stage,proof){
+  const fixture=complexFormCases[identity];assert(fixture?.steps.includes(stage),'Exact complex-form stage required');
+  assert.equal(proof.identity,identity);assert(proof.rootID);assert.equal(proof.truncated,false);assert.equal(proof.foreignEvents,false);
+  const native=(type,control,value,trusted=true,key=null)=>({type,control,value,trusted,key});
+  const change=detail=>({type:'ely:change',detail:{...detail,id:proof.rootID,component:identity}});
+  const fieldChange=(name,value,type='text')=>change({name,value,...(type==='textarea'?{}:{checked:false}),type});
+  const email='caller@example.test',url='https://example.test',tag='NewCallerTag',query=identity==='forms/HashtagInput'?'#b':'@b',inserted=identity==='forms/HashtagInput'?'#beta ':'@beta ';
+  let events,state;
+  if(fixture.mode==='field'||fixture.mode==='inline'){
+    state={value:email,valid:true};
+    events=stage==='email-edit'?[native('input','field',email)]:stage==='email-commit'?[native('keydown','field',email,true,'Tab'),native('change','field',email),fieldChange('email',email,'email'),native('blur','field',email)]:[native('click','submit',''),native('submit','form',null),{type:'ely:action',actualFormData:true,detail:{formData:[['email',email]],values:[['email',email]],submitter:'',id:proof.rootID,component:identity,action:'save'}}];
+    if(stage==='email-commit')assert.equal(proof.focusLeft,true);
+    assert.deepEqual(proof.siblings,fixture.mode==='field'?[['name',''],['bio','']]:[],'Unedited primary siblings must remain unchanged');
+    if(stage==='form-submit'){assert.equal(proof.submitterMatches,true);assert.equal(proof.submitDefaultPrevented,true);}
+  }else if(fixture.mode==='array'){
+    state={values:stage==='array-add'?['']:stage==='array-edit'?[url]:[],forms:0};
+    const destination={matchesNewPrimaryInput:true,rawID:null,rawName:'links',owned:true,ownedPath:'.ely-api-field-array > [data-ely-field-array] > [data-ely-array-row]:only-child > input[name="links"]',uniqueNewInput:true};
+    events=stage==='array-add'?[native('click','add',''),{...native('blur','add',''),relatedTarget:destination},change({name:'links',values:['']})]:stage==='array-edit'?[native('input','field',url)]:[native('change','field',url),fieldChange('links',url),native('blur','field',url),native('click','remove',''),{...native('blur','remove',''),arrayRemoval:proof.events[4]?.arrayRemoval},change({name:'links',values:[]})];
+    if(stage==='array-add')assert.deepEqual(proof.arrayPostFocus,{...destination,matchesNewPrimaryInput:true},'Post-click active element independently equals the unique newly added primary input');
+    if(stage==='array-remove'){
+      const removal=proof.events[4]?.arrayRemoval;assert(removal,'Actual removed-node blur witness required');assert.equal(removal.targetWasPinned,true);
+      const raw=removal.relatedTarget;assert(raw&&typeof raw.isNull==='boolean'&&typeof raw.owned==='boolean');assert.deepEqual(Object.keys(raw).sort(),['id','isNull','name','owned','tag','value']);assert.deepEqual(Object.keys(removal).sort(),['relatedTarget','targetWasPinned']);
+      for(const key of ['id','name','tag','value'])assert(raw[key]===null||typeof raw[key]==='string'&&raw[key].length<=256);
+      if(raw.isNull){assert.equal(raw.owned,false);for(const key of ['id','name','tag','value'])assert.equal(raw[key],null);}
+      assert.deepEqual(proof.arrayRemoval,{removedDetached:true,addUnique:true,addOwned:true,addConnected:true,addIsActive:true,addID:null,addName:null},'Removal must leave the actual unique owned Add button focused, independently of blur relatedTarget');
+    }
+  }else if(fixture.mode==='tag'){
+    state={value:stage==='tag-add'?`alpha,${tag}`:'alpha',entry:stage==='tag-edit'?tag:'',tags:stage==='tag-add'?['alpha',tag]:['alpha']};
+    events=stage==='tag-edit'?[native('input','field',tag)]:stage==='tag-add'?[native('keydown','field',tag,true,'Enter'),native('input','hidden',`alpha,${tag}`,false),native('change','hidden',`alpha,${tag}`,false),fieldChange('caller_value',`alpha,${tag}`,'hidden')]:[native('blur','field',''),native('click','remove',tag),{...native('blur','remove',tag),removal:{targetWasPinned:true,relatedTargetIsNull:true,relatedTargetID:null,relatedTargetName:null}},native('input','hidden','alpha',false),native('change','hidden','alpha',false),fieldChange('caller_value','alpha','hidden')];
+    if(stage==='tag-remove'){
+      const focus=proof.tagRemoval;assert(focus,'Measured removal focus witness required');
+      for(const key of ['entryIsActive','entryUnique','entryOwned','removeDetached'])assert.equal(focus[key],true,key);
+      assert.equal(focus.entryName,null);assert.equal(typeof focus.entryID,'string');assert(focus.entryID&&focus.entryID!==proof.rootID,'Record actual authored entry ID, never invent a removed-control ID');
+    }
+    // A user edit restored to its original empty value can commit or remain unchanged on blur.
+    if(stage==='tag-remove'&&proof.events[0]?.type==='change')events.unshift(native('change','field',''));
+  }else{
+    state={value:stage==='mention-edit'?query:inserted,listHidden:stage==='mention-select',visible:stage==='mention-edit'?['beta']:['alpha','beta']};
+    events=stage==='mention-edit'?[native('input','field',query)]:[native('change','field',query),fieldChange('caller_value',query,'textarea'),native('blur','field',query),native('click','option','beta'),native('input','field',inserted,false),native('change','field',inserted,false),fieldChange('caller_value',inserted,'textarea'),native('blur','option','beta')];
+  }
+  assert.deepEqual(proof.state,state,'Exact source fixture poststate');assert.deepEqual(proof.events,events,'Entire ordered event window; no extra/missing notifications or duplicate requests');
+  return proof;
+}
+
+const rangeFormCases={
+  'forms/RelativeDatePicker':{kind:'RelativeDatePicker',mode:'relative',field:'select[data-ely-relative-date]',initial:'Last 7 days',steps:[['relative-earlier','select[data-ely-relative-date]','ArrowUp','Yesterday'],['relative-restore','select[data-ely-relative-date]','ArrowDown','Last 7 days']]},
+  ...Object.fromEntries(['Slider','VerticalSlider'].map(name=>['forms/'+name,{kind:'Slider',mode:'slider',field:'input[data-ely-range]',initial:'3',steps:[['range-home','input[data-ely-range]','Home','0'],['range-end','input[data-ely-range]','End','5'],['range-left','input[data-ely-range]','ArrowLeft','4']]}])),
+  'forms/RangeSlider':{kind:'Slider',mode:'range',field:'input[data-ely-range]',initial:'3',steps:[['range-end-max','input[data-ely-range-end]','End','5'],['range-start-min','input[data-ely-range]','Home','0'],['range-start-right','input[data-ely-range]','ArrowRight','1'],['range-end-min','input[data-ely-range-end]','Home','1']]},
+  ...Object.fromEntries(['Knob','Dial'].map(name=>['forms/'+name,{kind:'Knob',mode:'knob',field:'input[data-ely-number]',initial:'2',steps:[['knob-up','[data-ely-knob]','ArrowUp','3'],['knob-down','[data-ely-knob]','ArrowDown','2']]}])),
+  'forms/Stepper':{kind:'Knob',mode:'stepper',field:'input[data-ely-number]',initial:'2',steps:[['stepper-up','button[data-ely-step="up"]',null,'3'],['stepper-down','button[data-ely-step="down"]',null,'2']]},
+};
+
+export function assertRelativeDateFixture(observed,value='Last 7 days'){
+  assert(['Last 7 days','Yesterday'].includes(value),'Only the exact relative fixture states are supported');
+  const labels=['Caller placeholder','Today','Yesterday','Last 7 days','Last 30 days','This month','Last month','This quarter','This year'];
+  assert.deepEqual(observed,{value,selectedIndex:value==='Yesterday'?2:3,disabled:false,options:labels.map((label,index)=>({value:index?label:'',label,selected:index>0&&label===value,disabled:false}))},'Exact placeholder plus relative options, labels, selection and disabled states');
+  return observed;
+}
+
+export async function diagnoseRelativeNativeCommit(field,read,observations){
+  await field.focus();
+  const before=await read('focused-before');observations.push(before);
+  assert(before.active&&before.uniqueOwned&&before.fieldID,'Actual unique primary select focus required');assert.equal(before.value,'Last 7 days');assert.deepEqual(before.events,[]);
+  // Chromium 143 select_type.cc::ShouldOpenPopupForKeyPressEvent opens on Space
+  // without selecting a new option. This is one hypothesis, not a contract fix.
+  for(const key of ['Space','ArrowUp','Enter']){
+    await field.press(key);const state=await read('after-'+key);observations.push(state);
+    assert.equal(state.fieldID,before.fieldID);assert(state.active&&state.uniqueOwned,'Native key must remain on the exact primary select');assert.equal(state.truncated,false);
+    const keys=state.events.filter(e=>e.type==='keydown');
+    for(const event of keys){assert.equal(event.targetID,before.fieldID);assert.equal(event.trusted,true);assert.equal(event.defaultPrevented,false,'Record final cancellation after production propagation, never fabricate an uncancelled key');}
+    if(key==='Space'){assert.equal(state.value,'Last 7 days');assert.deepEqual(keys.map(e=>e.key),[' ']);assert.equal(state.events.length,1,'Opening must not be treated as selection or a public change');}
+  }
+  const last=observations.at(-1);assert.equal(last.value,'Yesterday');
+  const key=key=>({type:'keydown',targetID:before.fieldID,key,trusted:true,defaultPrevented:false});
+  const notifications=[{type:'input',targetID:before.fieldID,value:'Yesterday',trusted:true},{type:'change',targetID:before.fieldID,value:'Yesterday',trusted:true},{type:'ely:change',detail:{id:before.rootID,component:'forms/RelativeDatePicker',name:'caller_value',value:'Yesterday',checked:false,type:'select-one'}}];
+  const afterArrow=observations[2].events.length>2;
+  assert.deepEqual(last.events,afterArrow?[key(' '),key('ArrowUp'),...notifications,key('Enter')]:[key(' '),key('ArrowUp'),key('Enter'),...notifications],'Entire diagnostic native/public window, without ignored extra events');
+  return {hypothesis:'space-open-arrow-up-enter',mechanicsObserved:true,commitPhase:afterArrow?'ArrowUp':'Enter',contractApproval:false};
+}
+
+export function assertRangeFormStep(identity,stage,proof){
+  const fixture=rangeFormCases[identity],index=fixture?.steps.findIndex(s=>s[0]===stage);assert(fixture&&index>=0,'Exact range-form stage required');
+  const [,selector,key,value]=fixture.steps[index],end=selector.includes('range-end'),synthetic=['knob','stepper'].includes(fixture.mode);
+  assert.equal(proof.identity,identity);assert(proof.rootID&&proof.fieldID);assert.equal(proof.truncated,false);
+  const control=fixture.mode==='knob'?'knob':fixture.mode==='stepper'?(index?'down':'up'):end?'end':'field';
+  assert.deepEqual(proof.nativeEvents.map(e=>[e.type,e.control,e.trusted,e.key]),[[key?'keydown':'click',control,true,key],['input',end?'end':'field',!synthetic,null],['change',end?'end':'field',!synthetic,null]],'Exact native initiation and production notification trust');
+  for(const event of proof.nativeEvents){assert.equal(event.targetID,proof.controlIDs[event.control],'Each event must target its exact primary control');if(event.type==='input'||event.type==='change')assert.equal(event.value,value);}
+  assert.equal(proof.controlIDs.field,proof.fieldID);assert.equal(new Set(Object.values(proof.controlIDs)).size,Object.keys(proof.controlIDs).length,'Primary control IDs must be distinct');
+  const type=fixture.mode==='relative'?'select-one':fixture.mode==='stepper'?'number':'range',name=end?'caller_value_end':'caller_value';
+  assert.deepEqual(proof.publicEvents,[{type:'ely:change',detail:{id:proof.rootID,component:identity,name,value,...(type==='select-one'?{}:{checked:false}),type}}],'Exactly one source-backed change and no host action');
+  const start=fixture.mode==='range'?['3','0','1','1'][index]:value,finish=fixture.mode==='range'?['5','5','5','1'][index]:null;
+  assert.deepEqual(proof.fields,[{id:proof.fieldID,name:'caller_value',type,value:start,min:'',max:fixture.mode==='relative'?'':finish??'5',step:'',disabled:false,valid:true},...(finish===null?[]:[{id:proof.controlIDs.end,name:'caller_value_end',type:'range',value:finish,min:start,max:'5',step:'',disabled:false,valid:true}])]);
+  if(fixture.mode==='slider'||fixture.mode==='range')assert.equal(proof.output,finish===null?value:`${start}–${finish}`);
+  if(fixture.mode==='knob')assert.deepEqual(proof.knob,{value,output:value,angle:String(-135+Number(value)/5*270),sweep:`${Number(value)/5*270}deg`});
+  if(fixture.mode==='stepper')assert.equal(proof.output,value);
+  if(fixture.mode==='relative')assertRelativeDateFixture(proof.relativeOptions,value);
+  if(identity==='forms/VerticalSlider'){
+    assert.equal(proof.orientation.writingMode,'vertical-lr');assert.equal(proof.orientation.direction,'rtl');assert.equal(proof.orientation.height,140);assert.equal(proof.orientation.width,36);
+    const {wrapper,root,field,output}=proof.flow;for(const rect of [wrapper,root,field,output]){for(const key of ['left','top','right','bottom'])assert(Number.isFinite(rect[key]));assert(rect.right>rect.left&&rect.bottom>rect.top);}
+    for(const rect of [field,output]){assert(rect.left>=wrapper.left&&rect.right<=wrapper.right&&rect.top>=wrapper.top&&rect.bottom<=wrapper.bottom,'Vertical range and output must occupy their wrapper flow box');assert(rect.left>=root.left&&rect.right<=root.right&&rect.top>=root.top&&rect.bottom<=root.bottom,'Vertical range and output must occupy component flow bounds');}
+    assert(output.top>=field.bottom,'Output must follow the complete vertical range');
+  }
+  return proof;
+}
+
+const regionalFormIDs=['forms/CountrySelect','forms/CurrencySelect','forms/LanguageSelect'];
+
+export function assertPathNativeStep(stage,proof){
+  assert(['path-edit','path-commit','path-request'].includes(stage));assert.equal(proof.identity,'forms/PathInput');
+  assert(proof.rootID&&proof.fieldID&&proof.rootID!==proof.fieldID);assert.equal(proof.truncated,false);
+  assert.equal(proof.value,'~/Projects/ely');assert.equal(proof.valid,true);
+  const shape=proof.nativeEvents.map(e=>[e.type,e.control,e.trusted,e.value,e.key]);
+  assert.deepEqual(shape,stage==='path-edit'?[['input','field',true,'~/Projects/ely',null]]:stage==='path-commit'?[['keydown','field',true,'~/Projects/ely','Tab'],['change','field',true,'~/Projects/ely',null],['blur','field',true,'~/Projects/ely',null]]:[['click','button',true,'',null]]);
+  for(const e of proof.nativeEvents)if(e.control==='field')assert.equal(e.targetID,proof.fieldID);
+  if(stage==='path-commit')assert.equal(proof.focusLeft,true,'Native Tab must actually leave the path field');
+  assert.deepEqual(proof.publicEvents,stage==='path-edit'?[]:stage==='path-commit'?[{type:'ely:change',detail:{id:proof.rootID,component:proof.identity,name:'caller_value',value:'~/Projects/ely',checked:false,type:'text'}}]:[{type:'ely:action',detail:{id:proof.rootID,component:proof.identity,action:'choose-path',value:'~/Projects/ely'}}],'One exact local payload; no empty duplicate request');
+  return proof;
+}
+
+export function assertRegionalStartingState(identity,reference,actual){
+  assert(regionalFormIDs.includes(identity),'Only the three authored regional aliases');
+  const suffixes=['','-control','-control-value','-control-input','-control-listbox','-control-option-0','-control-option-1'];
+  const qualify=packet=>{
+    assert.equal(packet.recordName,identity);assert.equal(packet.behaviorKey,'forms/LanguageSelect');
+    assert.match(packet.primary.id,/^audit-instance-\d+$/);assert.equal(packet.twin.id,packet.primary.id+'-twin');
+    for(const role of ['primary','twin']){
+      const owner=packet[role];assert.equal(owner.component,identity);assert.equal(owner.kind,'LanguageSelect');
+      assert.deepEqual(owner.ids,suffixes.map(suffix=>owner.id+suffix));assert.equal(owner.uniqueOwned,true);
+      assert.equal(owner.ariaControls,owner.id+'-control-listbox');assert.equal(owner.ariaControlsResolves,true);
+      assert.equal(owner.snapshot.id,owner.id);assert.equal(owner.snapshot.component,identity);assert.equal(owner.snapshot.kind,'LanguageSelect');
+    }
+    assert.equal(new Set([...packet.primary.ids,...packet.twin.ids]).size,14);
+  };
+  qualify(reference);qualify(actual);
+  for(const role of ['primary','twin']){
+    const from=reference[role],to=actual[role],map=new Map(from.ids.map((id,index)=>[id,to.ids[index]]));
+    const expected={...from.snapshot,id:map.get(from.snapshot.id),controls:from.snapshot.controls.map(control=>{
+      assert(map.has(control.id),'Every snapshot control must be one of the exact owned authored IDs');
+      return {...control,id:map.get(control.id),aria:control.aria.map(([key,value])=>key==='aria-controls'?[key,map.get(value)??assert.fail('Foreign aria-controls')]:[key,value])};
+    })};
+    assert.deepEqual(to.snapshot,expected,'Only independently qualified renderer IDs may differ; every other field remains exact');
+  }
+  return {identity,referencePrimary:reference.primary.id,actualPrimary:actual.primary.id,referenceTwin:reference.twin.id,actualTwin:actual.twin.id};
+}
+
+export function assertRegionalFormStep(identity,stage,proof){
+  assert(regionalFormIDs.includes(identity),'Exact regional identity required');
+  assert(['regional-search','regional-select','regional-unmatched','regional-escape'].includes(stage),'Unknown regional stage');
+  const selected=stage!=='regional-search',unmatched=stage==='regional-unmatched',escape=stage==='regional-escape';
+  assert.equal(proof.identity,identity);assert(proof.rootID&&proof.searchID&&proof.hiddenID);
+  assert.equal(new Set([proof.rootID,proof.searchID,proof.hiddenID]).size,3,'Distinct primary IDs required');
+  assert.equal(proof.truncated,false,'Truncated event proof cannot pass');
+  assert.deepEqual(proof.state,{name:'caller_value',value:selected?'beta':'alpha',search:unmatched?'no-matching-region':selected?'Caller Beta':'beta',preview:selected?'beta':'alpha',expanded:!selected||unmatched,listHidden:selected&&!unmatched,activeValue:selected?null:'beta',selected:[selected?'beta':'alpha'],visible:unmatched||escape?[]:['beta'],disabled:false,readOnly:false,valid:true});
+  assert.deepEqual(proof.nativeEvents.map(e=>[e.type,e.control,e.trusted,e.value,e.key]),unmatched?[['input','search',true,'no-matching-region',null]]:escape?[['keydown','search',true,'no-matching-region','Escape']]:selected?[
+    ['keydown','search',true,'beta','Enter'],['input','hidden',false,'beta',null],['change','hidden',false,'beta',null],
+  ]:[['input','search',true,'beta',null]],'Exact native initiation and synthetic production notifications');
+  for(const e of proof.nativeEvents)assert.equal(e.targetID,e.control==='search'?proof.searchID:proof.hiddenID,'Exact primary event target');
+  assert.deepEqual(proof.publicEvents,stage==='regional-select'?[{type:'ely:change',detail:{id:proof.rootID,component:identity,name:'caller_value',value:'beta',checked:false,type:'hidden'}}]:[],'Exact public payload; no host requests');
+  return proof;
+}
+
+const nextInputCases={
+  'forms/SearchInput':{kind:'SearchInput',type:'search',initial:'alpha',selector:':scope > .ely-api-search input[name="caller_value"][type="search"]',stages:['fill-text','commit-text','clear-text']},
+  'forms/PasswordInput':{kind:'PasswordInput',type:'password',initial:'alpha',selector:':scope > .ely-api-password input[name="caller_value"]',stages:['fill-text','commit-text','show-password','hide-password']},
+  'forms/PhoneInput':{kind:'PhoneInput',type:'tel',initial:'01012345678',mask:'###-####-####',partial:'010',raw:'a01098765432999b',cooked:'010-9876-5432',selector:':scope > .ely-api-format-field .ely-api-phone input[name="caller_value"][data-ely-mask]',stages:['fill-partial','fill-masked','commit-text']},
+  'forms/MaskedInput':{kind:'PhoneInput',type:'text',initial:'ab-1234',mask:'aa-9999',partial:'a',raw:'1ab!987654z',cooked:'ab-9876',selector:':scope > .ely-api-format-field .ely-api-phone input[name="caller_value"][data-ely-mask]',stages:['fill-partial','fill-masked','commit-text']},
+};
+
+export function assertSpecialInputState(identity,stage,state){
+  const fixture=nextInputCases[identity];assert(fixture,'No generic special-input contract');assert(fixture.stages.includes(stage));
+  const toggle=stage==='show-password'||stage==='hide-password';
+  const value=fixture.mask?(stage==='fill-partial'?fixture.partial:fixture.cooked):stage==='clear-text'?'':'Changed caller value';
+  assert.deepEqual(state,{name:'caller_value',type:stage==='show-password'?'text':fixture.type,value,valid:true,...(toggle?{label:stage==='show-password'?'Hide':'Show',ariaLabel:stage==='show-password'?'Hide password':'Show password'}:{})},'Exact native special-input value/type/validity and toggle labels');
+  return state;
+}
+
+const nextEightFormCases={
+  'forms/NumberInput':{kind:'NumberInput',mode:'number',selector:':scope > .ely-api-number input[data-ely-number]',initial:'4',min:'1',max:'99',step:'1',valid:'5',invalid:'100',steps:['fill-valid','commit-valid','fill-invalid','commit-invalid']},
+  'forms/ScrubInput':{kind:'ScrubInput',mode:'scrub',selector:':scope > .ely-api-number [data-ely-scrub]',initial:'120',min:'-2000',max:'2000',step:'1',steps:['scrub-right','scrub-left']},
+  ...Object.fromEntries(['PinInput','OTPInput'].map(name=>['forms/'+name,{kind:'PinInput',mode:'pin',selector:':scope > [data-ui-component="pin-input"] [data-ui-pin-slot]',initial:'123456',steps:['pin-replace-first','pin-reject-nondigit','pin-repair-second']}])),
+  ...Object.fromEntries(['InlineEdit','EditableText'].map(name=>['forms/'+name,{kind:'InlineEdit',mode:'inline',selector:'[data-ely-inline-value]',initial:'alpha',steps:['inline-open','inline-edit','inline-cancel','inline-reopen','inline-reedit','inline-save']}])),
+  ...Object.fromEntries(['InputGroup','InputAddon'].map(name=>['forms/'+name,{kind:'InputGroup',mode:'group',selector:':scope > .ely-api-input-group input[name="caller_value"]',initial:'alpha',prefix:name==='InputAddon'?'@':null,steps:['fill-text','commit-text']}])),
+};
+
+// Executed pure oracle for the eight finite branches; native payloads are retained, not inferred.
+export function assertEightFormStep(identity,stage,proof){
+  const fixture=nextEightFormCases[identity];assert(fixture&&fixture.steps.includes(stage),'No generic eight-form expansion');
+  const {id,value,nativeEvents,publicEvents}=proof;assert(id&&typeof id==='string');
+  assert(proof.fieldID&&typeof proof.fieldID==='string','Exact field ID is required');
+  for(const event of nativeEvents??[])if(event.control==='field'||event.control==='hidden')assert.equal(event.targetId,proof.fieldID,'Native field event must target the measured primary control');
+  const expectedValue=fixture.mode==='number'?(stage.endsWith('invalid')?'100':'5'):fixture.mode==='scrub'?(stage==='scrub-right'?'121':'120'):fixture.mode==='pin'?({'pin-replace-first':'923456','pin-reject-nondigit':'93456','pin-repair-second':'983456'}[stage]):fixture.mode==='group'?'beta':stage==='inline-edit'?'draft':stage==='inline-reedit'||stage==='inline-save'?'beta':'alpha';
+  assert.equal(value,expectedValue,'Exact finite value transition');
+  const generic=(value,type)=>({type:'ely:change',detail:{id,component:identity,name:'caller_value',value,checked:false,type}});
+  let expectedPublic=[];
+  if(fixture.mode==='number'&&stage.startsWith('commit-'))expectedPublic=[generic(value,'number')];
+  if(fixture.mode==='group'&&stage==='commit-text')expectedPublic=[generic(value,'text')];
+  if(fixture.mode==='scrub')expectedPublic=[generic(value,'number')];
+  if(fixture.mode==='pin')expectedPublic=[generic(value,'hidden')];
+  if(fixture.mode==='inline'&&stage==='inline-cancel')expectedPublic=[generic('draft','text')];
+  if(fixture.mode==='inline'&&stage==='inline-save')expectedPublic=[generic('beta','text'),{type:'ely:change',detail:{id,component:identity,name:'caller_value',value:'beta'}},{type:'ely:action',detail:{id,component:identity,action:'save',name:'caller_value',value:'beta'}}];
+  assert.deepEqual(publicEvents,expectedPublic,'Exact public payload and order; no host fulfillment');
+  assert(Array.isArray(nativeEvents)&&nativeEvents.length,'Every action requires actual native event evidence');
+  const inputs=nativeEvents.filter(event=>event.type==='input'),changes=nativeEvents.filter(event=>event.type==='change'),clicks=nativeEvents.filter(event=>event.type==='click'),keys=nativeEvents.filter(event=>event.type==='keydown');
+  const controls=fixture.mode==='pin'?['hidden',...Array.from({length:6},(_,i)=>`slot-${i}`)]:fixture.mode==='inline'?['field','open','cancel','save']:fixture.mode==='scrub'?['field','scrub']:['field'];
+  assert(nativeEvents.every(event=>controls.includes(event.control)),'Native evidence cannot come from another control');
+  assert(nativeEvents.every(event=>event.type==='input'||event.type==='change'||event.trusted===true),'Only production input/change may be synthetic');
+  if(fixture.mode==='number'||fixture.mode==='group'){
+    const commit=stage.startsWith('commit-');assert.equal(clicks.length,0);
+    assert.deepEqual(inputs.map(event=>[event.control,event.trusted]),commit?[]:[['field',true]]);
+    assert.deepEqual(changes.map(event=>[event.control,event.trusted,event.value]),commit?[['field',true,value]]:[]);
+    assert.deepEqual(keys.map(event=>[event.control,event.key,event.trusted]),commit?[['field','Tab',true]]:[]);
+    if(commit){assert.equal(proof.focusLeft,true);assert(nativeEvents.some(event=>event.type==='blur'&&event.control==='field'&&event.trusted));}
+    if(fixture.mode==='number'){
+      assert.deepEqual(proof.bounds,{min:'1',max:'99',step:'1'});
+      assert.deepEqual(proof.validity,Object.fromEntries(['badInput','customError','patternMismatch','rangeOverflow','rangeUnderflow','stepMismatch','tooLong','tooShort','typeMismatch','valueMissing','valid'].map(key=>[key,key==='valid'?!stage.endsWith('invalid'):key==='rangeOverflow'&&stage.endsWith('invalid')])));
+    }
+  }else if(fixture.mode==='scrub'){
+    assert.deepEqual(keys.map(e=>[e.control,e.key,e.trusted]),[['scrub',stage==='scrub-right'?'ArrowRight':'ArrowLeft',true]]);assert.equal(clicks.length,0);
+    assert.deepEqual(inputs.map(e=>[e.control,e.value,e.trusted]),[['field',value,false]]);assert.deepEqual(changes.map(e=>[e.control,e.value,e.trusted]),[['field',value,false]]);
+    assert.equal(proof.ariaValue,value);assert.deepEqual(proof.bounds,{min:'-2000',max:'2000',step:'1'});
+  }else if(fixture.mode==='pin'){
+    assert.equal(keys.length,0);
+    assert.equal(proof.slotIDs?.length,6);assert.equal(new Set(proof.slotIDs).size,6);assert(proof.slotIDs.every(Boolean));
+    for(const event of nativeEvents)if(event.control.startsWith('slot-'))assert.equal(event.targetId,proof.slotIDs[Number(event.control.slice(5))],'Native PIN event must target the exact slot ID');
+    const index=stage==='pin-replace-first'?0:1;
+    assert.deepEqual(inputs.map(e=>[e.control,e.trusted,e.value]),[[`slot-${index}`,true,stage==='pin-replace-first'?'9':stage==='pin-reject-nondigit'?'x':'8'],['hidden',false,value]]);
+    assert.deepEqual(changes.filter(e=>e.control==='hidden').map(e=>[e.trusted,e.value]),[[false,value]]);
+    assert(changes.filter(e=>e.control!=='hidden').every(e=>e.control.startsWith('slot-')&&e.trusted),'Slot blur commits stay native and unnamed');
+    assert.deepEqual(proof.slots,stage==='pin-replace-first'?['9','2','3','4','5','6']:stage==='pin-reject-nondigit'?['9','','3','4','5','6']:['9','8','3','4','5','6']);
+    assert.equal(proof.focusedSlot,stage==='pin-repair-second'?2:1);assert.equal(clicks.length,0);
+  }else{
+    assert.equal(keys.length,0);
+    const edit=stage==='inline-edit'||stage==='inline-reedit';
+    assert.deepEqual(inputs.map(e=>[e.control,e.trusted,e.value]),edit?[['field',true,value]]:[]);
+    assert.deepEqual(clicks.map(e=>[e.control,e.trusted]),edit?[]:[[stage==='inline-cancel'?'cancel':stage==='inline-save'?'save':'open',true]]);
+    assert.deepEqual(changes.map(e=>[e.control,e.trusted,e.value]),stage==='inline-cancel'?[['field',true,'draft']]:stage==='inline-save'?[['field',true,'beta']]:[]);
+    assert.equal(proof.editorHidden,stage==='inline-cancel'||stage==='inline-save');assert.equal(proof.openerHidden,!proof.editorHidden);
+    assert.equal(proof.openerText,stage==='inline-save'?'beta':'alpha');assert.equal(proof.focusedControl,proof.editorHidden?'open':'field');
+  }
+  return proof;
+}
+
+export function assertDurationNativeProof(stage,proof){
+  assert.equal(proof.identity,'forms/DurationPicker');assert(proof.rootID&&proof.fieldID&&proof.rootID!==proof.fieldID);
+  assert.equal(proof.type,'number');assert.equal(proof.value,'31');assert.equal(proof.valid,true);assert.equal(proof.hostRequests,0);
+  assert(Array.isArray(proof.nativeEvents)&&Array.isArray(proof.publicEvents));assert.equal(proof.truncated,false);
+  assert(proof.nativeEvents.every(event=>event.trusted===true&&event.targetId===proof.fieldID&&event.value==='31'),'Duration native events must be trusted and target the exact primary field');
+  if(stage==='edit'){
+    assert.deepEqual(proof.nativeEvents.map(event=>event.type),['input']);assert.deepEqual(proof.publicEvents,[],'Editing has not committed a public change');
+  }else{
+    assert.equal(stage,'commit');assert.equal(proof.focusLeft,true);
+    assert.deepEqual(proof.nativeEvents.map(event=>event.type),['change','blur']);
+    assert.deepEqual(proof.publicEvents,[{type:'ely:change',detail:{id:proof.rootID,component:proof.identity,name:'caller_value',value:'31',checked:false,type:'number'}}],'Commit serializes the exact delegated native-input public payload');
+  }
+  return proof;
+}
+
+const formattedInputCases={
+  'forms/EmailInput':{kind:'EmailInput',type:'email',initial:'caller@example.test',valid:'changed@example.test',invalid:'not-an-email',invalidFlag:'typeMismatch'},
+  'forms/UrlInput':{kind:'EmailInput',type:'url',initial:'https://example.test/source',valid:'https://example.test/changed',invalid:'not-a-url',invalidFlag:'typeMismatch'},
+  'forms/CurrencyInput':{kind:'CurrencyInput',type:'number',initial:'3',min:'0',max:'10',step:'1',valid:'4',invalid:'11',invalidFlag:'rangeOverflow'},
+  'forms/PercentInput':{kind:'CurrencyInput',type:'number',initial:'3',min:'0',max:'10',step:'1',valid:'4',invalid:'11',invalidFlag:'rangeOverflow'},
+  'forms/UnitInput':{kind:'CurrencyInput',type:'number',initial:'3',min:'0',max:'10',step:'1',valid:'4',invalid:'11',invalidFlag:'rangeOverflow'},
+};
+
+export function assertFormattedInputState(identity,state,{invalid}){
+  const fixture=formattedInputCases[identity];assert(fixture,'No generic formatted-input contract');
+  assert.equal(state.name,'caller_value');assert.equal(state.type,fixture.type);
+  assert.equal(state.value,invalid?fixture.invalid:fixture.valid);
+  if(fixture.type==='number')for(const key of ['min','max','step'])assert.equal(state[key],fixture[key],'Exact caller numeric bound: '+key);
+  assert.deepEqual(state.validity,Object.fromEntries(['badInput','customError','patternMismatch','rangeOverflow','rangeUnderflow','stepMismatch','tooLong','tooShort','typeMismatch','valueMissing','valid'].map(key=>[key,key==='valid'?!invalid:invalid&&key===fixture.invalidFlag])),'Exact native validity reason, not just valid/invalid');
+  return state;
+}
+
+export function assertFoundationPublicEvents(identity,id,observed,{value}){
+  assert.equal(typeof id,'string');assert(id.length>0);
+  if(identity==='buttons/Button')assert.deepEqual(observed.map(event=>[event.type,event.detail]),[['ely:action',{id,component:identity,action:value,value,formData:null,values:[]}]]);
+  else if(identity==='forms/TextArea')assert.deepEqual(observed.map(event=>[event.type,event.detail]),[['ely:change',{id,component:identity,name:'caller_value',value,checked:undefined,type:'textarea'}]]);
+  else if(['forms/Input','forms/TextField','forms/ClearableInput'].includes(identity))assert.deepEqual(observed.map(event=>[event.type,event.detail]),[['ely:change',{id,component:identity,name:'caller_value',value,checked:false,type:'text'}]]);
+  else if(formattedInputCases[identity]||nextInputCases[identity])assert.deepEqual(observed.map(event=>[event.type,event.detail]),[['ely:change',{id,component:identity,name:'caller_value',value,checked:false,type:(formattedInputCases[identity]||nextInputCases[identity]).type}]]);
+  else assert.fail('No finite foundation public event contract for '+identity);
+  return observed;
+}
+
+export function assertPlainInputNativeEvents(stage,observed,{clearButton=false,value}){
+  const event=(type,isTrusted)=>({type,value,isTrusted,defaultPrevented:false});
+  const expected=stage==='fill-text'?[event('input',true)]:stage==='commit-text'?[event('change',true)]
+    :stage==='clear-text'?(clearButton?[{type:'click',value:'',isTrusted:true,defaultPrevented:false},event('input',false),event('change',false)]:[event('input',true)])
+    :stage==='commit-empty'?(clearButton?[]:[event('change',true)]):stage==='show-password'||stage==='hide-password'?[event('click',true)]:null;
+  assert(expected,'Unknown finite input checkpoint');
+  assert.deepEqual(observed,expected,'Exact native input or explicitly production-generated clear events required');
+}
+
+export function assertStatusSelectDueEvents(observed,{id,identity,entries,nativeChangeCount}){
+  assert(Number.isInteger(nativeChangeCount)&&nativeChangeCount>=1,'Due commit requires an observed native change');
+  assert.equal(observed.length,nativeChangeCount*3,'Every native change must retain exactly one generic change, task change and action triplet');
+  const expected=[
+    ['ely:change',{id,component:identity,name:'due',value:'2026-10-20',checked:false,type:'date'}],
+    ['ely:change',{id,component:identity,name:'due',value:'2026-10-20',taskId:'brief'}],
+    ['ely:action',{id,component:identity,action:'update-task',taskId:'brief',field:'due',value:'2026-10-20',formData:entries,values:entries}],
+  ];
+  for(let index=0;index<observed.length;index+=3)assert.deepEqual(observed.slice(index,index+3).map(event=>[event.type,event.detail]),expected,'Each native change retains every public event in listener-registration order');
+  return observed;
+}
+
+export function assertMinimapViewport(before,actual,{bounds,ratio,point}){
+  const zoom=before.view.zoom,expected={zoom,
+    x:bounds.x+(point.x-10)/ratio-before.stage.width/zoom/2,
+    y:bounds.y+(point.y-10)/ratio-before.stage.height/zoom/2};
+  for(const key of ['zoom','x','y'])assert(Math.abs(actual[key]-expected[key])<=1e-6,`Minimap ${key} must preserve pre-click viewport semantics: expected ${expected[key]}, got ${actual[key]}`);
+  return expected;
+}
+
+export function assertTrashLayout(observed){
+  const finite=box=>['left','top','right','bottom'].every(key=>Number.isFinite(box[key]))&&box.right>box.left&&box.bottom>box.top;
+  assert(finite(observed.card),'Actual trash card must have positive finite bounds');
+  assert(observed.boxes.length,'Visible card content required');
+  for(const box of observed.boxes){
+    assert(finite(box),'Visible content needs actual positive bounds');
+    for(const key of ['left','top'])assert(box[key]>=observed.card[key]-.5,`Trash ${box.label} escapes card ${key}`);
+    for(const key of ['right','bottom'])assert(box[key]<=observed.card[key]+.5,`Trash ${box.label} escapes card ${key}`);
+    if(box.kind==='button'){assert(box.scrollWidth<=box.clientWidth+1,'Button label horizontally clipped');assert(box.scrollHeight<=box.clientHeight+1,'Button label vertically clipped');}
+  }
+  const overlap=(a,b)=>Math.min(a.right,b.right)-Math.max(a.left,b.left)>.5&&Math.min(a.bottom,b.bottom)-Math.max(a.top,b.top)>.5;
+  for(let i=0;i<observed.boxes.length;i++)for(let j=i+1;j<observed.boxes.length;j++){
+    const a=observed.boxes[i],b=observed.boxes[j];
+    if((a.kind==='button'&&b.kind==='button')||(a.kind==='button'&&!b.insideButton&&b.kind==='text')||(b.kind==='button'&&!a.insideButton&&a.kind==='text'))assert(!overlap(a,b),'Trash controls overlap another control or caller text');
+  }
+}
+
+export const threewaySourcePins={
+  'internal/gallery/advanced_workspace_fixtures.go':'c80d3265b34db38b95bdf67816e54b9e794dae140754c7efbefd5d8567dc9a8f',
+  'ui/gohtmx/templates/ely-api-workspace.html':'f66a0245d2287fb20a12355a7989b4af8151cc9497707a84667baebd78cf698b',
+  'ui/gohtmx/assets/ely-api-workspace.js':'5c38659eb2af5a3ee65bc1bc452f6c687ab1092b001758959af07ce50272f455',
+};
+export function assertThreewayState(state,{id,stage,twin}){
+  assert(['initial','choose-theirs','edit-merged','submit-merged'].includes(stage));
+  assert.equal(state.primary,true,'Exact behavioral primary, not a nested preview');
+  assert.equal(state.id,id);assert.equal(state.component,'git/ThreeWayMerge');assert.equal(state.kind,'ThreeWayMerge');
+  assert.deepEqual(state.panes,[['ours','main','return callerOld'],['base','base','return callerBase'],['theirs','feature/caller','return callerNew']]);
+  assert.equal(state.action,'operate');assert.equal(state.required,true);assert.equal(state.disabled,false);
+  assert.deepEqual(state.twin,twin);assert.deepEqual(state.twinEvents,[]);
+  const initial=stage==='initial',edited=stage==='edit-merged'||stage==='submit-merged';
+  assert.deepEqual(state.checked,initial?['ours']:['theirs']);
+  assert.equal(state.value,initial?'return callerOld':edited?'resolved caller value':'return callerNew');
+  assert.equal(state.status,initial?'':'Selected theirs.');
+  const detail={id,component:'git/ThreeWayMerge'},events=initial?[]:[
+    {type:'ely:change',detail:{...detail,name:'resolution',value:'theirs',checked:true,type:'radio'}},
+    {type:'ely:change',detail:{...detail,name:'merged',value:'return callerNew'}},
+  ];
+  if(edited)events.push({type:'ely:change',detail:{...detail,name:'merged',value:'resolved caller value',checked:undefined,type:'textarea'}});
+  if(stage==='submit-merged')events.push({type:'ely:action',detail:{...detail,action:'operate',submitter:'',formData:[['resolution','theirs'],['merged','resolved caller value']],values:[['resolution','theirs'],['merged','resolved caller value']]},actualFormData:true});
+  assert.deepEqual(state.events,events);
+  const native=initial?[]:[['click','resolution','theirs'],['input','resolution','theirs'],['change','resolution','theirs']];
+  if(edited)native.push(['input','merged','resolved caller value'],['change','merged','resolved caller value']);
+  if(stage==='submit-merged')native.push(['click','',''],['submit',null,null]);
+  assert.deepEqual(state.native.map(event=>[event.type,event.name,event.value]),native);
+  assert(state.native.every(event=>event.trusted===true),'Every recorded native event must be trusted');
+  const timeline=initial?[]:['click','input','change','ely:change:resolution','ely:change:merged'];
+  if(edited)timeline.push('input','change','ely:change:merged');
+  if(stage==='submit-merged')timeline.push('click','submit','ely:action:operate');
+  assert.deepEqual(state.timeline,timeline,'Native and public events retain their combined causal order');
+}
+
+export async function threewayCleanup(cleanup,primaryFailed,failureDiagnostics){
+  try{await cleanup();}
+  catch(cleanupError){
+    // The runner owns this bounded channel before any capture/action receipt.
+    // Never let diagnostic formatting or attachment replace either real error.
+    let text='[unprintable cleanup error]';
+    try{text=String(cleanupError).slice(0,1000);}catch{}
+    try{failureDiagnostics.threewayCleanupFailures.push({phase:'threeway-listener-cleanup',error:text,primaryFailed});}catch{}
+    if(!primaryFailed)throw cleanupError;
+  }
+}
+
+export function assertVerticalRangeSnapshot(identity,stage,state,twinHTML){
+  assert(['layout/Scrollbar','layout/StickyHeader'].includes(identity),'Only the two canonical vertical range identities are covered');
+  assert(['range-top-min-pointer','range-bottom-max-pointer','range-center-pointer','range-home-min','range-end-max','content-wheel-up','scroll-home-min','scroll-end-max'].includes(stage),'Unknown vertical range state');
+  assert.equal(state.component,identity);assert.equal(state.direction,'ltr');assert.equal(state.writingMode,'vertical-lr');
+  assert(state.rect.height>state.rect.width,'The native range must be physically vertical');
+  assert(state.scrollMax>0);assert.equal(state.scrollMax,state.scrollHeight-state.clientHeight);assert.equal(state.scrollLeft,0);assert.equal(state.documentScrollTop,state.previousDocumentScrollTop,'The page must not jump while operating the local scroll fixture');
+  assert(state.value>=0&&state.value<=1000);assert(Math.abs(state.scrollTop-state.scrollMax*state.value/1000)<=1,'Native range value must map to vertical scrollTop');
+  if(stage==='range-top-min-pointer'||stage==='range-home-min'||stage==='scroll-home-min'){assert.equal(state.value,0);assert.equal(state.scrollTop,0);}
+  if(stage==='range-bottom-max-pointer'||stage==='range-end-max'||stage==='scroll-end-max'){assert.equal(state.value,1000);assert.equal(state.scrollTop,state.scrollMax);}
+  if(stage==='range-center-pointer')assert(state.value>0&&state.value<1000,'A center pointer action must select an interior range value');
+  if(stage.startsWith('range-')){
+    assert(state.nativeEvents.some(event=>event.type==='input'&&event.trusted===true),'Each native range action must emit trusted input');
+    assert(state.nativeEvents.every(event=>event.trusted===true),'Native range events must remain trusted');
+    if(stage.endsWith('-pointer'))assert(state.nativeEvents.some(event=>event.type==='pointerdown')&&state.nativeEvents.some(event=>event.type==='click'),'Range selection must use a real pointer path');
+    if(stage==='range-home-min'||stage==='range-end-max')assert(state.nativeEvents.some(event=>event.type==='keydown'&&event.key===(stage==='range-home-min'?'Home':'End')),'Range endpoint selection must use its native key');
+    const nativeChanges=state.nativeEvents.filter(event=>event.type==='change');
+    assert.equal(nativeChanges.length,1,'Each changed native range action must emit exactly one native change');
+    const nativeChange=nativeChanges[0];assert.equal(nativeChange.trusted,true);
+    assert.equal(nativeChange.name,'');assert.equal(nativeChange.checked,false);assert.equal(nativeChange.controlType,'range');
+    assert.deepEqual(state.publicEvents,[{type:'ely:change',detail:{id:state.id,component:identity,name:'',value:nativeChange.value,checked:false,type:'range'}}],'Core API must forward the trusted native range change exactly once');
+  }else assert.deepEqual(state.publicEvents,[],'Wheel and scroll-region keys do not dispatch public host changes');
+  if(stage==='content-wheel-up')assert(state.regionEvents.some(event=>event.type==='wheel'&&event.target==='content'&&event.trusted===true&&event.deltaY<0),'Scroll content must receive a trusted upward wheel; range input is not required');
+  if(stage==='scroll-home-min'||stage==='scroll-end-max')assert(state.regionEvents.some(event=>event.type==='keydown'&&event.target==='region'&&event.trusted===true&&event.key===(stage==='scroll-home-min'?'Home':'End')),'Content endpoint selection must use its trusted native key');
+  assert.equal(state.twinHTML,twinHTML,'The independent twin must remain unchanged');assert.deepEqual(state.twinEvents,[]);
+}
+
+export function assertCommunicationCallerRequest(actions,offset,identity,action,value){
+  assert(Array.isArray(actions)&&Number.isInteger(offset)&&offset>=0&&offset<=actions.length,'Caller request observation offset must be valid');
+  const emitted=actions.slice(offset);assert.equal(emitted.length,1,'One native activation must emit exactly one new caller request');
+  const event=emitted[0];assert.equal(event.action,action,'Native activation emitted the wrong caller request');assert.equal(event.component,identity,'Caller request must retain the exact gallery identity');
+  if(value!==undefined)assert.equal(event.value,value,'Caller request must retain the exact default-fixture value');
+  return {event,nextOffset:actions.length};
+}
+
+export function assertDockCallerAction(actions,offset,identity,value,dock){
+  assert(Array.isArray(actions)&&Number.isInteger(offset)&&offset>=0&&offset<=actions.length,'Dock action observation offset must be valid');
+  const emitted=actions.slice(offset);assert.equal(emitted.length,1,'One native Dock activation must emit exactly one caller request');
+  const event=emitted[0];assert.equal(event.action,'change');assert.equal(event.component,identity);assert.equal(event.value,value);
+  if(dock!==undefined)assert.equal(event.dock,dock);
+  return actions.length;
+}
+
+export function assertNativeEmbedOpen({actions,clicks,identity,rootId,url,before,after}){
+  assert(Array.isArray(actions)&&actions.length===1,'One native Embed activation must emit exactly one host action');
+  const action=actions[0];assert.equal(action.action,'open');assert.equal(action.value,url,'Host request must preserve the exact fixture URL');assert.equal(action.component,identity,'Host request must preserve the canonical or alias identity');assert.equal(action.id,rootId,'Host request must preserve the exact rendered root ID');
+  assert(Array.isArray(clicks)&&clicks.length===1,'One native Embed activation must produce exactly one observed button click');
+  const click=clicks[0];assert.equal(click.trusted,true,'Embed activation must be trusted browser input, not synthetic dispatch');assert.equal(click.action,'open');assert.equal(click.value,url);assert.equal(click.component,identity);assert.equal(click.id,rootId);
+  assert.deepEqual(after,before,'Opening through the host must not mutate the local Embed fixture');
+  return {identity,rootId,url,action:'open',trustedClick:true,localStateUnchanged:true};
+}
+
+export function assertDockNativeEvents(stepId,events,label){
+  assert(Array.isArray(events)&&events.length>0,'Dock input must produce observed native browser events');
+  assert(events.every(event=>event.trusted===true),'Dock input must be trusted browser input, not dispatched synthetic events');
+  if(stepId.startsWith('dock-click-')){
+    const clicks=events.filter(event=>event.type==='click');assert.equal(clicks.length,1);assert.equal(clicks[0].tab,label);assert(clicks[0].detail>0,'Mouse click must retain pointer activation detail');
+  }else if(stepId==='dock-key-enter-search'||stepId==='dock-key-space-search'){
+    const isEnter=stepId==='dock-key-enter-search',key=isEnter?'Enter':' ',sequence=events.filter(event=>['keydown','keyup','click'].includes(event.type));
+    const expectedOrder=isEnter?['keydown','click','keyup']:['keydown','keyup','click'];
+    assert.deepEqual(sequence.map(event=>event.type),expectedOrder,`Native ${isEnter?'Enter':'Space'} button activation must follow its browser key order`);
+    assert(sequence.every(event=>event.tab===label),'Keyboard activation must stay on the requested Dock button');
+    assert.equal(sequence.find(event=>event.type==='keydown').key,key);assert.equal(sequence.find(event=>event.type==='keyup').key,key);
+    assert.equal(sequence.find(event=>event.type==='click').detail,0,'Keyboard-generated click must not masquerade as pointer input');
+  }else if(stepId==='dock-drag-files-center'){
+    const start=events.find(event=>event.type==='dragstart'),drop=events.find(event=>event.type==='drop');
+    assert(start&&drop,'Native drag must reach both dragstart and drop');assert.equal(start.tab,label);assert.equal(drop.zone,'center');assert.equal(drop.transferText,label,'Drop must carry the browser DataTransfer text from the source tab');
+  }else assert.fail(`Unknown Dock native-input checkpoint ${stepId}`);
+  return {stepId,label,trusted:true};
+}
+
+export function assertEvalLastColumnGeometry({scrollLeft,previousScrollLeft,scrollWidth,clientWidth,columns,actionsBefore,actionsAfter,initiallyVisible,didScroll}){
+  assert.equal(actionsAfter,actionsBefore,'Reading the final table column must not emit a host action');
+  assert.equal(columns.length,6,'The final Time header and all five fixture values must be present');
+  if(scrollWidth>clientWidth&&!initiallyVisible)assert.equal(didScroll,true,'An initially clipped final column requires native horizontal wheel input');
+  if(didScroll)assert(scrollLeft>previousScrollLeft,'Native horizontal wheel input must advance the local scroll owner');
+  assert(columns.every(column=>column.insideRoot&&column.insideClip),'The Time header and every Time value must be reachable within the component root and local scrollport');
+  return {overflow:scrollWidth>clientWidth,scrollLeft,columns};
+}
+
+export async function assertActivityLogScopedAuditPage(root){
+  const page=root.page();
+  assert.equal(await page.locator('[data-audit-case]').count(),1,'Exact-case audit route must keep the native tab order bounded to one component pair');
+  assert.equal(await page.locator('[data-audit-name="collab/ActivityLog"]').count(),1,'Exact public ActivityLog fixture wrapper required');
+}
+
+export function assertCronNativePreview(expression,now,runs){
+  assert.equal(now,'2026-09-25T12:00:00Z','Exact canonical frozen cron clock required');
+  const expected={
+    '*/5 * * * *':['2026-09-25T12:05:00.000Z','2026-09-25T12:10:00.000Z','2026-09-25T12:15:00.000Z'],
+    '0 9 * * 1-5':['2026-09-28T09:00:00.000Z','2026-09-29T09:00:00.000Z','2026-09-30T09:00:00.000Z'],
+    '0 9 * * *':['2026-09-26T09:00:00.000Z','2026-09-27T09:00:00.000Z','2026-09-28T09:00:00.000Z'],
+  }[expression];
+  assert(expected,'Only the finite canonical cron expressions have an oracle');
+  assert.deepEqual(runs,expected,'Cron preview must be fresh and match the exact expression and frozen clock');
+  return runs;
+}
+
+export async function runRequestedStateActions(contract,root,runStep,failureDiagnostics){
+  if(contract.focusedSequence==='forms-temporal-ax-native'){
+    const identity=contract.identity,fixture=temporalAXCases[identity],range=identity==='forms/DateRangePicker';assert(fixture);assert.equal(contract.nativeFormTwinWitness,true);
+    assert.equal(await root.getAttribute('data-ely-component'),identity);assert.equal(await root.getAttribute('data-ely-kind'),fixture.kind);
+    const start=root.locator(fixture.field),end=root.locator('input[data-ely-date-end]'),trigger=root.locator('[data-ely-date-range-trigger]');
+    assert.equal(await start.count(),1);assert.equal(await start.inputValue(),fixture.initial);assert.equal(await start.getAttribute('name'),'caller_value');
+    assert.deepEqual(await start.evaluate(n=>({type:n.type,disabled:n.disabled,readOnly:n.readOnly,required:n.required})),{type:fixture.type,disabled:false,readOnly:false,required:false});
+    if(identity==='forms/TimePicker')assert.equal(await start.getAttribute('step'),'900');
+    if(range){assert.equal(await end.count(),1);assert.equal(await end.inputValue(),'2026-10-22');assert.equal(await end.getAttribute('name'),'caller_value_end');assert.equal(await trigger.getAttribute('aria-expanded'),'false');}
+    const cdp=await root.page().context().newCDPSession(root.page());
+    await root.evaluate(node=>{
+      node.__temporalEvents=[];node.__temporalTruncated=false;node.__temporalForeign=false;
+      node.__temporalObserver=e=>{
+        if(node.__temporalEvents.length>=128){node.__temporalTruncated=true;return;}
+        if(e.type==='ely:action'){node.__temporalForeign=true;return;}
+        if(e.type==='ely:change'){if(e.target!==node)node.__temporalForeign=true;node.__temporalEvents.push({type:e.type,detail:{...e.detail}});return;}
+        const first=node.querySelector('input[data-ely-date-start],input[type="month"],input[type="time"]'),last=node.querySelector('input[data-ely-date-end]'),button=node.querySelector('[data-ely-date-range-trigger]'),target=e.target===first?first:e.target===last?last:e.target.closest('button')===button?button:null,control=target===first?'start':target===last?'end':target===button?'trigger':'foreign';
+        if(!target||target.closest('[data-ely-family]')!==node)node.__temporalForeign=true;
+        node.__temporalEvents.push({type:e.type,control,value:target?.value??null,key:e.type==='keydown'?(e.shiftKey&&e.key==='Tab'?'Shift+Tab':e.key):null,trusted:e.isTrusted});
+      };
+      for(const type of ['click','keydown','input','change','blur','ely:change','ely:action'])node.addEventListener(type,node.__temporalObserver,true);
+    });
+    let primaryError=null,cursor=0;
+    try{
+      for(const stage of fixture.steps)await runStep(stage,async()=>{
+        assert.equal(await root.evaluate(n=>n.__temporalEvents.length),cursor);contract.temporalAXTrace??=[];const trace=[];contract.temporalAXTrace.push({stage,trace});
+        if(stage==='date-range-open'||stage==='date-range-close'||stage==='date-range-reopen')await trigger.click();
+        else if(stage==='date-range-escape')await start.press('Escape');
+        else{
+          const field=stage==='date-range-invalid'||stage==='date-range-repair'?end:start;
+          if(stage!=='period-commit'&&!await field.evaluate(n=>n===document.activeElement))await field.click();
+          await temporalAXKeyboardRoute(identity,stage,()=>observeOwnedNativeDate(field,cdp),key=>root.page().keyboard.press(key),trace);
+        }
+      },async(_state,_before,receipt)=>{
+        const proof=await root.evaluate((node,args)=>{const field=node.querySelector(args.control==='end'?'input[data-ely-date-end]':'input[data-ely-date-start],input[type="month"],input[type="time"]'),first=node.querySelector('input[data-ely-date-start]'),last=node.querySelector('input[data-ely-date-end]'),button=node.querySelector('[data-ely-date-range-trigger]');return {identity:node.dataset.elyComponent,rootID:node.id,value:field.value,active:field===document.activeElement,events:node.__temporalEvents.slice(args.cursor),truncated:node.__temporalTruncated,foreign:node.__temporalForeign,range:first?{start:first.value,end:last.value,endValid:last.checkValidity(),validationMessage:last.validationMessage,expanded:button.getAttribute('aria-expanded')==='true',hidden:node.querySelector('[data-ely-date-range-panel]').hidden}:null};},{cursor,control:stage==='date-range-invalid'||stage==='date-range-repair'?'end':'start'});
+        proof.axTrace=contract.temporalAXTrace.at(-1);receipt.nativeFormProof=proof;assertTemporalAXStep(identity,stage,proof);cursor+=proof.events.length;return proof;
+      });
+    }catch(error){primaryError=error;if(failureDiagnostics){failureDiagnostics.temporalAXTrace=contract.temporalAXTrace;await retainFailurePayload(failureDiagnostics,'temporalAX',()=>root.evaluate(n=>({events:n.__temporalEvents,truncated:n.__temporalTruncated,foreign:n.__temporalForeign})));}throw error;}
+    finally{await cleanupPreservingPrimary(async()=>{try{await root.evaluate(node=>{for(const type of ['click','keydown','input','change','blur','ely:change','ely:action'])node.removeEventListener(type,node.__temporalObserver,true);for(const key of ['__temporalEvents','__temporalTruncated','__temporalForeign','__temporalObserver'])delete node[key];});}finally{await cdp.detach();}},primaryError,failureDiagnostics??{},'temporalAXCleanupError');}
+    return;
+  }
+  if(contract.focusedSequence==='forms-local-studio-native'){
+    const identity=contract.identity,fixture=localStudioCases[identity],signature=identity==='forms/SignaturePad';assert.equal(contract.nativeFormTwinWitness,true);
+    assert.equal(await root.getAttribute('data-ely-component'),identity);assert.equal(await root.getAttribute('data-ely-kind'),fixture.kind);
+    const controls=signature?{fallback:'textarea',hidden:'[data-ui-signature-value]',clear:'[data-ui-signature-clear]',canvas:'canvas[data-ui-signature]'}:{angle:'[data-ely-gradient-angle]',add:'[data-ely-gradient-add]',hex:'[data-ely-color-hex]',color:'[data-ely-color]',alpha:'[data-ely-color-alpha]'};
+    for(const selector of Object.values(controls)){assert.equal(await root.locator(selector).count(),1);assert.equal(await root.locator(selector).isEnabled(),true);}
+    if(signature){assert.equal(await root.locator(controls.fallback).inputValue(),'Caller signature');assert.equal(await root.locator(controls.hidden).inputValue(),'Caller signature');assert.equal(await root.locator('details').getAttribute('open'),'');assert.equal(await root.locator(controls.fallback).getAttribute('name'),null);assert.equal(await root.locator(controls.hidden).getAttribute('name'),'caller_value');}
+    else{
+      assert.equal(await root.locator(controls.angle).inputValue(),'90');assert.equal(await root.locator(controls.angle).getAttribute('min'),'0');assert.equal(await root.locator(controls.angle).getAttribute('max'),'360');
+      assert.deepEqual(await root.locator('[data-ely-gradient-stop]').evaluateAll(ns=>ns.map(n=>[n.value,n.dataset.elyGradientAlpha,n.querySelector('[data-ely-gradient-color]').dataset.elyGradientColor])),[['0','100','#181613'],['100','100','#e9e7e5']]);
+      assert.deepEqual(await root.locator(controls.alpha).evaluate(n=>[n.name,n.min,n.max,n.value]),['caller_value_color_alpha','0','100','100']);
+    }
+    await root.evaluate((node,{controls,signature})=>{
+      node.__studioControls=Object.fromEntries(Object.entries(controls).map(([name,selector])=>[name,node.querySelector(selector)]));node.__studioEvents=[];node.__studioBytes=0;node.__studioTruncated=false;node.__studioForeign=false;node.__studioPinnedStop=null;node.__studioStopRelated=null;
+      node.__studioObserver=e=>{
+        if(e.type.startsWith('pointer')&&e.target!==node.__studioControls.canvas)return;
+        const publicEvent=e.type.startsWith('ely:'),value=publicEvent?e.detail?.value:e.target.value;
+        if(node.__studioEvents.length>=512||typeof value==='string'&&value.length>131072||publicEvent&&e.detail?.stops?.length>3){node.__studioTruncated=true;return;}
+        let record;
+        if(publicEvent){if(e.target!==node)node.__studioForeign=true;record={type:e.type,detail:JSON.parse(JSON.stringify(e.detail))};}
+        else{
+          const match=Object.entries(node.__studioControls).find(([,n])=>n===e.target),control=match?.[0]??(e.target.matches('button[data-ely-gradient-stop]')?'stop':'foreign');
+          if(control==='foreign'||e.target.closest('[data-ely-family]')!==node)node.__studioForeign=true;
+          const stopBlur=node.__studioPinnedStop&&control==='stop'&&e.type==='blur';
+          if(stopBlur){const target=e.relatedTarget;node.__studioStopRelated={isNull:target===null,id:target?.getAttribute?.('id')??null,name:target?.getAttribute?.('name')??null,value:target?.value??null,tag:target?.localName??null,owned:!!target&&node.contains(target)&&target.closest('[data-ely-family]')===node};if(Object.values(node.__studioStopRelated).some(value=>typeof value==='string'&&value.length>256)){node.__studioTruncated=true;return;}}
+          record={type:e.type,control,value:e.target.value??null,key:e.key??null,trusted:e.isTrusted,...(e.type.startsWith('pointer')?{buttons:e.buttons}:{}),...(stopBlur?{originalStop:e.target===node.__studioPinnedStop}:{})};
+        }
+        const size=new TextEncoder().encode(JSON.stringify(record)).byteLength;
+        if(node.__studioBytes+size>1048576){node.__studioTruncated=true;return;}node.__studioBytes+=size;node.__studioEvents.push(record);
+      };
+      for(const type of ['input','change','keydown','click','blur','pointerdown','pointermove','pointerup','ely:change','ely:action'])node.addEventListener(type,node.__studioObserver,true);
+    },{controls,signature});
+    let cursor=0,primaryError=null;
+    try{for(const [stage]of fixture.steps)await runStep(stage,async()=>{
+      assert.equal(await root.evaluate(n=>n.__studioEvents.length),cursor,'No unaccounted studio events between steps');
+      if(stage==='signature-type')await root.locator(controls.fallback).fill('Caller native signature');
+      else if(stage==='signature-draw'){
+        const canvas=root.locator(controls.canvas);await canvas.scrollIntoViewIfNeeded();
+        const box=await canvas.boundingBox();assert(box&&box.width>=80&&box.height>=40,'Bounded authored canvas required');
+        await root.page().mouse.move(box.x+box.width*.25,box.y+box.height*.5);await root.page().mouse.down();
+        try{for(const [x,y]of [[.4,.35],[.55,.65],[.7,.45]])await root.page().mouse.move(box.x+box.width*x,box.y+box.height*y);}
+        finally{await root.page().mouse.up();}
+      }else if(stage==='signature-clear')await root.locator(controls.clear).click();
+      else if(stage==='gradient-angle')await root.locator(controls.angle).fill('180');
+      else if(stage==='gradient-add')await root.locator(controls.add).press('Enter');
+      else if(stage==='gradient-hex')await root.locator(controls.hex).fill('#ff0000');
+      else if(stage==='gradient-alpha'){for(let index=0;index<50;index++)await root.locator(controls.alpha).press('ArrowLeft');}
+      else {
+        if(stage==='gradient-stop-right')await root.evaluate(node=>{const stops=[...node.querySelectorAll('button[data-ely-gradient-stop][value="50"]')];if(stops.length!==1||stops[0].closest('[data-ely-family]')!==node||stops[0].getAttribute('aria-pressed')!=='true')throw Error('Exact unique selected owned original stop50 required');node.__studioPinnedStop=stops[0];node.__studioStopRelated=null;});
+        else await root.evaluate(node=>{node.__studioPinnedStop=null;node.__studioStopRelated=null;});
+        await root.locator(`button[data-ely-gradient-stop][value="${stage==='gradient-stop-right'?'50':'51'}"]`).press(stage==='gradient-stop-right'?'ArrowRight':'Delete');
+      }
+    },async(_state,_before,receipt)=>{
+      const proof=await root.evaluate((node,{cursor,signature})=>{
+        const q=selector=>node.querySelector(selector);let state,canvasDataURL;
+        if(signature){
+          const canvas=q('[data-ui-signature]'),hidden=q('[data-ui-signature-value]'),fallback=q('textarea');
+          if(canvas.width*canvas.height>1048576||hidden.value.length>131072)throw Error('Signature bounded raster/data URL limit');
+          const pixels=canvas.getContext('2d').getImageData(0,0,canvas.width,canvas.height).data;let inkPixels=0;for(let index=3;index<pixels.length;index+=4)if(pixels[index])inkPixels++;
+          canvasDataURL=canvas.toDataURL();if(canvasDataURL.length>131072)throw Error('Signature canvas serialization cap');
+          state={value:hidden.value,fallback:fallback.value,strokes:q('[data-ui-signature-count]').textContent,inkPixels,canvasMatchesValue:hidden.value.startsWith('data:')?canvasDataURL===hidden.value:true,valid:fallback.checkValidity(),hiddenEnabled:!hidden.disabled,fallbackName:fallback.name,guideHidden:q('.ui-signature-guide').hidden};
+        }else{
+          const value=q('[data-ely-gradient-value]').value,preview=q('[data-ely-gradient-preview]'),expected=document.createElement('output');expected.style.background=value;
+          state={value,angle:q('[data-ely-gradient-angle]').value,stops:[...node.querySelectorAll('[data-ely-gradient-stop]')].map(n=>({at:Number(n.dataset.elyGradientAt),color:n.querySelector('[data-ely-gradient-color]').dataset.elyGradientColor,alpha:Number(n.dataset.elyGradientAlpha),selected:n.getAttribute('aria-pressed')==='true'})),hex:q('[data-ely-color-hex]').value,alpha:q('[data-ely-color-alpha]').value,start:q('[data-ely-gradient-start]').value,end:q('[data-ely-gradient-end]').value,previewMatches:!!expected.style.background&&expected.style.background===preview.style.background};
+        }
+        const raw=node.__studioEvents.slice(cursor),pointerButtons=raw.filter(e=>e.type.startsWith('pointer')).map(e=>e.buttons),events=raw.map(({buttons,...event})=>event);
+        let stopTransition;
+        if(node.__studioPinnedStop){const replacements=[...node.querySelectorAll('button[data-ely-gradient-stop][value="51"]')],replacement=replacements.length===1?replacements[0]:null;stopTransition={originalID:node.__studioPinnedStop.getAttribute('id'),originalDetached:!node.__studioPinnedStop.isConnected,replacementUnique:replacements.length===1,replacementID:replacement?.getAttribute('id')??null,replacementValue:replacement?.value??null,replacementOwned:!!replacement&&node.contains(replacement)&&replacement.closest('[data-ely-family]')===node,replacementIsActive:!!replacement&&document.activeElement===replacement,replacementSelected:replacement?.getAttribute('aria-pressed')==='true',rawRelatedTarget:node.__studioStopRelated};}
+        return {identity:node.dataset.elyComponent,rootID:node.id,state,events,pointerButtons,...(signature?{canvasDataURL}:{}),...(stopTransition?{stopTransition}:{}),truncated:node.__studioTruncated,foreign:node.__studioForeign};
+      },{cursor,signature});
+      receipt.nativeFormProof=proof;assertLocalStudioStep(identity,stage,proof);cursor+=proof.events.length;return proof;
+    });}catch(error){primaryError=error;if(failureDiagnostics)await retainFailurePayload(failureDiagnostics,'localStudio',()=>root.evaluate(n=>({events:n.__studioEvents,truncated:n.__studioTruncated,foreign:n.__studioForeign,bytes:n.__studioBytes,rawRelatedTarget:n.__studioStopRelated,originalStop:n.__studioPinnedStop?{id:n.__studioPinnedStop.getAttribute('id'),value:n.__studioPinnedStop.value,detached:!n.__studioPinnedStop.isConnected}:null})));throw error;}
+    finally{await cleanupPreservingPrimary(()=>root.evaluate(node=>{for(const type of ['input','change','keydown','click','blur','pointerdown','pointermove','pointerup','ely:change','ely:action'])node.removeEventListener(type,node.__studioObserver,true);for(const key of ['__studioControls','__studioEvents','__studioBytes','__studioTruncated','__studioForeign','__studioObserver','__studioPinnedStop','__studioStopRelated'])delete node[key];}),primaryError,failureDiagnostics??{},'localStudioCleanupError');}
+    return;
+  }
+  if(contract.focusedSequence==='forms-local-picker-native'){
+    const identity=contract.identity,fixture=localPickerCases[identity],font=fixture.mode==='font';assert.equal(contract.nativeFormTwinWitness,true);
+    assert.equal(await root.getAttribute('data-ely-component'),identity);assert.equal(await root.getAttribute('data-ely-kind'),fixture.kind);
+    const field=root.locator(fixture.field),hidden=root.locator(font?'input[type="hidden"][name="caller_value"]':'[data-ely-icon-value]');
+    assert.equal(await field.count(),1);assert.equal(await hidden.count(),1);assert.equal(await hidden.inputValue(),fixture.initial);assert.equal(await field.inputValue(),font?'Inter':'');
+    assert.equal(await field.isEnabled(),true);assert.equal(await hidden.getAttribute('name'),'caller_value');
+    assert.deepEqual(await root.locator(font?'[data-ui-option]':'[data-ely-icon-option]').evaluateAll((nodes,font)=>nodes.map(n=>font?[n.dataset.value,n.textContent.trim(),n.getAttribute('aria-disabled')]:[n.value,n.getAttribute('aria-label'),n.disabled]),font),font?[['Inter','Inter',null],['Georgia','Georgia',null],['Courier New','Courier New',null]]:identity==='forms/IconPicker'?[['alpha','Caller Alpha',false],['beta','Caller Beta',false]]:[['✨','Sparkles',false],['👩‍💻','Woman technologist',false]]);
+    await root.evaluate((node,fixture)=>{
+      const controls={search:node.querySelector(fixture.field),hidden:node.querySelector('input[type="hidden"][name="caller_value"]')};
+      if(fixture.mode==='icon'){controls.first=[...node.querySelectorAll('[data-ely-icon-option]')].find(n=>n.value===fixture.first);controls.second=[...node.querySelectorAll('[data-ely-icon-option]')].find(n=>n.value===fixture.second);}
+      node.__localPickerEvents=[];node.__localPickerTruncated=false;node.__localPickerForeign=false;
+      node.__localPickerObserver=e=>{
+        if(node.__localPickerEvents.length>=64){node.__localPickerTruncated=true;return;}
+        if(e.type.startsWith('ely:')){if(e.target!==node)node.__localPickerForeign=true;node.__localPickerEvents.push({type:e.type,detail:JSON.parse(JSON.stringify(e.detail))});return;}
+        const control=Object.entries(controls).find(([,n])=>n===e.target)?.[0]??'foreign';if(control==='foreign'||e.target.closest('[data-ely-family]')!==node)node.__localPickerForeign=true;
+        node.__localPickerEvents.push({type:e.type,control,value:e.target.value??null,key:e.key??null,trusted:e.isTrusted});
+      };
+      for(const type of ['input','change','keydown','click','blur','ely:change','ely:action'])node.addEventListener(type,node.__localPickerObserver,true);
+    },fixture);
+    let cursor=0,primaryError=null;
+    try{for(const stage of fixture.steps)await runStep(stage,async()=>{
+      assert.equal(await root.evaluate(n=>n.__localPickerEvents.length),cursor,'No unaccounted picker events between actions');
+      if(stage==='font-search'||stage==='picker-search')await field.fill(fixture.query);
+      else if(stage==='font-select')await field.press('Enter');
+      else if(stage==='picker-focus')await field.press('ArrowDown');
+      else if(stage==='picker-select')await root.locator('[data-ely-icon-option]').filter({hasText:identity==='forms/EmojiPicker'?'Sparkles':'Caller Alpha'}).press('Enter');
+      else if(stage==='picker-unmatched')await field.fill('no-matching-picker-option');
+      else if(stage==='picker-clear')await field.fill('');
+      else {await field.press('ArrowDown');await root.locator('[data-ely-icon-option]').filter({hasText:identity==='forms/EmojiPicker'?'Sparkles':'Caller Alpha'}).press('ArrowRight');}
+    },async(_state,_before,receipt)=>{
+      const proof=await root.evaluate((node,args)=>{
+        const {fixture,cursor}=args,font=fixture.mode==='font',field=node.querySelector(fixture.field),hidden=node.querySelector('input[type="hidden"][name="caller_value"]'),preview=node.querySelector('[data-ely-picker-preview]'),options=[...node.querySelectorAll(font?'[data-ui-option]':'[data-ely-icon-option]')];
+        const value=n=>font?n.dataset.value:n.value,focus=document.activeElement;
+        const state=font?{value:hidden.value,search:field.value,selected:options.filter(n=>n.getAttribute('aria-selected')==='true').map(value),visible:options.filter(n=>!n.hidden).map(value),expanded:field.getAttribute('aria-expanded')==='true',listHidden:node.querySelector('[data-ui-combobox-list]').hidden,font:preview.dataset.elySelectedFont,text:preview.textContent,fontFamily:preview.style.fontFamily.split(',').map(n=>n.trim().replace(/^"|"$/g,'')),focused:focus===field?'search':'foreign'}:{value:hidden.value,search:field.value,preview:preview.value,selected:options.filter(n=>n.getAttribute('aria-selected')==='true').map(value),visible:options.filter(n=>!n.hidden).map(value),empty:!node.querySelector('[data-ely-icon-empty]').hidden,focused:focus===field?'search':focus===options[0]?'first':focus===options[1]?'second':'foreign'};
+        return {identity:node.dataset.elyComponent,rootID:node.id,events:node.__localPickerEvents.slice(cursor),truncated:node.__localPickerTruncated,foreign:node.__localPickerForeign,state};
+      },{fixture,cursor});
+      receipt.nativeFormProof=proof;assertLocalPickerStep(identity,stage,proof);cursor+=proof.events.length;return proof;
+    });}catch(error){primaryError=error;if(failureDiagnostics)await retainFailurePayload(failureDiagnostics,'localPicker',()=>root.evaluate(n=>({events:n.__localPickerEvents,truncated:n.__localPickerTruncated,foreign:n.__localPickerForeign})));throw error;}
+    finally{await cleanupPreservingPrimary(()=>root.evaluate(node=>{for(const type of ['input','change','keydown','click','blur','ely:change','ely:action'])node.removeEventListener(type,node.__localPickerObserver,true);for(const key of ['__localPickerEvents','__localPickerTruncated','__localPickerForeign','__localPickerObserver'])delete node[key];}),primaryError,failureDiagnostics??{},'localPickerCleanupError');}
+    return;
+  }
+  if(contract.focusedSequence==='forms-complex-eight-native'){
+    const identity=contract.identity,fixture=complexFormCases[identity];assert(fixture);assert.equal(contract.nativeFormTwinWitness,true);
+    assert.equal(await root.getAttribute('data-ely-component'),identity);assert.equal(await root.getAttribute('data-ely-kind'),fixture.kind);
+    const field=()=>root.locator(fixture.field);
+    if(fixture.mode==='array'){
+      assert.equal(await root.locator('form').count(),0);assert.equal(await root.locator('[data-ely-array-row]').count(),0);assert.equal(await root.locator('[data-ely-array-add]').count(),1);
+      assert.equal(await root.locator('template[data-ely-field-row]').evaluate(n=>n.content.querySelector('input').name),'links');
+    }else{
+      assert.equal(await field().count(),1);assert.equal(await field().inputValue(),fixture.mode==='tag'?'':fixture.mode==='mention'?'alpha':'');
+      assert.equal(await field().getAttribute('name'),fixture.mode==='tag'?null:fixture.mode==='mention'?'caller_value':'email');
+      assert.equal(await field().isEnabled(),true);assert.equal(await field().evaluate(n=>n.readOnly),false);
+      if(fixture.mode==='field'||fixture.mode==='inline'){
+        assert.equal(await field().getAttribute('type'),'email');assert.equal(await field().evaluate(n=>n.required),true);
+        assert.deepEqual(await root.locator('input,textarea').evaluateAll(ns=>ns.map(n=>[n.name,n.type,n.value,n.required])),fixture.mode==='field'?[['name','text','',true],['email','email','',true],['bio','textarea','',false]]:[['email','email','',true]]);
+        assert.equal(await root.locator('form').count(),fixture.mode==='inline'?1:0);
+        if(fixture.mode==='inline'){assert.equal(await root.locator('form.ely-api-inline-form').getAttribute('data-ely-submit'),'save');assert.equal(await root.locator('button[type="submit"]').count(),1);}
+      }
+      if(fixture.mode==='tag')assert.equal(await root.locator('input[type="hidden"][name="caller_value"]').inputValue(),'alpha');
+      if(fixture.mode==='mention')assert.deepEqual(await root.locator('[data-ely-mention-value]').evaluateAll(ns=>ns.map(n=>[n.value,n.textContent])),[['alpha','Caller Alpha'],['beta','Caller Beta']]);
+    }
+    await root.evaluate((node,fixture)=>{
+      node.__complexEvents=[];node.__complexTruncated=false;node.__complexForeign=false;node.__complexSubmit=null;node.__complexPinnedRemove=null;node.__complexTagEntry=fixture.mode==='tag'?node.querySelector(fixture.field):null;
+      node.__complexObserver=e=>{
+        if(node.__complexEvents.length>=64){node.__complexTruncated=true;return;}
+        if(e.type.startsWith('ely:')){if(e.target!==node)node.__complexForeign=true;const detail={...e.detail},actualFormData=detail.formData instanceof FormData;if(actualFormData)detail.formData=[...detail.formData];node.__complexEvents.push({type:e.type,detail:JSON.parse(JSON.stringify(detail)),...(e.type==='ely:action'?{actualFormData}:{})});return;}
+        if(e.target.closest('[data-ely-family]')!==node)node.__complexForeign=true;
+        const field=node.querySelector(fixture.field),button=e.target.closest('button');let control='foreign',target=e.target;
+        if(e.target===field)control='field';
+        else if(e.target.matches('input[type="hidden"][name="caller_value"]')&&fixture.mode==='tag')control='hidden';
+        else if((fixture.mode==='tag'||fixture.mode==='array')&&e.target===node.__complexPinnedRemove)control='remove';
+        else if(e.type==='submit'&&e.target===node.querySelector('form.ely-api-inline-form')){control='form';node.__complexSubmit=e;}
+        else if(button){target=button;if(button===node.querySelector('[data-ely-array-add]'))control='add';else if(button===node.querySelector(fixture.mode==='tag'?'[data-ui-action="remove-tag"][value="NewCallerTag"]':'[data-ely-array-remove]'))control='remove';else if(button===node.querySelector('[data-ely-mention-value][value="beta"]'))control='option';else if(button===node.querySelector('form.ely-api-inline-form button[type="submit"]'))control='submit';}
+        if(control==='foreign')node.__complexForeign=true;
+        let relatedTarget;
+        if(fixture.mode==='array'&&control==='add'&&e.type==='blur'){
+          const path='.ely-api-field-array > [data-ely-field-array] > [data-ely-array-row]:only-child > input[name="links"]',inputs=[...node.querySelectorAll(path)],added=inputs.length===1?inputs[0]:null,destination=e.relatedTarget;
+          relatedTarget={matchesNewPrimaryInput:!!added&&destination===added,rawID:destination?.getAttribute?.('id')??null,rawName:destination?.getAttribute?.('name')??null,owned:!!destination&&node.contains(destination)&&destination.closest('[data-ely-family]')===node,ownedPath:!!destination&&destination.matches?.(path)?path:null,uniqueNewInput:inputs.length===1};
+        }
+        const removal=fixture.mode==='tag'&&control==='remove'&&e.type==='blur'?{targetWasPinned:e.target===node.__complexPinnedRemove,relatedTargetIsNull:e.relatedTarget===null,relatedTargetID:e.relatedTarget?.getAttribute?.('id')??null,relatedTargetName:e.relatedTarget?.getAttribute?.('name')??null}:null;
+        let arrayRemoval;
+        if(fixture.mode==='array'&&control==='remove'&&e.type==='blur'){
+          const r=e.relatedTarget,raw={isNull:r===null,id:r?.getAttribute?.('id')??null,name:r?.getAttribute?.('name')??null,tag:r?.localName??null,value:r?.value??null,owned:!!r&&node.contains(r)&&r.closest('[data-ely-family]')===node};
+          if(Object.values(raw).some(v=>typeof v==='string'&&v.length>256)){node.__complexTruncated=true;return;}
+          arrayRemoval={targetWasPinned:e.target===node.__complexPinnedRemove,relatedTarget:raw};
+        }
+        node.__complexEvents.push({type:e.type,control,value:control==='form'?null:target.value??null,trusted:e.isTrusted,key:e.key??null,...(relatedTarget?{relatedTarget}:{}),...(removal?{removal}:{}),...(arrayRemoval?{arrayRemoval}:{})});
+      };
+      for(const type of ['input','change','keydown','blur','click','submit','ely:change','ely:action'])node.addEventListener(type,node.__complexObserver,true);
+    },fixture);
+    let primaryError=null,cursor=0;
+    try{
+      for(const stage of fixture.steps)await runStep(stage,async()=>{
+        assert.equal(await root.evaluate(n=>n.__complexEvents.length),cursor,'No unaccounted complex-form events between actions');
+        if(stage==='email-edit')await field().fill('caller@example.test');
+        else if(stage==='email-commit'){assert.equal(await field().evaluate(n=>n===document.activeElement),true);await field().press('Tab');}
+        else if(stage==='form-submit')await root.locator('form.ely-api-inline-form button[type="submit"]').click();
+        else if(stage==='array-add')await root.locator('[data-ely-array-add]').click();
+        else if(stage==='array-edit'){assert.equal(await field().count(),1);await field().fill('https://example.test');}
+        else if(stage==='array-remove'){
+          const remove=root.locator('[data-ely-array-row] [data-ely-array-remove]');assert.equal(await remove.count(),1);
+          await root.evaluate(node=>{const buttons=[...node.querySelectorAll('[data-ely-array-row] [data-ely-array-remove]')];if(buttons.length!==1||buttons[0].closest('[data-ely-family]')!==node)throw Error('Exact unique owned array remove required');node.__complexPinnedRemove=buttons[0];});
+          await remove.click();
+        }
+        else if(stage==='tag-edit')await field().fill('NewCallerTag');
+        else if(stage==='tag-add'){assert.equal(await field().evaluate(n=>n===document.activeElement),true);await field().press('Enter');}
+        else if(stage==='tag-remove'){
+          const remove=root.locator('[data-ui-action="remove-tag"][value="NewCallerTag"]');assert.equal(await remove.count(),1);
+          await root.evaluate(node=>{const button=node.querySelector('[data-ui-action="remove-tag"][value="NewCallerTag"]');if(!button||button.closest('[data-ely-family]')!==node)throw Error('Exact owned tag remove required');node.__complexPinnedRemove=button;});
+          await remove.click();
+        }
+        else if(stage==='mention-edit')await field().fill(identity==='forms/HashtagInput'?'#b':'@b');
+        else {const option=root.locator('[data-ely-mention-value][value="beta"]');assert.equal(await option.isVisible(),true);await option.click();}
+      },async(_state,_before,receipt)=>{
+        const proof=await root.evaluate((node,args)=>{
+          const field=node.querySelector(args.fixture.field),mode=args.fixture.mode;
+          const state=mode==='array'?{values:[...node.querySelectorAll('[data-ely-array-row] input')].map(n=>n.value),forms:node.querySelectorAll('form').length}:mode==='tag'?{value:node.querySelector('input[type="hidden"][name="caller_value"]').value,entry:field.value,tags:[...node.querySelectorAll('[data-ui-tag-text]')].map(n=>n.textContent)}:mode==='mention'?{value:field.value,listHidden:node.querySelector('[data-ely-mention-list]').hidden,visible:[...node.querySelectorAll('[data-ely-mention-value]')].filter(n=>!n.hidden).map(n=>n.value)}:{value:field.value,valid:field.checkValidity()};
+          let arrayPostFocus;
+          if(mode==='array'){
+            const path='.ely-api-field-array > [data-ely-field-array] > [data-ely-array-row]:only-child > input[name="links"]',inputs=[...node.querySelectorAll(path)],added=inputs.length===1?inputs[0]:null,destination=document.activeElement;
+            arrayPostFocus={matchesNewPrimaryInput:!!added&&destination===added,rawID:destination?.getAttribute?.('id')??null,rawName:destination?.getAttribute?.('name')??null,owned:!!destination&&node.contains(destination)&&destination.closest('[data-ely-family]')===node,ownedPath:!!destination&&destination.matches?.(path)?path:null,uniqueNewInput:inputs.length===1};
+          }
+          const tagRemoval=mode==='tag'&&node.__complexPinnedRemove?{entryIsActive:document.activeElement===node.__complexTagEntry,entryUnique:node.querySelectorAll(args.fixture.field).length===1,entryOwned:node.contains(node.__complexTagEntry)&&node.__complexTagEntry.closest('[data-ely-family]')===node,entryID:node.__complexTagEntry.getAttribute('id'),entryName:node.__complexTagEntry.getAttribute('name'),removeDetached:!node.__complexPinnedRemove.isConnected}:null;
+          const adds=mode==='array'&&node.__complexPinnedRemove?[...node.querySelectorAll('[data-ely-array-add]')]:[],add=adds.length===1?adds[0]:null;
+          const arrayRemoval=mode==='array'&&node.__complexPinnedRemove?{removedDetached:!node.__complexPinnedRemove.isConnected,addUnique:adds.length===1,addOwned:!!add&&node.contains(add)&&add.closest('[data-ely-family]')===node,addConnected:!!add&&add.isConnected,addIsActive:!!add&&document.activeElement===add,addID:add?.getAttribute('id')??null,addName:add?.getAttribute('name')??null}:null;
+          return {identity:node.dataset.elyComponent,rootID:node.id,truncated:node.__complexTruncated,foreignEvents:node.__complexForeign,events:node.__complexEvents.slice(args.cursor),state,focusLeft:field!==document.activeElement,...(arrayPostFocus?{arrayPostFocus}:{}),...(tagRemoval?{tagRemoval}:{}),...(arrayRemoval?{arrayRemoval}:{}),siblings:mode==='field'?[...node.querySelectorAll('input,textarea')].filter(n=>n.name!=='email').map(n=>[n.name,n.value]):[],submitterMatches:node.__complexSubmit?.submitter===node.querySelector('form.ely-api-inline-form button[type="submit"]'),submitDefaultPrevented:node.__complexSubmit?.defaultPrevented??false};
+        },{fixture,cursor});
+        receipt.nativeFormProof=proof;assertComplexFormStep(identity,stage,proof);cursor+=proof.events.length;return proof;
+      });
+    }catch(error){primaryError=error;if(failureDiagnostics)await retainFailurePayload(failureDiagnostics,'complexForms',()=>root.evaluate(n=>({events:n.__complexEvents,truncated:n.__complexTruncated,foreign:n.__complexForeign})));throw error;}
+    finally{await cleanupPreservingPrimary(()=>root.evaluate(node=>{for(const type of ['input','change','keydown','blur','click','submit','ely:change','ely:action'])node.removeEventListener(type,node.__complexObserver,true);for(const key of ['__complexEvents','__complexTruncated','__complexForeign','__complexSubmit','__complexObserver','__complexPinnedRemove','__complexTagEntry'])delete node[key];}),primaryError,failureDiagnostics??{},'complexCleanupError');}
+    return;
+  }
+  if(contract.focusedSequence==='forms-range-native'){
+    const identity=contract.identity,fixture=rangeFormCases[identity];assert(fixture);assert.equal(contract.nativeFormTwinWitness,true);
+    assert.equal(await root.getAttribute('data-ely-component'),identity);assert.equal(await root.getAttribute('data-ely-kind'),fixture.kind);
+    const field=root.locator(fixture.field);assert.equal(await field.count(),1);assert.equal(await field.inputValue(),fixture.initial);assert.equal(await field.getAttribute('name'),'caller_value');
+    assert.deepEqual(await field.evaluate(n=>({type:n.type,disabled:n.disabled,readOnly:n.readOnly??false,required:n.required})),{type:fixture.mode==='relative'?'select-one':fixture.mode==='stepper'?'number':'range',disabled:false,readOnly:false,required:false});
+    if(fixture.mode==='relative')assertRelativeDateFixture(await field.evaluate(n=>({value:n.value,selectedIndex:n.selectedIndex,disabled:n.disabled,options:[...n.options].map(o=>({value:o.value,label:o.label,selected:o.selected,disabled:o.disabled}))})));
+    else {assert.equal(await field.getAttribute('max'),fixture.mode==='range'?'3':'5');assert.equal(await field.getAttribute('min'),null);assert.equal(await field.getAttribute('step'),null);}
+    const controls={field:fixture.field,...(fixture.mode==='range'?{end:'input[data-ely-range-end]'}:{}),...(fixture.mode==='knob'?{knob:'[data-ely-knob]'}:{}),...(fixture.mode==='stepper'?{up:'button[data-ely-step="up"]',down:'button[data-ely-step="down"]'}:{})};
+    // Authored buttons/knob have no IDs; preserve exact node references rather than inventing DOM IDs.
+    const controlIDs={};for(const [name,selector]of Object.entries(controls)){const control=root.locator(selector);assert.equal(await control.count(),1);controlIDs[name]=await control.getAttribute('id')||`owned-${name}`;}
+    const fieldID=controlIDs.field;assert(!fieldID.startsWith('owned-'));assert.equal(await root.page().locator(`[id="${fieldID}"]`).count(),1);
+    await root.evaluate((node,controls)=>{
+      node.__rangeControls=Object.fromEntries(Object.entries(controls).map(([name,selector])=>[name,node.querySelector(selector)]));node.__rangeNative=[];node.__rangePublic=[];node.__rangeTruncated=false;
+      const push=(list,value)=>{if(list.length>=64){node.__rangeTruncated=true;return;}list.push(value);};
+      node.__rangeObserver=e=>{const entry=Object.entries(node.__rangeControls).find(([,n])=>e.target===n||(n.tagName==='BUTTON'&&e.target.closest?.('button')===n));push(node.__rangeNative,{type:e.type,control:entry?.[0]??'foreign',targetID:entry?(entry[1].id||`owned-${entry[0]}`):null,trusted:e.isTrusted,value:e.target.value??null,key:e.key??null});};
+      node.__rangePublicObserver=e=>push(node.__rangePublic,{type:e.type,detail:JSON.parse(JSON.stringify(e.detail))});
+      for(const type of ['keydown','click','input','change'])node.addEventListener(type,node.__rangeObserver,true);for(const type of ['ely:change','ely:action'])node.addEventListener(type,node.__rangePublicObserver);
+    },controls);
+    let primaryError=null,nativeCursor=0,publicCursor=0;
+    try{
+      for(const [stage,selector,key]of fixture.steps)await runStep(stage,async()=>{
+        assert.deepEqual(await root.evaluate(n=>[n.__rangeNative.length,n.__rangePublic.length]),[nativeCursor,publicCursor],'No unaccounted events between range actions');
+        const target=root.locator(selector);assert.equal(await target.count(),1);if(key)await target.press(key);else await target.click();
+      },async(_state,_before,receipt)=>{
+        const proof=await root.evaluate((node,args)=>{
+          const fields=['field','end'].filter(name=>node.__rangeControls[name]).map(name=>{const n=node.__rangeControls[name];return {id:n.id,name:n.name,type:n.type,value:n.value,min:n.min??'',max:n.max??'',step:n.step??'',disabled:n.disabled,valid:n.checkValidity()};}),knob=node.querySelector('[data-ely-knob]'),range=node.__rangeControls.field,style=getComputedStyle(range),rect=range.getBoundingClientRect();
+          const box=n=>{const r=n.getBoundingClientRect();return {left:r.left,top:r.top,right:r.right,bottom:r.bottom};};
+          return {identity:node.dataset.elyComponent,rootID:node.id,fieldID:range.id,controlIDs:args.controlIDs,truncated:node.__rangeTruncated,fields,nativeEvents:node.__rangeNative.slice(args.nativeCursor),publicEvents:node.__rangePublic.slice(args.publicCursor),relativeOptions:range.tagName==='SELECT'?{value:range.value,selectedIndex:range.selectedIndex,disabled:range.disabled,options:[...range.options].map(o=>({value:o.value,label:o.label,selected:o.selected,disabled:o.disabled}))}:null,output:node.querySelector('[data-ely-range-value],[data-ely-stepper-value]')?.value??null,flow:node.dataset.elyComponent==='forms/VerticalSlider'?{wrapper:box(node.querySelector('.ely-api-slider.is-vertical')),root:box(node),field:box(range),output:box(node.querySelector('[data-ely-range-value]'))}:null,knob:knob?{value:knob.getAttribute('aria-valuenow'),output:node.querySelector('[data-ely-knob-value]').value,angle:knob.style.getPropertyValue('--ely-knob-angle'),sweep:knob.style.getPropertyValue('--ely-knob-sweep')}:null,orientation:{writingMode:style.writingMode,direction:style.direction,width:rect.width,height:rect.height}};
+        },{controlIDs,nativeCursor,publicCursor});
+        receipt.nativeFormProof=proof;assertRangeFormStep(identity,stage,proof);nativeCursor+=proof.nativeEvents.length;publicCursor+=proof.publicEvents.length;return proof;
+      });
+    }catch(error){primaryError=error;if(failureDiagnostics)await retainFailurePayload(failureDiagnostics,'rangeNative',()=>root.evaluate(n=>({nativeEvents:n.__rangeNative,publicEvents:n.__rangePublic,truncated:n.__rangeTruncated})));throw error;}
+    finally{await cleanupPreservingPrimary(()=>root.evaluate(node=>{for(const type of ['keydown','click','input','change'])node.removeEventListener(type,node.__rangeObserver,true);for(const type of ['ely:change','ely:action'])node.removeEventListener(type,node.__rangePublicObserver);for(const key of ['__rangeControls','__rangeNative','__rangePublic','__rangeTruncated','__rangeObserver','__rangePublicObserver'])delete node[key];}),primaryError,failureDiagnostics??{},'rangeCleanupError');}
+    return;
+  }
+  if(contract.focusedSequence==='forms-path-native'){
+    assert.equal(contract.identity,'forms/PathInput');assert.equal(contract.nativeFormTwinWitness,true);
+    assert.equal(await root.getAttribute('data-ely-component'),contract.identity);assert.equal(await root.getAttribute('data-ely-kind'),'PathInput');
+    const field=root.locator(':scope > .ely-api-path-input input[data-ely-path][name="caller_value"]'),button=root.locator(':scope > .ely-api-path-input button[data-ely-action="choose-path"]');
+    assert.equal(await field.count(),1);assert.equal(await button.count(),1);assert.equal(await field.inputValue(),'alpha');
+    assert.deepEqual(await field.evaluate(n=>({type:n.type,disabled:n.disabled,readOnly:n.readOnly,required:n.required})),{type:'text',disabled:false,readOnly:false,required:false});assert.equal(await button.isEnabled(),true);
+    const fieldID=await field.getAttribute('id');assert(fieldID);assert.equal(await root.page().locator(`[id="${fieldID}"]`).count(),1);
+    await root.evaluate(node=>{
+      const field=node.querySelector('[data-ely-path]'),button=node.querySelector('.ely-api-path-input button[data-ely-action]');
+      node.__pathNative=[];node.__pathPublic=[];node.__pathTruncated=false;
+      const push=(list,value)=>{if(list.length>=32){node.__pathTruncated=true;return;}list.push(value);};
+      node.__pathObserver=e=>push(node.__pathNative,{type:e.type,control:e.target===field?'field':e.target.closest?.('button')===button?'button':'foreign',targetID:e.target.id||null,trusted:e.isTrusted,value:e.target.closest?.('button')===button?button.value:e.target.value??null,key:e.key??null});
+      node.__pathPublicObserver=e=>push(node.__pathPublic,{type:e.type,detail:{...e.detail}});
+      for(const type of ['input','change','keydown','blur','click'])node.addEventListener(type,node.__pathObserver,true);
+      for(const type of ['ely:change','ely:action'])node.addEventListener(type,node.__pathPublicObserver);
+    });
+    let primaryError=null,nativeCursor=0,publicCursor=0;
+    try{
+      for(const stage of ['path-edit','path-commit','path-request'])await runStep(stage,async()=>{
+        assert.deepEqual(await root.evaluate(n=>[n.__pathNative.length,n.__pathPublic.length]),[nativeCursor,publicCursor]);
+        if(stage==='path-edit')await field.fill('~/Projects/ely');
+        else if(stage==='path-commit'){assert.equal(await field.evaluate(n=>n===document.activeElement),true);await field.press('Tab');}
+        else await button.click();
+      },async(_state,_before,receipt)=>{
+        const proof=await root.evaluate((node,cursor)=>{const field=node.querySelector('[data-ely-path]');return {identity:node.dataset.elyComponent,rootID:node.id,fieldID:field.id,value:field.value,valid:field.checkValidity(),focusLeft:field!==document.activeElement,truncated:node.__pathTruncated,nativeEvents:node.__pathNative.slice(cursor.native),publicEvents:node.__pathPublic.slice(cursor.public)};},{native:nativeCursor,public:publicCursor});
+        receipt.nativeFormProof=proof;assertPathNativeStep(stage,proof);nativeCursor+=proof.nativeEvents.length;publicCursor+=proof.publicEvents.length;return proof;
+      });
+    }catch(error){primaryError=error;if(failureDiagnostics)await retainFailurePayload(failureDiagnostics,'pathNative',()=>root.evaluate(n=>({nativeEvents:n.__pathNative,publicEvents:n.__pathPublic,truncated:n.__pathTruncated})));throw error;}
+    finally{await cleanupPreservingPrimary(()=>root.evaluate(node=>{for(const type of ['input','change','keydown','blur','click'])node.removeEventListener(type,node.__pathObserver,true);for(const type of ['ely:change','ely:action'])node.removeEventListener(type,node.__pathPublicObserver);for(const key of ['__pathNative','__pathPublic','__pathTruncated','__pathObserver','__pathPublicObserver'])delete node[key];}),primaryError,failureDiagnostics??{},'pathCleanupError');}
+    return;
+  }
+  if(contract.focusedSequence==='forms-regional-native'){
+    const identity=contract.identity;assert(regionalFormIDs.includes(identity));assert.equal(contract.nativeFormTwinWitness,true);
+    assert.equal(await root.getAttribute('data-ely-component'),identity);assert.equal(await root.getAttribute('data-ely-kind'),'LanguageSelect');
+    const selector=':scope > .ely-api-region-picker > [data-ui-component="combobox"]';
+    const combo=root.locator(selector),search=combo.locator('[data-ui-combobox-input]'),hidden=combo.locator('input[type="hidden"][name="caller_value"]');
+    assert.equal(await combo.count(),1);assert.equal(await search.count(),1);assert.equal(await hidden.count(),1);
+    assert.equal(await search.inputValue(),'Caller Alpha');assert.equal(await hidden.inputValue(),'alpha');
+    assert.deepEqual(await combo.locator('[data-ui-option]').evaluateAll(ns=>ns.map(n=>[n.dataset.value,n.dataset.uiLabel])),[['alpha','Caller Alpha'],['beta','Caller Beta']]);
+    for(const control of [root,search,hidden]){const id=await control.getAttribute('id');assert(id);assert.equal(await root.page().locator(`[id="${id}"]`).count(),1,'Unique primary IDs required');}
+    assert.equal(await search.getAttribute('aria-expanded'),'false');
+    await root.evaluate((node,selector)=>{
+      const combo=node.querySelector(selector),search=combo.querySelector('[data-ui-combobox-input]'),hidden=combo.querySelector('input[type="hidden"]');
+      node.__regionalNative=[];node.__regionalPublic=[];node.__regionalTruncated=false;
+      const push=(list,value)=>{if(list.length>=32){node.__regionalTruncated=true;return;}list.push(value);};
+      node.__regionalObserver=e=>push(node.__regionalNative,{type:e.type,control:e.target===search?'search':e.target===hidden?'hidden':'foreign',targetID:e.target.id||null,trusted:e.isTrusted,value:e.target.value??null,key:e.key??null});
+      node.__regionalPublicObserver=e=>push(node.__regionalPublic,{type:e.type,detail:{...e.detail}});
+      for(const type of ['input','change','keydown'])node.addEventListener(type,node.__regionalObserver,true);
+      for(const type of ['ely:change','ely:action'])node.addEventListener(type,node.__regionalPublicObserver);
+    },selector);
+    let primaryError=null,nativeCursor=0,publicCursor=0;
+    try{
+      for(const stage of ['regional-search','regional-select','regional-unmatched','regional-escape'])await runStep(stage,async()=>{
+        assert.deepEqual(await root.evaluate(n=>[n.__regionalNative.length,n.__regionalPublic.length]),[nativeCursor,publicCursor],'No unaccounted input between actions');
+        if(stage==='regional-unmatched')await search.fill('no-matching-region');
+        else if(stage==='regional-escape'){assert.equal(await search.evaluate(n=>n===document.activeElement),true);await search.press('Escape');}
+        else if(stage==='regional-search')await search.fill('beta');
+        else{
+          assert.equal(await search.evaluate(n=>n===document.activeElement),true);
+          const active=await search.getAttribute('aria-activedescendant');assert(active);
+          assert.equal(await combo.locator('[data-ui-option][data-value="beta"]').getAttribute('id'),active,'Enter must target active beta');
+          await search.press('Enter');
+        }
+      },async(_state,_before,receipt)=>{
+        const proof=await root.evaluate((node,args)=>{
+          const combo=node.querySelector(args.selector),search=combo.querySelector('[data-ui-combobox-input]'),hidden=combo.querySelector('input[type="hidden"]'),list=combo.querySelector('[data-ui-combobox-list]'),options=[...combo.querySelectorAll('[data-ui-option]')],active=search.getAttribute('aria-activedescendant');
+          return {identity:node.dataset.elyComponent,rootID:node.id,searchID:search.id,hiddenID:hidden.id,truncated:node.__regionalTruncated,nativeEvents:node.__regionalNative.slice(args.nativeCursor),publicEvents:node.__regionalPublic.slice(args.publicCursor),state:{name:hidden.name,value:hidden.value,search:search.value,preview:node.querySelector('[data-ely-picker-preview]').value,expanded:search.getAttribute('aria-expanded')==='true',listHidden:list.hidden,activeValue:options.find(n=>n.id===active)?.dataset.value??null,selected:options.filter(n=>n.getAttribute('aria-selected')==='true').map(n=>n.dataset.value),visible:options.filter(n=>!n.hidden).map(n=>n.dataset.value),disabled:hidden.disabled||search.disabled,readOnly:search.readOnly,valid:search.checkValidity()}};
+        },{selector,nativeCursor,publicCursor});
+        receipt.nativeFormProof=proof;assertRegionalFormStep(identity,stage,proof);
+        nativeCursor+=proof.nativeEvents.length;publicCursor+=proof.publicEvents.length;return proof;
+      });
+    }catch(error){primaryError=error;if(failureDiagnostics)await retainFailurePayload(failureDiagnostics,'regionalForms',()=>root.evaluate(n=>({nativeEvents:n.__regionalNative,publicEvents:n.__regionalPublic,truncated:n.__regionalTruncated})));throw error;}
+    finally{await cleanupPreservingPrimary(()=>root.evaluate(node=>{for(const type of ['input','change','keydown'])node.removeEventListener(type,node.__regionalObserver,true);for(const type of ['ely:change','ely:action'])node.removeEventListener(type,node.__regionalPublicObserver);for(const key of ['__regionalNative','__regionalPublic','__regionalTruncated','__regionalObserver','__regionalPublicObserver'])delete node[key];}),primaryError,failureDiagnostics??{},'regionalCleanupError');}
+    return;
+  }
+  if(contract.focusedSequence==='forms-eight-explicit-native'){
+    const identity=contract.identity,fixture=nextEightFormCases[identity];assert(fixture,'Exact eight-form identity required');
+    assert.equal(await root.getAttribute('data-ely-component'),identity);assert.equal(await root.getAttribute('data-ely-kind'),fixture.kind);
+    assert.equal(contract.nativeFormTwinWitness,true,'Every new step requires the runner upfront twin witness');
+    const id=await root.getAttribute('id');assert(id);assert.equal(await root.page().locator(`[id="${id}"]`).count(),1);
+    const field=root.locator(fixture.mode==='pin'?':scope > [data-ui-component="pin-input"] input[type="hidden"]':fixture.mode==='scrub'?':scope > .ely-api-number input[data-ely-number]':fixture.selector);
+    assert.equal(await field.count(),1,'Exact primary field must be unique');assert.equal(await field.getAttribute('name'),'caller_value');assert.equal(await field.inputValue(),fixture.initial);
+    const fieldID=await field.getAttribute('id');assert(fieldID);assert.equal(await root.page().locator(`[id="${fieldID}"]`).count(),1);
+    const initial=await field.evaluate(n=>({type:n.type,disabled:n.disabled,readOnly:n.readOnly,required:n.required}));
+    assert.deepEqual(initial,{type:fixture.mode==='pin'?'hidden':fixture.mode==='number'||fixture.mode==='scrub'?'number':'text',disabled:false,readOnly:false,required:false});
+    if(fixture.mode==='number'||fixture.mode==='scrub')for(const key of ['min','max','step'])assert.equal(await field.getAttribute(key),fixture[key]);
+    const slots=root.locator('[data-ui-pin-slot]'),scrub=root.locator(fixture.selector),open=root.locator('[data-ely-inline-open]'),editor=root.locator('[data-ely-inline-editor]');
+    if(fixture.mode==='pin'){
+      assert.equal(await slots.count(),6);assert.deepEqual(await slots.evaluateAll(nodes=>nodes.map(n=>n.value)),['1','2','3','4','5','6']);
+      assert.deepEqual(await slots.evaluateAll(nodes=>nodes.map(n=>({type:n.type,name:n.name,maxLength:n.maxLength,required:n.required,disabled:n.disabled}))),Array.from({length:6},()=>({type:'tel',name:'',maxLength:1,required:false,disabled:false})));
+    }
+    if(fixture.mode==='scrub'){assert.equal(await scrub.count(),1);assert.equal(await scrub.getAttribute('aria-valuenow'),'120');}
+    if(fixture.mode==='inline'){assert.equal(await open.count(),1);assert.equal(await open.textContent(),'alpha');assert.equal(await editor.count(),1);assert.equal(await editor.getAttribute('hidden'),'');}
+    if(fixture.mode==='group')assert.deepEqual(await root.locator('.ely-api-input-addon').allTextContents(),fixture.prefix?[fixture.prefix]:[],'Qualified prefix only, never PreviewExamples');
+    await root.evaluate((node,selector)=>{
+      const field=node.querySelector(selector),slots=[...node.querySelectorAll('[data-ui-pin-slot]')];
+      const control=target=>{if(target===field)return slots.length?'hidden':'field';const index=slots.indexOf(target);if(index>=0)return `slot-${index}`;for(const [name,sel] of [['scrub','[data-ely-scrub]'],['open','[data-ely-inline-open]'],['cancel','[data-ely-inline-cancel]'],['save','[data-ely-inline-save]']])if(target.closest?.(sel))return name;return 'other';};
+      node.__eightFormsNative=[];node.__eightFormsPublic=[];
+      node.__eightFormsObserver=event=>node.__eightFormsNative.push({type:event.type,control:control(event.target),targetId:event.target.id||null,trusted:event.isTrusted,value:event.target.value??null,key:event.key??null});
+      node.__eightFormsPublicObserver=event=>{if(event.target===node)node.__eightFormsPublic.push({type:event.type,detail:{...event.detail}});};
+      for(const type of ['input','change','click','keydown','blur','focusin','focusout'])node.addEventListener(type,node.__eightFormsObserver,true);
+      for(const type of ['ely:change','ely:action'])node.addEventListener(type,node.__eightFormsPublicObserver);
+    },fixture.mode==='pin'?':scope > [data-ui-component="pin-input"] input[type="hidden"]':fixture.mode==='scrub'?':scope > .ely-api-number input[data-ely-number]':fixture.selector);
+    let primaryError=null,nativeCursor=0,publicCursor=0;
+    try{
+      for(const stage of fixture.steps)await runStep(stage,async()=>{
+        await root.evaluate((node,cursors)=>{if(node.__eightFormsNative.length!==cursors.native||node.__eightFormsPublic.length!==cursors.public)throw Error('Unaccounted native/public event before this action');},{native:nativeCursor,public:publicCursor});
+        if(stage.startsWith('commit-')){assert.equal(await field.evaluate(n=>n===document.activeElement),true);await field.press('Tab');}
+        else if(fixture.mode==='number')await field.fill(stage==='fill-invalid'?'100':'5');
+        else if(fixture.mode==='group')await field.fill('beta');
+        else if(fixture.mode==='scrub')await scrub.press(stage==='scrub-right'?'ArrowRight':'ArrowLeft');
+        else if(fixture.mode==='pin'){const slot=root.locator(contract.steps.find(step=>step.id===stage).control);assert.equal(await slot.count(),1);await slot.fill(stage==='pin-replace-first'?'9':stage==='pin-reject-nondigit'?'x':'8');}
+        else if(stage==='inline-open'||stage==='inline-reopen')await open.click();
+        else if(stage==='inline-edit'||stage==='inline-reedit')await field.fill(stage==='inline-edit'?'draft':'beta');
+        else await root.locator(stage==='inline-cancel'?'[data-ely-inline-cancel]':'[data-ely-inline-save]').click();
+      },async(_state,_before,receipt)=>{
+        const proof=await field.evaluate(n=>({value:n.value,bounds:{min:n.min,max:n.max,step:n.step},validity:Object.fromEntries(['badInput','customError','patternMismatch','rangeOverflow','rangeUnderflow','stepMismatch','tooLong','tooShort','typeMismatch','valueMissing','valid'].map(key=>[key,n.validity[key]])),focusLeft:n!==document.activeElement}));
+        Object.assign(proof,await root.evaluate((node,cursors)=>({nativeEvents:node.__eightFormsNative.slice(cursors.native),publicEvents:node.__eightFormsPublic.slice(cursors.public),ariaValue:node.querySelector('[data-ely-scrub]')?.getAttribute('aria-valuenow'),slots:[...node.querySelectorAll('[data-ui-pin-slot]')].map(n=>n.value),slotIDs:[...node.querySelectorAll('[data-ui-pin-slot]')].map(n=>n.id),focusedSlot:[...node.querySelectorAll('[data-ui-pin-slot]')].indexOf(document.activeElement),editorHidden:node.querySelector('[data-ely-inline-editor]')?.hidden,openerHidden:node.querySelector('[data-ely-inline-open]')?.hidden,openerText:node.querySelector('[data-ely-inline-open]')?.textContent,focusedControl:document.activeElement===node.querySelector('[data-ely-inline-open]')?'open':document.activeElement===node.querySelector('[data-ely-inline-value]')?'field':null}),{native:nativeCursor,public:publicCursor}),{id,fieldID,eventWindow:{nativeBefore:nativeCursor,publicBefore:publicCursor}});
+        receipt.nativeFormProof=proof;
+        assertEightFormStep(identity,stage,proof);nativeCursor+=proof.nativeEvents.length;publicCursor+=proof.publicEvents.length;return proof;
+      });
+    }catch(error){primaryError=error;if(failureDiagnostics)await retainFailurePayload(failureDiagnostics,'eightFormsNative',()=>root.evaluate(node=>({nativeEvents:node.__eightFormsNative,publicEvents:node.__eightFormsPublic})));throw error;}
+    finally{await cleanupPreservingPrimary(()=>root.evaluate(node=>{for(const type of ['input','change','click','keydown','blur','focusin','focusout'])node.removeEventListener(type,node.__eightFormsObserver,true);for(const type of ['ely:change','ely:action'])node.removeEventListener(type,node.__eightFormsPublicObserver);delete node.__eightFormsObserver;delete node.__eightFormsPublicObserver;delete node.__eightFormsNative;delete node.__eightFormsPublic;}),primaryError,failureDiagnostics??{},'eightFormsCleanupError');}
+    return;
+  }
+  if(contract.focusedSequence==='forms-seven-native-local'){
+    const identity=contract.identity,allowed=['forms/DatePicker','forms/CodeInput','forms/ColorPicker','forms/CronEditor','forms/ExpressionInput','forms/Form','forms/MultiSelect'];
+    assert(allowed.includes(identity),'Only the seven exact canonical forms identities use this local contract');
+    assert.equal(await root.getAttribute('data-ely-component'),identity);assert.equal(await root.getAttribute('data-ely-kind'),contract.kind);
+    const local=async(id,action,verify)=>runStep(id,action,async(state,before)=>{assert.deepEqual(state.actions.slice(before.actions.length),[],'This forms contract does not claim a host action');return verify();});
+    if(identity==='forms/DatePicker'){
+      const field=root.locator('input[type="date"]');assert.equal(await field.count(),1);assert.equal(await field.inputValue(),contract.fixtureGuards.initial);
+      await local('date-edit',()=>field.fill(contract.fixtureGuards.changed),async()=>{assert.equal(await field.inputValue(),contract.fixtureGuards.changed);assert.equal(await field.getAttribute('type'),'date');return {value:await field.inputValue(),kind:'single native date'};});
+      await local('date-commit',()=>field.press('Tab'),async()=>{assert.equal(await field.inputValue(),contract.fixtureGuards.changed);return {value:await field.inputValue(),hostRequests:0};});return;
+    }
+    if(identity==='forms/CodeInput'){
+      const field=root.locator('[data-ely-code-input]'),preview=root.locator('[data-ely-code-highlight]');assert.equal(await field.count(),1);assert.equal(await field.evaluate(node=>node.tagName),'INPUT');assert.equal(await field.inputValue(),contract.fixtureGuards.initial);
+      const value=contract.fixtureGuards.changed;
+      await local('code-edit',()=>field.fill(value),async()=>{assert.equal(await field.inputValue(),value);assert.equal((await preview.textContent()).trimEnd(),value,'Highlight is text and must preserve the exact source string');assert.equal(await preview.locator('img').count(),0,'Caller code cannot create markup');return {value,highlightText:value,markupInserted:false};});
+      await local('code-commit',()=>field.press('Tab'),async()=>{assert.equal(await field.inputValue(),value);assert.equal((await preview.textContent()).trimEnd(),value);return {value,hostRequests:0};});return;
+    }
+    if(identity==='forms/ColorPicker'){
+      const color=root.locator('[data-ely-color]'),hex=root.locator('[data-ely-color-hex]'),status=root.locator('[data-ely-color-status]'),hue=root.locator('[data-ely-color-hue]'),palette=root.locator('[data-ely-color-choice="#228855"]');
+      assert.equal(await color.inputValue(),contract.fixtureGuards.initial);assert.equal(await palette.count(),1);assert.equal(await root.locator('[data-ely-pick-screen-color]').count(),1,'Screen-color host control is present but excluded from this local contract');
+      await local('color-palette',()=>clickVisibleControl(palette),async()=>{assert.equal(await color.inputValue(),contract.fixtureGuards.palette);assert.equal(await hex.inputValue(),contract.fixtureGuards.palette);assert((await status.evaluate(node=>node.value)).includes(contract.fixtureGuards.palette));assert.equal(await root.locator('[data-ely-color-channel="g"]').inputValue(),'136');assert.equal(Number(await hue.inputValue()),150);return {color:await color.inputValue(),hex:await hex.inputValue(),green:136,hue:150};});
+      await local('color-hue-key',()=>hue.press('ArrowRight'),async()=>{const hueValue=Number(await hue.inputValue()),selected=await color.inputValue();assert.equal(hueValue,151);assert.notEqual(selected,contract.fixtureGuards.palette);assert.equal(await hex.inputValue(),selected);assert((await status.evaluate(node=>node.value)).includes(selected));return {hue:hueValue,color:selected,hex:selected};});return;
+    }
+    if(identity==='forms/CronEditor'){
+      const field=root.locator('[data-ely-cron]'),runs=root.locator('[data-ely-cron-runs] time'),preset=root.locator('[data-ely-cron-preset][value="0 9 * * *"]');assert.equal(await field.inputValue(),contract.fixtureGuards.initial);assert.equal(await root.locator('[data-ely-cron-now]').getAttribute('data-ely-cron-now'),contract.fixtureGuards.now);
+      const assertRuns=async()=>assertCronNativePreview(await field.inputValue(),await root.locator('[data-ely-cron-now]').getAttribute('data-ely-cron-now'),await runs.evaluateAll(nodes=>nodes.map(node=>node.dateTime)));
+      await assertRuns();
+      await local('cron-edit',()=>field.fill(contract.fixtureGuards.edited),async()=>{assert.equal(await field.inputValue(),contract.fixtureGuards.edited);assert.equal(await field.evaluate(node=>node.checkValidity()),true);return {expression:await field.inputValue(),runs:await assertRuns()};});
+      await local('cron-preset',()=>clickVisibleControl(preset),async()=>{assert.equal(await field.inputValue(),contract.fixtureGuards.preset);assert.equal(await field.evaluate(node=>node.checkValidity()),true);return {expression:await field.inputValue(),runs:await assertRuns(),schedulerExecuted:false};});return;
+    }
+    if(identity==='forms/ExpressionInput'){
+      const field=root.locator('[data-ely-expression]'),output=root.locator('[data-ely-evaluation]');assert.equal(await field.inputValue(),contract.fixtureGuards.initial);assert.equal((await output.evaluate(node=>node.value)).trim(),'24');
+      await local('expression-edit',()=>field.fill(contract.fixtureGuards.changed),async()=>{const result=await output.evaluate(node=>node.value);assert.equal(result.trim(),contract.fixtureGuards.result);assert.equal(await field.evaluate(node=>node.checkValidity()),true);return {expression:await field.inputValue(),result};});
+      await local('expression-invalid',()=>field.fill(contract.fixtureGuards.invalid),async()=>{const validation=await output.evaluate(node=>node.value);assert.equal(validation.trim(),contract.fixtureGuards.invalidResult);assert.equal(await field.evaluate(node=>node.checkValidity()),false);return {expression:await field.inputValue(),validation,hostRequests:0};});return;
+    }
+    if(identity==='forms/Form'){
+      const form=root.locator('form[data-ely-form]'),name=form.locator('input[name="name"]'),dirty=form.locator('[data-ely-dirty]'),add=form.locator('[data-ely-array-add]'),rows=form.locator('[data-ely-field-array] [data-ely-array-row]');assert.equal(await form.count(),1);assert.equal(await name.inputValue(),contract.fixtureGuards.initial);assert.equal(await rows.count(),contract.fixtureGuards.initialRows);assert.equal(await add.textContent(),'Add link');
+      await local('form-edit',()=>name.fill(contract.fixtureGuards.changed),async()=>{assert.equal(await name.inputValue(),contract.fixtureGuards.changed);assert.equal((await dirty.textContent()).trim(),'Unsaved changes');return {name:await name.inputValue(),dirty:true,submitted:false};});
+      await local('form-add-array-row',()=>clickVisibleControl(add),async()=>{assert.equal(await rows.count(),1);assert.equal(await rows.locator('input').inputValue(),'');assert.equal(await name.inputValue(),contract.fixtureGuards.changed);assert.equal((await dirty.textContent()).trim(),'Unsaved changes');return {arrayRows:1,dirty:true,submitted:false,persistence:'not supplied'};});return;
+    }
+    const entry=root.locator('[data-ely-multi-entry]'),beta=root.locator('[data-ui-multi-option] input[value="beta"]'),locked=root.locator('[data-ui-multi-option] input[value="locked"]'),chips=root.locator('[data-ely-multi-chips]');
+    assert.equal(await entry.count(),1);assert.equal(await locked.isDisabled(),true);assert.deepEqual(await root.locator('[data-ui-multi-option] input:checked').evaluateAll(nodes=>nodes.map(node=>node.value)),contract.fixtureGuards.initial);
+    await local('multi-filter',()=>entry.fill(contract.fixtureGuards.filter),async()=>{assert.equal(await beta.isVisible(),true);assert.equal(await beta.isChecked(),false);assert.equal(await entry.getAttribute('aria-expanded'),'true');assert.deepEqual(await root.locator('[data-ui-multi-option] input:checked').evaluateAll(nodes=>nodes.map(node=>node.value)),contract.fixtureGuards.initial);return {filter:await entry.inputValue(),selected:contract.fixtureGuards.initial};});
+    await local('multi-select-beta',()=>beta.check(),async()=>{const selected=await root.locator('[data-ui-multi-option] input:checked').evaluateAll(nodes=>nodes.map(node=>node.value));assert.deepEqual(selected,contract.fixtureGuards.added);assert((await chips.textContent()).includes('Caller Beta'));assert.equal(await locked.isDisabled(),true);return {selected,chips:(await chips.textContent()).trim(),lockedDisabled:true};});
+    await local('multi-remove-last',async()=>{await entry.fill('');await entry.press('Backspace');},async()=>{const selected=await root.locator('[data-ui-multi-option] input:checked').evaluateAll(nodes=>nodes.map(node=>node.value));assert.deepEqual(selected,contract.fixtureGuards.removed);assert.equal(await beta.isChecked(),false);assert.equal(await locked.isDisabled(),true);return {selected,removed:'beta',initiatingKey:'trusted Backspace',productionCheckboxClick:'not claimed native'};});return;
+  }
+  if(contract.focusedSequence==='forms-six-qualified-native-local'){
+    const identity=contract.identity,allowed=['forms/AutoResizeInput','forms/DateTimePicker','forms/WeekPicker','forms/YearPicker','forms/JsonInput','forms/DurationPicker'];
+    assert(allowed.includes(identity),'Only the six exact qualified forms identities use this local contract');
+    assert.equal(await root.getAttribute('data-ely-component'),identity);assert.equal(await root.getAttribute('data-ely-kind'),contract.fixtureGuards.renderKind);
+    const local=async(id,action,verify)=>runStep(id,action,async(state,before)=>{assert.deepEqual(state.actions.slice(before.actions.length),[],'These exact forms contracts make no host request');return verify();});
+    const observeNative=field=>field.evaluate(node=>{node.__elyAuditNative=[];for(const type of ['input','change','blur'])node.addEventListener(type,event=>node.__elyAuditNative.push({type:event.type,isTrusted:event.isTrusted}),true);});
+    const nativeEvents=field=>field.evaluate(node=>node.__elyAuditNative||[]);
+    const assertTrusted=async(field,type)=>{const events=(await nativeEvents(field)).filter(event=>event.type===type);assert(events.length>0,`Expected native ${type} event`);assert(events.every(event=>event.isTrusted),`Native ${type} event must remain trusted`);};
+    const leaveField=async field=>{assert.equal(await field.evaluate(node=>node===document.activeElement),true,'Field must own focus before the native leave action');await field.press('Tab');assert.equal(await field.evaluate(node=>node===document.activeElement),false,'Native Tab must actually leave the edited field');};
+    if(identity==='forms/AutoResizeInput'){
+      const field=root.locator('textarea[data-ely-autoresize]');assert.equal(await field.count(),1);assert.equal(await field.inputValue(),contract.fixtureGuards.initial);await observeNative(field);
+      const before=await field.evaluate(node=>node.getBoundingClientRect().height),value=contract.fixtureGuards.changed;
+      await local('autoresize-edit',()=>field.fill(value),async()=>{assert.equal(await field.inputValue(),value);await assertTrusted(field,'input');const after=await field.evaluate(node=>({height:node.getBoundingClientRect().height,scrollHeight:node.scrollHeight,inlineHeight:node.style.height}));assert(after.height>before,'Multiline native input must grow this exact TextArea/AutoResizeInput alias');assert.equal(after.inlineHeight,`${Math.min(600,after.scrollHeight)}px`);return {value,initialHeight:before,...after};});
+      await local('autoresize-commit',()=>leaveField(field),async()=>{await assertTrusted(field,'change');await assertTrusted(field,'blur');assert.equal(await field.inputValue(),value);return {value,focusLeft:true,hostRequests:0};});return;
+    }
+    if(identity==='forms/JsonInput'){
+      const field=root.locator('textarea[data-ely-code-input]'),status=root.locator('[data-ely-code-status]'),preview=root.locator('[data-ely-code-highlight]');assert.equal(await field.count(),1);assert.equal(await preview.count(),1,'JsonInput must render its source-highlighter preview');assert.equal(await field.evaluate(node=>node.tagName),'TEXTAREA');assert.equal(await field.inputValue(),contract.fixtureGuards.initial);await observeNative(field);
+      const readHighlight=()=>preview.evaluate(node=>({text:node.textContent,tokens:[...node.children].map(token=>({kind:[...token.classList].find(name=>name.startsWith('ely-code-'))?.slice('ely-code-'.length),text:token.textContent})),elementCount:node.querySelectorAll('*').length}));
+      await local('json-invalid',()=>field.fill(contract.fixtureGuards.invalid),async()=>{assert.equal(await field.inputValue(),contract.fixtureGuards.invalid);assert.equal(await field.evaluate(node=>node.checkValidity()),false);assert.match(await status.textContent(),/Invalid JSON\./);const highlight=assertJsonHighlight(contract.fixtureGuards.invalid,await readHighlight());await assertTrusted(field,'input');return {value:await field.inputValue(),valid:false,highlight,markupInserted:false};});
+      await local('json-repair',()=>field.fill(contract.fixtureGuards.changed),async()=>{assert.equal(await field.inputValue(),contract.fixtureGuards.changed);assert.equal(await field.evaluate(node=>node.checkValidity()),true);assert.equal(await status.textContent(),'');const highlight=assertJsonHighlight(contract.fixtureGuards.changed,await readHighlight());await assertTrusted(field,'input');return {value:await field.inputValue(),valid:true,status:'',highlight};});
+      await local('json-commit',()=>leaveField(field),async()=>{await assertTrusted(field,'change');await assertTrusted(field,'blur');assert.equal(await field.inputValue(),contract.fixtureGuards.changed);return {value:await field.inputValue(),focusLeft:true,hostRequests:0};});return;
+    }
+    if(identity==='forms/DateTimePicker'||identity==='forms/WeekPicker'){
+      const field=root.locator(contract.steps[0].control);assert.equal(await field.count(),1);assert.equal(await field.inputValue(),nativeDateTargets[identity].initial);
+      assert.equal(await field.getAttribute('type'),contract.fixtureGuards.type);assert.equal(await field.getAttribute('name'),'caller_value');
+      const rootID=await root.getAttribute('id'),fieldID=await field.getAttribute('id');assert(rootID&&fieldID);assert.equal(await root.page().locator(`[id="${fieldID}"]`).count(),1);
+      const cdp=await root.page().context().newCDPSession(root.page());await cdp.send('DOM.enable');await cdp.send('Accessibility.enable');
+      const proof={identity,rootID,fieldID,trace:[],events:[],truncated:false};if(failureDiagnostics)failureDiagnostics.nativeDate=proof;
+      await root.evaluate(node=>{node.__elyDateEvents=[];node.__elyDateTruncated=false;node.__elyDateListener=event=>{
+        if(node.__elyDateEvents.length>=128){node.__elyDateTruncated=true;return;}
+        const value=event.target?.value??null;if(typeof value==='string'&&value.length>64){node.__elyDateTruncated=true;return;}
+        const detail=event.type==='ely:change'?event.detail:null;
+        if(detail&&(Object.keys(detail).length>8||Object.values(detail).some(value=>value!==null&&!['string','boolean','number'].includes(typeof value)||typeof value==='string'&&value.length>128))){node.__elyDateTruncated=true;return;}
+        node.__elyDateEvents.push({type:event.type,trusted:event.isTrusted,targetId:event.target?.id||null,key:event.key||null,value,detail});
+      };for(const type of ['keydown','input','change','blur','ely:change'])node.addEventListener(type,node.__elyDateListener,true);});
+      let cursor=0;
+      const observe=async()=>{
+        const state=await observeOwnedNativeDate(field,cdp),native=await root.evaluate(node=>({events:node.__elyDateEvents,truncated:node.__elyDateTruncated}));
+        Object.assign(proof,state,native);return state;
+      };
+      try{
+        await local(contract.steps[0].id,async()=>{await field.click();await nativeDateKeyboardRoute(identity,'edit',observe,key=>root.page().keyboard.press(key),proof.trace);},async()=>{await observe();return assertNativeDateResult(identity,'edit',{...proof,events:proof.events.slice(cursor),hostRequests:0});});
+        cursor=proof.events.length;proof.trace=[];
+        await local(contract.steps[1].id,()=>nativeDateKeyboardRoute(identity,'commit',observe,key=>root.page().keyboard.press(key),proof.trace),async()=>{await observe();return assertNativeDateResult(identity,'commit',{...proof,events:proof.events.slice(cursor),focusLeft:!proof.active,hostRequests:0});});
+      }catch(error){proof.error={name:error.name,message:error.message};throw error;}
+      finally{
+        try{await root.evaluate(node=>{for(const type of ['keydown','input','change','blur','ely:change'])node.removeEventListener(type,node.__elyDateListener,true);});}
+        catch(error){proof.listenerCleanupError=String(error);if(!proof.error)throw error;}
+        finally{try{await cdp.detach();}catch(error){proof.cdpCleanupError=String(error);if(!proof.error)throw error;}}
+      }
+      return;
+    }
+    const field=root.locator(contract.steps[0].control);assert.equal(await field.count(),1);assert.equal(await field.getAttribute('type'),contract.fixtureGuards.type);assert.equal(await field.inputValue(),contract.fixtureGuards.initial);
+    if(identity==='forms/YearPicker'){assert.equal(await field.getAttribute('step'),contract.fixtureGuards.step);assert.equal(await field.getAttribute('max'),null,'The qualified year fixture has no inherited Max=5 bound');}
+    if(identity==='forms/DurationPicker'){assert.equal(await field.getAttribute('min'),contract.fixtureGuards.min);assert.equal(await field.getAttribute('max'),null,'The qualified duration fixture has no inherited Max=5 bound');}
+    if(identity==='forms/DurationPicker'){
+      const rootID=await root.getAttribute('id'),fieldID=await field.getAttribute('id');assert(rootID&&fieldID);assert.equal(await field.getAttribute('name'),'caller_value');
+      const cursor={native:0,public:0},proofState={identity,rootID,fieldID,type:contract.fixtureGuards.type,hostRequests:0};let primaryError=null;
+      await root.evaluate(node=>{
+        node.__durationNative=[];node.__durationPublic=[];node.__durationTruncated=false;
+        node.__durationNativeListener=event=>{if(node.__durationNative.length>=16){node.__durationTruncated=true;return;}node.__durationNative.push({type:event.type,trusted:event.isTrusted,targetId:event.target?.id||null,value:event.target?.value??null});};
+        node.__durationPublicListener=event=>{if(event.target!==node)return;if(node.__durationPublic.length>=8){node.__durationTruncated=true;return;}node.__durationPublic.push({type:event.type,detail:event.detail===undefined?null:{...event.detail}});};
+        for(const type of ['input','change','blur'])node.addEventListener(type,node.__durationNativeListener,true);
+        node.addEventListener('ely:change',node.__durationPublicListener,true);
+      });
+      const readDurationStep=async stage=>{
+        const observed=await root.evaluate(node=>({native:node.__durationNative,public:node.__durationPublic,truncated:node.__durationTruncated}));
+        const proof={...proofState,value:await field.inputValue(),valid:await field.evaluate(node=>node.checkValidity()),nativeEvents:observed.native.slice(cursor.native),publicEvents:observed.public.slice(cursor.public),truncated:observed.truncated,...(stage==='commit'?{focusLeft:await field.evaluate(node=>document.activeElement!==node)}:{})};
+        assertDurationNativeProof(stage,proof);cursor.native=observed.native.length;cursor.public=observed.public.length;return proof;
+      };
+      try{
+        await local('duration-edit',()=>field.fill(contract.fixtureGuards.changed),async()=>{assert.equal(await field.inputValue(),contract.fixtureGuards.changed);assert.equal(await field.evaluate(node=>node.checkValidity()),true);return readDurationStep('edit');});
+        await local('duration-commit',()=>leaveField(field),async()=>{assert.equal(await field.inputValue(),contract.fixtureGuards.changed);assert.equal(await field.evaluate(node=>node.checkValidity()),true);return readDurationStep('commit');});
+      }catch(error){primaryError=error;await retainFailurePayload(failureDiagnostics??{},'durationNative',()=>root.evaluate(node=>({native:node.__durationNative,public:node.__durationPublic,truncated:node.__durationTruncated})));throw error;}
+      finally{await cleanupPreservingPrimary(()=>root.evaluate(node=>{for(const type of ['input','change','blur'])node.removeEventListener(type,node.__durationNativeListener,true);node.removeEventListener('ely:change',node.__durationPublicListener,true);delete node.__durationNativeListener;delete node.__durationPublicListener;delete node.__durationNative;delete node.__durationPublic;delete node.__durationTruncated;}),primaryError,failureDiagnostics??{},'durationNativeCleanupError');}
+      return;
+    }
+    await observeNative(field);
+    const editId=contract.steps[0].id,commitId=contract.steps[1].id,value=contract.fixtureGuards.changed;
+    await local(editId,()=>field.fill(value),async()=>{assert.equal(await field.inputValue(),value);await assertTrusted(field,'input');assert.equal(await field.evaluate(node=>node.checkValidity()),true,'The exact edited native value must be valid');return {value,type:contract.fixtureGuards.type,valid:true,hostRequests:0};});
+    await local(commitId,()=>leaveField(field),async()=>{await assertTrusted(field,'change');await assertTrusted(field,'blur');assert.equal(await field.inputValue(),value);assert.equal(await field.evaluate(node=>node.checkValidity()),true,'Validity is checked after native focus leaves the field');return {value,type:contract.fixtureGuards.type,valid:true,focusLeft:true,hostRequests:0,...(identity==='forms/DurationPicker'?{unitSwitchTested:false}:{})};});return;
+  }
+  if(contract.focusedSequence==='native-cookie-owner-boundary'){
+    const identity='misc/CookieBanner',cookies=root.locator('[data-misc-cookies]'),all=cookies.locator('[data-cookies="all"]'),none=cookies.locator('[data-cookies="none"]'),choose=cookies.locator('[data-cookies="choose"]'),analytics=cookies.locator('input[value="Analytics"]'),options=cookies.locator('[data-cookie-options]');
+    assert.equal(contract.identity,identity);assert.equal(contract.behaviorKey,'misc/Terms');assert.equal(await root.getAttribute('data-ely-component'),identity);assert.equal(await root.getAttribute('data-ely-kind'),'Terms');assert.equal(await cookies.count(),1);assert.equal(await options.getAttribute('hidden'),'');assert.deepEqual(await cookies.locator('input:not(:disabled)').evaluateAll(nodes=>nodes.map(node=>node.value)),['Analytics','Video']);
+    const read=()=>cookies.evaluate(node=>({visible:node.getClientRects().length>0,optionsHidden:node.querySelector('[data-cookie-options]').hidden,buttons:[...node.querySelectorAll('[data-cookies]')].map(button=>[button.dataset.cookies,button.textContent.trim()]),checks:[...node.querySelectorAll('input')].map(input=>({value:input.value,checked:input.checked,disabled:input.disabled}))}));
+    const expectRequest=async(state,before,values)=>{const actions=state.actions.slice(before.actions.length),id=await root.getAttribute('id');assert.deepEqual(actions,[{id,component:identity,action:'choose-cookies',values,necessary:true}]);const current=await read();assert.equal(current.visible,true,'The banner remains rendered until the host chooses its own response');return current;};
+    await runStep('cookies-accept-all',()=>clickVisibleControl(all),async(state,before)=>{const current=await expectRequest(state,before,['Analytics','Video']);assert.equal(current.optionsHidden,true);return {request:state.actions.at(-1),bannerDismissed:false,hostPersistence:'not supplied'};});
+    await runStep('cookies-reject-all',()=>clickVisibleControl(none),async(state,before)=>{const current=await expectRequest(state,before,[]);assert.equal(current.optionsHidden,true);return {request:state.actions.at(-1),bannerDismissed:false,hostPersistence:'not supplied'};});
+    await runStep('cookies-open-choices',()=>clickVisibleControl(choose),async(state,before)=>{const current=await read();assert.deepEqual(state.actions.slice(before.actions.length),[]);assert.equal(current.visible,true);assert.equal(current.optionsHidden,false);assert(current.buttons.some(([value,label])=>value==='choose'&&label==='Save choices'));return {optionsVisible:true,saveLabel:'Save choices',hostRequests:0,bannerDismissed:false};});
+    await runStep('cookies-select-analytics',()=>analytics.check(),async(state,before)=>{const current=await read();assert.deepEqual(state.actions.slice(before.actions.length),[]);assert.equal(current.checks.find(item=>item.value==='Analytics').checked,true);assert.equal(current.checks.find(item=>item.value==='Video').checked,false);assert.equal(current.checks.find(item=>item.disabled).checked,true);return {checks:current.checks,hostRequests:0,bannerDismissed:false};});
+    await runStep('cookies-save-choices',()=>clickVisibleControl(choose),async(state,before)=>{const current=await expectRequest(state,before,['Analytics']);assert.equal(current.optionsHidden,false);assert.equal(current.checks.find(item=>item.value==='Analytics').checked,true);return {request:state.actions.at(-1),bannerDismissed:false,hostPersistence:'not supplied'};});
+    return;
+  }
+  if(contract.focusedSequence==='native-prompt-owner-boundary'){
+    const identity='generative/PromptPlayground',template=root.locator('[data-native-prompt-template]'),topic=root.locator('[data-native-variable="topic"]'),tone=root.locator('[data-native-variable="tone"]'),preview=root.locator('[data-native-filled-prompt]'),run=root.locator('[data-native-run]'),answer=root.locator('[data-native-prompt-answer]');
+    assert.equal(contract.identity,identity);assert.equal(await root.getAttribute('data-ely-component'),identity);assert.equal(await root.getAttribute('data-ely-kind'),'PromptPlayground');assert.equal(await template.inputValue(),contract.fixtureGuards.template);assert.equal(await template.getAttribute('name'),contract.fixtureGuards.templateField);assert.equal(await topic.inputValue(),'');assert.equal(await tone.inputValue(),'');assert.equal(await run.isDisabled(),true);assert.equal(await answer.getAttribute('hidden'),'');
+    const read=()=>root.evaluate(node=>({running:node.querySelector('[data-native-prompt-workbench]').dataset.running,template:node.querySelector('[data-native-prompt-template]').value,variables:Object.fromEntries([...node.querySelectorAll('[data-native-variable]')].map(input=>[input.dataset.nativeVariable,input.value])),preview:node.querySelector('[data-native-filled-prompt]').textContent,marks:[...node.querySelectorAll('[data-native-filled-prompt] mark')].map(mark=>mark.textContent),runDisabled:node.querySelector('[data-native-run]').disabled,runningHidden:node.querySelector('[data-native-prompt-running]').hidden,answerHidden:node.querySelector('[data-native-prompt-answer]').hidden,answer:node.querySelector('[data-native-prompt-answer]').textContent,error:node.querySelector('[data-native-prompt-error]').textContent}));
+    await runStep('prompt-fill-topic',()=>topic.fill('observability'),async(state,before)=>{assert.deepEqual(state.actions.slice(before.actions.length),[]);const current=await read();assert.deepEqual(current.variables,{topic:'observability',tone:''});assert.equal(current.preview,'Write three short notes on observability in a {tone} voice.');assert.deepEqual(current.marks,['{tone}']);assert.equal(current.runDisabled,true);assert.equal(current.running,'false');return current;});
+    await runStep('prompt-fill-tone',()=>tone.fill('concise'),async(state,before)=>{assert.deepEqual(state.actions.slice(before.actions.length),[]);const current=await read();assert.deepEqual(current.variables,{topic:'observability',tone:'concise'});assert.equal(current.preview,'Write three short notes on observability in a concise voice.');assert.deepEqual(current.marks,[]);assert.equal(current.runDisabled,false);assert.equal(current.running,'false');return current;});
+    await runStep('prompt-run-request',()=>clickVisibleControl(run),async(state,before)=>{const current=await read(),actions=state.actions.slice(before.actions.length);assert.equal(actions.length,1,'One native submit emits one owner request');const action=actions[0];assert.equal(action.id,await root.getAttribute('id'));assert.equal(action.component,identity);assert.equal(action.action,'run-prompt');assert.equal(action.template,current.template);assert.equal(action.prompt,current.preview);assert.deepEqual(action.variables,current.variables);const templateField=contract.fixtureGuards.templateField;assert.deepEqual(action.formData?.entries,[[templateField,current.template],['variable:topic','observability'],['variable:tone','concise']]);assert.deepEqual(action.values,[[templateField,current.template],['variable:topic','observability'],['variable:tone','concise']]);assert.equal(current.running,'true');assert.equal(current.runningHidden,false);assert.equal(current.runDisabled,true);assert.equal(current.answerHidden,true);assert.equal(current.answer,'');assert.equal(current.error,'');return {request:action,pending:true,answer:'none; host response not supplied'};});
+    return;
+  }
+  if(contract.focusedSequence==='communication-subagent-tree-local'){
+    const identity='agent/SubAgentTree',tree=root.locator('.ely-agent-tree'),code=root.locator('[data-ely-value="code"]'),details=code.locator('xpath=ancestor::details[1]'),summary=details.locator(':scope > summary'),marker=summary.locator(':scope > span[aria-hidden="true"]');
+    assert.equal(contract.identity,identity);assert.equal(await root.getAttribute('data-ely-component'),identity);assert.equal(await root.getAttribute('data-ely-kind'),'SubAgentTree');assert.equal(await tree.count(),1);assert.equal(await code.count(),1);assert.equal(await details.evaluate(node=>node.open),true);
+    await details.evaluate(node=>{node.__visualDisclosureEvents=[];node.addEventListener('toggle',event=>node.__visualDisclosureEvents.push({trusted:event.isTrusted,open:node.open}));});
+    const read=()=>tree.evaluate(node=>({nodes:[...node.querySelectorAll('li[data-agent-state]')].map(item=>({value:item.querySelector('[data-ely-select]')?.dataset.elyValue||'',status:item.dataset.agentState,progress:item.querySelector('progress')?{value:item.querySelector('progress').getAttribute('value'),max:item.querySelector('progress').getAttribute('max'),text:item.querySelector('progress').textContent}:null,open:item.querySelector(':scope > details')?.open??false,selected:item.querySelector('[data-ely-select]')?.getAttribute('aria-current')}))}));
+    const initial=await read(),statusProgress=state=>state.nodes.map(({value,status,progress})=>({value,status,progress}));assert.deepEqual(initial.nodes.map(node=>[node.value,node.status,node.progress?.value,node.open]),[['lead','working','62',true],['research','done','100',false],['code','working','45',true],['tests','failed','100',false],['fix','working','30',false],['notes','waiting',undefined,false]]);
+    const assertStable=async()=>{const current=await read();assert.deepEqual(statusProgress(current),statusProgress(initial),'Caller-supplied status and progress are display state, not simulated agent execution');return current;};
+    await runStep('tree-collapse-code',async()=>{assert.equal(await details.evaluate(node=>node.open),true);return clickVisibleControl(marker);},async(state,before)=>{assert.deepEqual(state.actions.slice(before.actions.length),[]);const current=await assertStable();assert.equal(current.nodes.find(node=>node.value==='code').open,false);const events=await details.evaluate(node=>node.__visualDisclosureEvents);assert.deepEqual(events,[{trusted:true,open:false}]);return {disclosure:'collapsed by native summary activation',statusProgress:statusProgress(current),hostRequests:0};});
+    await runStep('tree-expand-code',async()=>{assert.equal(await details.evaluate(node=>node.open),false);return clickVisibleControl(marker);},async(state,before)=>{assert.deepEqual(state.actions.slice(before.actions.length),[]);const current=await assertStable();assert.equal(current.nodes.find(node=>node.value==='code').open,true);const events=await details.evaluate(node=>node.__visualDisclosureEvents);assert.deepEqual(events,[{trusted:true,open:false},{trusted:true,open:true}]);return {disclosure:'expanded by native summary activation',statusProgress:statusProgress(current),hostRequests:0};});
+    await runStep('tree-select-code',()=>clickVisibleControl(code),async(state,before)=>{const current=await assertStable(),actions=state.actions.slice(before.actions.length),id=await root.getAttribute('id');assert.equal(current.nodes.find(node=>node.value==='code').open,true);assert.equal(current.nodes.find(node=>node.value==='code').selected,'true');assert.deepEqual(actions,[{id,component:identity,action:'select',value:'code',itemId:'',laneId:'',date:''}]);return {selected:'code',request:actions[0],statusProgress:statusProgress(current),hostFulfillment:'not supplied'};});
+    await details.evaluate(node=>{delete node.__visualDisclosureEvents;});
+    return;
+  }
+  if(contract.focusedSequence==='workspace-activity-native-link-focus'){
+    const identity='collab/ActivityLog',links=root.locator('[data-ws-activity-entry] a[href]'),hrefs=contract.fixtureGuards.entryHrefs;
+    assert.equal(contract.identity,identity);assert.equal(await root.getAttribute('data-ely-component'),identity);assert.equal(await root.getAttribute('data-ely-kind'),'ActivityLog');
+    await assertActivityLogScopedAuditPage(root);
+    assert.equal(await links.count(),4,'Exact four-entry ActivityLog fixture required');assert.deepEqual(await links.evaluateAll(nodes=>nodes.map(node=>node.getAttribute('href'))),hrefs,'Default target links and order are pinned');
+    const twin=()=>root.evaluate(node=>node.closest('[data-audit-name]')?.querySelector('[data-audit-twin] > [data-ely-family]')?.innerHTML);
+    const initialTwin=await twin();assert.equal(typeof initialTwin,'string','Independent ActivityLog twin required');
+    await root.evaluate(node=>{
+      node.__visualActivityFocusEvents=[];
+      node.__visualActivityFocusListener=event=>{
+        const anchor=event.target.closest?.('[data-ws-activity-entry] a[href]');
+        if(event.type==='focusin'&&anchor&&node.contains(anchor))node.__visualActivityFocusEvents.push({type:event.type,trusted:event.isTrusted,index:[...node.querySelectorAll('[data-ws-activity-entry] a[href]')].indexOf(anchor),href:anchor.getAttribute('href')});
+        else if(event.type==='keydown'&&event.key==='Tab')node.__visualActivityFocusEvents.push({type:event.type,trusted:event.isTrusted,key:event.key});
+        else if(event.type==='click'&&anchor&&node.contains(anchor))node.__visualActivityFocusEvents.push({type:event.type,trusted:event.isTrusted,index:[...node.querySelectorAll('[data-ws-activity-entry] a[href]')].indexOf(anchor),href:anchor.getAttribute('href')});
+      };
+      for(const type of ['focusin','keydown','click'])node.ownerDocument.addEventListener(type,node.__visualActivityFocusListener,true);
+    });
+    const native=()=>root.evaluate(node=>node.__visualActivityFocusEvents);let nativeOffset=0;
+    try{
+      assert.equal(await root.evaluate(node=>node.ownerDocument.activeElement===node.ownerDocument.body),true,'Native keyboard traversal must start at the untouched document body');
+      for(let index=0;index<4;index++){
+        const step=`activity-focus-entry-${index+1}`;
+        await runStep(step,async()=>{
+          if(index===0){
+            let reached=false;
+            for(let count=0;count<32;count++){
+              await root.page().keyboard.press('Tab');
+              if(await root.evaluate((node,targetIndex)=>node.ownerDocument.activeElement===node.querySelectorAll('[data-ws-activity-entry] a[href]')[targetIndex],index)){reached=true;break;}
+            }
+            assert(reached,'Native Tab traversal must reach the first ActivityLog link within the bounded page tab order');
+          }else await root.page().keyboard.press('Tab');
+          return {method:'trusted native Tab'};
+        },async(state,before)=>{
+          assert.equal(await root.evaluate((node,targetIndex)=>node.ownerDocument.activeElement===node.querySelectorAll('[data-ws-activity-entry] a[href]')[targetIndex],index),true,`Entry ${index+1} target must receive native focus`);
+          assert.equal(await links.nth(index).getAttribute('href'),hrefs[index],'Focus must not alter the target');
+          const events=(await native()).slice(nativeOffset),tabs=events.filter(event=>event.type==='keydown'),focus=events.filter(event=>event.type==='focusin');
+          assert(tabs.length>0&&tabs.every(event=>event.trusted&&event.key==='Tab'),'Every focus transition must come from trusted native Tab input');
+          assert.deepEqual(focus,[{type:'focusin',trusted:true,index,href:hrefs[index]}],'The exact source-order target must receive trusted native focus');
+          assert.equal(events.some(event=>event.type==='click'),false,'Tab traversal must not activate or navigate a link');
+          assert.deepEqual(state.actions.slice(before.actions.length),[],'Link focus must not emit a host request');
+          assert.equal(await twin(),initialTwin,'The independent ActivityLog twin must remain unchanged');
+          nativeOffset+=events.length;
+          return {focusedLink:index+1,href:hrefs[index],nativeTabEvents:tabs.length,activated:false,hostRequests:0,twinUnchanged:true};
+        });
+      }
+    }finally{
+      await root.evaluate(node=>{for(const type of ['focusin','keydown','click'])node.ownerDocument.removeEventListener(type,node.__visualActivityFocusListener,true);delete node.__visualActivityFocusListener;delete node.__visualActivityFocusEvents;});
+    }
+    return;
+  }
+  if(contract.focusedSequence==='workspace-native-presence-follow'){
+    const {identity,kind}=contract;assert(['collab/PresenceAvatars','collab/LiveIndicator','collab/FollowMode','collab/RemoteSelection','collab/RemoteCursor'].includes(identity));
+    assert.equal(kind,'PresenceAvatars');assert.equal(await root.getAttribute('data-ely-component'),identity);assert.equal(await root.getAttribute('data-ely-kind'),kind);
+    const ada=root.locator('[data-ws-follow][value="ada"]'),stop=root.locator('[data-ws-follow-stop]');assert.equal(await ada.count(),1);assert.equal(await ada.isEnabled(),true);assert.equal(await stop.count(),1);assert.equal(await stop.isEnabled(),true);
+    await root.evaluate(node=>{node.__presenceNativeEvents=[];node.__presenceNativeListener=event=>{if(!['click','keydown'].includes(event.type))return;const target=event.target.closest?.('[data-ws-follow],[data-ws-follow-stop]');if(!target||!node.contains(target))return;node.__presenceNativeEvents.push({type:event.type,trusted:event.isTrusted,key:event.key||null,control:target.matches('[data-ws-follow-stop]')?'stop':target.value});};document.addEventListener('click',node.__presenceNativeListener,true);document.addEventListener('keydown',node.__presenceNativeListener,true);});
+    const read=()=>root.evaluate(node=>{const presence=node.querySelector('[data-ws-presence]'),peers=[...presence.querySelectorAll('[data-ws-follow]')],editor=presence.querySelector('[data-ws-presence-text]');return {id:node.id,component:node.dataset.elyComponent,kind:node.dataset.elyKind,following:presence.dataset.following,peers:peers.map(peer=>({value:peer.value,name:peer.dataset.name,hue:peer.dataset.hue,title:peer.title,hidden:peer.hidden,pressed:peer.getAttribute('aria-pressed')})),bannerHidden:presence.querySelector('[data-ws-follow-banner]').hidden,label:presence.querySelector('[data-ws-follow-label]').textContent,live:presence.querySelector('[data-ws-live]').textContent,sourceText:editor.textContent,selection:[...editor.querySelectorAll('mark')].map(mark=>({text:mark.textContent,hue:mark.dataset.hue,title:mark.title})),cursors:[...editor.querySelectorAll('[data-ws-remote-cursor]')].map(cursor=>({text:cursor.textContent,hue:cursor.dataset.hue,title:cursor.title}))};});
+    let actionOffset=0,nativeOffset=0,fixtureSource=null;
+    const native=()=>root.evaluate(node=>node.__presenceNativeEvents);
+    const sequences=[
+      ['presence-follow-ada','follow'],['presence-stop-button','stop'],['presence-follow-ada-again','follow'],['presence-stop-escape','stop'],
+    ];
+    let primaryError;
+    try{
+      const initial=await read();assert.equal(initial.following,'');assert(initial.bannerHidden);assert.equal(initial.label,'');assert.deepEqual(initial.peers.map(peer=>peer.value),['ada','grace','alan','mae','tim','joan']);assert(initial.peers.every(peer=>peer.pressed==='false'));
+      fixtureSource={peers:initial.peers.map(({value,name,hue,title,hidden})=>({value,name,hue,title,hidden})),live:initial.live,sourceText:initial.sourceText,selection:initial.selection,cursors:initial.cursors};
+      assert.equal(initial.kind,kind,'The component kind remains distinct from the action-sequence label');
+      for(const [id,actionKind]of sequences){
+        const click=actionKind==='follow',expectedFollowing=click?'ada':'',expectedPriorFollowing=click?'':'ada';
+        await runStep(id,async()=>{const current=await read();assert.equal(current.following,expectedPriorFollowing,'Presence action sequence must start from its expected prior local state');return activatePresenceStep(id,{ada,stop});},async(state,before)=>{
+          const after=await read(),nativeEvents=await native(),newEvents=nativeEvents.slice(nativeOffset),newActions=state.actions.slice(actionOffset);
+          const proof=assertPresenceNativeRequest(id,newEvents,newActions,{id:initial.id,component:identity});nativeOffset+=newEvents.length;actionOffset=state.actions.length;
+          assert.equal(after.following,expectedFollowing);assert.deepEqual(after.peers.map(peer=>peer.pressed),after.peers.map(peer=>peer.value===expectedFollowing?'true':'false'));
+          assert.equal(after.bannerHidden,!click);assert.equal(after.label,click?'Following Ada Park':'');
+          assert.deepEqual({peers:after.peers.map(({value,name,hue,title,hidden})=>({value,name,hue,title,hidden})),live:after.live,sourceText:after.sourceText,selection:after.selection,cursors:after.cursors},fixtureSource,'Only local follow presentation may change; fixture peer/document data remains intact');
+          assert.equal(after.id,initial.id);assert.equal(after.component,identity);assert.equal(after.kind,initial.kind);
+          return {identity,actionKind,following:after.following,pressed:after.peers.filter(peer=>peer.pressed==='true').map(peer=>peer.value),bannerHidden:after.bannerHidden,label:after.label,...proof,fixtureSourceUnchanged:true};
+        });
+      }
+    }catch(error){primaryError=error;await retainFailurePayload(failureDiagnostics,'presenceNativeEvents',native);throw error;}
+    finally{await cleanupPreservingPrimary(()=>root.evaluate(node=>{if(node.__presenceNativeListener){document.removeEventListener('click',node.__presenceNativeListener,true);document.removeEventListener('keydown',node.__presenceNativeListener,true);}delete node.__presenceNativeListener;delete node.__presenceNativeEvents;}),primaryError,failureDiagnostics);}
+    return;
+  }
+  if(contract.focusedSequence==='native-embed-open-host'){
+    const {identity,kind}=contract,url='https://example.com';assert(['misc/IframeEmbed','misc/EmbedCard'].includes(identity));assert.equal(kind,'IframeEmbed');
+    const button=root.locator('header button[data-ely-action="open"][data-value="https://example.com"]');assert.equal(await button.count(),1,'The exact default host-open button must remain present');assert.equal(await button.isEnabled(),true,'The default host-open button must remain enabled');
+    const rootId=await root.getAttribute('id'),snapshot=()=>root.evaluate(node=>{const open=node.querySelector('header button[data-ely-action="open"][data-value="https://example.com"]'),note=node.querySelector('[data-misc-source-note]');return {id:node.id,component:node.dataset.elyComponent,kind:node.dataset.elyKind,button:open?{action:open.dataset.elyAction,value:open.dataset.value,disabled:open.disabled,ariaLabel:open.getAttribute('aria-label')}:null,sourceNote:note?.textContent.trim()||null,iframeCount:node.querySelectorAll('iframe').length};});
+    const before=await snapshot();assert.deepEqual(before,{id:rootId,component:identity,kind:'IframeEmbed',button:{action:'open',value:url,disabled:false,ariaLabel:'Open with host'},sourceNote:'Web views need macOS for now.',iframeCount:0},'Default note, enabled header action, exact URL, and no-provider frame state are required');
+    await root.evaluate(node=>{const proof={clicks:[]};proof.listener=event=>{const target=event.target.closest?.('header button[data-ely-action="open"]');if(!target||target.closest('[data-ely-family]')!==node)return;proof.clicks.push({trusted:event.isTrusted,action:target.dataset.elyAction,value:target.dataset.value,id:node.id,component:node.dataset.elyComponent});};node.__nativeEmbedProof=proof;node.addEventListener('click',proof.listener,true);});
+    try{await runStep(contract.steps[0].id,()=>button.click(),async state=>{const after=await snapshot(),clicks=await root.evaluate(node=>node.__nativeEmbedProof.clicks);return assertNativeEmbedOpen({actions:state.actions,clicks,identity,rootId,url,before,after});});}
+    finally{await root.evaluate(node=>{const proof=node.__nativeEmbedProof;if(proof)node.removeEventListener('click',proof.listener,true);delete node.__nativeEmbedProof;});}
+    return;
+  }
+  if(contract.focusedSequence==='dock-native-actions'){
+    const identity='layout/Dock';assert.equal(contract.identity,identity);assert.equal(contract.kind,'Dock');assert.equal(await root.getAttribute('data-ely-component'),identity);assert.equal(await root.getAttribute('data-ely-kind'),'Dock');
+    let actionOffset=0,nativeOffset=0;
+    await root.evaluate(node=>{node.__visualDockNativeEvents=[];for(const type of ['click','keydown','keyup','dragstart','dragenter','dragover','dragleave','drop','dragend'])node.addEventListener(type,event=>{const tab=event.target.closest?.('[data-foundation-dock-tab]'),zone=event.target.closest?.('[data-foundation-dock-zone]');node.__visualDockNativeEvents.push({type,trusted:event.isTrusted,key:event.key||null,detail:event.detail??null,tab:tab?.textContent.trim()||null,zone:zone?.dataset.foundationDockZone||null,transferText:type==='drop'?event.dataTransfer?.getData('text/plain')||null:null});},true);});
+    const nativeSinceOffset=async()=>root.evaluate((node,offset)=>node.__visualDockNativeEvents.slice(offset),nativeOffset);
+    const assertLocalSelection=async(zone,label)=>root.locator(`[data-foundation-dock-zone="${zone}"]`).evaluate((node,wanted)=>{const tabs=[...node.querySelectorAll('[data-foundation-dock-tab]')],selected=tabs.filter(tab=>tab.getAttribute('aria-selected')==='true').map(tab=>tab.textContent.trim()),target=tabs.find(tab=>tab.textContent.trim()===wanted);return {selected,labelSelected:target?.getAttribute('aria-selected')==='true',output:node.querySelector('output')?.textContent.trim()||''};},label);
+    for(const [id,zone,index,label]of [['dock-click-files','left',0,'Files'],['dock-click-outline','left',1,'Outline'],['dock-click-search','right',0,'Search'],['dock-click-terminal','bottom',0,'Terminal']]){
+      const tab=root.locator(`[data-foundation-dock-zone="${zone}"] [data-foundation-dock-tab]`).nth(index);assert.equal(await tab.count(),1,`Exact ${label} tab required in ${zone} zone`);
+      await runStep(id,()=>tab.click(),async state=>{const events=await nativeSinceOffset();assertDockNativeEvents(id,events,label);nativeOffset+=events.length;actionOffset=assertDockCallerAction(state.actions,actionOffset,identity,label);const local=await assertLocalSelection(zone,label);assert.deepEqual(local,{selected:[label],labelSelected:true,output:`${label} panel`});return {zone,label,local};});
+    }
+    const search=root.locator('.ely-foundation__dock-right [data-foundation-dock-tab]');
+    for(const [id,key]of [['dock-key-enter-search','Enter'],['dock-key-space-search','Space']])await runStep(id,()=>search.press(key),async state=>{const events=await nativeSinceOffset();assertDockNativeEvents(id,events,'Search');nativeOffset+=events.length;actionOffset=assertDockCallerAction(state.actions,actionOffset,identity,'Search');const local=await assertLocalSelection('right','Search');assert.deepEqual(local,{selected:['Search'],labelSelected:true,output:'Search panel'});assert.equal(await search.evaluate(node=>node===document.activeElement),true,'Keyboard Dock activation must retain focus on its native button');return {key,local,focused:true};});
+    const source=root.locator('.ely-foundation__dock-left [data-foundation-dock-tab]').filter({hasText:'Files'}),target=root.locator('[data-foundation-dock-zone="center"]');assert.equal(await source.count(),1);assert.equal(await target.count(),1);
+    await runStep('dock-drag-files-center',()=>source.dragTo(target),async state=>{const events=await nativeSinceOffset();assertDockNativeEvents('dock-drag-files-center',events,'Files');nativeOffset+=events.length;actionOffset=assertDockCallerAction(state.actions,actionOffset,identity,'Files','center');const moved=await root.evaluate(node=>{const left=node.querySelector('.ely-foundation__dock-left'),center=node.querySelector('[data-foundation-dock-zone="center"]'),tabs=[...center.querySelectorAll('[data-foundation-dock-tab]')],tab=tabs.find(item=>item.textContent.trim()==='Files');return {remainingLeft:[...left.querySelectorAll('[data-foundation-dock-tab]')].map(item=>item.textContent.trim()),centerTabs:tabs.map(item=>item.textContent.trim()),centerSelected:tab?.getAttribute('aria-selected')==='true',output:center.querySelector('output')?.textContent.trim()||''};});assert.deepEqual(moved,{remainingLeft:['Outline'],centerTabs:['Files'],centerSelected:true,output:'Files panel'},'Native drop must move the original tab into the target zone without duplicating it');return moved;});
+    return;
+  }
+  if(contract.focusedSequence==='foundation-native-resize'){
+    const identity='layout/ResizeHandle';assert.equal(contract.identity,identity);assert.equal(contract.kind,'ResizeHandle');
+    assert.equal(await root.getAttribute('data-ely-component'),identity);assert.equal(await root.getAttribute('data-ely-kind'),'ResizeHandle');
+    let actionOffset=0;
+    await root.evaluate(node=>{node.__requestedResizeEvents=[];node.__requestedResizeListener=event=>{const handle=event.target.closest?.('[data-foundation-split-handle]'),range=event.target.closest?.('input[type="range"]');if(handle||range)node.__requestedResizeEvents.push({type:event.type,key:event.key||null,trusted:event.isTrusted,control:handle?'separator':'range',orientation:(handle||range.closest('[data-foundation-split]')?.querySelector('[data-foundation-split-handle]'))?.getAttribute('aria-orientation')||null});};for(const type of ['pointerdown','pointermove','pointerup','keydown','input','change'])node.addEventListener(type,node.__requestedResizeListener,true);});
+    const events=()=>root.evaluate(node=>node.__requestedResizeEvents);
+    const split=value=>root.locator(`.ely-foundation__resize-line--${value}`),snapshot=async node=>node.evaluate(item=>({value:item.querySelector('input[type="range"]').value,aria:item.querySelector('[data-foundation-split-handle]').getAttribute('aria-valuenow'),style:item.style.getPropertyValue('--foundation-split')}));
+    try{
+      const horizontal=split('horizontal'),vertical=split('vertical');assert.equal(await horizontal.count(),1);assert.equal(await vertical.count(),1);
+      const pointer=horizontal.locator('[data-foundation-split-handle]');
+      let pointerStart=await snapshot(horizontal),pointerEvents=0;
+      await runStep('resize-horizontal-pointer',async()=>{const box=await horizontal.boundingBox(),handle=await pointer.boundingBox();assert(box&&handle&&box.height>0,'The source horizontal split must provide a real pointer target');const x=handle.x+handle.width/2,y=handle.y+handle.height/2;await root.page().mouse.move(x,y);await root.page().mouse.down();await root.page().mouse.move(x,box.y+box.height*.7,{steps:3});await root.page().mouse.up();},async state=>{const after=await snapshot(horizontal),native=await events();const emitted=state.actions.slice(actionOffset);assert(emitted.length>=1,'A real split drag must report its change');assert(emitted.every(event=>event.action==='change'&&event.component===identity&&Number(event.value)>=25&&Number(event.value)<=75),'Split drag caller changes must retain identity and 25–75 bounds');actionOffset=state.actions.length;pointerEvents=native.filter(event=>event.type==='pointerdown'||event.type==='pointermove'||event.type==='pointerup');assert(pointerEvents.length>=3&&pointerEvents.every(event=>event.trusted),'ResizeHandle drag must be trusted native pointer input');assert.notEqual(after.value,pointerStart.value,'Pointer drag must move the range');assert.equal(after.value,after.aria);assert.equal(after.style,`${after.value}%`);return {before:pointerStart,after,emitted:emitted.length,trustedPointerEvents:pointerEvents.length};});
+      for(const [id,owner,key,wanted]of [['resize-vertical-range-home',vertical,'Home','25'],['resize-horizontal-range-end',horizontal,'End','75']])await runStep(id,async()=>{await owner.locator('input[type="range"]').press(key);},async state=>{const after=await snapshot(owner),native=await events(),emitted=state.actions.slice(actionOffset);assert.deepEqual(emitted.map(event=>({action:event.action,component:event.component,value:String(event.value)})),[{action:'change',component:identity,value:wanted}],'Each native range endpoint must emit one exact bounded change');actionOffset=state.actions.length;assert(native.some(event=>event.type==='keydown'&&event.key===key&&event.trusted&&event.control==='range'),'Range endpoint must use trusted native keyboard input');assert.equal(after.value,wanted);assert.equal(after.aria,wanted);assert.equal(after.style,`${wanted}%`);return {key,value:after.value,aria:after.aria};});
+      const horizontalHandle=horizontal.locator('[data-foundation-split-handle]');
+      for(const [id,key,wanted]of [['resize-separator-arrow-up','ArrowUp','70'],['resize-separator-arrow-down','ArrowDown','75'],['resize-separator-home','Home','25'],['resize-separator-end','End','75']])await runStep(id,()=>horizontalHandle.press(key),async state=>{const after=await snapshot(horizontal),native=await events(),emitted=state.actions.slice(actionOffset);assert.deepEqual(emitted.map(event=>({action:event.action,component:event.component,value:String(event.value)})),[{action:'change',component:identity,value:wanted}],'Each separator key must produce exactly one identity-scoped bounded change');actionOffset=state.actions.length;assert(native.some(event=>event.type==='keydown'&&event.key===key&&event.trusted&&event.control==='separator'&&event.orientation==='horizontal'),'Custom separator behavior must receive trusted native keyboard input on the horizontal handle');assert.equal(after.value,wanted);assert.equal(after.aria,wanted);assert.equal(after.style,`${wanted}%`);return {key,value:after.value,aria:after.aria};});
+    }finally{await root.evaluate(node=>{if(node.__requestedResizeListener)for(const type of ['pointerdown','pointermove','pointerup','keydown','input','change'])node.removeEventListener(type,node.__requestedResizeListener,true);delete node.__requestedResizeEvents;delete node.__requestedResizeListener;});}
+    return;
+  }
+  if(contract.focusedSequence==='interaction-notification-actions'){
+    const identity=contract.identity;assert(['feedback/Notification','feedback/NotificationCenter'].includes(identity));assert.equal(contract.kind,'Notification');
+    assert.equal(await root.getAttribute('data-ely-component'),identity);assert.equal(await root.getAttribute('data-ely-kind'),'Notification');
+    let actionOffset=0;
+    await root.evaluate(node=>{node.__requestedNotificationChanges=[];node.__requestedNotificationEvents=[];node.__requestedNotificationListener=event=>{if(event.type==='ely:change'){node.__requestedNotificationChanges.push({target:event.target===node,detail:{...event.detail}});return;}if(event.type==='wheel'||event.type==='click'){const target=event.target.closest?.('[data-interaction-notification-read],[data-interaction-notification-clear],[data-interaction-notification-reset],[data-ely-action="review"]');node.__requestedNotificationEvents.push({type:event.type,trusted:event.isTrusted,control:target?.matches('[data-ely-action="review"]')?'review':target?.hasAttribute('data-interaction-notification-read')?'read':target?.hasAttribute('data-interaction-notification-clear')?'clear':target?.hasAttribute('data-interaction-notification-reset')?'reset':null});}};for(const type of ['ely:change','wheel','click'])node.addEventListener(type,node.__requestedNotificationListener,true);});
+    const changes=()=>root.evaluate(node=>node.__requestedNotificationChanges),native=()=>root.evaluate(node=>node.__requestedNotificationEvents);
+    const host=root.locator('.ely-interaction__notification'),rows=host.locator('[data-interaction-notification]'),read=host.locator('[data-interaction-notification-read]'),clear=host.locator('[data-interaction-notification-clear]'),reset=root.locator('[data-interaction-notification-reset]');
+    const assertChange=async(before,name,value)=>{const after=await changes(),emitted=after.slice(before);assert.equal(emitted.length,1,'Each local notification control must emit exactly one change');assert.deepEqual(emitted[0],{target:true,detail:{id:await root.getAttribute('id'),component:identity,name,value}});};
+    try{
+      assert.equal(await rows.count(),5);assert.equal(await host.locator('[data-interaction-unread]').count(),2);assert.equal(await reset.count(),1);
+      let scrollProof;
+      await runStep('notification-scroll-last-row',async()=>{const list=host.locator('ol'),box=await list.boundingBox();assert(box&&box.height>0,'The source notification list must be visible');const before=await list.evaluate(node=>({top:node.scrollTop,height:node.scrollHeight,client:node.clientHeight}));const visible=()=>list.locator('[data-interaction-notification]').last().evaluate(node=>{const list=node.closest('ol'),r=node.getBoundingClientRect(),clip=list.getBoundingClientRect();return r.top>=clip.top+list.clientTop&&r.bottom<=clip.top+list.clientTop+list.clientHeight;});let didWheel=false;if(before.height>before.client&&!await visible()){await list.hover();for(let attempt=0;attempt<8&&!await visible();attempt++){await root.page().mouse.wheel(0,Math.max(100,Math.round(box.height*.7)));didWheel=true;await root.page().evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));}}scrollProof={before,after:await list.evaluate(node=>({top:node.scrollTop,height:node.scrollHeight,client:node.clientHeight})),visible:await visible(),didWheel};},async state=>{assert(scrollProof.visible,'The final notification must fit inside its own list clip');assert.deepEqual(state.actions.slice(actionOffset),[],'Notification list scrolling must not emit a host action');assert.equal((await changes()).length,0,'Notification list scrolling must not emit a local state change');if(scrollProof.didWheel){assert(scrollProof.after.top>scrollProof.before.top,'Native wheel must advance an overflowing notification list');assert((await native()).some(event=>event.type==='wheel'&&event.trusted),'List reachability must use trusted wheel input');}return scrollProof;});
+      await runStep('notification-open-review',async()=>{const review=host.locator('[data-ely-action="review"]');assert.equal(await review.count(),1,'The exact notification fixture must expose one Review control');await review.click();},async state=>{const result=assertCommunicationCallerRequest(state.actions,actionOffset,identity,'review','');actionOffset=result.nextOffset;const click=(await native()).filter(event=>event.type==='click');assert(click.some(event=>event.trusted&&event.control==='review'),'Review request must follow a trusted native control click');return {action:result.event.action,value:result.event.value,identity};});
+      for(const [id,control,value]of [['notification-mark-all-read',read,'read-all'],['notification-clear',clear,'cleared'],['notification-reset',reset,'reset']]){
+        const cursor=(await changes()).length;
+        await runStep(id,()=>control.click(),async state=>{await assertChange(cursor,'notification',value);assert.deepEqual(state.actions.slice(actionOffset),[],'Local notification controls must not fabricate host requests');const result=await host.evaluate(node=>({rows:node.querySelectorAll('[data-interaction-notification]').length,unread:node.querySelectorAll('[data-interaction-unread]').length,count:node.querySelector('[data-feedback-unread]').textContent,readHidden:node.querySelector('[data-interaction-notification-read]').hidden,clearHidden:node.querySelector('[data-interaction-notification-clear]').hidden,emptyHidden:node.querySelector('[data-feedback-notification-empty]').hidden,status:node.querySelector('[data-interaction-notification-status]').textContent}));
+          if(value==='read-all')assert.deepEqual(result,{rows:5,unread:0,count:'',readHidden:true,clearHidden:false,emptyHidden:true,status:'All notifications marked read'});
+          else if(value==='cleared')assert.deepEqual(result,{rows:0,unread:0,count:'',readHidden:true,clearHidden:true,emptyHidden:false,status:'Notifications cleared'});
+          else assert.deepEqual(result,{rows:5,unread:2,count:'2 new',readHidden:false,clearHidden:false,emptyHidden:true,status:''});
+          actionOffset=state.actions.length;return result;});
+      }
+    }finally{await root.evaluate(node=>{if(node.__requestedNotificationListener)for(const type of ['ely:change','wheel','click'])node.removeEventListener(type,node.__requestedNotificationListener,true);delete node.__requestedNotificationChanges;delete node.__requestedNotificationEvents;delete node.__requestedNotificationListener;});}
+    return;
+  }
+  if(contract.focusedSequence==='interaction-scroll-sync'){
+    const identity=contract.identity,virtual=identity==='interaction/VirtualScroller';assert(['interaction/ScrollSync','interaction/VirtualScroller'].includes(identity));assert.equal(contract.kind,'VirtualScroller');
+    assert.equal(await root.getAttribute('data-ely-component'),identity);assert.equal(await root.getAttribute('data-ely-kind'),'VirtualScroller');
+    const panes=root.locator('[data-direct-sync] > div');assert.equal(await panes.count(),2,'The exact Before/After source panes are required');let actionCount;
+    if(virtual){
+      const scroller=root.locator('.ely-interaction__scroller[data-direct-count]');assert.equal(await scroller.count(),1);let windowBefore;
+      await runStep('virtual-scroller-advance',async()=>{windowBefore=await scroller.evaluate(node=>({top:node.scrollTop,client:node.clientHeight,count:node.querySelectorAll('[data-direct-virtual-rows] > [data-index]').length,first:Number(node.querySelector('[data-direct-virtual-rows] > [data-index]')?.dataset.index)}));assert(windowBefore.client>0&&windowBefore.count>0);await scroller.hover();const box=await scroller.boundingBox();assert(box&&box.height>0);await root.page().mouse.wheel(0,Math.max(160,Math.round(box.height*.8)));await root.page().evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));},async state=>{const after=await scroller.evaluate(node=>({top:node.scrollTop,client:node.clientHeight,count:node.querySelectorAll('[data-direct-virtual-rows] > [data-index]').length,first:Number(node.querySelector('[data-direct-virtual-rows] > [data-index]')?.dataset.index),last:Number(node.querySelector('[data-direct-virtual-rows] > [data-index]:last-child')?.dataset.index)}));assert(after.top>windowBefore.top&&after.first>windowBefore.first,'Native scrolling must advance the virtual window');assert(after.count<=Math.ceil(after.client/28)+5,'VirtualScroller must retain a viewport-bounded row window');actionCount=state.actions.length;assert.equal(actionCount,0,'Virtual row scrolling is local and has no host action');return {before:windowBefore,after};});
+    }
+    let previous=[0,0];
+    for(const [id,sourceIndex,targetIndex]of [[virtual?'virtual-sync-before-to-after':'scrollsync-before-to-after',0,1],[virtual?'virtual-sync-after-to-before':'scrollsync-after-to-before',1,0]])await runStep(id,async()=>{const source=panes.nth(sourceIndex);previous=await Promise.all([panes.nth(0).evaluate(node=>node.scrollTop),panes.nth(1).evaluate(node=>node.scrollTop)]);const box=await source.boundingBox();assert(box&&box.width>0&&box.height>0,'Exact source pane must be scrollable and visible');await source.hover();await root.page().mouse.wheel(0,Math.max(120,Math.round(box.height*.7)));await root.page().evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));},async state=>{const positions=await Promise.all([panes.nth(0).evaluate(node=>node.scrollTop),panes.nth(1).evaluate(node=>node.scrollTop)]);assert(positions[sourceIndex]>previous[sourceIndex],'Trusted native wheel must advance its source pane');assert(Math.abs(positions[0]-positions[1])<=1,'The paired pane must synchronize to the source scroll position');if(actionCount===undefined){actionCount=state.actions.length;assert.equal(actionCount,0,'Native scrolling must not emit host actions');}assert.equal(state.actions.length,actionCount,'Native scrolling must not emit host actions');return {source:sourceIndex===0?'Before':'After',before:previous,after:positions};});
+    return;
+  }
+  if(contract.focusedSequence==='native-rtl-locale-host'){
+    const identity='i18n/RTL layout';assert.equal(contract.identity,identity);assert.equal(contract.kind,'RTL layout');assert.equal(await root.getAttribute('data-ely-component'),identity);assert.equal(await root.getAttribute('data-ely-kind'),'RTL layout');
+    const scope=root.locator('[data-native-locale-scope]');assert.equal(await scope.count(),1);
+    const snapshot=()=>scope.evaluate(node=>({locale:node.dataset.locale,lang:node.lang,dir:node.dir,error:node.querySelector('[data-native-locale-error]')?.textContent||''}));
+    const twin=()=>root.evaluate(node=>{const shell=node.closest('[data-audit-name]'),peer=shell?.querySelector('[data-audit-twin] [data-ely-family]');return peer?{html:peer.innerHTML,component:peer.dataset.elyComponent}:null;});
+    const twinBefore=await twin();assert(twinBefore,'The independent RTL twin is required');assert.deepEqual(await snapshot(),{locale:'en-US',lang:'en-US',dir:'ltr',error:''});
+    await root.evaluate(node=>{node.__requestedLocaleChanges=[];node.__requestedLocaleListener=event=>{if(event.type==='ely:change')node.__requestedLocaleChanges.push({target:event.target===node,detail:{...event.detail}});};node.addEventListener('ely:change',node.__requestedLocaleListener,true);});
+    try{for(const [id,locale,direction]of [['rtl-locale-he','he-IL','rtl'],['rtl-locale-en-restore','en-US','ltr']]){const cursor=await root.evaluate(node=>node.__requestedLocaleChanges.length);await runStep(id,()=>root.evaluate((node,value)=>node.dispatchEvent(new CustomEvent('ely:locale',{bubbles:true,detail:{locale:value}})),locale),async state=>{const actual=await snapshot(),events=await root.evaluate((node,offset)=>node.__requestedLocaleChanges.slice(offset),cursor);assert.deepEqual(actual,{locale,lang:locale,dir:direction,error:''});assert.equal(events.length,1,'Documented locale host input must emit one local change');assert.deepEqual(events[0],{target:true,detail:{id:await root.getAttribute('id'),component:identity,locale,direction,messages:[]}});assert.deepEqual(state.actions,[],'Locale API input is not an ely:action request');assert.deepEqual(await twin(),twinBefore,'Locale change must remain bound to the requested instance');return {locale,direction,scope:actual,twinUnchanged:true,sourceInput:'documented ely:locale host event'};});}}
+    finally{await root.evaluate(node=>{if(node.__requestedLocaleListener)node.removeEventListener('ely:change',node.__requestedLocaleListener,true);delete node.__requestedLocaleChanges;delete node.__requestedLocaleListener;});}
+    return;
+  }
+  if(contract.focusedSequence?.startsWith('communication-')){
+    const identity=contract.identity,grid=root.locator('.ely-calendar-time-grid');
+    assert.equal(await root.getAttribute('data-ely-component'),identity,'Exact alias/canonical gallery identity is required');
+    assert.equal(await root.getAttribute('data-ely-kind'),contract.kind,'Default fixture must resolve to its documented canonical kind');
+    let actionOffset=0;
+    const assertAction=(state,name,value)=>{const result=assertCommunicationCallerRequest(state.actions,actionOffset,identity,name,value);actionOffset=result.nextOffset;return result.event;};
+    if(contract.focusedSequence==='communication-eval-sort'){
+      const tokens=root.locator('[data-ely-eval-sort][value="tokens"]'),table=root.locator('table'),owner=root.locator('.ely-agent-evals');
+      assert.equal(await table.locator('tbody tr').count(),5,'Default evaluation fixture must retain its five source rows');
+      for(const [id,direction,firstText] of [['sort-tokens-ascending','ascending','Explain a stack trace'],['sort-tokens-descending','descending','Add a settings page']])
+        await runStep(id,()=>tokens.click(),async state=>{assert.equal(await tokens.evaluate(node=>node.closest('th').getAttribute('aria-sort')),direction);assert((await table.locator('tbody tr').first().textContent()).includes(firstText),'Sorted first row must match numeric token ordering');const event=assertAction(state,'sort-evaluations');assert.equal(event.column,'tokens');assert.equal(event.direction,direction);return {column:event.column,direction:event.direction,firstRow:(await table.locator('tbody tr').first().textContent()).trim()};});
+      let columnGeometry;
+      await runStep('eval-scroll-last-column',async()=>{
+        assert.equal(await owner.count(),1,'The evaluation table must have one local horizontal scroll owner');
+        assert.equal(await owner.locator('table').count(),1);
+        const previousScrollLeft=await owner.evaluate(node=>node.scrollLeft),box=await owner.boundingBox();assert(box&&box.width>0,'The local evaluation scroll owner must be visible');
+        const inspect=()=>owner.evaluate(node=>{const root=node.closest('[data-ely-family]'),rootRect=root.getBoundingClientRect(),rect=node.getBoundingClientRect(),clip={left:rect.left+node.clientLeft,right:rect.left+node.clientLeft+node.clientWidth,top:rect.top+node.clientTop,bottom:rect.top+node.clientTop+node.clientHeight},table=node.querySelector('table'),cells=[table.querySelector('thead th[data-eval-column="time"]'),...table.querySelectorAll('tbody td[data-eval-column="time"]')];return {scrollLeft:node.scrollLeft,scrollWidth:node.scrollWidth,clientWidth:node.clientWidth,columns:cells.map(cell=>{const r=cell.getBoundingClientRect();return {text:cell.textContent.trim(),insideRoot:r.left>=rootRect.left&&r.right<=rootRect.right&&r.top>=rootRect.top&&r.bottom<=rootRect.bottom,insideClip:r.left>=clip.left&&r.right<=clip.right&&r.top>=clip.top&&r.bottom<=clip.bottom};})};});
+        let current=await inspect();const initiallyVisible=current.columns.every(column=>column.insideRoot&&column.insideClip);let didScroll=false;
+        if(current.scrollWidth>current.clientWidth&&!initiallyVisible){
+          await owner.hover();
+          for(let attempt=0;attempt<8&&!current.columns.every(column=>column.insideRoot&&column.insideClip);attempt++){
+            await root.page().mouse.wheel(Math.max(120,Math.round(box.width*.75)),0);
+            didScroll=true;
+            await root.page().evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+            current=await inspect();
+          }
+        }
+        columnGeometry={...current,previousScrollLeft,initiallyVisible,didScroll};
+      },async state=>{const result=assertEvalLastColumnGeometry({...columnGeometry,actionsBefore:actionOffset,actionsAfter:state.actions.length});return {owner:{scrollLeft:result.scrollLeft,previousScrollLeft:columnGeometry.previousScrollLeft,scrollWidth:columnGeometry.scrollWidth,clientWidth:columnGeometry.clientWidth},columns:result.columns};});
+      return;
+    }
+    if(contract.focusedSequence==='communication-calendar-month'){
+      const selected=root.locator('[data-ely-calendar-day][aria-pressed="true"]');
+      let beforeDate='',expectedDate='';
+      await runStep('month-page-down',async()=>{beforeDate=await selected.getAttribute('value');assert.match(beforeDate,/^\d{4}-\d\d-\d\d$/,'Default month fixture must expose its selected ISO date');const [year,month,day]=beforeDate.split('-').map(Number),nextMonth=Date.UTC(year,month,1),lastDay=new Date(Date.UTC(year,month+1,0)).getUTCDate();expectedDate=new Date(nextMonth).toISOString().slice(0,8)+String(Math.min(day,lastDay)).padStart(2,'0');await selected.press('PageDown');},async state=>{const date=await root.locator('[data-ely-calendar-day][aria-pressed="true"]').getAttribute('value');assert.equal(date,expectedDate,'PageDown selection must equal the independently derived clamped next-month date');assert.equal(await root.locator('[data-ely-calendar-day][aria-pressed="true"]').evaluate(node=>node===document.activeElement),true,'PageDown must retain visible keyboard focus');const event=assertAction(state,'calendar-navigation');assert.equal(event.direction,'next');assert.equal(event.view,'month');assert.equal(event.date,expectedDate);return {beforeDate,date,focused:true};});
+      await runStep('month-open-day',()=>root.locator('[data-ely-calendar-day][aria-pressed="true"]').press('Enter'),async state=>{const event=assertAction(state,'open-day',expectedDate);assert.equal(event.date,expectedDate);return {date:expectedDate,action:event.action};});
+      return;
+    }
+    if(contract.focusedSequence==='communication-calendar-week'||contract.focusedSequence==='communication-calendar-day'){
+      let previousScrollTop=0;
+      const day=contract.focusedSequence==='communication-calendar-day';
+      await runStep(day?'day-scroll-late-events':'week-scroll-late-events',async()=>{assert.equal(await grid.count(),1,'One native calendar time grid is required');previousScrollTop=await grid.evaluate(node=>node.scrollTop);await grid.hover();const box=await grid.boundingBox();assert(box&&box.height>0,'Calendar time grid must be visible for native wheel input');for(let attempt=0;attempt<8;attempt++){const reached=await grid.evaluate(node=>['samples','client'].every(value=>{const target=node.querySelector(`[data-ely-calendar-event][value="${value}"]`);if(!target)return false;const r=target.getBoundingClientRect(),clip=node.getBoundingClientRect();return r.top>=clip.top&&r.bottom<=clip.bottom&&r.left>=clip.left&&r.right<=clip.right;}));if(reached)break;await root.page().mouse.wheel(0,Math.max(120,Math.round(box.height*.75)));await root.page().evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));}},async()=>{const geometry=await grid.evaluate(node=>({scrollTop:node.scrollTop,grid:(()=>{const r=node.getBoundingClientRect();return {top:r.top,bottom:r.bottom,left:r.left,right:r.right};})(),events:Object.fromEntries(['samples','client'].map(value=>{const target=node.querySelector(`[data-ely-calendar-event][value="${value}"]`),r=target.getBoundingClientRect();return [value,{top:r.top,bottom:r.bottom,left:r.left,right:r.right,inside:r.top>=node.getBoundingClientRect().top&&r.bottom<=node.getBoundingClientRect().bottom&&r.left>=node.getBoundingClientRect().left&&r.right<=node.getBoundingClientRect().right}];}))}));assert(geometry.scrollTop>previousScrollTop,'Native wheel must advance the calendar grid itself');assert(Object.values(geometry.events).every(event=>event.inside),'Both target events must be wholly reachable inside the native scrollport');return {previousScrollTop,...geometry,reachable:['samples','client']};});
+      for(const value of ['samples','client'])await runStep(`${day?'day':'week'}-open-${value}`,()=>grid.locator(`[data-ely-calendar-event][value="${value}"]`).click(),async state=>{const event=assertAction(state,'open-event',value);return {action:event.action,value:event.value};});
+      if(day){
+        await runStep('day-create-event',async()=>{const start=grid.locator('.ely-calendar-time-slot[data-ely-date="2026-10-13"][data-ely-time="16:00"]'),end=grid.locator('.ely-calendar-time-slot[data-ely-date="2026-10-13"][data-ely-time="16:30"]');assert.equal(await start.count(),1,'Exactly one Tuesday 16:00 slot must exist');assert.equal(await end.count(),1,'Exactly one Tuesday 16:30 slot must exist');const from=await start.boundingBox(),to=await end.boundingBox();assert(from&&to&&from.width>0&&to.width>0&&to.y>from.y,'Adjacent Tuesday slots must have visible, increasing geometry');await root.page().mouse.move(from.x+from.width/2,from.y+1);await root.page().mouse.down();await root.page().mouse.move(to.x+to.width/2,to.y+1,{steps:3});await root.page().mouse.up();},async state=>{const event=assertAction(state,'create-event');assert.equal(event.start,'2026-10-13T16:00');assert.equal(event.end,'2026-10-13T16:30');return {action:event.action,start:event.start,end:event.end};});
+        const draftMetrics=()=>grid.evaluate(node=>{const draft=node.querySelector('[data-calendar-draft]');if(!draft)throw Error('The exact local calendar draft is missing');const bounds=node.getBoundingClientRect(),clip={top:bounds.top+node.clientTop,bottom:bounds.top+node.clientTop+node.clientHeight,left:bounds.left+node.clientLeft,right:bounds.left+node.clientLeft+node.clientWidth,width:node.clientWidth,height:node.clientHeight},range=document.createRange();range.selectNodeContents(draft);const textRects=[...range.getClientRects()].map(rect=>({top:rect.top,bottom:rect.bottom,left:rect.left,right:rect.right,width:rect.width,height:rect.height}));return {scrollLeft:node.scrollLeft,scrollWidth:node.scrollWidth,clientWidth:node.clientWidth,scrollMaxX:Math.max(0,node.scrollWidth-node.clientWidth),scrollTop:node.scrollTop,scrollHeight:node.scrollHeight,clientHeight:node.clientHeight,scrollMaxY:Math.max(0,node.scrollHeight-node.clientHeight),draftText:draft.textContent,textRects,draftVisible:draft.checkVisibility({checkOpacity:true,checkVisibilityCSS:true})&&textRects.length>0&&textRects.every(rect=>rect.top>=clip.top&&rect.bottom<=clip.bottom&&rect.left>=clip.left&&rect.right<=clip.right),clip,wheels:node.__calendarDraftRevealWheels||[]};});
+        await grid.evaluate(node=>{node.__calendarDraftRevealWheels=[];node.__calendarDraftRevealListener=event=>node.__calendarDraftRevealWheels.push({trusted:event.isTrusted,deltaX:event.deltaX,deltaY:event.deltaY,targetInside:event.target===node||node.contains(event.target)});node.addEventListener('wheel',node.__calendarDraftRevealListener,true);});
+        let revealMetrics=null,revealFailure=null,actionCursor=0;
+        try{await runStep('day-reveal-created-draft',async()=>{
+          const before=await draftMetrics();assert.equal(before.draftText,'New event · 16:00 – 16:30','The exact local draft must retain both requested times');
+          actionCursor=await root.evaluate(()=>globalThis.__visualDirectActions.length);await grid.hover();
+          const decisions=[];let current=before,wheelCount=0;
+          for(let attempt=0;attempt<8;attempt++){
+            const decision=calendarDraftWheelDecision(current);if(decision.axis==='visible')break;
+            if(decision.reason){revealFailure=decision.reason;break;}
+            decisions.push(decision);await root.page().mouse.wheel(decision.deltaX,decision.deltaY);
+            await root.page().evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+            const next=await draftMetrics();wheelCount++;
+            if(next.scrollLeft===current.scrollLeft&&next.scrollTop===current.scrollTop){
+              current=next;revealFailure=`Trusted native ${decision.axis} wheel produced no scroll movement; ${decision.axis==='horizontal'?'horizontal':'vertical'} draft reveal is blocked`;
+              break;
+            }
+            current=next;
+          }
+          const finalDecision=calendarDraftWheelDecision(current);
+          if(!revealFailure&&finalDecision.axis!=='visible')revealFailure=finalDecision.reason||'Calendar draft remains clipped after eight axis-directed native wheel inputs';
+          revealMetrics={before,after:current,decisions,wheelCount,failure:revealFailure};
+          return {method:'axis-directed native Playwright wheel over the owned calendar grid',...revealMetrics};
+        },async state=>{
+          const after=await draftMetrics(),wheels=after.wheels;
+          assert.equal(after.scrollMaxX,Math.max(0,after.scrollWidth-after.clientWidth),'Native horizontal scroll endpoint metrics must reconcile');
+          assert.equal(after.scrollMaxY,Math.max(0,after.scrollHeight-after.clientHeight),'Native vertical scroll endpoint metrics must reconcile');
+          assert(after.scrollLeft>=0&&after.scrollLeft<=after.scrollMaxX,'Native scrollLeft must remain within the measured horizontal endpoint');
+          assert(after.scrollTop>=0&&after.scrollTop<=after.scrollMaxY,'Native scrollTop must remain within the measured vertical endpoint');
+          assert.equal(after.draftText,'New event · 16:00 – 16:30','Wheel reveal must preserve the complete 16:00–16:30 draft');
+          assert.equal(revealFailure,null,revealFailure||'Every painted draft text fragment must be visible inside the owned scrollport');
+          assert(after.draftVisible,'Every painted draft text fragment must be visible inside the owned scrollport');
+          if(!revealMetrics.before.draftVisible)assert(revealMetrics.wheelCount>0,'A clipped draft must be revealed with native wheel input');
+          if(revealMetrics.wheelCount)assert(wheels.some(event=>event.trusted&&event.targetInside&&(event.deltaX!==0||event.deltaY!==0)),'A trusted native wheel must reach the exact time-grid scroller');
+          assert.equal(state.actions.length,actionCursor,'The visual reveal must not emit a second host action');
+          return {scrollLeft:after.scrollLeft,scrollWidth:after.scrollWidth,clientWidth:after.clientWidth,scrollMaxX:after.scrollMaxX,scrollTop:after.scrollTop,scrollHeight:after.scrollHeight,clientHeight:after.clientHeight,scrollMaxY:after.scrollMaxY,draftText:after.draftText,textRects:after.textRects,clip:after.clip,nativeWheels:wheels,hostActionCount:state.actions.length};
+        });}finally{await grid.evaluate(node=>{if(node.__calendarDraftRevealListener)node.removeEventListener('wheel',node.__calendarDraftRevealListener,true);delete node.__calendarDraftRevealListener;delete node.__calendarDraftRevealWheels;});}
+      }else{
+        await runStep('week-create-event',async()=>{const start=grid.locator('.ely-calendar-time-slot[data-ely-date="2026-10-13"][data-ely-time="16:00"]'),end=grid.locator('.ely-calendar-time-slot[data-ely-date="2026-10-13"][data-ely-time="16:30"]');assert.equal(await start.count(),1,'Exactly one Tuesday 16:00 slot must exist');assert.equal(await end.count(),1,'Exactly one Tuesday 16:30 slot must exist');const from=await start.boundingBox(),to=await end.boundingBox();assert(from&&to&&from.width>0&&to.width>0&&to.y>from.y,'Adjacent Tuesday slots must have visible, increasing geometry');await root.page().mouse.move(from.x+from.width/2,from.y+1);await root.page().mouse.down();await root.page().mouse.move(to.x+to.width/2,to.y+1,{steps:3});await root.page().mouse.up();},async state=>{const event=assertAction(state,'create-event');assert.equal(event.start,'2026-10-13T16:00');assert.equal(event.end,'2026-10-13T16:30');return {action:event.action,start:event.start,end:event.end};});
+        await runStep('week-open-allday',()=>root.locator('.ely-calendar-allday [data-ely-action="open-event"][value="offsite"]').click(),async state=>{const event=assertAction(state,'open-event','offsite');return {action:event.action,value:event.value};});
+      }
+      return;
+    }
+    if(contract.focusedSequence==='communication-event-popover'){
+      const trigger=root.locator('[data-calendar-popover-open]'),panel=root.locator('[data-calendar-popover]');
+      await runStep('popover-open',()=>trigger.click(),async()=>{assert.equal(await panel.isVisible(),true);assert.equal(await trigger.getAttribute('aria-expanded'),'true');assert.equal(await panel.evaluate(node=>node.contains(document.activeElement)),true,'Opening must move keyboard focus into the owned details panel');return {visible:true,expanded:true,focusInside:true};});
+      for(const action of ['edit-event','delete-event'])await runStep(`popover-${action==='edit-event'?'edit':'delete'}`,()=>panel.locator(`[data-ely-action="${action}"]`).click(),async state=>{const event=assertAction(state,action,'review');return {action:event.action,value:event.value};});
+      await runStep('popover-close',()=>panel.locator('[data-calendar-popover-close]').click(),async()=>{assert.equal(await panel.isVisible(),false);assert.equal(await trigger.getAttribute('aria-expanded'),'false');assert.equal(await trigger.evaluate(node=>node===document.activeElement),true);return {visible:false,expanded:false,focusRestored:true};});
+      await runStep('popover-reopen',()=>trigger.click(),async()=>{assert.equal(await panel.isVisible(),true);assert.equal(await trigger.getAttribute('aria-expanded'),'true');assert.equal(await panel.evaluate(node=>node.contains(document.activeElement)),true);return {visible:true,expanded:true,focusInside:true};});
+      await runStep('popover-escape',()=>root.page().keyboard.press('Escape'),async()=>{assert.equal(await panel.isVisible(),false);assert.equal(await trigger.getAttribute('aria-expanded'),'false');assert.equal(await trigger.evaluate(node=>node===document.activeElement),true);return {visible:false,expanded:false,focusRestored:true};});
+      return;
+    }
+    assert.fail(`Unknown focused communication sequence ${contract.focusedSequence}`);
+  }
+  if(contract.focusedSequence==='vertical-range-native-scroll'){
+    assert(['layout/Scrollbar','layout/StickyHeader'].includes(contract.identity));
+    const identity=contract.identity,kind=identity.split('/')[1];
+    assert.equal(contract.kind,kind);assert.equal(await root.getAttribute('data-ely-component'),identity);assert.equal(await root.getAttribute('data-ely-kind'),kind);
+    const range=root.locator('input[type="range"][data-foundation-scrollbar]'),scroll=root.locator('[data-foundation-scroll]');
+    assert.equal(await range.count(),1);assert.equal(await scroll.count(),1);
+    const snapshot=()=>root.evaluate((node,kind)=>{
+      const own=selector=>[...node.querySelectorAll(selector)].filter(child=>child.closest('[data-ely-family]')===node);
+      const ranges=own('input[type="range"][data-foundation-scrollbar]'),scrolls=own('[data-foundation-scroll]');
+      if(ranges.length!==1||scrolls.length!==1)throw Error('Exactly one owned native range and scroll region required');
+      const input=ranges[0],region=scrolls[0],style=getComputedStyle(input),rect=input.getBoundingClientRect(),record=node.closest('[data-audit-name]'),twin=record?.querySelector('[data-audit-twin]>[data-ely-family]');
+      if(!twin)throw Error('Independent vertical range twin required');
+      const proof=node.__verticalRangeProof;
+      return {component:node.dataset.elyComponent,kind:node.dataset.elyKind,family:node.dataset.elyFamily,id:node.id,rangeMin:Number(input.min),rangeMax:Number(input.max),value:Number(input.value),scrollTop:region.scrollTop,scrollLeft:region.scrollLeft,scrollHeight:region.scrollHeight,clientHeight:region.clientHeight,scrollMax:Math.max(0,region.scrollHeight-region.clientHeight),documentScrollTop:document.scrollingElement?.scrollTop||0,scrollRole:region.getAttribute('role'),scrollTabIndex:region.tabIndex,rect:{width:rect.width,height:rect.height},writingMode:style.writingMode,direction:style.direction,
+        lineCount:kind==='Scrollbar'?region.querySelectorAll('p').length:null,stickyHeaders:kind==='StickyHeader'?[...region.querySelectorAll(':scope > section > header')].map(header=>header.textContent):null,
+        twinHTML:twin.outerHTML,nativeEvents:proof?.nativeEvents||[],regionEvents:proof?.regionEvents||[],publicEvents:proof?.publicEvents||[],twinEvents:proof?.twinEvents||[]};
+    },kind);
+    const initial=await snapshot();
+    assert.equal(initial.family,contract.family);assert.deepEqual([initial.rangeMin,initial.rangeMax],[0,1000]);assert.equal(initial.scrollRole,'region');assert.equal(initial.scrollTabIndex,0);assert(initial.scrollMax>0);
+    if(kind==='Scrollbar')assert.equal(initial.lineCount,30,'Scrollbar must use its 30-line canonical fixture');
+    else assert.deepEqual(initial.stickyHeaders,['Today','Yesterday','Earlier'],'StickyHeader must use its three canonical fixture groups');
+    await root.evaluate(node=>{
+      const proof=node.__verticalRangeProof={nativeEvents:[],regionEvents:[],publicEvents:[],twinEvents:[]},range=node.querySelector('input[type="range"][data-foundation-scrollbar]'),region=node.querySelector('[data-foundation-scroll]');
+      proof.observeNative=event=>{if(event.target===range)proof.nativeEvents.push({type:event.type,key:event.key||null,value:event.target.value,trusted:event.isTrusted,...(event.type==='change'?{name:event.target.name,checked:event.target.checked,controlType:event.target.type}:{})});};
+      proof.observeRegion=event=>{if(region.contains(event.target))proof.regionEvents.push({type:event.type,key:event.key||null,deltaY:event.deltaY??null,trusted:event.isTrusted,target:event.target===region?'region':'content'});};
+      proof.observePublic=event=>proof.publicEvents.push({type:event.type,detail:event.detail===undefined?null:JSON.parse(JSON.stringify(event.detail))});
+      proof.twin=node.closest('[data-audit-name]').querySelector('[data-audit-twin]>[data-ely-family]');proof.observeTwin=event=>proof.twinEvents.push(event.type);
+      for(const type of ['input','change','keydown','keyup','pointerdown','pointerup','click'])node.addEventListener(type,proof.observeNative,true);
+      for(const type of ['wheel','keydown'])region.addEventListener(type,proof.observeRegion,true);
+      for(const type of ['ely:action','ely:change','ely:result'])node.addEventListener(type,proof.observePublic,true);
+      for(const type of ['input','change','keydown','keyup','pointerdown','pointerup','click','ely:action','ely:change','ely:result'])proof.twin.addEventListener(type,proof.observeTwin,true);
+    });
+    let primaryFailed=false;
+    try{
+      for(const {id:stage}of contract.steps){
+        let before;
+        await runStep(stage,async()=>{
+          before=await snapshot();
+          if(stage==='range-top-min-pointer'||stage==='range-bottom-max-pointer'||stage==='range-center-pointer'){
+            const box=await range.boundingBox();assert(box&&box.height>box.width,'Visible native vertical range required');
+            const y=stage==='range-top-min-pointer'?2:stage==='range-bottom-max-pointer'?box.height-2:box.height/2;
+            await range.click({position:{x:box.width/2,y}});
+          }else if(stage==='range-home-min'||stage==='range-end-max')await range.press(stage==='range-home-min'?'Home':'End');
+          else if(stage==='content-wheel-up'){
+            await scroll.hover();await root.page().mouse.wheel(0,-Math.min(120,before.scrollMax/2));
+            await root.page().waitForFunction(id=>{const node=document.getElementById(id),region=node?.querySelector('[data-foundation-scroll]'),input=node?.querySelector('input[type="range"][data-foundation-scrollbar]');if(!region||!input)return false;const max=Math.max(0,region.scrollHeight-region.clientHeight);return region.scrollTop>0&&region.scrollTop<max&&Math.abs(region.scrollTop-max*Number(input.value)/1000)<=1;},initial.id,{timeout:2000});
+          }else{await scroll.focus();await scroll.press(stage==='scroll-home-min'?'Home':'End');}
+          return {method:stage==='content-wheel-up'?'native upward wheel over scroll content':stage.startsWith('range-')&&stage.endsWith('-pointer')?'native vertical pointer on track':stage.startsWith('range-')?'native range keyboard':'native scroll-region keyboard',key:stage==='range-home-min'||stage==='scroll-home-min'?'Home':stage==='range-end-max'||stage==='scroll-end-max'?'End':null};
+        },async()=>{
+          const after=await snapshot();
+          assertVerticalRangeSnapshot(identity,stage,{...after,previousDocumentScrollTop:before.documentScrollTop,nativeEvents:after.nativeEvents.slice(before.nativeEvents.length),regionEvents:after.regionEvents.slice(before.regionEvents.length),publicEvents:after.publicEvents.slice(before.publicEvents.length),twinEvents:after.twinEvents.slice(before.twinEvents.length)},initial.twinHTML);
+          return {value:after.value,scrollTop:after.scrollTop,scrollMax:after.scrollMax,direction:after.direction,writingMode:after.writingMode,orientationRect:after.rect, trustedInput:stage.startsWith('range-'),regionEvents:after.regionEvents.slice(before.regionEvents.length),publicEvents:after.publicEvents.slice(before.publicEvents.length)};
+        });
+      }
+    }catch(error){primaryFailed=true;throw error;}
+    finally{await threewayCleanup(()=>root.evaluate(node=>{
+      const proof=node.__verticalRangeProof;if(!proof)return;
+      for(const type of ['input','change','keydown','keyup','pointerdown','pointerup','click'])node.removeEventListener(type,proof.observeNative,true);
+      const region=node.querySelector('[data-foundation-scroll]');for(const type of ['wheel','keydown'])region?.removeEventListener(type,proof.observeRegion,true);
+      for(const type of ['ely:action','ely:change','ely:result'])node.removeEventListener(type,proof.observePublic,true);
+      for(const type of ['input','change','keydown','keyup','pointerdown','pointerup','click','ely:action','ely:change','ely:result'])proof.twin.removeEventListener(type,proof.observeTwin,true);
+      delete node.__verticalRangeProof;
+    }),primaryFailed,failureDiagnostics);}
+    return;
+  }
+  if(contract.focusedSequence==='threeway-native-submit'){
+    assert.equal(contract.identity,'git/ThreeWayMerge');
+    const pinReceipts=[];
+    for(const [path,sha256]of Object.entries(threewaySourcePins)){
+      const bytes=await readFile(new URL('../../../../'+path,import.meta.url));
+      assert.equal(createHash('sha256').update(bytes).digest('hex'),sha256,'ThreeWayMerge independent source pin: '+path);pinReceipts.push({path,sha256});
+    }
+    contract.sourcePins=pinReceipts;
+    const snapshot=()=>root.evaluate(node=>{
+      const own=selector=>[...node.querySelectorAll(selector)].filter(child=>child.closest('[data-ely-family]')===node),forms=own('form[data-ws-merge]');
+      if(forms.length!==1)throw Error('Exactly one own merge form required');
+      const form=forms[0],field=form.elements.namedItem('merged'),record=node.closest('[data-audit-name]'),twin=record?.querySelector('[data-audit-twin]>[data-ely-family]');
+      if(!twin||twin===node)throw Error('Separate merge twin required');
+      return {primary:record.dataset.auditName==='git/ThreeWayMerge'&&node.parentElement===record.querySelector('[data-audit-main]'),id:node.id,component:node.dataset.elyComponent,kind:node.dataset.elyKind,panes:[...form.querySelectorAll('[data-ws-merge-side]')].map(side=>[side.dataset.wsMergeSide,side.querySelector('h3').textContent,side.querySelector('pre').textContent]),action:form.dataset.elySubmit,required:field.required,disabled:field.disabled||form.querySelector('button[type="submit"]').disabled,checked:[...form.querySelectorAll('[name="resolution"]:checked')].map(control=>control.value),value:field.value,status:form.querySelector('[data-ws-merge-status]').textContent,twin:{html:twin.outerHTML,fields:[...twin.querySelectorAll('input,textarea,select')].map(control=>[control.name,control.value,control.checked])},events:node.__threeway?.events||[],native:node.__threeway?.native||[],timeline:node.__threeway?.timeline||[],twinEvents:node.__threeway?.twinEvents||[]};
+    });
+    const initial=await snapshot(),id=initial.id,twin=initial.twin;
+    assertThreewayState(initial,{id,stage:'initial',twin});
+    const form=root.locator(':scope > form[data-ws-merge]');
+    assert.equal(await form.count(),1,'Exactly one direct behavioral form; never first nested preview');
+    await root.evaluate(node=>{
+      const proof=node.__threeway={events:[],native:[],timeline:[],twinEvents:[]};proof.twin=node.closest('[data-audit-name]').querySelector('[data-audit-twin]>[data-ely-family]');
+      proof.observe=event=>{
+        if(event.type.startsWith('ely:')){if(event.target!==node)return;const detail={...event.detail},actualFormData=detail.formData instanceof FormData;if(actualFormData)detail.formData=[...detail.formData];proof.events.push({type:event.type,detail,...(event.type==='ely:action'?{actualFormData}:{})});proof.timeline.push(event.type+':'+(detail.action||detail.name));}
+        else if(event.target.closest('[data-ely-family]')===node){proof.native.push({type:event.type,name:event.type==='submit'?null:event.target.name,value:event.type==='submit'?null:event.target.value,trusted:event.isTrusted});proof.timeline.push(event.type);}
+      };
+      proof.observeTwin=event=>proof.twinEvents.push(event.type);
+      for(const type of ['click','input','change','submit','ely:change','ely:action']){node.addEventListener(type,proof.observe,true);proof.twin.addEventListener(type,proof.observeTwin,true);}
+    });
+    let primaryFailed=false;
+    try{
+      for(const stage of contract.steps.map(step=>step.id))await runStep(stage,async()=>{
+        if(stage==='choose-theirs')await form.locator('input[name="resolution"][value="theirs"]').click();
+        else if(stage==='edit-merged'){await form.locator('textarea[name="merged"]').fill('resolved caller value');await form.locator('textarea[name="merged"]').press('Tab');}
+        else await form.locator('button[type="submit"]').click();
+        // Existing runStep persists actionActivation even when later assertions fail.
+        return {stage,rawState:await snapshot(),sourcePins:pinReceipts};
+      },async()=>{const state=await snapshot();contract.threewayEvidence??=[];contract.threewayEvidence.push({stage,state});assertThreewayState(state,{id,stage,twin});return {stage,state,sourcePins:pinReceipts};});
+    }catch(error){primaryFailed=true;throw error;}
+    finally{await threewayCleanup(()=>root.evaluate(node=>{const proof=node.__threeway;if(!proof)return;for(const type of ['click','input','change','submit','ely:change','ely:action']){node.removeEventListener(type,proof.observe,true);proof.twin.removeEventListener(type,proof.observeTwin,true);}}),primaryFailed,failureDiagnostics);}
+    return;
+  }
+  if(contract.focusedSequence==='license-native-selection-scroll'){
+    assert.equal(contract.identity,'misc/LicenseViewer');
+    assert.equal(await root.getAttribute('data-ely-component'),contract.identity);
+    assert.equal(await root.getAttribute('data-ely-kind'),'LicenseViewer');
+    // Same repository root as the existing actions runner; never an external fallback.
+    const fixtureURL=new URL('../../../../internal/gallery/assets/native-misc-fixtures.json',import.meta.url);
+    const fixture=await inventoryReceipt(fixtureURL),items=fixture.data.LicenseViewer.Items;
+    assert.deepEqual(items.map(item=>[item.Label,item.Version,item.License]),[['Ely GPUI Component','0.1.0','MIT'],['Lucide','1.48.0','ISC'],['Inter','4.1','OFL-1.1'],['JetBrains Mono','2.304','OFL-1.1']]);
+    contract.fixtureReceipt={path:fixtureURL.pathname,sha256:fixture.sha256,contentSource:'independently source-pinned JSON, not matrix or DOM',endingSHA256:null};
+    const id=await root.getAttribute('id'),page=root.page();
+    const snapshot=()=>root.evaluate(node=>{
+      const section=node.querySelector('[data-misc-licenses]'),buttons=[...section.querySelectorAll('[data-misc-license]')],twin=node.closest('[data-audit-name]').querySelector('[data-audit-twin]>[data-ely-family]');
+      if(!twin)throw Error('Independent LicenseViewer twin required');
+      return {buttons:buttons.map(button=>({label:button.dataset.title,version:button.dataset.version,license:button.dataset.license,content:button.dataset.content,pressed:button.getAttribute('aria-pressed')})),title:section.querySelector('[data-license-title]').textContent,license:section.querySelector('[data-license-name]').textContent,content:section.querySelector('pre').textContent,focus:buttons.indexOf(document.activeElement),twin:twin.outerHTML,events:node.__licenseEvents||[],native:node.__licenseNative||[],twinEvents:node.__licenseTwinEvents||[],documentX:scrollX};
+    });
+    const initial=await snapshot();
+    const verifyLicenseSelection = (state,index) => {
+      assert.equal(state.buttons.length,items.length);
+      assert.deepEqual(state.buttons.map(button=>[button.label,button.version,button.license,button.content]),items.map(item=>[item.Label,item.Version,item.License,item.Content]));
+      assert.deepEqual(state.buttons.map(button=>button.pressed),items.map((_item,i)=>String(i===index)));
+      assert.equal(state.title,`${items[index].Label} ${items[index].Version}`);assert.equal(state.license,items[index].License);assert.equal(state.content,items[index].Content);
+      assert.equal(state.twin,initial.twin);assert.deepEqual(state.twinEvents,[]);
+    };
+    verifyLicenseSelection(initial,0);
+    await root.evaluate(node=>{
+      node.__licenseEvents=[];node.__licenseNative=[];node.__licenseTwinEvents=[];
+      const twin=node.closest('[data-audit-name]').querySelector('[data-audit-twin]>[data-ely-family]');node.__licenseTwin=twin;
+      node.__licenseObserver=event=>{
+        if(event.type.startsWith('ely:')){if(event.target===node)node.__licenseEvents.push({type:event.type,detail:{...event.detail}});}
+        else if(event.target.closest?.('[data-misc-license]'))node.__licenseNative.push({type:event.type,key:event.key||null,trusted:event.isTrusted});
+      };
+      node.__licenseTwinObserver=event=>node.__licenseTwinEvents.push(event.type);
+      for(const type of ['ely:change','ely:action','click','keydown']){node.addEventListener(type,node.__licenseObserver,true);twin.addEventListener(type,node.__licenseTwinObserver,true);}
+    });
+    const layout=async()=>{
+      const metrics=await root.evaluate(node=>{
+        const rect=element=>{const r=element.getBoundingClientRect();return {left:r.left,right:r.right,top:r.top,bottom:r.bottom,width:r.width,height:r.height};};
+        const section=node.querySelector('[data-misc-licenses]'),article=section.querySelector('article'),pre=section.querySelector('pre');
+        const chain=[];for(let current=section;current;current=current.parentElement){const style=getComputedStyle(current);chain.push({tag:current.localName,rect:rect(current),clientWidth:current.clientWidth,scrollWidth:current.scrollWidth,scrollLeft:current.scrollLeft,overflowX:style.overflowX});}
+        return {section:rect(section),article:rect(article),pre:rect(pre),host:{clientWidth:section.parentElement.clientWidth,paddingLeft:getComputedStyle(section.parentElement).paddingLeft,paddingRight:getComputedStyle(section.parentElement).paddingRight},chain,documentX:scrollX};
+      });
+      const overlays=assertNoOwnedLicenseViewerOverlays(await root.evaluate(ownedOverlayInventory));
+      return {...metrics,overlays:overlays.length};
+    };
+    let selected=0;
+    assert.equal((await layout()).overlays,0,'Unexpected overlays block before any capture expansion');
+    try{
+      await runStep('inspect-license',async()=>{const metrics=await layout();assert.equal(metrics.overlays,0,'Unexpected overlay exceeds bounded License capture scope');return metrics;},async()=>{verifyLicenseSelection(await snapshot(),0);return {fixture:contract.fixtureReceipt,layout:await layout()};});
+      const picks=[['pick-inter',2,null],['next-jetbrains',3,'ArrowDown'],['wrap-first',0,'ArrowDown'],['wrap-last',3,'ArrowUp'],['home-first',0,'Home'],['next-lucide',1,'ArrowDown'],['end-last',3,'End']];
+      for(const [label,index,key]of picks){let before;
+        await runStep(label,async()=>{before=await snapshot();assert.equal((await layout()).overlays,0);
+          if(key){assert.equal(before.focus,selected,'Receiving button must retain real native focus');await page.keyboard.press(key);}
+          else await root.locator('[data-misc-license]').nth(index).click();
+          return {method:key?'native keyboard':'non-forced native pointer',key};
+        },async()=>{const state=await snapshot();verifyLicenseSelection(state,index);assert.equal(state.focus,index,'Native activation must focus selected package before next key');assert.equal(state.documentX,before.documentX,'Whole-page horizontal scrolling is not local accessibility proof');
+          assert.deepEqual(state.events.slice(before.events.length),[{type:'ely:change',detail:{id,component:contract.identity,package:items[index].Label}}]);
+          const trace=state.native.slice(before.native.length);assert(trace.some(event=>event.type===(key?'keydown':'click')&&event.trusted&&(!key||event.key===key)));assert(trace.every(event=>event.trusted));assert.equal((await layout()).overlays,0);selected=index;return {selected:index,layout:await layout()};});
+      }
+      for(const axis of ['horizontal','text']){let before,after;
+        await runStep(`scroll-license-${axis}`,async()=>{
+          before=await snapshot();assert.equal((await layout()).overlays,0);
+          const target=await root.evaluate((node,axis)=>{
+            const section=node.querySelector('[data-misc-licenses]');let target=axis==='text'?section.querySelector('pre'):section;
+            if(axis==='horizontal'){while(target&&target!==document.body&&target!==document.documentElement){const s=getComputedStyle(target);if(/^(auto|scroll)$/.test(s.overflowX)&&target.scrollWidth>target.clientWidth)break;target=target.parentElement;}if(target===document.body||target===document.documentElement)target=null;}
+            if(!target)return null;const r=target.getBoundingClientRect();let left=Math.max(0,r.left),right=Math.min(document.documentElement.clientWidth,r.right),top=Math.max(0,r.top),bottom=Math.min(innerHeight,r.bottom);
+            for(let a=target.parentElement;a;a=a.parentElement){const s=getComputedStyle(a),b=a.getBoundingClientRect();if(s.overflowX!=='visible'){left=Math.max(left,b.left+a.clientLeft);right=Math.min(right,b.left+a.clientLeft+a.clientWidth);}if(s.overflowY!=='visible'){top=Math.max(top,b.top+a.clientTop);bottom=Math.min(bottom,b.top+a.clientTop+a.clientHeight);}}
+            if(right<=left||bottom<=top)throw Error('Local scroll target has no visible wheel surface');node.__licenseScrollTarget=target;return {x:(left+right)/2,y:(top+bottom)/2};
+          },axis);
+          const metrics=()=>root.evaluate((node,axis)=>{const target=node.__licenseScrollTarget;if(!target)return null;return {offset:axis==='text'?target.scrollTop:target.scrollLeft,client:axis==='text'?target.clientHeight:target.clientWidth,extent:axis==='text'?target.scrollHeight:target.scrollWidth};},axis);
+          const start=target?await metrics():null;let ending=start,attempts=0;
+          if(target){await page.mouse.move(target.x,target.y);while(ending.offset+ending.client<ending.extent-1&&attempts<6){await page.mouse.wheel(axis==='horizontal'?Math.max(ending.extent,800):0,axis==='text'?Math.max(ending.extent,800):0);attempts++;await page.waitForFunction(({node,axis,offset})=>{const target=node.__licenseScrollTarget;return (axis==='text'?target.scrollTop:target.scrollLeft)>offset;},{node:await root.elementHandle(),axis,offset:ending.offset},{timeout:2000});ending=await metrics();}assert(ending.offset+ending.client>=ending.extent-1,'Bounded native wheel did not reach local endpoint');}
+          after={axis,start,ending,attempts,noLocalScroller:!target};return after;
+        },async()=>{const state=await snapshot();verifyLicenseSelection(state,selected);assert.deepEqual(state.events,before.events);assert.equal(state.documentX,before.documentX);assert.equal((await layout()).overlays,0);
+          const visibility=await root.evaluate((node,axis)=>{
+            const element=node.querySelector(axis==='text'?'pre':'[data-license-title]'),range=document.createRange();range.selectNodeContents(element);
+            const rectJSON=rect=>rect?{left:rect.left,top:rect.top,right:rect.right,bottom:rect.bottom,width:rect.width,height:rect.height}:null;
+            const rects=[...range.getClientRects()].map(rectJSON),elementRect=axis==='text'?null:rectJSON(element.getBoundingClientRect());
+            let left=0,right=document.documentElement.clientWidth,top=0,bottom=innerHeight;
+            const clips=[{selector:'viewport',left,top,right,bottom}];
+            for(let a=element.parentElement,index=0;a;a=a.parentElement,index++){
+              const s=getComputedStyle(a),b=a.getBoundingClientRect(),clip={left:b.left+a.clientLeft,top:b.top+a.clientTop,right:b.left+a.clientLeft+a.clientWidth,bottom:b.top+a.clientTop+a.clientHeight};
+              if(s.overflowX!=='visible'){left=Math.max(left,clip.left);right=Math.min(right,clip.right);}
+              if(s.overflowY!=='visible'){top=Math.max(top,clip.top);bottom=Math.min(bottom,clip.bottom);}
+              clips.push({index,selector:a.id?`#${a.id}`:a.localName,position:s.position,overflowX:s.overflowX,overflowY:s.overflowY,rect:{left:b.left,top:b.top,right:b.right,bottom:b.bottom,width:b.width,height:b.height},clip,left,top,right,bottom});
+            }
+            const pre=node.querySelector('pre'),text=pre?.textContent??'',tail=text.slice(-48),lastIndex=text.search(/\s*$/)-1;
+            let lastTextRect=null;
+            if(pre&&lastIndex>=0){const walker=document.createTreeWalker(pre,NodeFilter.SHOW_TEXT);let current,remaining=lastIndex;while((current=walker.nextNode())){if(remaining<current.data.length){const lastRange=document.createRange();lastRange.setStart(current,remaining);lastRange.setEnd(current,remaining+1);const rect=lastRange.getBoundingClientRect();lastTextRect={left:rect.left,top:rect.top,right:rect.right,bottom:rect.bottom,width:rect.width,height:rect.height};break;}remaining-=current.data.length;}}
+            const preStyle=pre?getComputedStyle(pre):null,preRect=pre?.getBoundingClientRect();
+            return {rects,elementRect,hasContent:axis!=='text'||/\S/.test(element.textContent??''),clip:{left,top,right,bottom},diagnostic:{selectedLicense:node.querySelector('[data-misc-license][aria-pressed="true"]')?.dataset.title??null,textLength:text.length,textTail:JSON.stringify(tail),lastNonWhitespaceIndex:lastIndex,lastNonWhitespaceCharacter:lastIndex>=0?text[lastIndex]:null,lastNonWhitespaceRect:lastTextRect,lastRangeRects:rects.slice(-8),targetRect:elementRect??rects.at(-1)??null,pre:pre?{scrollTop:pre.scrollTop,clientHeight:pre.clientHeight,scrollHeight:pre.scrollHeight,rect:rectJSON(preRect),overflowX:preStyle.overflowX,overflowY:preStyle.overflowY}:null,viewport:{width:document.documentElement.clientWidth,height:innerHeight,scrollX,scrollY},clips}};
+          },axis);
+          const fragment=lastPaintedLicenseFragment(axis==='text'?visibility.rects:visibility.elementRect?[visibility.elementRect]:[],visibility.clip,visibility.hasContent);
+          visibility.diagnostic.targetRect=fragment.rect;
+          assert(fragment.visible,`Required detail/last license line not visible through actual clip chain${visibility.diagnostic?`: ${JSON.stringify(visibility.diagnostic)}`:''}`);return {...after,layout:await layout()};});
+      }
+    }finally{
+      const ending=await inventoryReceipt(fixtureURL);contract.fixtureReceipt.endingSHA256=ending.sha256;
+      await root.evaluate(node=>{for(const type of ['ely:change','ely:action','click','keydown']){node.removeEventListener(type,node.__licenseObserver,true);node.__licenseTwin.removeEventListener(type,node.__licenseTwinObserver,true);}delete node.__licenseScrollTarget;});
+      assert.equal(ending.sha256,fixture.sha256,'Independent license fixture drifted during direct proof');
+    }
+    return;
+  }
+  if(contract.trashFixture){
+    const fixture=contract.trashFixture,empty=fixture==='empty',id=fixture==='longpath'?'deleted-long':'deleted-8';
+    const path=fixture==='longpath'?'docs/'+'long-unbroken-path'.repeat(12)+'/caller-notes.md':'docs/retired.md';
+    const card=root.locator('[data-ws-trash]'),restore=root.locator('[data-ely-action="restore-file"]'),remove=root.locator('[data-ely-action="delete-file-permanently"]'),clear=root.locator('[data-ely-action="empty-trash"]');
+    assert.equal(await card.count(),1);assert.equal(await root.getAttribute('data-ely-component'),'documents/TrashBin');
+    const peer=()=>root.evaluate(node=>{const twin=node.closest('[data-audit-case]').querySelector('[data-audit-twin]>[data-ely-family]');if(!twin)throw new Error('Independent trash twin missing');return twin.outerHTML;});
+    const initialPeer=await peer();
+    await root.evaluate(node=>{node.__trashClicks=[];document.addEventListener('click',event=>{const button=event.target.closest('button');if(button&&node.contains(button))node.__trashClicks.push({trusted:event.isTrusted,action:button.dataset.elyAction,value:button.value});},true);});
+    const layout=async()=>{
+      const observed=await card.evaluate(node=>{
+        const box=r=>({left:r.left,top:r.top,right:r.right,bottom:r.bottom});
+        const boxes=[...node.querySelectorAll('button')].map(button=>({kind:'button',label:button.textContent,...box(button.getBoundingClientRect()),scrollWidth:button.scrollWidth,clientWidth:button.clientWidth,scrollHeight:button.scrollHeight,clientHeight:button.clientHeight}));
+        for(const element of node.querySelectorAll('strong,small,time,output,button,p'))for(const child of element.childNodes){if(child.nodeType!==Node.TEXT_NODE||!child.textContent.trim())continue;const range=document.createRange();range.selectNodeContents(child);for(const rect of range.getClientRects())boxes.push({kind:'text',insideButton:Boolean(element.closest('button')),label:child.textContent,...box(rect)});}
+        const html=getComputedStyle(document.documentElement);
+        return {card:box(node.getBoundingClientRect()),boxes,text:node.textContent,theme:{attribute:document.documentElement.getAttribute('data-theme'),colorScheme:html.colorScheme,paper:html.getPropertyValue('--color-paper').trim(),ink:html.getPropertyValue('--color-ink').trim(),surface:getComputedStyle(node).backgroundColor}};
+      });
+      assertTrashLayout(observed);
+      assert.equal(await peer(),initialPeer,'Every Trash state must preserve its independent twin');
+      assert.equal(await root.locator('[data-ws-trash-item]').count(),empty?0:1,'Host request must not remove caller records');
+      if(empty){assert(observed.text.includes('The trash is empty'));assert.equal(await card.locator('button').count(),0);}
+      else{assert.equal(await root.locator('[data-ws-trash-item]').getAttribute('data-ws-trash-item'),id);assert.equal(await root.locator('[data-ws-trash-item] strong').textContent(),path);}
+      return observed;
+    };
+    await runStep('inspect-layout',async()=>({method:'passive rendered-state inspection'}),async()=>({fixture,layout:await layout()}));
+    if(empty)return;
+    const press=async(label,control,expectedAction,expectedValue,armed)=>{
+      const count=await root.evaluate(node=>node.__trashClicks.length);
+      await runStep(label,()=>clickVisibleControl(control),async(after,before)=>{
+        const clicks=await root.evaluate(node=>node.__trashClicks);
+        assert.equal(clicks.length,count+1);assert.equal(clicks.at(-1).trusted,true);
+        assert.equal(clicks.at(-1).action,await control.getAttribute('data-ely-action'));
+        assert.deepEqual(after.actions.slice(before.actions.length),expectedAction?[{id:await root.getAttribute('id'),component:'documents/TrashBin',action:expectedAction,value:expectedValue,formData:null,values:[]}]:[]);
+        assert.equal((await restore.textContent()).trim(),'Restore');
+        assert.equal((await remove.textContent()).trim(),armed==='delete'?'Confirm delete':'Delete');
+        assert.equal((await clear.textContent()).trim(),armed==='empty'?'Confirm empty trash':'Empty trash');
+        assert.equal(await remove.getAttribute('data-confirming')==='true',armed==='delete');
+        assert.equal(await clear.getAttribute('data-confirming')==='true',armed==='empty');
+        return {fixture,click:clicks.at(-1),layout:await layout(),hostPersistence:'not supplied; caller record unchanged'};
+      });
+    };
+    await press('restore',restore,'restore-file',id);
+    await press('delete-arm',remove,null,null,'delete');
+    await press('delete-blur-restore',restore,'restore-file',id);
+    await press('delete-rearm',remove,null,null,'delete');
+    await press('delete-confirm',remove,'delete-file-permanently',id);
+    await press('empty-arm',clear,null,null,'empty');
+    await press('empty-blur-restore',restore,'restore-file',id);
+    await press('empty-rearm',clear,null,null,'empty');
+    await press('empty-confirm',clear,'empty-trash','');
+    return;
+  }
+  if(['task-due-submit','remove-four-tags','radio-groups-reselection','eventlogger-public-timestamps','button-public-boundary','textarea-public-multiline','input-public-edit-clear','input-public-validity','input-public-special','canvas-minimap-zoom-fit-hit-test','websocket-public-host-boundary','sheet-native-actions','bulk-canonical-zero','native-disclosure'].includes(contract.focusedSequence)){
+    const identity=await root.getAttribute('data-ely-component');
+    assert.equal(identity,contract.identity,'Exact alias identity is required');
+    assert.equal(await root.getAttribute('data-ely-kind'),contract.kind);
+    await root.evaluate(node=>{
+      node.__visualControlEvents=[];
+      for(const type of ['ely:change','ely:action'])node.addEventListener(type,event=>{
+        if(event.target!==node)return;
+        const detail={...event.detail};
+        if(detail.formData instanceof FormData)detail.formData=[...detail.formData];
+        const trigger=node.querySelector('[data-interaction-menu]'),panel=trigger&&node.querySelector('#'+CSS.escape(trigger.getAttribute('aria-controls')));
+        node.__visualControlEvents.push({type,detail,panelClosed:panel?.hidden,focusReturned:trigger?document.activeElement===trigger:undefined});
+      });
+    });
+    const events=()=>root.evaluate(node=>node.__visualControlEvents);
+    const twinState=()=>root.evaluate(node=>{
+      const twin=node.closest('[data-audit-name]')?.querySelector('[data-audit-twin] > [data-ely-family]');
+      if(!twin)throw new Error('Independent audit twin is required');
+      return {html:twin.innerHTML,fields:[...twin.querySelectorAll('input,select,textarea')].map(field=>[field.name,field.value,field.checked])};
+    });
+    const initialTwin=await twinState(),id=await root.getAttribute('id');
+    let cursor=0;
+    const begin=async()=>{cursor=(await events()).length;};
+    const fresh=async()=>{assert.deepEqual(await twinState(),initialTwin,'Public actions must preserve the independent twin');return (await events()).slice(cursor);};
+    if(contract.focusedSequence==='websocket-public-host-boundary'){
+      assert.equal(identity,'devtools/WebSocketConsole');
+      const url='wss://stream.example.com/orders';
+      const socket=()=>root.evaluate(node=>{
+        const host=node.querySelector('[data-ws-devtools-source]');if(host?.dataset.kind!=='WebSocketConsole')throw new Error('Exact source-backed WebSocketConsole required');
+        const panel=host.querySelector('[data-dt-panel="socket"]'),row=panel.querySelector('[data-dt-row]'),draft=panel.querySelector('[data-dt-socket-draft]'),send=panel.querySelector('[data-dt-socket-send]'),toggle=panel.querySelector('[data-dt-socket-toggle]');
+        return {state:row.querySelector('[data-dt-badge]').dataset.dtBadge,url:row.children[1].textContent,draft:draft.value,sendDisabled:send.disabled,toggleDisabled:toggle.disabled,toggle:toggle.textContent,rows:[...panel.querySelector('[data-dt-socket-log]').children].map(row=>[...row.children].map(child=>child.textContent)),model:host.querySelector('[data-ws-devtools-data]').innerHTML};
+      });
+      const initial=await socket();
+      assert.equal(initial.state,'open');assert.equal(initial.url,url);assert.equal(initial.draft,'');assert.equal(initial.sendDisabled,true);assert.equal(initial.toggle,'Disconnect');assert.equal(initial.toggleDisabled,false);
+      assert.deepEqual(initial.rows.map(row=>row.slice(0,2)),[['ⓘ',`Connected to ${url}`],['↗',JSON.stringify({type:'subscribe',channel:'orders'},null,2)],['↙',JSON.stringify({type:'order',id:1011,total:42.5},null,2)]]);
+      await root.evaluate(node=>{
+        node.__visualSocketNative=[];
+        node.__visualSocketTwinEvents=[];node.__visualSocketTwin=node.closest('[data-audit-name]').querySelector('[data-audit-twin] > [data-ely-family]');
+        node.__visualSocketTwinObserver=event=>node.__visualSocketTwinEvents.push(event.type);
+        for(const type of ['input','change','ely:action','ely:change','ely:result'])node.__visualSocketTwin.addEventListener(type,node.__visualSocketTwinObserver,true);
+        node.__visualSocketObserver=event=>{
+          if(event.type==='ely:action'){node.__visualSocketNative.push({type:event.type,detail:{...event.detail}});return;}
+          if(event.type==='ely:result'){node.__visualSocketNative.push({type:event.type,trusted:event.isTrusted,root:event.target===node,action:event.detail?.action,state:event.detail?.result?.state});return;}
+          if(event.type==='wheel'){const log=event.target.closest?.('[data-dt-socket-log]');if(log)node.__visualSocketNative.push({type:event.type,trusted:event.isTrusted,deltaY:event.deltaY,control:'history-log'});return;}
+          const control=event.target.closest?.('[data-dt-socket-draft],[data-dt-socket-send],[data-dt-socket-toggle]');if(!control)return;
+          node.__visualSocketNative.push({type:event.type,trusted:event.isTrusted,key:event.key||null,value:control.value||'',control:control.hasAttribute('data-dt-socket-draft')?'draft':control.hasAttribute('data-dt-socket-send')?'send':'toggle',name:control.name||'',checked:control.checked??false,inputType:control.type||''});
+        };
+        for(const type of ['input','change','keydown','keyup','click','wheel','ely:result','ely:action'])node.addEventListener(type,node.__visualSocketObserver,true);
+      });
+      const native=()=>root.evaluate(node=>node.__visualSocketNative);
+      let nativeCursor=0;
+      const steps=[
+        ['empty-enter','open','',true,null,'Enter'],
+        ['type-ping','open','ping',false,null,'ping'],
+        ['send-enter','open','',true,{action:'send-socket',text:'ping',url},'Enter'],
+        ['type-pong','open','pong',false,null,'pong'],
+        ['send-button','open','',true,{action:'send-socket',text:'pong',url},'send'],
+        ['request-disconnect','open','',true,{action:'toggle-socket',state:'open',url},'toggle'],
+        ['host-ack-closed','closed','',true,null,'closed'],
+        ['type-closed-draft','closed','queued',true,null,'queued'],
+        ['closed-enter','closed','queued',true,null,'Enter'],
+        ['clear-closed-draft','closed','',true,null,'clear'],
+        ['request-connect','closed','',true,{action:'toggle-socket',state:'closed',url},'toggle'],
+        ['host-ack-open','open','',true,null,'open'],
+      ];
+      try{for(const [label,state,draft,sendDisabled,expected,activation]of steps){
+        await runStep(label,async()=>{
+          await begin();nativeCursor=(await native()).length;
+          // Reacquire scoped locators after each host-driven ui.replaceChildren render.
+          if(label.startsWith('host-ack-')){await root.evaluate((node,state)=>node.dispatchEvent(new CustomEvent('ely:result',{bubbles:true,detail:{action:'toggle-socket',result:{state}}})),activation);return {method:'synthetic root-targeted host acknowledgement',state:activation};}
+          if(activation==='send'||activation==='toggle')return clickVisibleControl(root.locator(`[data-dt-socket-${activation}]`));
+          const input=root.locator('[data-dt-socket-draft]');
+          if(activation==='Enter')await input.press('Enter');
+          else if(activation==='clear'){await input.press('ControlOrMeta+A');await input.press('Backspace');}
+          else await input.pressSequentially(activation);
+        },async()=>{
+          const observed=await fresh(),timeline=(await native()).slice(nativeCursor),inputs=timeline.filter(event=>event.type!=='ely:action');
+          const nativeChanges=inputs.filter(event=>event.type==='change'),expectedChangeCount=label==='send-button'?1:0;
+          assert.equal(nativeChanges.length,expectedChangeCount,`${label} must retain only the source-backed draft blur change`);
+          for(const event of nativeChanges){assert.equal(event.trusted,true);assert.equal(event.control,'draft');assert.equal(event.name,'A message to send');assert.equal(event.checked,false);assert.equal(event.inputType,'text');assert.equal(event.value,'pong');}
+          const expectedPublic=timeline.flatMap(event=>event.type==='ely:action'?[{type:event.type,detail:event.detail}]:event.type==='change'&&event.control==='draft'?[{type:'ely:change',detail:{id,component:identity,name:event.name,value:event.value,checked:event.checked,type:event.inputType}}]:[]);
+          assert.deepEqual(observed.map(event=>({type:event.type,detail:event.detail})),expectedPublic,'Every public event must match the exact captured native change/action sequence');
+          assert.deepEqual(observed.filter(event=>event.type==='ely:action').map(event=>event.detail),expected?[{...expected,id,component:identity}]:[],'Native activation must produce only the exact requested host action');
+          const current=await socket();assert.equal(current.state,state);assert.equal(current.url,url);assert.equal(current.draft,draft);assert.equal(current.sendDisabled,sendDisabled);assert.equal(current.toggle,state==='open'?'Disconnect':'Connect');assert.equal(current.toggleDisabled,false);
+          assert.deepEqual(current.rows,initial.rows,'No fabricated, removed, reordered or changed message');assert.equal(current.model,initial.model,'Caller fixture data remains unchanged');
+          assert.deepEqual(await root.evaluate(node=>node.__visualSocketTwinEvents),[],'Actions and host replies must not reach the independent twin');
+          assert.deepEqual(timeline.filter(event=>event.type==='ely:action').map(event=>event.detail),expected?[{...expected,id,component:identity}]:[]);
+          if(label.startsWith('host-ack-'))assert.deepEqual(inputs,[{type:'ely:result',trusted:false,root:true,action:'toggle-socket',state:activation}]);
+          else{
+            assert(inputs.length>0&&inputs.every(event=>event.trusted===true&&event.type!=='ely:result'),'Native evidence must be trusted; host replies require their named stage');
+            if(['ping','pong','queued'].includes(activation))assert.deepEqual(inputs.filter(event=>event.type==='input').map(event=>event.value),[...activation].map((_letter,index)=>activation.slice(0,index+1)));
+            else if(activation==='Enter'){assert.equal(inputs.filter(event=>event.type==='keydown'&&event.key==='Enter').length,1);assert.equal(inputs.filter(event=>event.type==='keyup'&&event.key==='Enter').length,1);if(expected){const down=timeline.findIndex(event=>event.type==='keydown'&&event.key==='Enter'),sent=timeline.findIndex(event=>event.type==='ely:action'),up=timeline.findIndex(event=>event.type==='keyup'&&event.key==='Enter');assert(down<sent&&sent<up,'Send request must occur inside native Enter dispatch');}}
+            else if(activation==='clear'){assert.equal(inputs.filter(event=>event.type==='keydown'&&event.key==='Backspace').length,1);assert.deepEqual(inputs.filter(event=>event.type==='input').map(event=>event.value),['']);}
+            else{assert.equal(inputs.filter(event=>event.type==='click'&&event.control===activation).length,1);assert(timeline.findIndex(event=>event.type==='click')<timeline.findIndex(event=>event.type==='ely:action'),'Host request must follow native pointer activation');}
+          }
+          return {state:current.state,draft:current.draft,sendDisabled:current.sendDisabled,events:observed,nativeEvents:timeline,hostAcknowledgement:label.startsWith('host-ack-')};
+        });
+      }
+      const historyMetrics=()=>root.evaluate(node=>{const log=node.querySelector('[data-dt-socket-log]'),row=log?.firstElementChild;if(!log||!row)throw Error('Exact first WebSocket history row required');const box=log.getBoundingClientRect(),clip={top:box.top+log.clientTop,bottom:box.top+log.clientTop+log.clientHeight,left:box.left+log.clientLeft,right:box.left+log.clientLeft+log.clientWidth},rect=row.getBoundingClientRect();return {scrollTop:log.scrollTop,scrollHeight:log.scrollHeight,clientHeight:log.clientHeight,scrollMax:Math.max(0,log.scrollHeight-log.clientHeight),firstRowText:row.textContent,firstRowFullyVisible:row.checkVisibility({checkOpacity:true,checkVisibilityCSS:true})&&rect.top>=clip.top&&rect.bottom<=clip.bottom&&rect.left>=clip.left&&rect.right<=clip.right,rowRect:{top:rect.top,bottom:rect.bottom,left:rect.left,right:rect.right},clip};});
+      await runStep('history-wheel-reveal',async()=>{await begin();nativeCursor=(await native()).length;const before=await historyMetrics();assert.deepEqual(await socket().then(current=>current.rows[0]),initial.rows[0],'The first history row must retain its exact fixture fields before reveal');let wheel=false;if(before.scrollMax>0&&before.scrollTop>0){const log=root.locator('[data-dt-socket-log]'),box=await log.boundingBox();assert(box&&box.height>0,'The overflowing history log must be the native wheel surface');await log.hover();await root.page().mouse.wheel(0,-Math.max(120,Math.round(box.height*.75)));await root.page().evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));wheel=true;}return {method:wheel?'trusted native upward wheel over the exact history log':'passive reachability because the first row is already fully visible',before,wheel};},async()=>{const observed=await fresh(),timeline=(await native()).slice(nativeCursor),metrics=await historyMetrics(),current=await socket(),wheels=timeline.filter(event=>event.type==='wheel');assert.equal(current.state,'open');assert.equal(current.draft,'');assert.deepEqual(current.rows,initial.rows,'History reveal must not alter, fabricate or reorder messages');assert.deepEqual(observed,[],'History scrolling must not emit a host request or component change');assert.equal(metrics.firstRowText,initial.rows[0].join(''),'The complete original first history row text must remain present');assert(metrics.firstRowFullyVisible,'The complete first history row must fit inside the native scrollport');assert.equal(metrics.scrollMax,Math.max(0,metrics.scrollHeight-metrics.clientHeight),'History scroll endpoint metrics must reconcile');assert(metrics.scrollTop>=0&&metrics.scrollTop<=metrics.scrollMax,'History scrollTop must remain in its measured range');if(wheels.length){assert.equal(wheels.length,1,'The reveal uses one bounded native wheel input');assert.deepEqual(wheels.map(event=>[event.trusted,event.control,event.deltaY]),[[true,'history-log',wheels[0].deltaY]]);assert(wheels[0].deltaY<0);assert.equal(metrics.scrollTop,0,'Upward wheel must reach the first-row endpoint');}else assert(metrics.scrollTop===0||metrics.scrollMax===0,'Without a wheel the complete first row must already be at a reachable endpoint');return {scrollTop:metrics.scrollTop,scrollHeight:metrics.scrollHeight,clientHeight:metrics.clientHeight,scrollMax:metrics.scrollMax,firstRowText:metrics.firstRowText,firstRowFullyVisible:metrics.firstRowFullyVisible,rowRect:metrics.rowRect,clip:metrics.clip,nativeWheel:wheels[0]||null,hostRequests:observed.length};});
+      }finally{await root.evaluate(node=>{for(const type of ['input','change','keydown','keyup','click','wheel','ely:result','ely:action'])node.removeEventListener(type,node.__visualSocketObserver,true);for(const type of ['input','change','ely:action','ely:change','ely:result'])node.__visualSocketTwin.removeEventListener(type,node.__visualSocketTwinObserver,true);delete node.__visualSocketTwinObserver;delete node.__visualSocketTwinEvents;delete node.__visualSocketTwin;delete node.__visualSocketObserver;delete node.__visualSocketNative;});}
+      return;
+    }
+    if(['sheet-native-actions','bulk-canonical-zero','native-disclosure'].includes(contract.focusedSequence)){
+      await root.evaluate(node=>{
+        node.__visualFiniteClicks=[];
+        node.__visualFiniteClickObserver=event=>{const target=event.target.closest('button,summary');if(target?.closest('[data-ely-family]')===node)node.__visualFiniteClicks.push({trusted:event.isTrusted,tag:target.tagName,value:target.value,label:target.textContent});};
+        node.addEventListener('click',node.__visualFiniteClickObserver);
+      });
+      const clicks=()=>root.evaluate(node=>node.__visualFiniteClicks);
+      let clickCursor=0;
+      const start=async()=>{await begin();clickCursor=(await clicks()).length;};
+      const pointer=async()=>{const activated=(await clicks()).slice(clickCursor);assert.equal(activated.length,1,'Exactly one native control click is required');assert.equal(activated[0].trusted,true,'Real controls require trusted pointer input');return activated[0];};
+      try{
+        if(contract.focusedSequence==='sheet-native-actions'){
+          const opener=root.locator('[data-interaction-dialog]'),dialog=root.locator('dialog.is-sheet');
+          assert.equal(await opener.count(),1);assert.equal(await dialog.count(),1);assert.equal(await opener.isEnabled(),true);
+          const headerClose=dialog.locator('header > button[data-interaction-close][aria-label="Close"]');
+          assert.equal(await headerClose.count(),1);assert.equal(await headerClose.isEnabled(),true);
+          assert.equal(await dialog.evaluate(node=>node.open),false);assert.equal(await dialog.getAttribute('id'),await opener.getAttribute('data-interaction-dialog'));
+          assert.deepEqual(await dialog.locator('[data-interaction-sheet-action]').evaluateAll(nodes=>nodes.map(node=>[node.value,node.dataset.elyAction,node.disabled])),[['wallpaper','set-wallpaper',false],['duplicate','duplicate',false],['delete','delete',false]]);
+          for(const value of ['wallpaper','duplicate','delete','cancel','close']){
+            await runStep(`open-${value}`,async()=>{await start();return clickVisibleControl(opener);},async()=>{await pointer();assert.deepEqual(await fresh(),[]);assert.equal(await dialog.evaluate(node=>node.open&&node.matches(':modal')),true);assert.equal(await headerClose.evaluate(node=>document.activeElement===node),true,'Actual DOM-first enabled header Close control receives focus');return {open:true,focusedControl:'owned header Close'};});
+            const action=['wallpaper','duplicate','delete'].includes(value),control=action?dialog.locator(`[data-interaction-sheet-action][value="${value}"]`):value==='cancel'?dialog.locator('.ely-interaction__sheet-cancel'):dialog.locator('[aria-label="Close"]');
+            await runStep(action?`choose-${value}`:value==='cancel'?'cancel-sheet':'close-sheet',async()=>{await start();return clickVisibleControl(control);},async()=>{
+              await pointer();await root.page().waitForFunction(node=>!node.open,await dialog.elementHandle());await root.page().waitForFunction(node=>document.activeElement===node,await opener.elementHandle());
+              const observed=await fresh(),expected=action?[['ely:action',{id,component:identity,action:value==='wallpaper'?'set-wallpaper':value,value}]]:[];
+              assert.deepEqual(observed.map(event=>[event.type,event.detail]),expected,'Sheet selection emits once; close/cancel emits no action');return {open:false,focusReturned:true,events:observed};
+            });
+          }
+        }else if(contract.focusedSequence==='bulk-canonical-zero'){
+          const host=root.locator('[data-interaction-bulk]'),bar=host.locator('.ely-interaction__bar.is-bulk');
+          const checkCount=async count=>{assert.equal(await host.getAttribute('data-interaction-bulk-count'),String(count));assert.equal(await host.locator('[data-interaction-bulk-count]').textContent(),String(count));assert.equal(await host.locator('[data-interaction-bulk-summary]').textContent(),`${count} selected`);assert.equal(await bar.evaluate(node=>node.hidden),count===0);};
+          assert.equal(await host.count(),1);await checkCount(0);
+          assert.deepEqual(await bar.locator('[data-ely-action]').evaluateAll(nodes=>nodes.map(node=>[node.value,node.dataset.elyAction,node.disabled])),[['move','move',false],['delete','delete',false]]);
+          for(const [label,selector,count,action] of [['select-first','[data-interaction-bulk-add]',1],['select-second','[data-interaction-bulk-add]',2],['move-selection','[data-ely-action="move"]',2,'move'],['delete-selection','[data-ely-action="delete"]',2,'delete'],['clear-selection','[data-interaction-bulk-clear]',0],['select-again','[data-interaction-bulk-add]',1],['clear-again','[data-interaction-bulk-clear]',0]]){
+            await runStep(label,async()=>{await start();return clickVisibleControl(host.locator(selector));},async()=>{await pointer();await checkCount(count);const observed=await fresh();assert.deepEqual(observed.map(event=>[event.type,event.detail]),action?[['ely:action',{id,component:identity,action,value:action,formData:null,values:[]}]]:[['ely:change',{id,component:identity,name:'bulk',value:String(count),selected:count>0}]]);return {count,events:observed,fixtureScope:'Canonical initial SelectedCount0 only; reaching2 does not prove an initial Value2 fixture'};});
+          }
+        }else{
+          await root.page().evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+          const accordion=contract.kind==='Accordion',details=accordion?root.locator('[data-foundation-accordion] > details'):root.locator('details');
+          assert.equal(await details.count(),accordion?3:1);assert.deepEqual(await details.evaluateAll(nodes=>nodes.map(node=>node.open)),accordion?[true,false,false]:[false]);
+          if(accordion)assert.deepEqual(await details.locator('summary').allTextContents(),['What is Ely?','Does it animate?','Can I theme it?']);
+          const specs=accordion?[['open-second',1,[false,true,false],[true,false]],['open-third',2,[false,false,true],[true,false]],['close-third',2,[false,false,false],[false]],['reopen-first',0,[true,false,false],[true]]]:[['open-disclosure',0,[true],[true]],['close-disclosure',0,[false],[false]]];
+          for(const [label,index,state,opens] of specs){
+            await runStep(label,async()=>{await start();return clickVisibleControl(details.nth(index).locator('summary'));},async()=>{
+              await root.page().waitForFunction(({id,cursor,state,count,accordion})=>{const node=document.getElementById(id),items=[...node.querySelectorAll(accordion?'[data-foundation-accordion] > details':'details')];return JSON.stringify(items.map(item=>item.open))===JSON.stringify(state)&&node.__visualControlEvents.slice(cursor).length===count;},{id,cursor,state,count:opens.length,accordion});
+              await pointer();assert.deepEqual(await details.evaluateAll(nodes=>nodes.map(node=>node.open)),state);const observed=await fresh();assert.deepEqual(observed.map(event=>[event.type,event.detail]),opens.map(open=>['ely:action',{id,component:identity,action:'change',open}]),'Retain every asynchronous native toggle action with its exact alias identity');return {openStates:state,events:observed};
+            });
+          }
+        }
+      }finally{await root.evaluate(node=>{node.removeEventListener('click',node.__visualFiniteClickObserver);delete node.__visualFiniteClickObserver;});}
+      return;
+    }
+    if(contract.focusedSequence==='canvas-minimap-zoom-fit-hit-test'){
+      const scene=()=>root.evaluate(node=>{
+        const host=node.querySelector('[data-ws-canvas-scene]'),stage=host?.querySelector('[data-cs-stage]'),world=host?.querySelector('[data-cs-world]'),map=host?.querySelector('[data-cs-minimap]');
+        if(!host||!stage||!world||!map)throw new Error('InfiniteCanvas must render its scene, stage, world and minimap');
+        const match=(world.getAttribute('transform')||'').match(/^scale\(([-+\d.e]+)\) translate\(([-+\d.e]+) ([-+\d.e]+)\)$/);
+        if(!match)throw new Error('Rendered canvas world transform is not the public scale/translate form');
+        const artboards=[...world.querySelectorAll('[data-cs-artboard]')].map(element=>({id:element.getAttribute('data-cs-artboard'),x:Number(element.getAttribute('x')),y:Number(element.getAttribute('y')),w:Number(element.getAttribute('width')),h:Number(element.getAttribute('height'))}));
+        const rect=element=>{const value=element.getBoundingClientRect();return {left:value.left,top:value.top,right:value.right,bottom:value.bottom,width:value.width,height:value.height};};
+        const spacing=values=>{const sorted=[...new Set(values.filter(Number.isFinite).map(value=>Number(value.toFixed(6))))].sort((a,b)=>a-b);return [...new Set(sorted.slice(1).map((value,index)=>Number((value-sorted[index]).toFixed(6))))].sort((a,b)=>a-b);};
+        const gridPoints=[...host.querySelectorAll('[data-cs-grid] circle')].map(point=>({x:Number(point.getAttribute('cx')),y:Number(point.getAttribute('cy')),radius:Number(point.getAttribute('r')),fill:point.getAttribute('fill')}));
+        const rulerGroup=host.querySelector('[data-cs-rulers]'),rulerTicks=[...rulerGroup.querySelectorAll('text')].map(tick=>({x:Number(tick.getAttribute('x')),y:Number(tick.getAttribute('y')),fontSize:Number(tick.getAttribute('font-size'))}));
+        const horizontalTicks=rulerTicks.filter(tick=>tick.x!==2),verticalTicks=rulerTicks.filter(tick=>tick.x===2);
+        const rulerRects=[...rulerGroup.querySelectorAll('rect')].map(item=>({width:Number(item.getAttribute('width')),height:Number(item.getAttribute('height')),fill:item.getAttribute('fill')}));
+        const unique=values=>[...new Set(values)].sort();
+        return {kind:host.dataset.sceneKind,stage:{width:stage.viewBox.baseVal.width,height:stage.viewBox.baseVal.height},view:{zoom:Number(match[1]),x:-Number(match[2]),y:-Number(match[3])},artboards,shapes:world.querySelectorAll('[data-cs-shape]').length,guides:world.querySelectorAll('[data-cs-guide]').length,
+          grid:{count:gridPoints.length,configuration:{xSpacing:spacing(gridPoints.map(point=>point.x)),ySpacing:spacing(gridPoints.map(point=>point.y)),radii:unique(gridPoints.map(point=>point.radius)),fills:unique(gridPoints.map(point=>point.fill))}},
+          rulers:{count:rulerTicks.length,configuration:{horizontalSpacing:spacing(horizontalTicks.map(tick=>tick.x)),verticalSpacing:spacing(verticalTicks.map(tick=>tick.y)),fontSizes:unique(rulerTicks.map(tick=>tick.fontSize)),rects:rulerRects}},
+          mapBounds:JSON.parse(map.dataset.bounds),mapRect:rect(map),viewRect:rect(host.querySelector('[data-cs-view]')),zoomRect:rect(host.querySelector('[data-cs-zoom]')),zoomTargets:[...host.querySelectorAll('[data-cs-zoom] button')].map(rect)};
+      });
+      const initial=await scene();
+      assert.equal(initial.kind,'InfiniteCanvas','Exact canonical fixture kind is required');
+      assert.deepEqual(initial.stage,{width:820,height:460},'Canonical InfiniteCanvas stage geometry changed');
+      assert.deepEqual(initial.view,{x:-60,y:-60,zoom:.7},'Initial viewport must match the canonical scene contract');
+      assert.deepEqual(initial.artboards.map(({id})=>id),['home','detail'],'The rendered fixture must contain its two canonical artboards');
+      assert.equal(initial.shapes,8,'The combined fixture must retain its eight rendered shapes');
+      assert.equal(initial.guides,2,'Both canonical guides must be painted');
+      assert(initial.grid.count>0&&initial.rulers.count>0,'The grid and ruler aliases must both render content');
+      const union=rects=>{const x=Math.min(...rects.map(rect=>rect.x)),y=Math.min(...rects.map(rect=>rect.y));return {x,y,w:Math.max(...rects.map(rect=>rect.x+rect.w))-x,h:Math.max(...rects.map(rect=>rect.y+rect.h))-y};};
+      const close=(actual,expected,message)=>assert(Math.abs(actual-expected)<=1e-6,message+`: expected ${expected}, got ${actual}`);
+      const initialBounds=union(initial.artboards);
+      for(const key of ['x','y','w','h'])close(initial.mapBounds.bounds[key],initialBounds[key],`Rendered minimap ${key} bound must cover the rendered artboard union`);
+      assert(initial.mapBounds.ratio>0,'Rendered minimap must have a positive scene-to-map scale');
+      const assertWorld=async expected=>{
+        const current=await scene();
+        close(current.view.zoom,expected.zoom,'Rendered canvas zoom must match the action state');
+        close(current.view.x,expected.x,'Rendered canvas x must match the action state');
+        close(current.view.y,expected.y,'Rendered canvas y must match the action state');
+        return current;
+      };
+      const controls=['[data-cs-zoom-out]','[data-cs-zoom-reset]','[data-cs-zoom-in]','[data-cs-fit]'];
+      assert.equal(await root.locator('[data-cs-zoom] button').count(),controls.length,'All four zoom targets must be present');
+      const overlap=(a,b)=>a.left<b.right&&b.left<a.right&&a.top<b.bottom&&b.top<a.bottom;
+      assert(!overlap(initial.zoomRect,initial.mapRect),'Zoom controls and minimap must not overlap');
+      for(let left=0;left<initial.zoomTargets.length;left++)for(let right=left+1;right<initial.zoomTargets.length;right++)assert(!overlap(initial.zoomTargets[left],initial.zoomTargets[right]),'Zoom control targets must not overlap each other');
+      assert(initial.mapRect.left>=initial.viewRect.left&&initial.mapRect.right<=initial.viewRect.right&&initial.mapRect.top>=initial.viewRect.top&&initial.mapRect.bottom<=initial.viewRect.bottom,'Minimap must remain inside its rendered canvas view');
+      for(const selector of controls){
+        const target=root.locator(selector);assert.equal(await target.count(),1,`${selector} must be unique`);
+        await target.scrollIntoViewIfNeeded();
+        await target.evaluate(node=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+        const hit=await target.evaluate(node=>{const rect=node.getBoundingClientRect(),x=rect.left+rect.width/2,y=rect.top+rect.height/2,element=document.elementFromPoint(x,y);return {reachable:!!element&&(element===node||node.contains(element)),disabled:node.disabled};});
+        assert.equal(hit.reachable,true,`${selector} center must be an owned hit target`);assert.equal(hit.disabled,false,`${selector} must be enabled`);
+      }
+      const mapTarget=root.locator('[data-cs-minimap]');await mapTarget.scrollIntoViewIfNeeded();
+      await mapTarget.evaluate(node=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+      const mapHit=await mapTarget.evaluate(node=>{const rect=node.getBoundingClientRect(),x=rect.left+rect.width/2,y=rect.top+rect.height/2,element=document.elementFromPoint(x,y);return !!element&&(element===node||node.contains(element));});
+      assert.equal(mapHit,true,'Minimap center must be an owned hit target');
+      await root.evaluate(installCanvasNativeInputObservers);
+      try{
+        if(['canvas/CanvasGrid','canvas/Guides'].includes(identity)){
+          let beforePan,beforePaint,pageScroll;
+          const measureRulerTick=()=>root.evaluate(node=>{const stage=node.querySelector('[data-ws-canvas-scene] [data-cs-stage]'),ticks=[...stage.querySelectorAll('[data-cs-rulers] text')].filter(tick=>tick.textContent==='1100'),tick=ticks.length===1?ticks[0]:null,rect=tick?.getBoundingClientRect(),clip=stage.getBoundingClientRect();return {count:ticks.length,text:tick?.textContent??null,rect:rect?{left:rect.left,top:rect.top,right:rect.right,bottom:rect.bottom}:null,clip:{left:clip.left,top:clip.top,right:clip.right,bottom:clip.bottom}};});
+          await runStep('pan-ruler-1100',async()=>{
+            await begin();beforePan=await scene();
+            const stage=root.locator('[data-cs-stage]');assert.equal(await stage.count(),1,'The exact SVG stage is required for native ruler panning');
+            const point=await stage.evaluate(node=>{const rect=node.getBoundingClientRect(),x=rect.left+rect.width/2,y=rect.top+rect.height/2,hit=document.elementFromPoint(x,y);return {x,y,owned:!!hit&&(hit===node||node.contains(hit))};});
+            assert.equal(point.owned,true,'The chosen stage point must already be visible and owned; this action does not scroll it into view');
+            beforePaint=await measureRulerTick();
+            pageScroll=await root.page().evaluate(()=>({x:window.scrollX,y:window.scrollY}));
+            await root.page().mouse.move(point.x,point.y);await root.page().mouse.wheel(48,0);
+            await stage.evaluate(node=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+          },async(_state,_before,receipt)=>{
+            const observed=await fresh(),after=await scene(),afterPaint=await measureRulerTick();
+            const inputs=await root.evaluate(node=>node.__visualCanvasWheels),scrollAfter=await root.page().evaluate(()=>({x:window.scrollX,y:window.scrollY})),detail=observed[0]?.detail??null;
+            receipt.canvasRulerPanEvidence={before:beforePan,after,detail,nativeEvents:observed,nativeInputs:inputs,beforeTick:beforePaint,afterTick:afterPaint,pageScroll:{before:pageScroll,after:scrollAfter}};
+            assert.deepEqual(observed.map(event=>event.type),['ely:action'],'The native wheel must produce exactly one public viewport action');
+            assert.equal(detail.id,id);assert.equal(detail.component,identity);assert.equal(detail.action,'change-viewport');assert(detail.view,'Ruler pan must carry the public viewport');
+            assert.deepEqual(scrollAfter,pageScroll,'The wheel must not scroll the page');
+            const proof=assertCanvasRulerPan(beforePan,after,detail,{inputs,beforePaint,afterPaint});
+            await assertWorld(detail.view);return {action:detail.action,view:detail.view,expected:proof.expected,input:inputs[0],primitiveCounts:proof.primitiveCounts,ruler:{before:beforePaint,after:afterPaint,visibleArea:[proof.initialVisibleArea,proof.finalVisibleArea]}};
+          });
+        }
+        let beforeZoom;
+        await runStep('zoom-in',async()=>{await begin();beforeZoom=await scene();return clickVisibleControl(root.locator('[data-cs-zoom-in]'));},async()=>{
+          const observed=await fresh();assert.deepEqual(observed.map(event=>event.type),['ely:action']);
+          const detail=observed[0].detail;assert.equal(detail.id,id);assert.equal(detail.component,identity);assert.equal(detail.action,'change-viewport');assert(detail.view,'Viewport action must carry the public view');
+          const stops=[.1,.25,.5,.75,1,1.5,2,3,4,6,8],zoom=stops.find(value=>value>beforeZoom.view.zoom+.001)??beforeZoom.view.zoom,center={x:beforeZoom.stage.width/2,y:beforeZoom.stage.height/2};
+          const expected={zoom,x:beforeZoom.view.x+center.x/beforeZoom.view.zoom-center.x/zoom,y:beforeZoom.view.y+center.y/beforeZoom.view.zoom-center.y/zoom};
+          close(detail.view.zoom,expected.zoom,'Zoom-in must advance exactly one canonical zoom stop from the pre-click state');close(detail.view.x,expected.x,'Zoom-in must preserve the pre-click center anchor');close(detail.view.y,expected.y,'Zoom-in must preserve the pre-click center anchor');
+          await assertWorld(detail.view);return {action:detail.action,view:detail.view,expected,preClick:beforeZoom.view,events:observed};
+        });
+        const afterZoom=await scene();
+        await runStep('fit-canvas',async()=>{await begin();return clickVisibleControl(root.locator('[data-cs-fit]'));},async()=>{
+          const observed=await fresh();assert.deepEqual(observed.map(event=>event.type),['ely:action']);
+          const detail=observed[0].detail;assert.equal(detail.id,id);assert.equal(detail.component,identity);assert.equal(detail.action,'change-viewport');assert(detail.view,'Fit action must carry the public view');
+          const bounds=union(afterZoom.artboards),margin=48,zoom=Math.max(.1,Math.min(1,Math.min(Math.max(1,afterZoom.stage.width-2*margin)/Math.max(1,bounds.w),Math.max(1,afterZoom.stage.height-2*margin)/Math.max(1,bounds.h))));
+          const expected={zoom,x:bounds.x+bounds.w/2-afterZoom.stage.width/2/zoom,y:bounds.y+bounds.h/2-afterZoom.stage.height/2/zoom};
+          close(detail.view.zoom,expected.zoom,'Fit zoom must be derived from rendered artboards and stage dimensions');close(detail.view.x,expected.x,'Fit x must center rendered artboards');close(detail.view.y,expected.y,'Fit y must center rendered artboards');
+          await assertWorld(detail.view);return {action:detail.action,view:detail.view,expected,geometry:{stage:afterZoom.stage,artboards:afterZoom.artboards}};
+        });
+        let beforeMinimap;
+        await runStep('navigate-minimap',async()=>{await begin();beforeMinimap=await scene();return clickVisibleControl(root.locator('[data-cs-minimap]'));},async()=>{
+          const observed=await fresh();assert.deepEqual(observed.map(event=>event.type),['ely:action']);
+          const detail=observed[0].detail;assert.equal(detail.id,id);assert.equal(detail.component,identity);assert.equal(detail.action,'change-viewport');assert(detail.view,'Minimap action must carry the public view');
+          const clicks=await root.evaluate(node=>node.__visualCanvasClicks);assert.equal(clicks.length,1,'Exactly one native minimap pointer click must be observed');
+          const click=clicks[0];assert.equal(click.trusted,true,'Minimap activation must use a trusted native pointer click');
+          const point=await root.locator('[data-cs-minimap]').evaluate((map,click)=>{const local=new DOMPoint(click.x,click.y).matrixTransform(map.getScreenCTM().inverse());return {x:local.x,y:local.y};},click);
+          const expected=assertMinimapViewport(beforeMinimap,detail.view,{bounds:beforeMinimap.mapBounds.bounds,ratio:beforeMinimap.mapBounds.ratio,point});
+          await assertWorld(detail.view);return {action:detail.action,view:detail.view,expected,pointer:click};
+        });
+      }finally{await root.evaluate(node=>{node.removeEventListener('click',node.__visualCanvasClickObserver,true);node.removeEventListener('wheel',node.__visualCanvasWheelObserver);delete node.__visualCanvasClickObserver;delete node.__visualCanvasClicks;delete node.__visualCanvasWheelObserver;delete node.__visualCanvasWheels;});}
+      return;
+    }
+    if(contract.focusedSequence==='input-public-edit-clear'||contract.focusedSequence==='input-public-validity'||contract.focusedSequence==='input-public-special'){
+      const formatted=contract.focusedSequence==='input-public-validity'?formattedInputCases[identity]:null;
+      const special=contract.focusedSequence==='input-public-special'?nextInputCases[identity]:null;
+      const clearButton=identity==='forms/ClearableInput'||identity==='forms/SearchInput';
+      const field=root.locator(special?special.selector:formatted?`:scope > .ely-api-format-field input[name="caller_value"][type="${formatted.type}"]`:'.ely-api-input-primary input[name="caller_value"], :scope > .ely-api-width input[name="caller_value"]');
+      assert.equal(await field.count(),1,'Exact primary caller input must be unique; no first-input fallback');
+      const initial=await field.evaluate(node=>({name:node.name,type:node.type,value:node.value,disabled:node.disabled,readOnly:node.readOnly,required:node.required}));
+      assert.deepEqual(initial,{name:'caller_value',type:special?.type??formatted?.type??'text',value:special?.initial??formatted?.initial??await field.getAttribute('value'),disabled:false,readOnly:false,required:false});
+      if(special?.mask){assert.equal(await field.getAttribute('data-ely-mask'),special.mask);assert.equal(await root.locator('[data-ely-phone-country]').count(),0,'Canonical mask fixture has no country selector');}
+      const toggle=root.locator('[data-ui-component="password-input"] button[data-ui-action="password-toggle"]');
+      assert.equal(await toggle.count(),identity==='forms/PasswordInput'?1:0);
+      if(identity==='forms/PasswordInput'){assert.equal(await toggle.textContent(),'Show');assert.equal(await toggle.getAttribute('aria-label'),'Show password');assert.equal(await toggle.isEnabled(),true);}
+      const hint=identity==='forms/SearchInput'?root.locator(':scope > .ely-api-search > small'):null;
+      if(hint)assert.equal(await hint.textContent(),'Last recent search: nothing yet');
+      if(formatted?.type==='number')for(const key of ['min','max','step'])assert.equal(await field.getAttribute(key),formatted[key],'Exact source fixture numeric bound: '+key);
+      const peers=()=>root.evaluate((node,fieldId)=>[...node.querySelectorAll('input,textarea,select')].filter(field=>field.id!==fieldId).map(field=>[field.id,field.value,field.checked,field.disabled]),fieldId);
+      const fieldId=await field.getAttribute('id');assert(fieldId,'Primary input requires an exact rendered ID');
+      const initialPeers=await peers();
+      const clear=root.locator('[data-ui-component="clearable-input"] button[data-ui-action="clear"]');
+      assert.equal(await clear.count(),clearButton?1:0,'Clear control must match the exact alias fixture');
+      await root.evaluate((node,fieldId)=>{
+        node.__visualPlainInputEvents=[];
+        node.__visualPlainInputObserver=event=>{const control=event.type==='click'?event.target.closest?.('button[data-ui-action="clear"],button[data-ui-action="password-toggle"]'):event.target;if(control&&(control.id===fieldId||node.contains(control)&&control.matches('button[data-ui-action="clear"],button[data-ui-action="password-toggle"]')))node.__visualPlainInputEvents.push({type:event.type,value:control.matches('button[data-ui-action="password-toggle"]')?node.querySelector(`[id="${fieldId}"]`).value:control.value,isTrusted:event.isTrusted,defaultPrevented:event.defaultPrevented});};
+        for(const type of ['click','input','change'])node.addEventListener(type,node.__visualPlainInputObserver);
+      },fieldId);
+      const native=()=>root.evaluate(node=>node.__visualPlainInputEvents);
+      try{
+        for(const stage of contract.steps.map(step=>step.id)){
+          const invalid=stage.endsWith('invalid');
+          const value=special?.mask?(stage==='fill-partial'?special.partial:special.cooked):formatted?(invalid?formatted.invalid:formatted.valid):((special&&stage!=='clear-text')||stage==='fill-text'||stage==='commit-text')?'Changed caller value':'';
+          let nativeCursor;
+          await runStep(stage,async()=>{
+            await begin();nativeCursor=(await native()).length;
+            if(stage==='show-password'||stage==='hide-password')await toggle.click();
+            else if(stage.startsWith('fill-'))await field.fill(stage==='fill-masked'?special.raw:value);
+            else if(stage==='clear-text'){
+              if(clearButton)await clear.click();
+              else{await field.focus();await field.press('ControlOrMeta+a');await field.press('Backspace');}
+            }else await field.press('Tab');
+          },async()=>{
+            let validity;
+            if(special){const state=await field.evaluate(node=>({name:node.name,type:node.type,value:node.value,valid:node.checkValidity()}));if(stage==='show-password'||stage==='hide-password'){state.label=await toggle.textContent();state.ariaLabel=await toggle.getAttribute('aria-label');}validity=assertSpecialInputState(identity,stage,state);if(hint)assert.equal(await hint.textContent(),'Last recent search: nothing yet','Clear must not fabricate recent-search fulfillment');}
+            else if(formatted)validity=assertFormattedInputState(identity,await field.evaluate(node=>({name:node.name,type:node.type,value:node.value,min:node.min,max:node.max,step:node.step,validity:Object.fromEntries(['badInput','customError','patternMismatch','rangeOverflow','rangeUnderflow','stepMismatch','tooLong','tooShort','typeMismatch','valueMissing','valid'].map(key=>[key,node.validity[key]]))})),{invalid});
+            else{assert.equal(await field.inputValue(),value);assert.equal(await field.evaluate(node=>node.checkValidity()),true);}
+            const observed=await fresh();
+            if(formatted?stage.startsWith('commit-'):stage==='commit-text'||(stage==='clear-text'&&clearButton)||(stage==='commit-empty'&&!clearButton))assertFoundationPublicEvents(identity,id,observed,{value});
+            else assert.deepEqual(observed,[],'No premature or duplicate public change or host action');
+            const inputs=(await native()).slice(nativeCursor);assertPlainInputNativeEvents(stage.startsWith('fill-')?'fill-text':formatted?'commit-text':stage,inputs,{clearButton,value});
+            assert.deepEqual(await peers(),initialPeers,'Input actions must preserve sibling specimens');
+            return {value,...(formatted||special?{validity}:{}),events:observed,nativeEvents:inputs,twinUnchanged:true,peersUnchanged:true,scope:clearButton?'Trusted click; generated clear input/change are synthetic production events; no host fulfillment':identity==='forms/PasswordInput'?'Native input/blur and trusted visibility toggles only; no fabricated public toggle events or host fulfillment':special?.mask?`Exact ${identity} ${special.mask} mask only; native input/blur, no country switching or host fulfillment`:'Native input and blur only; no host fulfillment'};
+          });
+        }
+      }finally{await root.evaluate(node=>{for(const type of ['click','input','change'])node.removeEventListener(type,node.__visualPlainInputObserver);delete node.__visualPlainInputObserver;delete node.__visualPlainInputEvents;});}
+      return;
+    }
+    if(['button-public-boundary','textarea-public-multiline'].includes(contract.focusedSequence)){
+      await root.evaluate(node=>{
+        node.__visualNativeControls=[];
+        node.__visualNativeObserver=event=>node.__visualNativeControls.push({type:event.type,value:event.target.value,isTrusted:event.isTrusted,defaultPrevented:event.defaultPrevented});
+        for(const type of ['click','input','change'])node.addEventListener(type,node.__visualNativeObserver);
+      });
+      const native=()=>root.evaluate(node=>node.__visualNativeControls);
+      try{
+        if(contract.focusedSequence==='button-public-boundary'){
+          assert.equal(await root.locator('button').count(),14);
+          for(const value of ['primary','secondary','outline','ghost','subtle','danger','link']){
+            const control=root.locator(`button[value="${value}"]`);
+            assert.equal(await control.isEnabled(),true);assert.equal(await control.getAttribute('data-ely-action'),value);
+            await runStep(`click-${value}`,async()=>{await begin();await control.click();},async()=>{
+              const observed=await fresh();assertFoundationPublicEvents(identity,id,observed,{value});
+              assert.deepEqual((await native()).at(-1),{type:'click',value,isTrusted:true,defaultPrevented:false});return {events:observed};
+            });
+          }
+          await runStep('cancel-primary',async()=>{
+            await begin();await root.evaluate(node=>{node.__visualCancelAction=event=>event.preventDefault();node.addEventListener('ely:action',node.__visualCancelAction);});
+            try{await root.locator('button[value="primary"]').click();}
+            finally{await root.evaluate(node=>{node.removeEventListener('ely:action',node.__visualCancelAction);delete node.__visualCancelAction;});}
+          },async()=>{const observed=await fresh();assertFoundationPublicEvents(identity,id,observed,{value:'primary'});assert.deepEqual((await native()).at(-1),{type:'click',value:'primary',isTrusted:true,defaultPrevented:true});return {events:observed,scope:'Public cancellation only; application onClick callback not executed by harness'};});
+          for(const value of ['primary','secondary','outline','ghost','subtle','danger','link']){
+            const control=root.locator(`button[value="${value}-disabled"]`);assert.equal(await control.isDisabled(),true);
+            let before;
+            await runStep(`disabled-${value}`,async()=>{await begin();before=await native();await control.evaluate(node=>node.click());},async()=>{assert.deepEqual(await fresh(),[]);assert.deepEqual(await native(),before);return {disabled:true,scope:'native disabled DOM click; no trusted pointer action claimed'};});
+          }
+        }else{
+          const field=root.locator('textarea[data-ely-autoresize]');assert.equal(await field.count(),1);
+          const initial=await field.evaluate(node=>({name:node.name,value:node.value,disabled:node.disabled,readOnly:node.readOnly,required:node.required,rows:node.rows}));
+          assert.deepEqual(initial,{name:'caller_value',value:'',disabled:false,readOnly:false,required:false,rows:3});
+          const initialHeight=await field.evaluate(node=>node.getBoundingClientRect().height);
+          let multilineHeight;
+          for(const [suffix,value] of [['multiline','one\ntwo\nthree\nfour'],['empty','']]){
+            await runStep(suffix==='multiline'?'fill-multiline':'clear-text',async()=>{await begin();await field.fill(value);},async()=>{
+              assert.deepEqual(await fresh(),[]);assert.equal(await field.inputValue(),value);
+              const painted=await field.evaluate(node=>({height:parseFloat(node.style.height),scrollHeight:node.scrollHeight,valid:node.checkValidity()}));
+              assert(painted.height>0&&painted.height<=600&&Math.abs(painted.height-Math.min(600,painted.scrollHeight))<=2,'Textarea autoresize follows its actual scroll height');assert.equal(painted.valid,true);
+              const height=await field.evaluate(node=>node.getBoundingClientRect().height);
+              if(suffix==='multiline'){assert(height>initialHeight,'Four lines must grow the initial three-row fixture');multilineHeight=height;}
+              else assert(height<multilineHeight,'Clearing the fixture must shrink its multiline height');
+              assert.deepEqual((await native()).at(-1),{type:'input',value,isTrusted:true,defaultPrevented:false});return {value,painted};
+            });
+            await runStep(`commit-${suffix}`,async()=>{await begin();await field.press('Tab');},async()=>{const observed=await fresh();assertFoundationPublicEvents(identity,id,observed,{value});assert.deepEqual((await native()).at(-1),{type:'change',value,isTrusted:true,defaultPrevented:false});return {value,events:observed};});
+          }
+        }
+      }finally{await root.evaluate(node=>{for(const type of ['click','input','change'])node.removeEventListener(type,node.__visualNativeObserver);delete node.__visualNativeObserver;});}
+      return;
+    }
+    if(contract.focusedSequence==='eventlogger-public-timestamps'){
+      await root.evaluate(node=>{
+        const target=node.querySelector('[data-tool-event-target]'),log=node.querySelector('[data-tool-event-log]');
+        if(!target||!log||log.querySelector('time')||!log.querySelector('[data-tool-event-empty]'))throw new Error('EventLogger requires an empty observable timestamp origin');
+        const proof=node.__visualEventLogger={rawEvents:[],initialEmpty:true,consumedKeys:0,bubbledKeys:0};
+        proof.observe=event=>{if(!target.contains(event.target))return;const rect=target.getBoundingClientRect();proof.rawEvents.push({type:event.type,timeStamp:event.timeStamp,isTrusted:event.isTrusted,x:Number.isFinite(event.clientX)?Math.round(event.clientX-rect.left):undefined,y:Number.isFinite(event.clientY)?Math.round(event.clientY-rect.top):undefined,key:event.key,ctrlKey:event.ctrlKey,deltaX:event.deltaX,deltaY:event.deltaY,deltaMode:event.deltaMode});};
+        proof.bubble=()=>proof.bubbledKeys++;
+        for(const type of ['pointermove','pointerdown','pointerup','wheel','keydown','keyup'])node.addEventListener(type,proof.observe,true);
+        node.addEventListener('keydown',proof.bubble);
+      });
+      try{
+        for(const stage of contract.steps.map(step=>step.id))await runStep(stage,()=>root.evaluate((node,stage)=>{
+          const target=node.querySelector('[data-tool-event-target]'),field=target.querySelector('input'),proof=node.__visualEventLogger;
+          if(stage==='coalesce-pointer'){
+            const rect=target.getBoundingClientRect();
+            for(const [x,y]of [[10,12],[11,13]])target.dispatchEvent(new PointerEvent('pointermove',{bubbles:true,clientX:rect.left+x,clientY:rect.top+y}));
+          }else if(stage==='capture-consumed-key'){
+            const stop=event=>{proof.consumedKeys++;event.stopPropagation();};field.addEventListener('keydown',stop);
+            try{field.dispatchEvent(new KeyboardEvent('keydown',{key:'K',ctrlKey:true,bubbles:true,cancelable:true}));}
+            finally{field.removeEventListener('keydown',stop);}
+          }else if(stage==='wheel-units')target.dispatchEvent(new WheelEvent('wheel',{bubbles:true,deltaX:0,deltaY:4,deltaMode:1}));
+          else for(let index=0;index<55;index++)field.dispatchEvent(new KeyboardEvent('keydown',{key:String(index),bubbles:true,cancelable:true}));
+        },stage),async()=>{
+          assert.deepEqual(await fresh(),[],'EventLogger must not fabricate host actions or change events');
+          const observation=await root.evaluate(node=>{
+            const proof=node.__visualEventLogger,log=node.querySelector('[data-tool-event-log]');
+            if(log.querySelector('[data-tool-event-empty]'))throw new Error('Empty hint survived public input');
+            return {initialEmpty:proof.initialEmpty,rawEvents:proof.rawEvents,consumedKeys:proof.consumedKeys,bubbledKeys:proof.bubbledKeys,rows:[...log.children].map(row=>{const time=row.querySelector('time');if(!time)throw new Error('Event row has no timestamp');return {time:time.textContent,message:[...row.childNodes].filter(child=>child!==time).map(child=>child.textContent).join(''),text:row.textContent};})};
+          });
+          return assertEventLoggerPublicState(stage,observation);
+        });
+      }finally{
+        await root.evaluate(node=>{const proof=node.__visualEventLogger;for(const type of ['pointermove','pointerdown','pointerup','wheel','keydown','keyup'])node.removeEventListener(type,proof.observe,true);node.removeEventListener('keydown',proof.bubble);delete node.__visualEventLogger;});
+      }
+      return;
+    }
+    if(contract.focusedSequence==='task-due-submit'){
+      const form=root.locator('form[data-project-properties][data-ely-submit="update-task"]'),due=form.locator('input[type="date"][name="due"][data-project-property]');
+      assert.equal(await form.getAttribute('data-task-id'),'brief');
+      assert.equal(await due.inputValue(),'2026-10-12');assert.equal(await due.isEnabled(),true);
+      assert.equal(await form.locator('[name="status"]').inputValue(),'In progress');assert.equal(await form.locator('[name="assignee"]').inputValue(),'ana');
+      const entries=[['status','In progress'],['assignee','ana'],['due','2026-10-20']];
+      const dueChanges=()=>root.evaluate(()=>globalThis.__visualDirectDOMEvents.filter(event=>event.type==='change'&&event.target==='due').length);
+      let dueChangesBefore;
+      const checkForm=async()=>{assert.equal(await due.inputValue(),'2026-10-20');assert.equal(await form.evaluate(node=>node.checkValidity()),true);assert.deepEqual(await form.evaluate(node=>[...new FormData(node)]),entries);};
+      await runStep('change-due',async()=>{await begin();dueChangesBefore=await dueChanges();await due.fill('2026-10-20');},async()=>{
+        await checkForm();const observed=await fresh();assertStatusSelectDueEvents(observed,{id,identity,entries,nativeChangeCount:await dueChanges()-dueChangesBefore});
+        return {due:'2026-10-20',events:observed};
+      });
+      const submit=form.locator('button[type="submit"]');
+      const focused=()=>submit.evaluate(node=>document.activeElement===node);
+      const paintedUpdate=()=>submit.evaluate(node=>{
+        const rect=node.getBoundingClientRect(),style=getComputedStyle(node),x=rect.left+rect.width/2,y=rect.top+rect.height/2,hit=document.elementFromPoint(x,y);
+        return {focused:document.activeElement===node,focusVisible:node.matches(':focus-visible'),disabled:node.disabled,position:style.position,clipPath:style.clipPath,width:rect.width,height:rect.height,reachable:!!hit&&(hit===node||node.contains(hit))};
+      });
+      const assertPainted=state=>{assert.equal(state.focused,true);assert.equal(state.focusVisible,true);assert.equal(state.disabled,false);assert.equal(state.position,'static');assert.equal(state.clipPath,'none');assert(state.width>1&&state.height>1);assert.equal(state.reachable,true,'Keyboard-revealed submit must have reachable owned painted pixels');};
+      await runStep('reveal-update',async()=>{
+        await begin();assert.equal(await due.evaluate(node=>document.activeElement===node),true,'Tab navigation starts at the actual filled due field');
+        let tabs=0;
+        while(!await focused()&&tabs<8){await root.page().keyboard.press('Tab');tabs++;assert(await focused()||await due.evaluate(node=>document.activeElement===node),'Tab must not escape to another control or twin');}
+        assert(tabs>0&&await focused(),'Bounded real Tab navigation must reach Update');
+        return {method:'real Tab navigation from due',tabs,unfocusedPointer:contract.inputSupport.unfocusedPointer};
+      },async()=>{await checkForm();assert.deepEqual(await fresh(),[],'Keyboard reveal must not fabricate public changes or host actions');const painted=await paintedUpdate();assertPainted(painted);return {painted,unfocusedPointer:contract.inputSupport.unfocusedPointer};});
+      await runStep('submit-current-due',async()=>{await begin();assertPainted(await paintedUpdate());await root.page().keyboard.press('Enter');return {method:'native keyboard Enter',unfocusedPointer:contract.inputSupport.unfocusedPointer};},async()=>{await checkForm();const observed=await fresh();assert.deepEqual(observed.map(event=>[event.type,event.detail]),[['ely:action',{id,component:identity,action:'update-task',formData:entries,values:entries,submitter:''}]]);return {due:'2026-10-20',events:observed,unfocusedPointer:contract.inputSupport.unfocusedPointer};});
+    }else if(contract.focusedSequence==='remove-four-tags'){
+      const keys=['design','motion','accessibility','rust'],labels=['Design','Motion','Accessibility','Rust'];
+      const tagLabels=()=>root.locator('.ely-data__tag > span').allTextContents();
+      assert.deepEqual(await tagLabels(),['Research','Pinned','Urgent',...labels]);
+      assert.deepEqual(await root.locator('[data-ely-tag-remove]').evaluateAll(nodes=>nodes.map(node=>node.value)),keys);
+      for(let index=0;index<keys.length;index++){
+        const key=keys[index],control=root.locator(`[data-ely-tag-remove][value="${key}"]`);
+        assert.equal(await control.getAttribute('aria-label'),`Remove ${labels[index]}`);
+        await runStep(`remove-${key}`,async()=>{await begin();await control.click();},async()=>{assert.equal(await control.count(),0);assert.deepEqual(await tagLabels(),['Research','Pinned','Urgent',...labels.slice(index+1)]);assert.deepEqual(await root.locator('[data-ely-tag-remove]').evaluateAll(nodes=>nodes.map(node=>node.value)),keys.slice(index+1));const observed=await fresh();assert.deepEqual(observed.map(event=>[event.type,event.detail]),[['ely:action',{id,component:identity,action:'tag-remove',value:key}]]);return {remaining:keys.slice(index+1),events:observed};});
+      }
+    }else{
+      const trigger=root.locator('[data-interaction-menu][aria-haspopup="menu"]'),panelID=await trigger.getAttribute('aria-controls');
+      const panel=root.locator(`[id=${JSON.stringify(panelID)}][role="menu"]`);
+      assert.equal(await panel.getAttribute('id'),panelID);assert.equal(await panel.getAttribute('hidden'),'');
+      const state=()=>panel.locator('[data-interaction-menu-radio]').evaluateAll(nodes=>nodes.map(node=>({value:node.value,group:node.dataset.interactionMenuRadio,checked:node.getAttribute('aria-checked'),role:node.getAttribute('role')})));
+      const initial=await state();assert.equal(initial.length,6);assert(initial.every(row=>row.role==='menuitemradio'));
+      assert.deepEqual(initial.map(row=>[row.value,row.group,row.checked]),[['sidebar','default','true'],['minimap','default','false'],['status-bar','default','true'],['compact','density','false'],['standard','density','true'],['comfortable','density','false']]);
+      for(const [group,value] of [['default','minimap'],['density','compact']]){
+        const peers=(await state()).filter(row=>row.group!==group),target=panel.locator(`[data-interaction-menu-radio="${group}"][value="${value}"]`);
+        for(const repeat of [false,true])await runStep(`${repeat?'reselect':'select'}-${group}`,async()=>{await trigger.click();assert.equal(await trigger.getAttribute('aria-expanded'),'true');assert.equal(await panel.isVisible(),true);await begin();await target.click();},async()=>{
+          const current=await state();assert.deepEqual(current.filter(row=>row.group!==group),peers);assert(current.filter(row=>row.group===group).every(row=>row.checked===String(row.value===value)));
+          assert.equal(await panel.isVisible(),false);assert.equal(await trigger.getAttribute('aria-expanded'),'false');assert.equal(await trigger.evaluate(node=>document.activeElement===node),true);
+          const observed=await fresh();assert.deepEqual(observed.map(event=>[event.type,event.detail]),[['ely:change',{id,component:identity,name:group,value,checked:true}],['ely:action',{id,component:identity,action:'select',value,formData:null,values:[]}]]);assert(observed.every(event=>event.panelClosed===true&&event.focusReturned===true),'Dismissal and focus must settle before observers');return {group,value,reselected:repeat,state:current,events:observed};
+        });
+      }
+    }
+    return;
+  }
+  if(contract.focusedSequence==='hotkey-record-clear-restore'){
+    const input=root.locator('[data-ui-hotkey]'),glyph=root.locator('.ely-api-hotkey-glyph');
+    assert.equal(await input.count(),1,'Hotkey case must expose one recorder input');
+    assert.equal(await glyph.count(),1,'Hotkey case must expose its visible shortcut glyph');
+    const original=await input.inputValue();
+    await runStep('record-shortcut',async()=>{await input.focus();await input.press('Control+k');},async()=>{
+      assert.equal(await input.inputValue(),'Ctrl+K','Control+K must be recorded in the field');
+      const clearance=await input.evaluate(node=>{const glyph=node.closest('.ely-api-hotkey-control')?.querySelector('.ely-api-hotkey-glyph');if(!glyph)return null;const field=node.getBoundingClientRect(),mark=glyph.getBoundingClientRect(),style=getComputedStyle(node),reach=style.direction==='rtl'?field.right-mark.left:mark.right-field.left;return {padding:parseFloat(style.paddingInlineStart),reach,glyphVisible:glyph.getClientRects().length>0&&getComputedStyle(glyph).visibility!=='hidden'};});
+      assert(clearance?.glyphVisible,'Shortcut glyph must remain visible while recording');
+      assert(clearance.padding>clearance.reach,'Shortcut text inset must clear the painted glyph');
+      return {value:await input.inputValue(),glyphClearance:clearance};
+    });
+    await runStep('clear-shortcut',()=>input.press('Backspace'),async()=>{assert.equal(await input.inputValue(),'','Backspace must clear the recorded shortcut');return {value:''};});
+    await runStep('restore-shortcut',()=>input.press('Escape'),async()=>{assert.equal(await input.inputValue(),original,'Escape must restore the value captured on focus');return {value:original};});
+    return;
+  }
+  if(contract.focusedSequence==='signup-terms-label'){
+    const form=root.locator('form[data-suite-validate="SignupForm"]'),name=form.locator('input[name="name"]'),email=form.locator('input[name="email"]'),password=form.locator('input[name="password"]'),terms=form.locator('input[name="terms"]'),label=form.locator('label.ely-suite-terms'),submit=form.locator('button[type="submit"]');
+    assert.equal(await form.count(),1,'Signup fixture form must be unique');
+    await runStep('fill-name',()=>name.fill('Ada Lovelace'),async()=>{assert.equal(await name.inputValue(),'Ada Lovelace');return {name:await name.inputValue()};});
+    await runStep('fill-email',()=>email.fill('ada@example.test'),async()=>{assert.equal(await email.inputValue(),'ada@example.test');assert.equal(await email.evaluate(node=>node.checkValidity()),true);return {email:await email.inputValue(),valid:true};});
+    await runStep('fill-password',()=>password.fill('Example-only-123'),async()=>{assert.equal(await password.inputValue(),'Example-only-123');assert.equal(await form.evaluate(node=>node.checkValidity()),false,'Required terms must still block a complete signup draft');assert.equal(await terms.isChecked(),false);assert.equal(await submit.isDisabled(),true);return {passwordRules:await form.locator('[data-suite-rule]').evaluateAll(nodes=>nodes.map(node=>node.dataset.kept)),termsChecked:false,formValid:false,submitDisabled:true};});
+    await runStep('accept-terms-label',()=>clickVisibleControl(label),async()=>{assert.equal(await terms.isChecked(),true,'Activating the visible terms label must check its control');assert.equal(await form.evaluate(node=>node.checkValidity()),true,'The required checkbox must complete native form validity');assert.equal(await submit.isDisabled(),false,'A complete valid signup draft must enable its submit control');assert.equal(await terms.evaluate(node=>document.activeElement===node),true,'Label activation must move focus to the checkbox');return {termsChecked:true,focused:true,formValid:true,submitDisabled:false};});
+    return;
+  }
+  if(contract.focusedSequence==='tabs-panel-selection'){
+    const tabs=root.locator('[data-interaction-tab]:not(:disabled)'),enabled=await tabs.count();
+    assert(enabled>=2,'Tabs fixture must provide at least two enabled tabs');
+    await root.evaluate(node=>{node.__visualFocusedChanges=[];node.addEventListener('ely:change',event=>node.__visualFocusedChanges.push({...event.detail}));});
+    const changes=()=>root.evaluate(node=>node.__visualFocusedChanges.map(change=>({...change})));
+    const selected=root.locator('[data-interaction-tab][aria-selected="true"]');
+    assert.equal(await selected.count(),1,'Tabs fixture must begin with one selected tab');
+    let targetIndex=0;if(await tabs.nth(0).getAttribute('aria-selected')==='true')targetIndex=1;
+    const target=tabs.nth(targetIndex),forward=await target.evaluate(node=>node.closest('[role="tablist"]')?.getAttribute('aria-orientation')==='vertical'?'ArrowDown':'ArrowRight');
+    const assertSelectedPanel=async expected=>{
+      const chosen=root.locator('[data-interaction-tab][aria-selected="true"]'),panels=root.locator('[role="tabpanel"]:not([hidden])');
+      assert.equal(await chosen.count(),1,'Exactly one tab remains selected');assert.equal(await panels.count(),1,'Exactly one associated tab panel remains visible');
+      assert.equal(await chosen.getAttribute('aria-controls'),await panels.first().getAttribute('id'),'Visible panel must be the selected tab target');
+      if(expected)assert.equal(await chosen.getAttribute('value'),expected);
+      return {selected:await chosen.getAttribute('value'),panel:await panels.first().getAttribute('id'),visiblePanels:1};
+    };
+    let changesBefore=0;
+    const assertChange=async expected=>{const recorded=await changes(),event=recorded.slice(changesBefore).find(change=>change.name==='tab'&&change.value===expected&&change.selected===true);assert(event,'Tab selection must emit the documented ely:change payload');assert.deepEqual(event,{id:await root.getAttribute('id'),component:contract.identity,name:'tab',value:expected,selected:true});return event;};
+    await runStep('select-tab',async()=>{changesBefore=(await changes()).length;await target.click();},async()=>{assert.equal(await target.getAttribute('aria-selected'),'true');const panel=await assertSelectedPanel(await target.getAttribute('value')),event=await assertChange(panel.selected);return {...panel,change:event};});
+    await runStep('keyboard-select-tab',async()=>{changesBefore=(await changes()).length;await target.press(forward);},async()=>{const state=await assertSelectedPanel();assert.notEqual(state.selected,await target.getAttribute('value'),'Arrow navigation must move selection to another enabled tab');const event=await assertChange(state.selected);return {...state,key:forward,change:event};});
+    return;
+  }
+  if(contract.focusedSequence==='lottie-play-pause-frame-reset'){
+    const host=root.locator('[data-interaction-lottie]'),play=root.locator('[data-interaction-lottie-play]'),pause=root.locator('[data-interaction-lottie-pause]'),seek=root.locator('[data-interaction-lottie-seek]'),progress=root.locator('[data-interaction-lottie-progress]'),status=root.locator('[data-interaction-lottie-status]'),svg=root.locator('[data-lottie-canvas] svg');
+    assert.equal(await host.getAttribute('data-lottie-autoplay'),'false','Deterministic fixture must not autoplay');
+    assert.equal(await host.getAttribute('data-lottie-loop'),'false','Deterministic fixture must not loop');
+    await svg.waitFor({state:'visible',timeout:5000});
+    for(let attempt=0;attempt<40&&(await status.textContent()).trim()!=='Animation ready';attempt++)await new Promise(resolve=>setTimeout(resolve,25));
+    assert.equal((await status.textContent()).trim(),'Animation ready','Lottie SVG must finish loading before its initial frame is measured');
+    await root.evaluate(node=>{node.__visualFocusedChanges=[];node.addEventListener('ely:change',event=>node.__visualFocusedChanges.push({...event.detail}));});
+    const changes=()=>root.evaluate(node=>node.__visualFocusedChanges.map(change=>({...change})));
+    let changesBefore=0;
+    const assertFrameChange=async expected=>{const recorded=await changes(),event=recorded.slice(changesBefore).find(change=>change.name==='frame'&&change.value===String(expected));assert(event,`Lottie seek must emit ely:change frame=${expected}`);assert.deepEqual(event,{id:await root.getAttribute('id'),component:contract.identity,name:'frame',value:String(expected)});return event;};
+    assert.equal(await seek.inputValue(),'0','Non-autoplay Lottie fixture must start at frame zero');
+    assert.equal((await progress.textContent()).trim(),'0%','Non-autoplay Lottie fixture must report its initial frame');
+    const visibleFrame=async()=>{
+      assert(await svg.isVisible(),'Lottie SVG must remain visible');
+      const frame=await svg.evaluate(node=>{const paths=[...node.querySelectorAll('path')];const painted=paths.filter(path=>{const box=path.getBBox(),style=getComputedStyle(path);return box.width>0&&box.height>0&&style.display!=='none'&&style.visibility!=='hidden'&&Number(style.opacity)>0&&style.fill!=='none';});return {pathCount:paths.length,paintedPathCount:painted.length};});
+      assert(frame.paintedPathCount>0,'Current Lottie frame must contain a visible painted path');
+      return frame;
+    };
+    const visibleGeometry=async()=>svg.evaluate(node=>{const svgBox=node.getBoundingClientRect();return [...node.querySelectorAll('path')].flatMap(path=>{const shape=path.getBoundingClientRect(),style=getComputedStyle(path),box=path.getBBox();if(!box.width||!box.height||style.display==='none'||style.visibility==='hidden'||Number(style.opacity)<=0||style.fill==='none')return [];return [{x:shape.x-svgBox.x,y:shape.y-svgBox.y,width:shape.width,height:shape.height}];});});
+    const frame0Geometry=await visibleGeometry();assert(frame0Geometry.length>0,'Initial frame must expose visible fixture shape geometry');
+    await runStep('play-animation',()=>play.click(),async()=>{assert.equal((await status.textContent()).trim(),'Animation playing');const frame=await visibleFrame();return {status:(await status.textContent()).trim(),svgVisible:true,...frame};});
+    await runStep('pause-animation',()=>pause.click(),async()=>{assert.equal((await status.textContent()).trim(),'Animation paused');const frame=await visibleFrame();return {status:(await status.textContent()).trim(),svgVisible:true,...frame};});
+    let frame50Geometry=[];
+    await runStep('seek-visible-frame',async()=>{changesBefore=(await changes()).length;await seek.focus();await seek.press('Home');for(let index=0;index<50;index++)await seek.press('ArrowRight');},async()=>{assert.equal(await seek.inputValue(),'50');assert.equal((await progress.textContent()).trim(),'50%');const frame=await visibleFrame();frame50Geometry=await visibleGeometry();assert.equal(frame50Geometry.length,frame0Geometry.length,'Frame geometry must remain independently comparable');const movement=Math.max(...frame50Geometry.map((shape,index)=>Math.hypot(shape.x-frame0Geometry[index].x,shape.y-frame0Geometry[index].y,shape.width-frame0Geometry[index].width,shape.height-frame0Geometry[index].height)));assert(movement>4,`The visible marker must move at frame 50 (observed maximum geometry delta ${movement}px)`);const change=await assertFrameChange(50);return {frame:50,progress:(await progress.textContent()).trim(),svgVisible:true,maximumGeometryDelta:movement,geometry:frame50Geometry,change,...frame};});
+    await runStep('reset-visible-frame',async()=>{changesBefore=(await changes()).length;await seek.press('Home');},async()=>{assert.equal(await seek.inputValue(),'0');assert.equal((await progress.textContent()).trim(),'0%');const frame=await visibleFrame(),geometry=await visibleGeometry(),box=await svg.boundingBox();assert(box&&box.width>0&&box.height>0,'Reset frame must retain a painted SVG');assert.equal(geometry.length,frame0Geometry.length,'Reset geometry must match the original frame');const resetDelta=Math.max(...geometry.flatMap((shape,index)=>['x','y','width','height'].map(key=>Math.abs(shape[key]-frame0Geometry[index][key]))));assert(resetDelta<=1,`Reset frame must restore frame-zero shape geometry (observed maximum delta ${resetDelta}px)`);const change=await assertFrameChange(0);return {frame:0,progress:(await progress.textContent()).trim(),svgVisible:true,svgBounds:box,maximumResetGeometryDelta:resetDelta,geometry,change,...frame};});
+    return;
+  }
+  if(!contract.target){
+    await root.locator('[data-ui-component=map-view][data-map-ready=true]').waitFor();
+    const marker=root.locator('button[data-map-point]:not([hidden])').first(),popup=root.locator('[data-map-popup]');
+    assert.equal(await popup.isVisible(),false);
+    await runStep('open-popup',()=>marker.click(),async state=>{assert.equal(await popup.isVisible(),true);const text=(await popup.innerText()).trim();assert(text.length>0,'Open popup must paint caller content');assert(state.actions.some(action=>action.action==='select-marker'));return {visible:true,text:text.slice(0,200),marker:await marker.getAttribute('data-map-point')};});
+    return;
+  }
+  const [index,label,toggleName]=contract.target,tabs=root.locator('[data-ely-settings-tab]'),panel=root.locator(`[data-ely-settings-panel="${index}"]`);
+  assert.equal(await tabs.count(),8);assert.equal((await tabs.nth(index).textContent()).trim(),label);
+  assert.equal(await panel.isVisible(),false,'Target must start inactive so a real opening action is evidenced');
+  if(contract.variant==='ResetToDefault')await runStep('dirty-font',async()=>{const size=root.locator('input[name=size]');await size.evaluate(node=>{node.value='18';});await size.dispatchEvent('input');},async()=>{assert.equal(await root.locator('input[name=size]').inputValue(),'18');return {fontSize:'18'};});
+  await runStep('open-target-section',()=>tabs.nth(index).click(),async()=>{
+    assert.equal(await panel.isVisible(),true);const visible=await root.locator('[data-ely-settings-panel]').evaluateAll(nodes=>nodes.filter(node=>!node.hidden).map(node=>node.dataset.elySettingsPanel));assert.deepEqual(visible,[String(index)]);
+    const text=(await panel.innerText()).trim();assert(text.length>0);
+    if(contract.variant==='KeyboardShortcutsList'){assert(text.includes('Command palette')&&text.includes('Undo'));}
+    if(contract.variant==='NotificationSettings')assert.equal(await panel.locator('.ely-suite-settings-matrix input').count(),9);
+    return {panel:index,label,visible:true,text:text.slice(0,200)};
+  });
+  if(toggleName){
+    const toggle=panel.locator(`input[name="${toggleName}"]`),before=await toggle.isChecked();
+    const label=toggle.locator('xpath=ancestor::label[1]');
+    await runStep('toggle-target',async()=>clickVisibleControl(await label.count()?label:toggle),async()=>{const checked=await toggle.isChecked();assert.equal(checked,!before);assert.equal(await panel.isVisible(),true);return {panel:index,name:toggleName,before,checked};});
+  }
+  if(contract.variant==='ProxySettings')await runStep('manual-proxy',()=>root.locator('[data-suite-proxy-mode]').selectOption('manual'),async()=>{assert.equal(await root.locator('[data-suite-proxy-fields]').isVisible(),true);assert.equal(await root.locator('[data-suite-proxy-apply]').isDisabled(),true);return {mode:'manual',fieldsVisible:true,applyDisabled:true};});
+  if(contract.variant==='ResetToDefault')await runStep('reset-defaults',()=>clickVisibleControl(root.locator('[data-suite-reset-defaults]'),{allowKeyboard:true}),async()=>{assert.equal(await root.locator('input[name=size]').inputValue(),'14');assert.equal(await root.locator('[data-suite-reset-defaults]').isDisabled(),true);return {fontSize:'14',resetDisabled:true,summary:await root.locator('[data-suite-defaults-summary]').textContent()};});
+}
+
+export function assertNoOwnedLicenseViewerOverlays(inventory){
+  const owned=inventory.filter(item=>item.owned);
+  assert.equal(owned.length,0,`Unexpected owned LicenseViewer overlay${owned.length===1?'':'s'}: ${owned.map(item=>item.id||item.tag).join(', ')}`);
+  return owned;
+}
+
+// Runs in the page. A twin's descendants/references never confer ownership.
+export function ownedOverlayInventory(node){
+  const references=new Set(),owners=new Set([node.id,...[...node.querySelectorAll('[id]')].map(item=>item.id)].filter(Boolean));
+  const attributes=['aria-controls','popovertarget','data-foundation-dialog-open','data-interaction-dialog','data-ely-dialog-open'];
+  for(const control of [node,...node.querySelectorAll(attributes.map(name=>`[${name}]`).join(','))])for(const attribute of attributes)for(const value of(control.getAttribute(attribute)||'').split(/\s+/))if(value)references.add(value.replace(/^#/,''));
+  const selectorAll='dialog[open],:popover-open,[role=dialog],[role=menu],[role=region],[data-ely-portal]';
+  const idElements=[...document.querySelectorAll('[id]')],rootIDs=idElements.filter(element=>element.id===node.id);
+  const candidates=[...document.querySelectorAll(selectorAll)]
+    .filter(element=>{const rect=element.getBoundingClientRect();return rect.width>0&&rect.height>0&&element.checkVisibility({checkOpacity:true,checkVisibilityCSS:true});})
+  let calendarPanel=null;
+  if(node.id&&rootIDs.length===1&&rootIDs[0]===node&&['calendar/EventPopover','calendar/AttendeeList'].includes(node.dataset.elyComponent)&&node.dataset.elyKind==='EventPopover'){
+    const triggers=[...node.querySelectorAll('[data-calendar-popover-open]')];
+    const references=(triggers[0]?.getAttribute('aria-controls')||'').trim().split(/\s+/).filter(Boolean);
+    const visible=[...node.querySelectorAll('article[data-calendar-popover]')].filter(element=>{
+      const rect=element.getBoundingClientRect();
+      return element.id&&element.checkVisibility({checkOpacity:true,checkVisibilityCSS:true})&&rect.width>0&&rect.height>0;
+    });
+    const matchingIDs=idElements.filter(element=>element.id===references[0]);
+    if(triggers.length===1&&triggers[0].getAttribute('aria-expanded')==='true'&&references.length===1&&visible.length===1&&visible[0].id===references[0]&&matchingIDs.length===1&&matchingIDs[0]===visible[0]){
+      calendarPanel=visible[0];
+      if(!candidates.includes(calendarPanel))candidates.push(calendarPanel);
+    }
+  }
+  let multiPanel=null;
+  const multiSelector='[data-ely-multi-source] [data-ui-multi-list][role=group]';
+  if(node.id&&rootIDs.length===1&&rootIDs[0]===node&&node.dataset.elyComponent==='forms/MultiSelect'&&node.dataset.elyKind==='MultiSelect'&&node.matches('[data-audit-main]>[data-ely-family]')){
+    const entries=[...node.querySelectorAll('[data-ely-multi-entry][role=combobox]')],sources=[...node.querySelectorAll('[data-ely-multi-source][data-ui-component="multi-select"]')];
+    const refs=(entries[0]?.getAttribute('aria-controls')||'').trim().split(/\s+/).filter(Boolean);
+    const panels=[...node.querySelectorAll(multiSelector)],matchingIDs=idElements.filter(element=>element.id===refs[0]),panel=panels[0];
+    if(entries.length===1&&entries[0].getAttribute('aria-expanded')==='true'&&refs.length===1&&sources.length===1&&sources[0].classList.contains('is-open')&&entries[0].closest('[data-ely-multi-source]')===sources[0]&&entries[0].closest('[data-ely-family]')===node&&panels.length===1&&panel.id===refs[0]&&matchingIDs.length===1&&matchingIDs[0]===panel&&panel.closest('[data-ely-multi-source]')===sources[0]&&panel.closest('[data-ely-family]')===node&&panel.checkVisibility({checkOpacity:true,checkVisibilityCSS:true})){
+      const rect=panel.getBoundingClientRect();
+      if(rect.width>0&&rect.height>0){multiPanel=panel;if(!candidates.includes(panel))candidates.push(panel);}
+    }
+  }
+  return candidates.map(element=>{
+      const calendar=element===calendarPanel,selector=calendar?'article[data-calendar-popover]:visible':element===multiPanel?multiSelector:selectorAll;
+      const inside=node.contains(element),foreign=element.closest('[data-audit-main]>[data-ely-family],[data-audit-twin]>[data-ely-family],[data-audit-main]>[data-basic-component],[data-audit-twin]>[data-basic-component]')||element.closest('[data-ely-family]');
+      const explicitOwner=element.getAttribute('data-ely-owner')?.replace(/^#/,'');
+      const scope=foreign&&!inside&&foreign!==node&&!owners.has(foreign.id)?'foreign-component':explicitOwner&&!owners.has(explicitOwner)?'foreign-portal-owner':owners.has(explicitOwner)?'portal-owner-attribute':references.has(element.id)?'trigger-reference':inside&&!element.matches('[role=region]')?'component-root':'unowned';
+      const rect=element.getBoundingClientRect();
+      return {tag:element.tagName,id:element.id||null,role:element.getAttribute('role'),text:(element.innerText||'').trim().slice(0,180),bounds:{x:rect.x,y:rect.y,width:rect.width,height:rect.height},
+        nativeOpen:element.matches('dialog')?element.open:null,popoverOpen:element.matches(':popover-open'),locatorSelector:selector,locatorIndex:calendar?0:[...document.querySelectorAll(selector)].indexOf(element),
+        ownerID:explicitOwner||null,checkedRootID:node.id,openerReferences:[...node.querySelectorAll('[aria-controls]')].filter(control=>(control.getAttribute('aria-controls')||'').split(/\s+/).includes(element.id)).map(control=>({id:control.id||null,ariaControls:control.getAttribute('aria-controls')})),
+        ownershipScope:scope,owned:['component-root','portal-owner-attribute','trigger-reference'].includes(scope)};
+    });
+}

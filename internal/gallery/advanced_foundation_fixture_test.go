@@ -192,6 +192,51 @@ func TestFoundationLayoutRegionsPreserveCallerFallbacks(t *testing.T) {
 	}
 }
 
+func TestDockGalleryFixtureStartsEnabledAndPreservesExplicitDisabled(t *testing.T) {
+	server, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixture := testFixture(t, func() map[string]AdvancedCase {
+		fixtures := make(map[string]AdvancedCase)
+		for _, candidate := range advancedFoundationCases() {
+			fixtures[candidate.Component.Chapter+"/"+candidate.Component.Name] = candidate
+		}
+		return fixtures
+	}(), "layout/Dock")
+	if fixture.Component.Props["Disabled"] != false {
+		t.Fatalf("Dock gallery fixture Disabled = %v, want false", fixture.Component.Props["Disabled"])
+	}
+	for _, id := range []string{"dock-main", "dock-twin"} {
+		t.Run(id, func(t *testing.T) {
+			component := fixture.Component
+			component.ID = id
+			var output bytes.Buffer
+			if err := ui.RenderComponent(server.templates, &output, component); err != nil {
+				t.Fatal(err)
+			}
+			body := output.String()
+			if !strings.Contains(body, `id="`+id+`"`) || strings.Contains(body, `data-ely-disabled="true"`) || strings.Contains(body, `<fieldset class="ely-api-disabled" disabled>`) {
+				t.Fatalf("enabled Dock %s rendered disabled: %s", id, body)
+			}
+		})
+	}
+	component := fixture.Component
+	component.ID = "dock-explicit-disabled"
+	component.Props = make(map[string]any, len(fixture.Component.Props))
+	for key, value := range fixture.Component.Props {
+		component.Props[key] = value
+	}
+	component.Props["Disabled"] = true
+	var output bytes.Buffer
+	if err := ui.RenderComponent(server.templates, &output, component); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), `data-ely-disabled="true"`) || !strings.Contains(output.String(), `<fieldset class="ely-api-disabled" disabled>`) {
+		t.Fatalf("explicitly disabled Dock lost native disabled semantics: %s", output.String())
+	}
+}
+
 func testFixture(t *testing.T, fixtures map[string]AdvancedCase, name string) AdvancedCase {
 	t.Helper()
 	fixture, ok := fixtures[name]

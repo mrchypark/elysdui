@@ -5,6 +5,8 @@ import {runInNewContext} from 'node:vm';
 // Execute the entire production runtime against a small, deterministic DOM.
 // The browser companion exercises these same swaps using bundled HTMX itself.
 const source = readFileSync(new URL('../../assets/ely-controls.js', import.meta.url), 'utf8');
+const controlsCSS = readFileSync(new URL('../../assets/ely-controls.css', import.meta.url), 'utf8');
+const formsCSS = readFileSync(new URL('../../assets/ely-api-forms.css', import.meta.url), 'utf8');
 const dataKey = name => name.slice(5).replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
 class DOMEvent {
   constructor(type, options = {}) { Object.assign(this, {type, bubbles: false, detail: undefined}, options); }
@@ -17,6 +19,8 @@ class Element {
     this.dataset = {};
     this.children = [];
     this.listeners = new Map();
+    this.rect = {width: 200, height: 100, left: 0, top: 0};
+    this.context2d = {calls: [], setTransform(...args) { this.calls.push(['setTransform', ...args]); }, clearRect(...args) { this.calls.push(['clearRect', ...args]); }, drawImage(...args) { this.calls.push(['drawImage', ...args]); }, beginPath() { this.calls.push(['beginPath']); }, moveTo(...args) { this.calls.push(['moveTo', ...args]); }, lineTo(...args) { this.calls.push(['lineTo', ...args]); }, stroke() { this.calls.push(['stroke']); }};
     this.value = '';
     this.hidden = this.disabled = this.required = false;
     for (const [name, value] of Object.entries(attributes)) this.setAttribute(name, value);
@@ -86,8 +90,8 @@ class Element {
   setCustomValidity(message) { this.validationMessage = message; }
   focus() { document.activeElement = this; }
   scrollIntoView() {}
-  getBoundingClientRect() { return {width: 200, height: 100, left: 0, top: 0}; }
-  getContext() { return {setTransform() {}, clearRect() {}, drawImage() {}, beginPath() {}, moveTo() {}, lineTo() {}, stroke() {}}; }
+  getBoundingClientRect() { return this.rect; }
+  getContext() { return this.context2d; }
   setPointerCapture() {}
   toDataURL() { return 'data:image/png;base64,drawn'; }
 }
@@ -276,6 +280,110 @@ const apiSource = readFileSync(new URL('../../assets/ely-api.js', import.meta.ur
 runInNewContext(apiSource.replaceAll('export ', '') + '\nregister("audit", () => {}); window.auditMount = mount;', {
   ...context, CustomEvent: DOMEvent, MutationObserver: class { observe() {} },
 });
+
+// FontPicker's unnamed search editor may emit native change on blur, but its
+// selected named value remains the sole host onChange commit.
+const fontChanges = [];
+const fontRoot = element('section', {'data-ely-family': 'audit', 'data-ely-component': 'forms/FontPicker', id: 'font-picker'});
+const fontValue = valueInput('', {name: 'caller_value'});
+fontValue.checked = false;
+const fontSearch = marked('data-ui-combobox-input', 'input', {type: 'text'});
+fontSearch.name = '';
+fontRoot.append(fontValue, fontSearch);
+body.append(fontRoot);
+window.auditMount(fontRoot, {onChange: detail => fontChanges.push({
+  keys: Object.keys(detail).sort(), id: detail.id, component: detail.component,
+  name: detail.name, value: detail.value, checked: detail.checked, type: detail.type,
+})});
+let nativeBlurChanges = 0;
+let bubbledBlurChanges = 0;
+fontSearch.addEventListener('change', () => nativeBlurChanges++);
+fontRoot.addEventListener('change', event => { if (event.target === fontSearch) bubbledBlurChanges++; });
+fontSearch.value = 'Georgia';
+const searchBlurChange = new DOMEvent('change', {bubbles: true});
+assert.equal(fontSearch.dispatchEvent(searchBlurChange), true, 'FontPicker search blur change remains uncancelled');
+assert.equal(searchBlurChange.defaultPrevented, undefined, 'bridge does not prevent the native search change');
+assert.equal(nativeBlurChanges, 1, 'native search listeners still receive blur change');
+assert.equal(bubbledBlurChanges, 1, 'native search change still bubbles to the FontPicker root');
+assert.equal(fontChanges.length, 0, 'unnamed FontPicker search blur does not notify host onChange');
+
+fontValue.value = 'Georgia';
+fontValue.dispatchEvent(new DOMEvent('input', {bubbles: true}));
+const hiddenCommitChange = new DOMEvent('change', {bubbles: true});
+assert.equal(fontValue.dispatchEvent(hiddenCommitChange), true, 'named hidden commit change remains uncancelled');
+assert.equal(hiddenCommitChange.defaultPrevented, undefined, 'bridge does not prevent the native hidden change');
+assert.deepEqual(fontChanges, [{
+  keys: ['checked', 'component', 'id', 'name', 'type', 'value'],
+  id: 'font-picker', component: 'forms/FontPicker', name: 'caller_value',
+  value: 'Georgia', checked: false, type: 'hidden',
+}], 'named selected value emits exactly one six-field host commit');
+const postCommitBlurChange = new DOMEvent('change', {bubbles: true});
+assert.equal(fontSearch.dispatchEvent(postCommitBlurChange), true, 'post-commit FontPicker search blur remains uncancelled');
+assert.equal(postCommitBlurChange.defaultPrevented, undefined, 'post-commit blur does not prevent the native search change');
+assert.equal(nativeBlurChanges, 2, 'native search listeners receive blur before and after selection commit');
+assert.equal(bubbledBlurChanges, 2, 'both native search changes bubble to the FontPicker root');
+assert.equal(fontChanges.length, 1, 'search blur after hidden selection does not emit a second host callback');
+
+// Named searches and ordinary value inputs retain their change callbacks.
+const namedSearch = marked('data-ui-combobox-input', 'input', {type: 'text', name: 'search_query'});
+fontRoot.append(namedSearch);
+namedSearch.value = 'Georgia';
+namedSearch.dispatchEvent(new DOMEvent('change', {bubbles: true}));
+assert.equal(fontChanges.length, 2, 'named search controls retain bridge behavior');
+assert.equal(fontChanges[1].name, 'search_query');
+
+const ordinaryUnnamed = element('input', {type: 'text'});
+ordinaryUnnamed.name = '';
+ordinaryUnnamed.value = 'ordinary';
+fontRoot.append(ordinaryUnnamed);
+ordinaryUnnamed.dispatchEvent(new DOMEvent('change', {bubbles: true}));
+assert.equal(fontChanges.length, 3, 'unmarked unnamed ordinary inputs retain bridge behavior');
+assert.equal(fontChanges[2].name, '');
+assert.equal(fontChanges[2].type, 'text');
+const unnamedHidden = valueInput('unmarked-hidden');
+unnamedHidden.name = '';
+unnamedHidden.checked = false;
+fontRoot.append(unnamedHidden);
+unnamedHidden.dispatchEvent(new DOMEvent('change', {bubbles: true}));
+assert.equal(fontChanges.length, 4, 'unnamed hidden value controls retain bridge behavior');
+assert.equal(fontChanges[3].name, '');
+assert.equal(fontChanges[3].type, 'hidden');
+
+const countryChanges = [];
+const countryRoot = element('section', {'data-ely-family': 'audit', 'data-ely-component': 'forms/CountrySelect', id: 'country-select'});
+const countryValue = valueInput('alpha', {name: 'caller_value'});
+countryValue.checked = false;
+const countrySearch = marked('data-ui-combobox-input', 'input', {type: 'text'});
+countrySearch.name = '';
+countryRoot.append(countryValue, countrySearch);
+body.append(countryRoot);
+window.auditMount(countryRoot, {onChange: detail => countryChanges.push({
+  keys: Object.keys(detail).sort(), id: detail.id, component: detail.component,
+  name: detail.name, value: detail.value, checked: detail.checked, type: detail.type,
+})});
+countryValue.value = 'beta';
+countryValue.dispatchEvent(new DOMEvent('input', {bubbles: true}));
+const countryCommit = new DOMEvent('change', {bubbles: true});
+assert.equal(countryValue.dispatchEvent(countryCommit), true, 'CountrySelect hidden value change remains uncancelled');
+assert.deepEqual(countryChanges, [{
+  keys: ['checked', 'component', 'id', 'name', 'type', 'value'],
+  id: 'country-select', component: 'forms/CountrySelect', name: 'caller_value',
+  value: 'beta', checked: false, type: 'hidden',
+}], 'CountrySelect selection reports the committed value once');
+countrySearch.value = 'Caller Beta';
+let countryNativeChanges = 0;
+let countryBubbledChanges = 0;
+countrySearch.addEventListener('change', () => countryNativeChanges++);
+countryRoot.addEventListener('change', event => { if (event.target === countrySearch) countryBubbledChanges++; });
+const countryBlurChange = new DOMEvent('change', {bubbles: true});
+assert.equal(countrySearch.dispatchEvent(countryBlurChange), true, 'CountrySelect search blur change remains uncancelled');
+assert.equal(countryBlurChange.defaultPrevented, undefined, 'CountrySelect search blur is not prevented');
+assert.equal(countryNativeChanges, 1, 'native CountrySelect search listener receives blur change');
+assert.equal(countryBubbledChanges, 1, 'CountrySelect search blur change bubbles to its root');
+assert.equal(countryChanges.length, 1, 'CountrySelect search blur does not emit a second host callback');
+assert.equal(countryChanges[0].value, 'beta', 'search display Caller Beta does not replace selected value beta');
+console.log('Shared combobox search blur, selected values, and bridge scope passed');
+
 const changes = [], inputEvents = [];
 const fixture = controls('commit-events');
 fixture.tagValue.name = 'tags';
@@ -321,3 +429,50 @@ fixture.tagEntry.disabled = true; fixture.slots[0].disabled = true;
 fixture.tagEntry.value = 'blocked'; fixture.tagEntry.dispatchEvent(new DOMEvent('keydown', {bubbles: true, key: 'Enter'})); paste('1111');
 assert.equal(changes.length, 6, 'disabled editors do not notify changes');
 console.log('Composite tag/PIN named input/change events and host callbacks passed');
+
+function cssDeclarations(css, selector) {
+  const rule = css.split('\n').find(line => line.startsWith(`${selector}{`));
+  assert(rule, `Missing exact CSS rule: ${selector}`);
+  return Object.fromEntries(rule.slice(rule.indexOf('{') + 1, rule.lastIndexOf('}')).split(';').filter(Boolean).map(declaration => {
+    const separator = declaration.indexOf(':');
+    return [declaration.slice(0, separator).trim(), declaration.slice(separator + 1).trim()];
+  }));
+}
+const signatureRootCSS = cssDeclarations(controlsCSS, '[data-ui-component="signature-pad"]');
+assert.equal(signatureRootCSS['inline-size'], 'min(420px,100%)', 'SignaturePad retains its desktop width while fitting a narrow parent');
+assert.equal(signatureRootCSS['min-inline-size'], '0', 'SignaturePad may shrink below canvas intrinsic width');
+const signatureCanvasCSS = cssDeclarations(controlsCSS, '.ui-signature-surface [data-ui-signature]');
+assert.equal(signatureCanvasCSS['inline-size'], '100%');
+assert.equal(signatureCanvasCSS['max-inline-size'], '100%');
+assert.equal(signatureCanvasCSS['min-inline-size'], '0');
+assert.equal(signatureCanvasCSS['block-size'], '160px', 'Responsive width preserves the existing canvas height');
+const inlineFormCSS = cssDeclarations(formsCSS, "[data-ely-family='forms'] .ely-api-inline-form");
+assert.equal(inlineFormCSS['inline-size'], 'min(30rem,100%)', 'InlineForm retains its desktop width while fitting a narrow parent');
+assert.equal(inlineFormCSS['min-inline-size'], '0');
+const inlineFieldsetCSS = cssDeclarations(formsCSS, "[data-ely-family='forms'] .ely-api-inline-form>fieldset");
+assert.equal(inlineFieldsetCSS['min-inline-size'], '0', 'InlineForm fieldset cannot impose its min-content width');
+assert.equal(inlineFieldsetCSS['max-inline-size'], '100%');
+
+const responsiveSignature = controls('responsive-signature');
+responsiveSignature.canvas.rect = {left: 30, top: 40, width: 308, height: 160};
+const responsiveHost = element('main'); body.append(responsiveHost);
+responsiveHost.replaceChildren(...responsiveSignature.nodes);
+window.devicePixelRatio = 2;
+afterSwap(form, responsiveHost, 'innerHTML');
+assert.equal(responsiveSignature.canvas.width, 616, 'Initial backing width follows the rendered CSS width and DPR');
+assert.equal(responsiveSignature.canvas.height, 320);
+const signatureResize = ResizeObserver.instances.findLast(observer => observer.canvas === responsiveSignature.canvas);
+assert(signatureResize, 'The responsive canvas has an observed size');
+responsiveSignature.canvas.rect = {left: 30, top: 40, width: 290, height: 160};
+signatureResize.callback();
+assert.equal(responsiveSignature.canvas.width, 580, 'ResizeObserver recalibrates backing pixels after a width change');
+assert(responsiveSignature.canvas.context2d.calls.some(call => call[0] === 'setTransform' && call[1] === 2), 'Resize retains device-pixel-ratio drawing coordinates');
+responsiveSignature.canvas.dispatchEvent(new DOMEvent('pointerdown', {button: 0, pointerId: 7, clientX: 50, clientY: 60}));
+responsiveSignature.canvas.dispatchEvent(new DOMEvent('pointermove', {pointerId: 7, clientX: 80, clientY: 100}));
+responsiveSignature.canvas.dispatchEvent(new DOMEvent('pointerup', {pointerId: 7}));
+assert(responsiveSignature.canvas.context2d.calls.some(call => call[0] === 'moveTo' && call[1] === 20 && call[2] === 20), 'Pointer origin uses CSS coordinates relative to the resized canvas');
+assert(responsiveSignature.canvas.context2d.calls.some(call => call[0] === 'lineTo' && call[1] === 50 && call[2] === 60), 'Pointer movement remains aligned after backing-store rescale');
+assert.equal(responsiveSignature.signatureValue.value, 'data:image/png;base64,drawn', 'Responsive drawing retains the existing serialized value contract');
+window.devicePixelRatio = 1;
+responsiveHost.remove();
+console.log('Responsive SignaturePad and InlineForm constraints plus resized-canvas DPR/pointer calibration passed');

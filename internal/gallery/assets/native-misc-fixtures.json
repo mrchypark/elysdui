@@ -99,12 +99,11 @@
     ]
   },
   "BarcodeDisplay": {
-    "SourceNote": "Each has one home, shown on its own chapter's page: BarcodeDisplay is data_display::Barcode, Signature is forms::SignaturePad, and Rating Widget is forms::Rating.",
+    "SourceNote": "BarcodeDisplay, Signature, and Rating Widget are source-only in this native demo; their platform controls are not implemented here.",
     "HideHeader": true,
     "PreviewExamples": [
       {}
-    ],
-    "SourceDescriptionOnly": true
+    ]
   },
   "Poll": {
     "Label": "Which chart should come next?",

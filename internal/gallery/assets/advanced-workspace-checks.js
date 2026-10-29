@@ -45,7 +45,7 @@ const devtoolsSource = async ({root,actions}) => {
       assert(one(root,'[data-dt-resolved-url]').textContent==='https://staging.api.example.com/v1/orders?status=open&limit=20','resolved address wrong');one(root,'[aria-label="Show token"]').click();choose('[aria-label="Environment"]','production');assert(one(root,'[aria-label="Show token"]')&&!one(root,'[data-dt-panel="collections"]').textContent.includes('sk_live_91c07e'),'environment switch leaked secret');one(root,'[data-dt-send-request]').click();const sent=actions.findLast(a=>a.action==='send-request');assert(sent?.request.params.length===2&&sent.address.startsWith('https://api.example.com/'),'request payload lost pairs or environment');one(root,'[data-dt-response-tab="Headers"]').click();assert(one(root,'[data-dt-panel="response"]').textContent.includes('x-request-id'),'response headers missing');break;
     }
     case 'WebSocketConsole': {
-      const before=one(root,'[data-dt-socket-log]').children.length;const draft=input('[data-dt-socket-draft]','ping');key(draft,'Enter');assert(actions.findLast(a=>a.action==='send-socket')?.text==='ping'&&draft.value==='','socket send/clear failed');assert(one(root,'[data-dt-socket-log]').children.length===before,'socket fabricated a sent message');one(root,'[data-dt-socket-toggle]').click();assert(actions.findLast(a=>a.action==='toggle-socket')?.state==='open','socket host toggle missing');break;
+      const before=one(root,'[data-dt-socket-log]').children.length;const draft=await input('[data-dt-socket-draft]','ping');key(draft,'Enter');assert(actions.findLast(a=>a.action==='send-socket')?.text==='ping'&&draft.value==='','socket send/clear failed');assert(one(root,'[data-dt-socket-log]').children.length===before,'socket fabricated a sent message');one(root,'[data-dt-socket-toggle]').click();assert(actions.findLast(a=>a.action==='toggle-socket')?.state==='open','socket host toggle missing');break;
     }
     case 'GraphQLExplorer': {
       input('[data-dt-graphql-variables]','{');assert(one(root,'[data-dt-graphql-run]').disabled,'GraphQL accepted invalid variables');input('[data-dt-graphql-variables]','{"id":"42"}');one(root,'[data-dt-graphql-run]').click();assert(actions.findLast(a=>a.action==='run-graphql')?.variables==='{"id":"42"}','GraphQL lost current variables');key(one(root,'[data-dt-key="Order"]'),'ArrowRight');key(one(root,'[data-dt-key="Order.id"]'),'Enter');assert(actions.findLast(a=>a.action==='pick-graphql-field')?.path==='Order.id','schema field callback lost path');break;
@@ -60,7 +60,7 @@ const devtoolsSource = async ({root,actions}) => {
   }
 };
 const code = async ({root,actions,twin}) => {
-  if(root.querySelector("[data-ws-devtools-source]"))return devtoolsSource({root,actions});
+  if(root.querySelector("[data-ws-devtools-source]"))return await devtoolsSource({root,actions});
   if(root.dataset.elyComponent==='editor/MiniMap'){const minimap=one(root,'[data-ws-minimap]');assert(!minimap.querySelector('[contenteditable]')&&minimap.textContent.includes('func'),'MiniMap must be a standalone read-only control');return;}
   const editor = one(root, '[data-workspace-rich]');
   if(root.dataset.elyKind==='CodeEditor'){const minimap=one(root,'[data-ws-minimap]');assert(!minimap.querySelector('[contenteditable]')&&minimap.textContent.includes('func'),'CodeEditor minimap must be a standalone read-only control');const fold=one(root,'[data-ws-code-line="2"] [data-ws-fold]');fold.click();assert(fold.getAttribute('aria-expanded')==='true'&&actions.findLast(a=>a.action==='toggle-code-fold')?.line==='2','code fold did not toggle');assert(one(root,'[data-ws-syntax="keyword"]').textContent==='func'&&one(root,'[data-ws-diagnostic="warning"]').textContent==='Caller warning','caller code decorations missing');one(root,'[data-ws-code-lens="references"]').click();assert(actions.findLast(a=>a.action==='run-code-lens')?.lens==='references','code lens did not emit');one(root,'[data-ws-editor-tool="toggle-minimap"]').click();assert(actions.findLast(a=>a.action==='editor-tool')?.tool==='toggle-minimap','editor toolbar did not emit its caller action');one(root,'[data-ws-editor-breadcrumb="src/worker.go"]').click();assert(actions.findLast(a=>a.action==='open-code-location')?.location==='src/worker.go','editor breadcrumb did not emit its caller location');}
@@ -189,7 +189,7 @@ const data = async ({root}) => {
   row.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', bubbles: true})); assert(row.tabIndex === 0 && row.getAttribute('aria-selected') === 'true', 'data row did not select');
 };
 const filesDevtools = async ({root,actions,expectError}) => {
-  if(root.querySelector("[data-ws-devtools-source]"))return devtoolsSource({root,actions});
+  if(root.querySelector("[data-ws-devtools-source]"))return await devtoolsSource({root,actions});
   const kind=root.dataset.elyKind;
   switch(kind) {
     case 'FileIcon': { const icons=[...root.querySelectorAll('[data-ws-file-icon]')];assert(icons.length===14&&icons[0].dataset.iconName==='folder'&&icons[1].dataset.iconName==='folder-open'&&icons.find(icon=>icon.dataset.name==='Budget.csv')?.dataset.iconName==='file-spreadsheet','source icon samples missing');break; }
@@ -244,7 +244,7 @@ const canvasScene = async ({root,actions}) => {
   if(kind==='ToolPalette'){one(root,'[data-cs-tool="rect"]').click();assert(actions.findLast(a=>a.action==='select-canvas-tool')?.tool==='rect','tool selection missing');assert(root.querySelectorAll('[data-cs-tool]').length===12,'tool palette incomplete');}
 };
 const canvas = async ({root,actions}) => {
-  if(root.querySelector("[data-ws-canvas-scene]"))return canvasScene({root,actions});
+  if(root.querySelector("[data-ws-canvas-scene]"))return await canvasScene({root,actions});
   const zoom = one(root, '[data-workspace-zoom="in"]'); zoom.click(); assert(one(root, 'output[data-workspace-zoom]').textContent === '110%', 'canvas zoom did not change');
   assert(Math.abs(new DOMMatrix(getComputedStyle(one(root,'[data-workspace-stage]')).transform).a - 1.1) < 0.001, 'visible canvas scale did not change');
   const shape = one(root, '[data-workspace-shape]'); shape.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', bubbles: true}));
@@ -268,7 +268,7 @@ const canvas = async ({root,actions}) => {
   }
 };
 const request = async ({root, actions}) => {
-  if(root.querySelector("[data-ws-devtools-source]"))return devtoolsSource({root,actions});
+  if(root.querySelector("[data-ws-devtools-source]"))return await devtoolsSource({root,actions});
   if(root.dataset.elyKind==='ShareDialog'){
     const open=one(root,'[data-ws-share-open]'),dialog=one(root,'[data-ws-share-dialog]');open.click();assert(dialog.open,'share dialog did not open');
     const pending=one(dialog,'[data-ws-invite-chip] input'),before=actions.length;pending.value='invalid';one(dialog,'[data-ws-invite-form] button[type="submit"]').click();assert(actions.length===before,'invalid invite emitted a host action');pending.value='pending@example.test';
@@ -412,8 +412,8 @@ const semantic = async ({root,actions,twin}) => {
   }
 };
 const domain = async ({root,actions}) => {
-  if(root.querySelector("[data-ws-devtools-source]"))return devtoolsSource({root,actions});
-  if(root.querySelector("[data-ws-canvas-scene]"))return canvasScene({root,actions});
+  if(root.querySelector("[data-ws-devtools-source]"))return await devtoolsSource({root,actions});
+  if(root.querySelector("[data-ws-canvas-scene]"))return await canvasScene({root,actions});
   const kind=root.dataset.elyKind, variant=root.dataset.elyComponent.split('/')[1];
   switch(kind) {
     case 'RenameInline': {

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
 
 	"golang.org/x/net/html"
@@ -78,6 +79,84 @@ func TestAdvancedAllAssetsRemainCompatible(t *testing.T) {
 	}
 	if !reflect.DeepEqual(styles, wantStyles) {
 		t.Fatalf("all-family styles = %v; want %v", styles, wantStyles)
+	}
+}
+
+func TestMobileGenerativeAndFeedbackWrappersUseShrinkableGridTracks(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		path string
+		want string
+	}{
+		{"FineTune and DatasetViewer", "assets/ely-api-native.css", "[data-ely-family='native'] .ely-native-card:is([data-native-kind='FineTuneJobCard'],[data-native-kind='DatasetViewer']) .ely-native-controls{grid-template-columns:minmax(0,1fr)}"},
+		{"Alert and Callout", "assets/ely-api-interaction.css", "[data-ely-family=\"interaction\"] .ely-interaction--feedback-source:is([data-interaction-kind=\"Alert\"],[data-interaction-kind=\"Callout\"]){grid-template-columns:minmax(0,1fr)}"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			css, err := Files.ReadFile(tc.path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(css), tc.want) {
+				t.Fatalf("%s is missing the constrained component grid rule %q", tc.path, tc.want)
+			}
+		})
+	}
+	nativeCSS, err := Files.ReadFile("assets/ely-api-native.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(nativeCSS), ".ely-native-card:is([data-native-kind='FineTuneJobCard'],[data-native-kind='DatasetViewer']){grid-template-columns:minmax(0,1fr)}") {
+		t.Fatal("generative track constraint must be on the inner controls grid, not the outer card")
+	}
+}
+
+func TestMobileWebEmbedsUseShrinkableControlsTrack(t *testing.T) {
+	css, err := Files.ReadFile("assets/ely-api-native.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const want = "[data-ely-family='native'] .ely-native-card:is([data-native-kind='WebView'],[data-native-kind='IframeEmbed']) .ely-native-controls{grid-template-columns:minmax(0,1fr)}"
+	if !strings.Contains(string(css), want) {
+		t.Fatalf("native web embeds are missing the constrained controls grid rule %q", want)
+	}
+}
+
+func TestLicenseViewerWrapsWithinItsContainerAndKeepsLicenseScrolling(t *testing.T) {
+	css, err := Files.ReadFile("assets/ely-api-native.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		".ely-misc-licenses{width:min(560px,100%);min-width:0;display:flex;flex-wrap:wrap;gap:16px}",
+		".ely-misc-licenses nav{width:min(240px,100%);min-width:0;flex:0 1 240px;display:flex;flex-direction:column;gap:4px}",
+		".ely-misc-licenses article{min-width:0;flex:1 1 240px;display:flex;flex-direction:column;gap:8px}",
+		"[data-ely-family='native'] .ely-misc-licenses pre{max-height:320px;overflow:auto;",
+	} {
+		if !strings.Contains(string(css), want) {
+			t.Errorf("native LicenseViewer CSS is missing %q", want)
+		}
+	}
+}
+
+func TestMobileDockReflowsEveryZoneAndKeepsPaneContentScrollable(t *testing.T) {
+	css, err := Files.ReadFile("assets/ely-api-foundation.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"@media(max-width:560px){\n  [data-ely-family='foundation'] .ely-foundation__dock{grid-template-columns:repeat(2,minmax(0,1fr));grid-template-rows:repeat(2,minmax(0,1fr))}",
+		".ely-foundation__dock-left{grid-column:1;grid-row:1}",
+		".ely-foundation__dock-right{grid-column:2;grid-row:1}",
+		".ely-foundation__dock main{grid-column:1;grid-row:2}",
+		".ely-foundation__dock footer{grid-column:2;grid-row:2}",
+		".ely-foundation__dock :is(aside,footer,main){min-inline-size:0;min-block-size:0;overflow:auto}",
+		".ely-foundation__dock :is(aside,footer){display:grid;grid-template-rows:auto minmax(0,1fr)}",
+		".ely-foundation__dock nav{block-size:auto;min-block-size:2rem;flex-wrap:wrap;align-items:flex-start}",
+		".ely-foundation__dock output{min-block-size:0;overflow:auto}",
+	} {
+		if !strings.Contains(string(css), want) {
+			t.Errorf("mobile Dock CSS is missing %q", want)
+		}
 	}
 }
 

@@ -16,3 +16,8 @@
 
 /* Inspector overlay wrapper; the scope, panel and highlight rules stay local. */
 .ely-tooling-inspector{position:relative}
+
+/* Let the playground form and preview shrink to the native gallery card. */
+[data-ely-family="native"] .ely-tooling-playground{width:100%;max-width:720px;min-width:0;box-sizing:border-box;display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,16rem),1fr))}
+[data-ely-family="native"] .ely-tooling-playground>*{min-width:0;max-width:100%;box-sizing:border-box}
+[data-ely-family="native"] .ely-tooling-playground select{min-width:0;max-width:100%;box-sizing:border-box}

@@ -1,10 +1,74 @@
 package sduicatalogue
 
 import (
+	"fmt"
 	ui "github.com/mrchypark/elysdui/ui/gohtmx"
 	"html/template"
+	"strconv"
 	"testing"
 )
+
+func TestGeneratedYearDurationKeepIntegerCallerBoundsWithoutFixtureMax(t *testing.T) {
+	manifest, fixtures, err := Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]bool{}
+	for _, contract := range manifest.Contracts {
+		if contract.Name != "forms/YearPicker" && contract.Name != "forms/DurationPicker" {
+			continue
+		}
+		bound := contract.Properties["max"]
+		if bound.Type != "integer" || bound.Target != "Max" || bound.Format != "" {
+			t.Fatalf("caller max contract drifted for %s: %+v", contract.Name, bound)
+		}
+		seen[contract.Name] = true
+	}
+	if len(seen) != 2 {
+		t.Fatal("missing reviewed numeric alias contracts")
+	}
+	seenFixtures := map[string]bool{}
+	for _, fixture := range fixtures {
+		if !seen[fixture.Name] {
+			continue
+		}
+		if _, exists := fixture.Props["max"]; exists {
+			t.Fatalf("invalid inherited max remains in %s", fixture.Name)
+		}
+		seenFixtures[fixture.Name] = true
+	}
+	if len(seenFixtures) != 2 {
+		t.Fatal("missing canonical alias fixture")
+	}
+}
+
+func TestGeneratedStepperAndStateFixtureValues(t *testing.T) {
+	manifest, fixtures, err := Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if manifest.QualifiedNames != 1313 {
+		t.Fatalf("qualified inventory = %d, want 1313", manifest.QualifiedNames)
+	}
+	steppers, dirty, formError := 0, false, false
+	for _, fixture := range fixtures {
+		switch fixture.Name {
+		case "forms/Stepper":
+			steppers++
+			value := fmt.Sprint(fixture.Props["value"])
+			if _, err := strconv.ParseFloat(value, 64); err != nil {
+				t.Errorf("generated Stepper %s has invalid numeric value %q", fixture.Source, value)
+			}
+		case "forms/DirtyIndicator":
+			dirty = dirty || fixture.Props["dirty"] == true
+		case "forms/FormError":
+			formError = formError || fixture.Props["error"] == "Example: email could not be saved."
+		}
+	}
+	if steppers == 0 || !dirty || !formError {
+		t.Fatalf("missing generated target fixtures: Stepper=%d dirty=%t error=%t", steppers, dirty, formError)
+	}
+}
 
 func TestASTSelectsRendererBranchesAndMapsHelperFields(t *testing.T) {
 	tpl, err := template.New("test").Funcs(ui.Funcs()).Parse(`{{define "component"}}{{if eq .Kind "One"}}{{template "helper" (dict "Heading" .Title "Rows" .Rows)}}{{else}}{{.Unrelated}}{{end}}{{if .Optional}}{{.Optional}}{{else}}{{.Fallback}}{{end}}{{end}}{{define "helper"}}<h2>{{or .Heading "Fallback title"}}</h2>{{range $i,$row := .Rows}}{{$row.Label}}{{range $row.Cells}}{{.}}{{end}}{{end}}{{end}}`)

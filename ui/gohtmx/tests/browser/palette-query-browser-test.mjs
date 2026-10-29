@@ -7,7 +7,7 @@ import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {chromium} from 'playwright';
 import {loadPaletteInputs, paletteSHA as sha} from './palette-query-inputs.mjs';
-import {paletteCases, paletteSurfaces, paletteErrors, paletteOracles, paletteDiagnostics, paletteSourcePins, paletteBaseline, paletteReportName} from './palette-query-evidence.mjs';
+import {paletteCases, paletteSurfaces, paletteErrors, paletteOracles, paletteDiagnostics, paletteSourcePins, paletteBaseline, paletteReportName, recordPaletteBrowserOutcome} from './palette-query-evidence.mjs';
 
 // Real browser execution is CI-only. This file is not an expected-red wrapper:
 // every unmet desired contract keeps exit 1 and all later cases still execute.
@@ -25,6 +25,7 @@ const root = (slot = 'primary') => page.locator(`#palette-${slot} [data-ely-fami
 const settle = () => page.evaluate(() => new Promise(resolve => setTimeout(() => requestAnimationFrame(() => requestAnimationFrame(resolve)), 20)));
 const snap = () => page.evaluate(() => paletteSnapshot());
 const clear = () => page.evaluate(() => paletteClear());
+const requestChecks = new WeakMap();
 async function open() { await page.mouse.move(1, 1); await root().locator('[data-interaction-dialog]').click(); await settle(); }
 async function keyboardEdit(text) { await page.keyboard.press('Control+A'); await page.keyboard.press('Backspace'); await page.keyboard.type(text); await settle(); }
 async function ready(origin) {
@@ -119,23 +120,14 @@ try {
   }
   browser = await chromium.launch({headless: true}); report.browserVersion = browser.version();
   page = await browser.newPage({viewport: {width: 1280, height: 900}}); page.setDefaultTimeout(10000);
-  page.on('response', response => {
-    const check = current?.name, url = new URL(response.url());
-    responses.push((async () => {
-      try {
-        assert.equal(url.origin, origin, 'no remote browser assets');
-        const path = url.pathname, responseFixture = path === '/sdui-action' ? '/sdui-response-primary' : path;
-        const wanted = report.assets[path] || report.fixtures[responseFixture]; assert(wanted, 'unexpected browser response');
-        const bytes = await response.body();
-        const proof = {check, path, ...(path === '/sdui-action' ? {responseFixture} : {}), status: response.status(), expectedSHA256: wanted.servedSHA256, receivedSHA256: sha(bytes), bytes: bytes.length};
-        report.browserResponses.push(proof);
-        if (proof.status !== 200 || proof.expectedSHA256 !== proof.receivedSHA256 || proof.bytes !== wanted.bytes) report.transportErrors.push(proof);
-      } catch (error) { report.transportErrors.push({check, message: String(error)}); }
-    })());
+  page.on('request', request => {
+    const check = current?.name ?? null;
+    requestChecks.set(request, check);
+    responses.push(recordPaletteBrowserOutcome(request, check, origin, report));
   });
   page.on('pageerror', error => report.pageErrors.push({check: current?.name, message: error.message}));
   page.on('console', message => { if (message.type() === 'error') report.consoleErrors.push({check: current?.name, message: message.text()}); });
-  page.on('requestfailed', request => report.requestFailures.push({check: current?.name, url: request.url(), error: request.failure()?.errorText}));
+  page.on('requestfailed', request => report.requestFailures.push({check: requestChecks.get(request) ?? null, url: request.url(), error: request.failure()?.errorText}));
   report.stage = 'checks';
   for (const name of report.caseInventory) {
     current = {name, raw: {}, status: 'running'}; report.checks.push(current);

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
-import {paletteHarness, paletteCoreSource, paletteRuntimeSource, ModelEvent, ModelNode} from './palette_activation_harness.mjs';
+import {paletteHarness, paletteCoreSource, ModelEvent, ModelNode} from './palette_activation_harness.mjs';
 import {
   activationModes, activationMutations, activationMutants, activationSourcePins,
   activationSourcePaths, reviewedManifest, activationSHA256, activationSourceRevision,
@@ -11,13 +11,12 @@ import {
 // Template projection below only imports its option marker into the model.
 // It is not a Go renderer, native dialog, implicit-submit, browser, or SDUI test.
 // The fixture is bound to the reviewed clean revision, not to the working
-// tree: the activation pins describe that committed revision, so the template
-// must be read back from that same revision. Reading the working tree would
-// silently swap the fixture under the fixed digests.
-const reviewedTemplate = execFileSync('git', ['show', `${activationSourceRevision}:ui/gohtmx/templates/ely-api-interaction.html`], {
-  cwd: new URL('../../', import.meta.url), maxBuffer: 16 * 1024 * 1024}).toString('utf8');
-const original = Object.freeze({core: paletteCoreSource, runtime: paletteRuntimeSource,
-  template: reviewedTemplate});
+// tree: all three inputs must come from the same immutable revision rather
+// than mixing current runtime bytes with a historical template and pins.
+const original = Object.freeze(Object.fromEntries(Object.entries(activationSourcePaths).map(([key, path]) => [key,
+  execFileSync('git', ['show', `${activationSourceRevision}:${path}`], {
+    cwd: new URL('../../', import.meta.url), maxBuffer: 16 * 1024 * 1024}).toString('utf8'),
+])));
 const plain = value => JSON.parse(JSON.stringify(value));
 let checks = 0;
 async function test(name, fn) { await fn(); checks++; console.log('passed: ' + name); }
@@ -96,6 +95,12 @@ await test('fixed inventory, reviewed source and independent expected metadata',
       metadata.kills.forEach(kill => { assert.deepEqual(Object.keys(kill), ['case', 'oracle']); assert.equal(typeof kill.case, 'string'); assert.equal(typeof kill.oracle, 'string'); });
     }
   }
+});
+
+await test('current core cannot be mixed into the historical source bundle', () => {
+  assert.notEqual(paletteCoreSource, original.core, 'current core includes later shared dispatch repairs');
+  assert.throws(() => applyActivationMutation({...original, core: paletteCoreSource}, 'control'),
+    /reviewed activation source (byte count|SHA256): core/);
 });
 
 await test('unknown names, wrong sources, missing and duplicated sites are rejected', () => {

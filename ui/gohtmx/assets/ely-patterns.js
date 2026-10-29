@@ -1,4 +1,33 @@
 (() => {
+  const menuPosition = (anchor, box, viewport) => {
+    const margin = 8, gap = 6, below = anchor.bottom + gap, above = anchor.top - box.height - gap;
+    const top = below + box.height > viewport.height - margin ? above : below;
+    return {left: Math.max(margin, Math.min(anchor.left, viewport.width - box.width - margin)), top: Math.max(margin, Math.min(top, viewport.height - box.height - margin))};
+  };
+  const positionMenu = (popup, trigger) => {
+    const viewport = {width: document.documentElement.clientWidth, height: document.documentElement.clientHeight};
+    popup.style.maxWidth = `${Math.max(0, viewport.width - 16)}px`;
+    popup.style.maxHeight = `${Math.max(0, viewport.height - 16)}px`;
+    const saved = popup.matches(':popover-open') ? [] : ['display', 'visibility'].map(name => [name, popup.style.getPropertyValue(name), popup.style.getPropertyPriority(name)]);
+    try {
+      // Measure closed popovers in this same synchronous beforetoggle task, before native focus/paint.
+      if (saved.length) {
+        popup.style.setProperty('visibility', 'hidden', 'important');
+        popup.style.setProperty('display', 'flex', 'important');
+      }
+      const position = menuPosition(trigger.getBoundingClientRect(), {width: popup.offsetWidth, height: popup.offsetHeight}, viewport);
+      popup.style.left = `${position.left}px`; popup.style.top = `${position.top}px`;
+    } finally {
+      for (const [name, value, priority] of saved) {
+        if (value) popup.style.setProperty(name, value, priority); else popup.style.removeProperty(name);
+      }
+    }
+  };
+  let menuEventsReady = false;
+  const repositionMenus = () => document.querySelectorAll('[data-ui-component="menu"] > .ui-menu-panel:popover-open').forEach(popup => {
+    const trigger = popup.parentElement.querySelector('[data-ui-menu-trigger]');
+    if (trigger) positionMenu(popup, trigger);
+  });
   const initialize = () => {
     document.querySelectorAll('[data-ui-component="data-table"]').forEach(root => {
       if (root.dataset.uiPatternsReady) return;
@@ -36,6 +65,14 @@
       if (root.dataset.uiPatternsReady) return;
       root.dataset.uiPatternsReady = 'true';
       const popup = root.querySelector('[popover]'), trigger = root.querySelector('[data-ui-menu-trigger]');
+      if (!menuEventsReady) {
+        window.addEventListener('scroll', repositionMenus, true);
+        window.addEventListener('resize', repositionMenus);
+        menuEventsReady = true;
+      }
+      popup.addEventListener('beforetoggle', event => {
+        if (event.newState === 'open') positionMenu(popup, trigger);
+      });
       const items = () => [...popup.querySelectorAll('[role="menuitem"]')].filter(item => !item.disabled);
       popup.addEventListener('toggle', event => {
         trigger.setAttribute('aria-expanded', String(event.newState === 'open'));
