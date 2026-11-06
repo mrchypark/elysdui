@@ -317,7 +317,10 @@
     listen(ownerOf(root), 'ely:result', event => { if (event.target === ownerOf(root)) receiveViewport(event.detail?.result?.viewport); });
     if (typeof ResizeObserver !== 'undefined') { resize = new ResizeObserver(() => { if (!cancelled) apply(); }); resize.observe(canvas); }
   };
-  const rootsIn = (scope, selector) => [...(scope?.matches?.(selector) ? [scope] : []), ...(scope || document).querySelectorAll(selector)];
+  const rootsIn = (scope, selector) => {
+    if (typeof scope?.querySelectorAll !== 'function') scope = document;
+    return [...(scope.matches?.(selector) ? [scope] : []), ...scope.querySelectorAll(selector)];
+  };
   const start = (scope = document) => { rootsIn(scope, '[data-ui-component="map-view"]').forEach(init); rootsIn(scope, '[data-map-copyable]').forEach(initCopy); };
   globalThis.ElyMap = Object.freeze({registerTileProvider});
   start(); document.addEventListener('htmx:after:swap', event => start(event.target));

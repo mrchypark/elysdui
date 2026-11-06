@@ -5,6 +5,34 @@ import {runInNewContext} from 'node:vm';
 const source=readFileSync(new URL('../../assets/ely-map.js',import.meta.url),'utf8');
 const document={activeElement:null,createElement:()=>node(),createElementNS:()=>node()};
 function node(){return {dataset:{},children:[],hidden:false,disabled:false,isConnected:true,attributes:{},style:{setProperty(name,value){this[name]=value;}},listeners:new Map(),classList:{add(){},remove(){}},selectors:new Map(),lists:new Map(),clientWidth:480,clientHeight:288,textContent:'',value:'',setAttribute(name,value){this.attributes[name]=String(value);if(name.startsWith('data-'))this.dataset[name.slice(5).replace(/-([a-z])/g,(_,char)=>char.toUpperCase())]=String(value);},getAttribute(name){return this.attributes[name];},append(child){this.children.push(child);child.parent=this;},replaceChildren(...children){this.children=[];children.forEach(child=>this.append(child));},remove(){if(this.parent)this.parent.children=this.parent.children.filter(child=>child!==this);},querySelector(selector){if(this.selectors.has(selector))return this.selectors.get(selector);if(selector==='[data-map-count]')return this.children.find(child=>'mapCount'in child.dataset)||null;return null;},querySelectorAll(selector){if(this.lists.has(selector))return this.lists.get(selector);const children=this.children.flatMap(child=>[child,...child.querySelectorAll('*')]);if(selector==='*')return children;if(selector==='[data-map-generated]')return children.filter(child=>'mapGenerated'in child.dataset);if(selector==='[data-map-geojson-point]')return children.filter(child=>'mapGeojsonPoint'in child.dataset);return [];},contains(other){return this===other||this.querySelectorAll('*').includes(other);},closest(selector){if(selector==='[data-ely-family]')return this.owner||null;if(selector==='[data-map-point]'&&'lat'in this.dataset)return this;return null;},focus(){document.activeElement=this;},addEventListener(type,fn,options={}){const handlers=this.listeners.get(type)||new Set();handlers.add(fn);this.listeners.set(type,handlers);options.signal?.addEventListener('abort',()=>handlers.delete(fn),{once:true});},dispatchEvent(event){for(const listener of this.listeners.get(event.type)||[])listener({...event,target:event.target||this});return true;}};}
+const productionRootsStart=source.indexOf('  const rootsIn =');
+const productionRootsEnd=source.indexOf('  new MutationObserver',productionRootsStart);
+assert.ok(productionRootsStart>=0&&productionRootsEnd>productionRootsStart,'production rootsIn and start block must be present');
+const documentRoots=new Map(),registeredHandlers=new Map(),startedRoots=[];
+document.querySelectorAll=selector=>documentRoots.get(selector)||[];
+document.addEventListener=(type,handler)=>registeredHandlers.set(type,handler);
+const {rootsIn,start}=runInNewContext(source.slice(productionRootsStart,productionRootsEnd)+'\n({rootsIn,start})',{document,init:root=>startedRoots.push(root),initCopy:root=>startedRoots.push(root),registerTileProvider(){}});
+const mapDocumentRoot={},copyDocumentRoot={};
+documentRoots.set('[data-ui-component="map-view"]',[mapDocumentRoot]);
+documentRoots.set('[data-map-copyable]',[copyDocumentRoot]);
+assert.equal(rootsIn(document,'[data-ui-component="map-view"]')[0],mapDocumentRoot,'document scope remains intact');
+const matchingElement={matches:selector=>selector==='map',querySelectorAll:selector=>selector==='map'?[{}]:[]};
+const nonmatchingElement={matches:()=>false,querySelectorAll:()=>[{}]};
+const fragment={querySelectorAll:()=>[{}]};
+assert.equal(rootsIn(matchingElement,'map').length,2,'matching element includes itself and descendants');
+assert.equal(rootsIn(nonmatchingElement,'map').length,1,'nonmatching element includes descendants only');
+assert.equal(rootsIn(fragment,'map').length,1,'DocumentFragment scope is retained');
+const windowLike={};windowLike.window=windowLike;
+for(const [name,invalidScope] of [['Window-like',windowLike],['nonfunction querySelectorAll',{querySelectorAll:'not a method'}],['Text-like',{nodeType:3}],['EventTarget-like',{addEventListener(){}}],['null',null]]){
+  assert.equal(rootsIn(invalidScope,'[data-ui-component="map-view"]')[0],mapDocumentRoot,`${name} scope falls back to document`);
+}
+assert.equal(registeredHandlers.has('htmx:after:swap'),true,'bundled HTMX event spelling is preserved');
+assert.equal(registeredHandlers.has('htmx:after-swap'),false,'unbundled HTMX spelling is not registered');
+startedRoots.length=0;
+registeredHandlers.get('htmx:after:swap')({target:{querySelectorAll:0}});
+assert.deepEqual(startedRoots,[mapDocumentRoot,copyDocumentRoot],'registered swap handler normalizes a bad event.target through start');
+const oldRootsIn=runInNewContext("(document,scope,selector)=>[...(scope?.matches?.(selector)?[scope]:[]),...(scope||document).querySelectorAll(selector)]",{document});
+assert.throws(()=>oldRootsIn(document,{querySelectorAll:0},'[data-ui-component="map-view"]'),error=>error?.name==='TypeError'&&/querySelectorAll/.test(error.message),'negative control: old rootsIn must fail on invocation for a nonfunction querySelectorAll');
 const customEvent=class{constructor(type,options){this.type=type;Object.assign(this,options);}};
 const geometry={provenance:{source:'Natural Earth'},features:[{type:'Feature',properties:{name:'Caller land',iso_a2:'CL'},geometry:{type:'Polygon',coordinates:[[[0,0],[1,0],[1,1],[0,0]]]}}]};
 let landReply = async () => ({ok:true,json:async()=>geometry});
