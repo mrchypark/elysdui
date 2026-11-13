@@ -10,6 +10,7 @@ use std::{
 use ely_gpui_component::{
     dashboard::{DashboardCard, Tile},
     init_for_tests,
+    theme::Theme,
 };
 use elysdui_gpui::{
     catalogue::{CatalogueRegistry, CatalogueView},
@@ -914,4 +915,248 @@ fn gpui_renders_all_2166_catalogue_fixtures_and_handles_interactive_events(
         assert_eq!(submit.value["agreed"], json!(true));
         assert_eq!(submit.value["notify"], json!(true));
     });
+}
+
+#[gpui::test]
+fn gpui_mobile_touch_widgets_roundtrip(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        init_for_tests(cx);
+        Theme::update(cx, |t| {
+            t.touch_mode = true;
+            t.reduced_motion = true;
+        });
+    });
+
+    let (view, vcx) = cx.add_window_view(|_, _| CatalogueView::new());
+    vcx.update(|window, _| {
+        window.resize(gpui::size(gpui::px(390.), gpui::px(844.)));
+    });
+    vcx.run_until_parked();
+
+    let touch_screen = Screen {
+        version: "1".into(),
+        id: "mobile-touch-controls".into(),
+        loader: None,
+        templates: BTreeMap::new(),
+        root: ScreenNode {
+            id: "mobile-stack".into(),
+            node_type: "basic/stack".into(),
+            props: BTreeMap::from([("horizontal".into(), json!(false))]),
+            bindings: BTreeMap::new(),
+            children: vec![
+                make_node(
+                    "guests",
+                    "forms/Stepper",
+                    BTreeMap::from([
+                        ("name".into(), json!("guests")),
+                        ("title".into(), json!("Guests")),
+                        ("min".into(), json!("1")),
+                        ("max".into(), json!(10)),
+                        ("value".into(), json!("2")),
+                    ]),
+                ),
+                make_node(
+                    "score",
+                    "forms/Rating",
+                    BTreeMap::from([
+                        ("name".into(), json!("score")),
+                        ("label".into(), json!("Score")),
+                        ("max".into(), json!(5)),
+                        ("value".into(), json!("2")),
+                    ]),
+                ),
+                make_node(
+                    "period",
+                    "buttons/SegmentedControl",
+                    BTreeMap::from([
+                        ("name".into(), json!("period")),
+                        ("label".into(), json!("Period")),
+                        ("value".into(), json!("day")),
+                        (
+                            "items".into(),
+                            json!([
+                                {"label": "Day", "value": "day"},
+                                {"label": "Week", "value": "week"},
+                                {"label": "Month", "value": "month"}
+                            ]),
+                        ),
+                    ]),
+                ),
+                make_node(
+                    "pager",
+                    "navigation/Pagination",
+                    BTreeMap::from([
+                        ("label".into(), json!("Pages")),
+                        ("page".into(), json!("2")),
+                        ("total".into(), json!("5")),
+                    ]),
+                ),
+                make_node(
+                    "detail-sheet",
+                    "overlays/Sheet",
+                    BTreeMap::from([
+                        ("label".into(), json!("Open Sheet")),
+                        ("title".into(), json!("Details")),
+                        ("content".into(), json!("Mobile sheet body")),
+                    ]),
+                ),
+            ],
+            event: None,
+            events: Vec::new(),
+            use_template: None,
+            params: BTreeMap::new(),
+            param_bindings: BTreeMap::new(),
+            slots: BTreeMap::new(),
+            when: None,
+            repeat: None,
+        },
+    };
+
+    vcx.update(|window, cx| {
+        view.update(cx, |v, cx| v.load_screen(touch_screen, window, cx).unwrap());
+    });
+    vcx.run_until_parked();
+
+    // Click '+' on Stepper (right side of stepper box)
+    let step_bounds = vcx.debug_bounds("cat-step-guests").expect("stepper bounds");
+    let plus_pt = gpui::point(step_bounds.right() - gpui::px(12.), step_bounds.center().y);
+    vcx.simulate_click(plus_pt, Modifiers::none());
+    vcx.run_until_parked();
+
+    // Click 4th star on Rating (roughly 70% across the stars row)
+    let rate_bounds = vcx.debug_bounds("cat-rate-score").expect("rating bounds");
+    let star_pt = gpui::point(
+        rate_bounds.origin.x + rate_bounds.size.width * 0.7,
+        rate_bounds.center().y,
+    );
+    vcx.simulate_click(star_pt, Modifiers::none());
+    vcx.run_until_parked();
+
+    // Click 'Month' on SegmentedControl (right third)
+    let seg_bounds = vcx.debug_bounds("cat-seg-period").expect("segment bounds");
+    let seg_pt = gpui::point(
+        seg_bounds.origin.x + seg_bounds.size.width * 0.82,
+        seg_bounds.center().y,
+    );
+    vcx.simulate_click(seg_pt, Modifiers::none());
+    vcx.run_until_parked();
+
+    // Click next page on Pagination (right side)
+    let page_bounds = vcx
+        .debug_bounds("cat-page-pager")
+        .expect("pagination bounds");
+    let next_pt = gpui::point(page_bounds.right() - gpui::px(12.), page_bounds.center().y);
+    vcx.simulate_click(next_pt, Modifiers::none());
+    vcx.run_until_parked();
+
+    // Open mobile bottom Sheet
+    let sheet_btn = vcx
+        .debug_bounds("cat-sheet-open-detail-sheet")
+        .expect("sheet trigger bounds");
+    vcx.simulate_click(sheet_btn.center(), Modifiers::none());
+    vcx.run_until_parked();
+
+    vcx.read_entity(&view, |v, _| {
+        assert_eq!(v.value("guests"), Some(&json!(3.0)));
+        let score = v.value("score").and_then(Value::as_u64).unwrap_or(0);
+        assert!(score >= 3, "expected rating >= 3 after click, got {score}");
+        assert_ne!(v.value("period"), Some(&json!("day")));
+        assert_eq!(v.value("pager"), Some(&json!(3)));
+        assert_eq!(v.value("detail-sheet"), Some(&json!(true)));
+        assert!(v.events().len() >= 5);
+    });
+
+    // Load responsive MasterDetail, Charts, Gauge, UsageBar, Tree, Kanban, Map at 390px mobile width
+    let widgets_screen = Screen {
+        version: "1".into(),
+        id: "mobile-core-widgets".into(),
+        loader: None,
+        templates: BTreeMap::new(),
+        root: ScreenNode {
+            id: "widgets-stack".into(),
+            node_type: "basic/stack".into(),
+            props: BTreeMap::from([("horizontal".into(), json!(false))]),
+            bindings: BTreeMap::new(),
+            children: vec![
+                make_node(
+                    "md",
+                    "layout/MasterDetail",
+                    BTreeMap::from([
+                        ("items".into(), json!(["Alpha", "Beta"])),
+                        ("text".into(), json!("Alpha")),
+                    ]),
+                ),
+                make_node(
+                    "gauge",
+                    "data/Gauge",
+                    BTreeMap::from([
+                        ("label".into(), json!("CPU")),
+                        ("min".into(), json!(0)),
+                        ("max".into(), json!(100)),
+                        ("value".into(), json!(45)),
+                    ]),
+                ),
+                make_node(
+                    "usage",
+                    "data/UsageBar",
+                    BTreeMap::from([(
+                        "usageParts".into(),
+                        json!([{"label": "Used", "value": 40}, {"label": "Free", "value": 60}]),
+                    )]),
+                ),
+                make_node(
+                    "line",
+                    "charts/LineChart",
+                    BTreeMap::from([("points".into(), json!("0,10 10,30 20,25 30,50"))]),
+                ),
+                make_node(
+                    "tree",
+                    "lists/Tree",
+                    BTreeMap::from([(
+                        "items".into(),
+                        json!([{"label": "Root", "value": "r", "children": [{"label": "Leaf", "value": "l"}]}]),
+                    )]),
+                ),
+                make_node(
+                    "board",
+                    "project/KanbanBoard",
+                    BTreeMap::from([(
+                        "lanes".into(),
+                        json!([{"title": "Todo", "cards": [{"title": "Task", "value": "t1"}]}]),
+                    )]),
+                ),
+                make_node(
+                    "map",
+                    "basic/map-view",
+                    BTreeMap::from([
+                        ("name".into(), json!("site")),
+                        ("label".into(), json!("Site")),
+                        (
+                            "center".into(),
+                            json!({"latitude": 37.5665, "longitude": 126.978}),
+                        ),
+                        (
+                            "points".into(),
+                            json!([{"label": "Seoul", "value": "seoul", "latitude": 37.5665, "longitude": 126.978}]),
+                        ),
+                    ]),
+                ),
+            ],
+            event: None,
+            events: Vec::new(),
+            use_template: None,
+            params: BTreeMap::new(),
+            param_bindings: BTreeMap::new(),
+            slots: BTreeMap::new(),
+            when: None,
+            repeat: None,
+        },
+    };
+
+    vcx.update(|window, cx| {
+        view.update(cx, |v, cx| {
+            v.load_screen(widgets_screen, window, cx).unwrap()
+        });
+    });
+    vcx.run_until_parked();
 }
