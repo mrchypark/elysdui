@@ -49,12 +49,15 @@ SwiftUI is under `adapters/ios`; Jetpack Compose is under `adapters/android`.
 The versioned protocol, schema, support matrix and fixtures are under
 `contracts/native/profile-v1`. The Go host is `examples/native-profile` and
 platform CI helpers are under `scripts/ci/native`.
+A standalone Rust GPUI adapter crate lives under `adapters/gpui` (`elysdui-gpui`),
+implementing the `profile-v1` contract and an extensible `DashboardGrid` widget
+registry on top of `ely-gpui-component`.
 
 These clients implement a bounded profile and controls example, not the entire
 web catalogue. Capability support is explicit in the contract. See the
 [native guide](native/README.md) and [support matrix](native/SUPPORT.md).
-There is no implemented GPUI adapter. Upstream Ely GPUI remains a separate
-visual/component reference with its attribution retained.
+Upstream Ely GPUI remains a separate visual/component reference with its
+attribution retained.
 
 ## Examples, docs and verification
 
