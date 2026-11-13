@@ -16,6 +16,7 @@ test-support = ["ely-gpui-component/test-support"]
 
 [dependencies]
 ely-gpui-component = { git = "https://github.com/mrchypark/Ely-GPUI-Components", rev = "a8324b9e621666dc5def1b97cdc6dc86dc713303", default-features = false }
+flate2 = "1"
 gpui = { package = "gpui-fast", version = "=0.1.12", default-features = false, features = ["stacker"] }
 gpui-liveplot = { git = "https://github.com/mrchypark/gpui-liveplot.git", rev = "ba3bdbe72ab1480bee4420c5d2f2178ce76913dd", features = ["gpui-fast", "gpui_component_theme"] }
 jiff = "0.2"

@@ -14,8 +14,14 @@ use ely_gpui_component::{
     primitives::Severity,
     typography::{Caption, Label},
 };
-use gpui::{AnyElement, App, ElementId, IntoElement, ParentElement, SharedString, Styled, Window, div, prelude::*, px};
-use gpui_liveplot::{LineStyle, Plot, PlotView, PlotViewConfig, Point as PlotPoint, Rgba, Series, SeriesKind, Theme as PlotTheme};
+use gpui::{
+    AnyElement, App, ElementId, IntoElement, ParentElement, SharedString, Styled, Window, div,
+    prelude::*, px,
+};
+use gpui_liveplot::{
+    LineStyle, Plot, PlotView, PlotViewConfig, Point as PlotPoint, Rgba, Series, SeriesKind,
+    Theme as PlotTheme,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -26,6 +32,7 @@ use crate::profile::{
 
 pub const SCHEMA_VERSION: &str = "1";
 pub const MAX_SCHEMA_BYTES: usize = MAX_RESPONSE_BYTES;
+pub const HARD_MAX_STRING_BYTES: usize = 262_144;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ScreenError {
@@ -80,7 +87,11 @@ pub struct ScreenNode {
     pub use_template: Option<String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub params: BTreeMap<String, Value>,
-    #[serde(rename = "paramBindings", default, skip_serializing_if = "BTreeMap::is_empty")]
+    #[serde(
+        rename = "paramBindings",
+        default,
+        skip_serializing_if = "BTreeMap::is_empty"
+    )]
     pub param_bindings: BTreeMap<String, String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub slots: BTreeMap<String, Vec<ScreenNode>>,
@@ -95,8 +106,8 @@ pub fn decode_screen_json(bytes: &[u8]) -> Result<Screen, ScreenError> {
         return Err(ScreenError::new("Schema exceeds 1 MiB limit."));
     }
     reject_ambiguous_json(bytes).map_err(|e| ScreenError::new(e.message))?;
-    let screen: Screen =
-        serde_json::from_slice(bytes).map_err(|e| ScreenError::new(format!("Invalid screen JSON: {e}")))?;
+    let screen: Screen = serde_json::from_slice(bytes)
+        .map_err(|e| ScreenError::new(format!("Invalid screen JSON: {e}")))?;
     validate_screen(&screen)?;
     Ok(screen)
 }
@@ -116,8 +127,8 @@ pub fn validate_screen(screen: &Screen) -> Result<(), ScreenError> {
 
     fn check_value_strings(value: &Value) -> Result<(), ScreenError> {
         match value {
-            Value::String(s) if s.len() > MAX_STRING_BYTES => {
-                Err(ScreenError::new("String property exceeds 16,384 bytes."))
+            Value::String(s) if s.len() > HARD_MAX_STRING_BYTES => {
+                Err(ScreenError::new("String property exceeds 262,144 bytes."))
             }
             Value::Array(items) => {
                 for item in items {
@@ -146,13 +157,18 @@ pub fn validate_screen(screen: &Screen) -> Result<(), ScreenError> {
     ) -> Result<(), ScreenError> {
         *count += 1;
         if depth > MAX_DEPTH || *count > MAX_NODES {
-            return Err(ScreenError::new("Screen exceeds maximum node count or depth."));
+            return Err(ScreenError::new(
+                "Screen exceeds maximum node count or depth.",
+            ));
         }
         if !is_valid_node_id(&node.id) || node.id.starts_with("sdui-internal-") {
             return Err(ScreenError::new(format!("Invalid node ID '{}'.", node.id)));
         }
         if !ids.insert(node.id.clone()) {
-            return Err(ScreenError::new(format!("Duplicate node ID '{}'.", node.id)));
+            return Err(ScreenError::new(format!(
+                "Duplicate node ID '{}'.",
+                node.id
+            )));
         }
         if node.use_template.is_none() && node.node_type.is_empty() {
             return Err(ScreenError::new(format!(
@@ -551,7 +567,10 @@ impl WidgetRegistry {
                 Severity::Warning,
                 "Unsupported widget",
             )
-            .body(format!("Widget type '{}' is not registered.", node.node_type)),
+            .body(format!(
+                "Widget type '{}' is not registered.",
+                node.node_type
+            )),
         )
     }
 }
@@ -606,10 +625,7 @@ impl WidgetPlugin for DefaultStatSummaryWidget {
                     .unwrap_or("Metric")
                     .to_owned();
                 let value = metric.get("value").and_then(Value::as_f64).unwrap_or(0.0);
-                let decimals = metric
-                    .get("decimals")
-                    .and_then(Value::as_u64)
-                    .unwrap_or(0) as usize;
+                let decimals = metric.get("decimals").and_then(Value::as_u64).unwrap_or(0) as usize;
                 row = row.child(
                     div().min_w(px(110.)).flex_1().child(
                         Statistic::new(
@@ -667,14 +683,18 @@ impl WidgetPlugin for DefaultFilterSidebarWidget {
                         .items_center()
                         .py_1()
                         .child(Label::new(label))
-                        .when(active, |row| row.child(Badge::new("Active").tone(Tone::Info))),
+                        .when(active, |row| {
+                            row.child(Badge::new("Active").tone(Tone::Info))
+                        }),
                 );
             }
         }
         card.body(
-            div()
-                .size_full()
-                .child(ScrollArea::new(SharedString::from(format!("{}-scroll", node.id))).size_full().child(list)),
+            div().size_full().child(
+                ScrollArea::new(SharedString::from(format!("{}-scroll", node.id)))
+                    .size_full()
+                    .child(list),
+            ),
         )
     }
 }
@@ -754,9 +774,13 @@ impl DashboardRenderer {
     ) -> AnyElement {
         let id = id.into();
         if let Err(err) = validate_screen(screen) {
-            return Alert::new((id, "invalid"), Severity::Danger, "Invalid dashboard screen")
-                .body(err.message)
-                .into_any_element();
+            return Alert::new(
+                (id, "invalid"),
+                Severity::Danger,
+                "Invalid dashboard screen",
+            )
+            .body(err.message)
+            .into_any_element();
         }
         if screen.root.node_type != "dashboard/DashboardGrid" {
             return Alert::new(

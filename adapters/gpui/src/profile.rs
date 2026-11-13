@@ -7,12 +7,12 @@ use std::{
 };
 
 use ely_gpui_component::{
-    buttons::{Button, ButtonVariant},
+    buttons::{Button, ButtonVariant, CopyButton},
     feedback::Alert,
     forms::{Checkbox, Choice, Form, FormField, Input, InputEvent, Select, Switch, TextInput},
     primitives::Severity,
     theme::{ActiveTheme, ControlSize},
-    typography::{Caption, Heading, Paragraph},
+    typography::{Caption, Heading, Paragraph, SelectableText},
 };
 use gpui::{
     AnyElement, App, Context, Entity, IntoElement, ParentElement, Render, SharedString, Styled,
@@ -607,9 +607,7 @@ pub fn validate_envelope(envelope: &ProfileEnvelope) -> Result<(), ProtocolFailu
                     }
                     if node.node_type == "checkbox" {
                         if node.props.options.is_some() {
-                            return Err(ProtocolFailure::new(
-                                "Checkbox options are unsupported.",
-                            ));
+                            return Err(ProtocolFailure::new("Checkbox options are unsupported."));
                         }
                     } else {
                         let Some(options) = node.props.options.as_ref() else {
@@ -827,7 +825,15 @@ impl ProfileState {
 
     pub fn edit(&mut self, field: &str, value: impl Into<String>) {
         let value = value.into();
-        if self.envelope.is_none() || self.is_loading() {
+        if self.is_loading()
+            || self.envelope.as_ref().is_none_or(|envelope| {
+                collect_controls(&envelope.region)
+                    .get(field)
+                    .is_none_or(|node| {
+                        node.props.disabled == Some(true) || node.props.readonly == Some(true)
+                    })
+            })
+        {
             return;
         }
         let Some(current) = self.drafts.get(field) else {
@@ -1140,7 +1146,10 @@ impl ProfileView {
 
     pub fn edit_field(&mut self, field: &str, value: impl Into<String>, cx: &mut Context<Self>) {
         let value = value.into();
-        self.state.edit(field, value.clone());
+        self.state.edit(field, value);
+        let Some(value) = self.state.drafts().get(field).cloned() else {
+            return;
+        };
         if let Some(input) = self.inputs.get(field).cloned() {
             input.update(cx, |ti, cx| {
                 if ti.text() != value {
@@ -1196,22 +1205,20 @@ impl ProfileView {
         let controls = collect_controls(&envelope.region);
         let input_names: BTreeSet<String> = controls
             .iter()
-            .filter(|(_, node)| node.node_type == "input")
+            .filter(|(_, node)| {
+                node.node_type == "input"
+                    && !(node.props.readonly == Some(true) && node.props.disabled != Some(true))
+            })
             .map(|(name, _)| (*name).to_owned())
             .collect();
         self.inputs.retain(|name, _| input_names.contains(name));
 
         let mut subs = Vec::new();
         for (name, node) in controls {
-            if node.node_type != "input" {
+            if !input_names.contains(name) {
                 continue;
             }
-            let draft = self
-                .state
-                .drafts()
-                .get(name)
-                .cloned()
-                .unwrap_or_default();
+            let draft = self.state.drafts().get(name).cloned().unwrap_or_default();
             let label = node.props.label.clone().unwrap_or_default();
             let placeholder = node.props.placeholder.clone().unwrap_or_default();
             let disabled = node.props.disabled == Some(true) || self.state.is_loading();
@@ -1269,7 +1276,11 @@ impl ProfileView {
                 .flex()
                 .flex_col()
                 .gap(px(16.))
-                .children(node.children.iter().map(|child| self.render_node(child, cx)))
+                .children(
+                    node.children
+                        .iter()
+                        .map(|child| self.render_node(child, cx)),
+                )
                 .into_any_element(),
             "stack" => {
                 let mut container = div().id(SharedString::from(node.id.clone())).flex();
@@ -1292,7 +1303,11 @@ impl ProfileView {
                 };
                 container
                     .gap(gap)
-                    .children(node.children.iter().map(|child| self.render_node(child, cx)))
+                    .children(
+                        node.children
+                            .iter()
+                            .map(|child| self.render_node(child, cx)),
+                    )
                     .into_any_element()
             }
             "text" => {
@@ -1321,11 +1336,10 @@ impl ProfileView {
                     .into_any_element()
             }
             "form" => {
-                let mut form = Form::new(SharedString::from(node.id.clone())).on_submit(
-                    move |window, cx| {
+                let mut form =
+                    Form::new(SharedString::from(node.id.clone())).on_submit(move |window, cx| {
                         let _ = view.update(cx, |this, cx| this.submit(window, cx));
-                    },
-                );
+                    });
                 for child in &node.children {
                     form = form.child(self.render_node(child, cx));
                 }
@@ -1343,7 +1357,40 @@ impl ProfileView {
                 if let Some(error) = err {
                     field = field.error(error);
                 }
-                if let Some(input_entity) = self.inputs.get(name) {
+                if node.props.readonly == Some(true) && node.props.disabled != Some(true) {
+                    let draft = self.state.drafts().get(name).cloned().unwrap_or_default();
+                    let readonly_box = div()
+                        .id(SharedString::from(format!("{}-readonly-box", node.id)))
+                        .debug_selector({
+                            let id = node.id.clone();
+                            move || format!("{id}-readonly-box")
+                        })
+                        .w_full()
+                        .min_h(px(36.))
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .gap_2()
+                        .px_3()
+                        .py_1p5()
+                        .rounded(px(6.))
+                        .border_1()
+                        .border_color(if has_error {
+                            colors.danger
+                        } else {
+                            colors.border
+                        })
+                        .bg(colors.bg)
+                        .child(div().flex_1().min_w_0().child(SelectableText::new(
+                            SharedString::from(format!("{}-readonly", node.id)),
+                            draft.clone(),
+                        )))
+                        .child(CopyButton::new(
+                            SharedString::from(format!("{}-copy", node.id)),
+                            draft,
+                        ));
+                    field = field.child(readonly_box);
+                } else if let Some(input_entity) = self.inputs.get(name) {
                     field = field.child(Input::new(input_entity).invalid(has_error));
                 } else {
                     field = field.child(Caption::new("Input unavailable"));
@@ -1353,15 +1400,13 @@ impl ProfileView {
             "switch" => {
                 let name = node.props.name.clone().unwrap_or_default();
                 let label = node.props.label.clone().unwrap_or_default();
-                let checked = self
-                    .state
-                    .drafts()
-                    .get(&name)
-                    .is_some_and(|v| v == "true");
+                let checked = self.state.drafts().get(&name).is_some_and(|v| v == "true");
                 let disabled = node.props.disabled == Some(true) || self.state.is_loading();
                 let err = self.state.field_errors().get(&name).cloned();
-                let mut field =
-                    FormField::new(SharedString::from(format!("{}-field", node.id)), label.clone());
+                let mut field = FormField::new(
+                    SharedString::from(format!("{}-field", node.id)),
+                    label.clone(),
+                );
                 if let Some(error) = err {
                     field = field.error(error);
                 }
@@ -1382,15 +1427,13 @@ impl ProfileView {
             "checkbox" => {
                 let name = node.props.name.clone().unwrap_or_default();
                 let label = node.props.label.clone().unwrap_or_default();
-                let checked = self
-                    .state
-                    .drafts()
-                    .get(&name)
-                    .is_some_and(|v| v == "true");
+                let checked = self.state.drafts().get(&name).is_some_and(|v| v == "true");
                 let disabled = node.props.disabled == Some(true) || self.state.is_loading();
                 let err = self.state.field_errors().get(&name).cloned();
-                let mut field =
-                    FormField::new(SharedString::from(format!("{}-field", node.id)), label.clone());
+                let mut field = FormField::new(
+                    SharedString::from(format!("{}-field", node.id)),
+                    label.clone(),
+                );
                 if let Some(error) = err {
                     field = field.error(error);
                 }
@@ -1421,8 +1464,10 @@ impl ProfileView {
                     .flatten()
                     .map(|opt| Choice::new(opt.value.clone(), opt.label.clone()))
                     .collect();
-                let mut field =
-                    FormField::new(SharedString::from(format!("{}-field", node.id)), label.clone());
+                let mut field = FormField::new(
+                    SharedString::from(format!("{}-field", node.id)),
+                    label.clone(),
+                );
                 if let Some(error) = err {
                     field = field.error(error);
                 }
@@ -1494,8 +1539,12 @@ impl Render for ProfileView {
         let mut root = div().w_full().flex().flex_col().gap_3();
 
         if let Some(err) = &self.decode_error {
-            let mut alert = Alert::new("profile-decode-error", Severity::Danger, "Unsupported screen")
-                .body(err.clone());
+            let mut alert = Alert::new(
+                "profile-decode-error",
+                Severity::Danger,
+                "Unsupported screen",
+            )
+            .body(err.clone());
             if self.on_request.is_some() {
                 alert = alert.action(
                     Button::new("profile-error-reload", "Reload (discard edits)")

@@ -1622,6 +1622,7 @@ name = "elysdui-gpui"
 version = "0.1.0"
 dependencies = [
  "ely-gpui-component",
+ "flate2",
  "gpui-fast",
  "gpui-liveplot",
  "jiff",

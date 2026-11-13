@@ -9,6 +9,9 @@
 2. **`elysdui` v1 Screen & extensible `DashboardGrid` renderer** (`elysdui_gpui::dashboard`):
    - Validates `sdui` v1 `Screen` documents and Perses-aligned `DashboardSpec` layouts.
    - Provides `WidgetPlugin` and `WidgetRegistry` (`data/StatSummary`, `dashboard/FilterSidebar`, `charts/TimeSeriesChart` by default) so host applications can register domain widgets such as custom map panels without adding domain dependencies to `elysdui`.
+3. **Full SDUI catalogue validator and GPUI renderer** (`elysdui_gpui::catalogue`):
+   - Loads all 1,361 embedded catalogue contracts (44 chapters, 624 primaries, 1,313 chapter-qualified names, and 48 `basic/*` templates) from `adapters/gohtmx/catalogue_manifest.json.gz`.
+   - Validates caller `Screen` nodes strictly against declared property contracts and renders interactive `ely-gpui-component` controls with state updates and events in `CatalogueView`.
 
 ## Running contract tests
 
