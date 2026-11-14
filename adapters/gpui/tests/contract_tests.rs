@@ -2083,3 +2083,163 @@ fn gpui_mobile_tabs_use_selected_item_and_caller_content(cx: &mut TestAppContext
     });
     assert!(vcx.debug_bounds("tab-panel-content-One content").is_some());
 }
+
+#[gpui::test]
+fn gpui_mobile_data_table_pagination_shows_requested_page(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        init_for_tests(cx);
+        Theme::update(cx, |t| {
+            t.touch_mode = true;
+            t.reduced_motion = true;
+        });
+    });
+    let window = cx.open_window(gpui::size(gpui::px(390.), gpui::px(844.)), |_, _| {
+        CatalogueView::new()
+    });
+    let view = window.root(cx).unwrap();
+    let vcx = gpui::VisualTestContext::from_window(window.into(), cx).into_mut();
+    let screen = Screen {
+        version: "1".into(),
+        id: "table-pages".into(),
+        loader: None,
+        templates: BTreeMap::new(),
+        root: make_node(
+            "table",
+            "tables/DataTable",
+            BTreeMap::from([
+                ("columns".into(), json!([{"label":"Name"}])),
+                (
+                    "rows".into(),
+                    json!([{"cells":["Ada"]},{"cells":["Grace"]},{"cells":["Lin"]}]),
+                ),
+                ("paged".into(), json!(true)),
+                ("pageSize".into(), json!(2)),
+            ]),
+        ),
+    };
+    vcx.update(|window, cx| view.update(cx, |v, cx| v.load_screen(screen, window, cx).unwrap()));
+    vcx.run_until_parked();
+    assert!(vcx.debug_bounds("table-row row-0").is_some());
+    let page2 = vcx
+        .debug_bounds("pagination-page-2")
+        .expect("second page button");
+    vcx.simulate_click(page2.center(), Modifiers::none());
+    vcx.run_until_parked();
+    assert!(
+        vcx.debug_bounds("table-row row-2").is_some(),
+        "third row should appear on page two"
+    );
+}
+
+#[gpui::test]
+fn gpui_mobile_grouped_table_keeps_caller_rows_selectable(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        init_for_tests(cx);
+        Theme::update(cx, |t| {
+            t.touch_mode = true;
+            t.reduced_motion = true;
+        });
+    });
+    let window = cx.open_window(gpui::size(gpui::px(390.), gpui::px(844.)), |_, _| {
+        CatalogueView::new()
+    });
+    let view = window.root(cx).unwrap();
+    let vcx = gpui::VisualTestContext::from_window(window.into(), cx).into_mut();
+    let screen = Screen {
+        version: "1".into(),
+        id: "table-groups".into(),
+        loader: None,
+        templates: BTreeMap::new(),
+        root: make_node(
+            "table",
+            "tables/DataTable",
+            BTreeMap::from([
+                ("columns".into(), json!([{"label":"Name"}])),
+                ("grouped".into(), json!(true)),
+                (
+                    "groups".into(),
+                    json!([{ "label":"Team", "rows":[{"cells":["Ada","extra"]}] }]),
+                ),
+            ]),
+        ),
+    };
+    vcx.update(|window, cx| view.update(cx, |v, cx| v.load_screen(screen, window, cx).unwrap()));
+    vcx.run_until_parked();
+    let row = vcx
+        .debug_bounds("table-row group-0-row-0")
+        .expect("grouped row");
+    vcx.simulate_click(
+        gpui::point(row.left() + gpui::px(16.), row.center().y),
+        Modifiers::none(),
+    );
+    vcx.run_until_parked();
+    vcx.read_entity(&view, |v, _| {
+        assert_eq!(v.value("table"), Some(&json!(["group-0-row-0"])))
+    });
+}
+
+#[gpui::test]
+fn gpui_mobile_data_table_filter_emits_action_and_keeps_matching_row(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        init_for_tests(cx);
+        Theme::update(cx, |t| {
+            t.touch_mode = true;
+            t.reduced_motion = true;
+        });
+    });
+    let window = cx.open_window(gpui::size(gpui::px(390.), gpui::px(844.)), |_, _| {
+        CatalogueView::new()
+    });
+    let view = window.root(cx).unwrap();
+    let vcx = gpui::VisualTestContext::from_window(window.into(), cx).into_mut();
+    let screen = Screen {
+        version: "1".into(),
+        id: "table-filter".into(),
+        loader: None,
+        templates: BTreeMap::new(),
+        root: make_node(
+            "table",
+            "tables/DataTable",
+            BTreeMap::from([
+                (
+                    "columns".into(),
+                    json!([{"label":"Name"},{"label":"Status"}]),
+                ),
+                (
+                    "rows".into(),
+                    json!([{"cells":["Ada","Draft"]},{"cells":["Grace","Live"]}]),
+                ),
+                ("paged".into(), json!(true)),
+                ("filterColumn".into(), json!(2)),
+                (
+                    "filterOptions".into(),
+                    json!([{ "label":"Live", "value":"Live" }]),
+                ),
+            ]),
+        ),
+    };
+    vcx.update(|window, cx| view.update(cx, |v, cx| v.load_screen(screen, window, cx).unwrap()));
+    vcx.run_until_parked();
+    let filter = vcx.debug_bounds("field-root").expect("filter control");
+    vcx.simulate_click(filter.center(), Modifiers::none());
+    vcx.run_until_parked();
+    vcx.simulate_keystrokes("down enter");
+    vcx.run_until_parked();
+    vcx.read_entity(&view, |v, _| {
+        assert!(
+            v.events().iter().any(|event| event.node_id == "table"
+                && event.value == json!({"action":"filter","column":2,"value":"Live"})),
+            "filter event: {:?}",
+            v.events()
+        )
+    });
+    let row = vcx.debug_bounds("table-row row-1").expect("matching row");
+    vcx.simulate_click(
+        gpui::point(row.left() + gpui::px(16.), row.center().y),
+        Modifiers::none(),
+    );
+    vcx.run_until_parked();
+    vcx.read_entity(&view, |v, _| {
+        assert_eq!(v.value("table"), Some(&json!(["row-1"])))
+    });
+}

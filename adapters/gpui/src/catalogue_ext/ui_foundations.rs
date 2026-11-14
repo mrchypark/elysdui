@@ -317,6 +317,31 @@ fn extract_string_items(node: &ScreenNode) -> Vec<String> {
         .collect()
 }
 
+fn list_selection(view_state: &CatalogueView, state_key: &str) -> Vec<String> {
+    match view_state.value(state_key) {
+        Some(Value::String(value)) => vec![value.clone()],
+        Some(Value::Array(values)) => values
+            .iter()
+            .filter_map(Value::as_str)
+            .map(ToOwned::to_owned)
+            .collect(),
+        Some(Value::Object(fields)) => fields
+            .get("values")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .map(ToOwned::to_owned)
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+fn list_multiple(node: &ScreenNode) -> bool {
+    prop_bool(node, "multiple")
+        || matches!(prop_str(node, "multiple").as_deref(), Some("true" | "1"))
+}
+
 fn render_children_group(
     node: &ScreenNode,
     eid: &SharedString,
@@ -1685,14 +1710,25 @@ pub(crate) fn render(
         }
         "lists/InfiniteList" => {
             let items = extract_item_objects(node);
+            let selected = list_selection(view_state, &state_key);
+            let selectable = prop_bool(node, "selectable");
+            let multiple = list_multiple(node);
             let v = view.clone();
             let nid = node.id.clone();
             let ntype = node.node_type.clone();
+            let cursor = prop_str(node, "cursor").unwrap_or_default();
             let mut list = InfiniteList::new(eid.clone())
                 .loading(prop_bool(node, "loading"))
                 .done(prop_bool(node, "done"))
                 .on_more(move |_, cx| {
-                    emit_event(&v, &nid, &ntype, "ely:action", json!("load-more"), cx);
+                    emit_event(
+                        &v,
+                        &nid,
+                        &ntype,
+                        "ely:action",
+                        json!({ "action": "load-more", "value": cursor, "cursor": cursor }),
+                        cx,
+                    );
                 });
             if items.is_empty() {
                 list = list.child(ListItem::new(
@@ -1701,12 +1737,43 @@ pub(crate) fn render(
                 ));
             } else {
                 for (idx, item) in items.iter().enumerate() {
+                    let value = str_from_obj(item, &["value", "id", "label"])
+                        .unwrap_or_else(|| format!("row-{idx}"));
                     let lbl = str_from_obj(item, &["label", "title", "value"])
                         .unwrap_or_else(|| format!("Row {}", idx + 1));
-                    list = list.child(ListItem::new(
-                        SharedString::from(format!("{eid}-r-{idx}")),
-                        lbl,
-                    ));
+                    let mut row = ListItem::new(SharedString::from(format!("{eid}-r-{idx}")), lbl)
+                        .selected(selected.contains(&value))
+                        .disabled(item.get("disabled").and_then(Value::as_bool) == Some(true));
+                    if let Some(description) = str_from_obj(item, &["description", "detail"]) {
+                        row = row.description(description);
+                    }
+                    if selectable {
+                        let v = view.clone();
+                        let sk = state_key.clone();
+                        let ntype = node.node_type.clone();
+                        let selected = selected.clone();
+                        row = row.on_click(move |_, _, cx| {
+                            if multiple {
+                                let mut values = selected.clone();
+                                if let Some(index) = values.iter().position(|item| item == &value) {
+                                    values.remove(index);
+                                } else {
+                                    values.push(value.clone());
+                                }
+                                emit_event(
+                                    &v,
+                                    &sk,
+                                    &ntype,
+                                    "change",
+                                    json!({ "value": value, "values": values }),
+                                    cx,
+                                );
+                            } else {
+                                emit_event(&v, &sk, &ntype, "change", json!(value), cx);
+                            }
+                        });
+                    }
+                    list = list.child(row);
                 }
             }
             list.into_any_element()
@@ -1804,23 +1871,68 @@ pub(crate) fn render(
             col.into_any_element()
         }
         "lists/VirtualList" => {
-            let labels: Vec<String> = extract_item_objects(node)
-                .into_iter()
-                .map(|o| {
-                    str_from_obj(&o, &["label", "title", "value"]).unwrap_or_else(|| "Row".into())
-                })
-                .collect();
+            let items = extract_item_objects(node);
+            let selected = list_selection(view_state, &state_key);
+            let selectable = prop_bool(node, "selectable");
+            let multiple = list_multiple(node);
             let total = prop_f64(node, "total")
                 .map(|n| (n as usize).clamp(1, 100_000))
-                .unwrap_or_else(|| labels.len().max(1));
+                .unwrap_or_else(|| items.len().max(1));
+            let start = prop_f64(node, "start")
+                .map(|n| (n as usize).max(1))
+                .unwrap_or(1);
             let eid_row = eid.clone();
-            VirtualList::new(eid, total, move |ix, _, _| {
-                let text = labels
-                    .get(ix)
-                    .cloned()
-                    .unwrap_or_else(|| format!("Row {}", ix + 1));
-                ListItem::new(SharedString::from(format!("{eid_row}-vl-{ix}")), text)
-                    .into_any_element()
+            let v = view.clone();
+            let sk = state_key.clone();
+            let ntype = node.node_type.clone();
+            VirtualList::new(eid, items.len(), move |ix, _, _| {
+                let item = items.get(ix);
+                let value = item
+                    .and_then(|item| str_from_obj(item, &["value", "id", "label"]))
+                    .unwrap_or_else(|| format!("row-{}", start + ix));
+                let label = item
+                    .and_then(|item| str_from_obj(item, &["label", "title", "value"]))
+                    .unwrap_or_else(|| format!("Row {}", start + ix));
+                let mut row =
+                    ListItem::new(SharedString::from(format!("{eid_row}-vl-{ix}")), label)
+                        .selected(selected.contains(&value))
+                        .place(start + ix, total);
+                if let Some(description) =
+                    item.and_then(|item| str_from_obj(item, &["description", "detail"]))
+                {
+                    row = row.description(description);
+                }
+                if item.and_then(|item| item.get("disabled").and_then(Value::as_bool)) == Some(true)
+                {
+                    row = row.disabled(true);
+                }
+                if selectable {
+                    let v = v.clone();
+                    let sk = sk.clone();
+                    let ntype = ntype.clone();
+                    let selected = selected.clone();
+                    row = row.on_click(move |_, _, cx| {
+                        if multiple {
+                            let mut values = selected.clone();
+                            if let Some(index) = values.iter().position(|item| item == &value) {
+                                values.remove(index);
+                            } else {
+                                values.push(value.clone());
+                            }
+                            emit_event(
+                                &v,
+                                &sk,
+                                &ntype,
+                                "change",
+                                json!({ "value": value, "values": values }),
+                                cx,
+                            );
+                        } else {
+                            emit_event(&v, &sk, &ntype, "change", json!(value), cx);
+                        }
+                    });
+                }
+                row.into_any_element()
             })
             .w_full()
             .h(px(200.))

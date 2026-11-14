@@ -401,6 +401,7 @@ pub struct CatalogueView {
     screen: Option<Screen>,
     values: BTreeMap<String, Value>,
     nav_groups: BTreeMap<(String, usize), bool>,
+    table_filters: BTreeMap<String, String>,
     locked_keys: BTreeSet<String>,
     inputs: BTreeMap<String, Entity<TextInput>>,
     _input_subs: Vec<Subscription>,
@@ -422,6 +423,7 @@ impl CatalogueView {
             screen: None,
             values: BTreeMap::new(),
             nav_groups: BTreeMap::new(),
+            table_filters: BTreeMap::new(),
             locked_keys: BTreeSet::new(),
             inputs: BTreeMap::new(),
             _input_subs: Vec::new(),
@@ -491,6 +493,7 @@ impl CatalogueView {
         self.last_error = None;
         if self.screen.as_ref().is_none_or(|old| old.id != screen.id) {
             self.nav_groups.clear();
+            self.table_filters.clear();
         }
         self.values.clear();
         self.action_requests.clear();
@@ -612,6 +615,28 @@ impl CatalogueView {
             && !val.is_null()
         {
             self.values.insert(key.clone(), val.clone());
+        } else if matches!(
+            node.node_type.as_str(),
+            "lists/VirtualList" | "lists/InfiniteList"
+        ) {
+            let selected: Vec<Value> = node
+                .props
+                .get("items")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter(|item| {
+                    item.get("selected")
+                        .is_some_and(|value| value == true || value == "true")
+                })
+                .filter_map(|item| {
+                    item.get("value")
+                        .or_else(|| item.get("id"))
+                        .or_else(|| item.get("label"))
+                })
+                .cloned()
+                .collect();
+            self.values.insert(key.clone(), Value::Array(selected));
         } else if let Some(tags) = node.props.get("tags").and_then(Value::as_array) {
             self.values.insert(key.clone(), Value::Array(tags.clone()));
         } else if matches!(node.node_type.as_str(), "basic/tabs" | "navigation/Tabs")
@@ -3813,14 +3838,25 @@ fn render_data_table_interactive(
         .filter(|cols: &Vec<String>| !cols.is_empty())
         .unwrap_or_else(|| vec!["Item".into(), "Value".into()]);
 
-    let columns: Vec<Column> = col_labels
+    let mut columns: Vec<Column> = col_labels
         .iter()
         .enumerate()
         .map(|(i, title)| Column::new(format!("col-{i}"), title.clone()))
         .collect();
     let col_count = columns.len();
+    let filter_options = node.props.get("filterOptions").and_then(Value::as_array);
+    let filter_column = node
+        .props
+        .get("filterColumn")
+        .and_then(Value::as_u64)
+        .and_then(|n| usize::try_from(n).ok())
+        .and_then(|n| n.checked_sub(1));
+    let filter = view_state
+        .and_then(|state| state.table_filters.get(&node.id))
+        .cloned()
+        .unwrap_or_default();
 
-    let rows: Vec<Row> = node
+    let mut rows: Vec<Row> = node
         .props
         .get("rows")
         .and_then(Value::as_array)
@@ -3828,6 +3864,19 @@ fn render_data_table_interactive(
             raw_rows
                 .iter()
                 .enumerate()
+                .filter(|(_, row)| {
+                    if filter.is_empty() {
+                        return true;
+                    }
+                    filter_column
+                        .and_then(|column| {
+                            row.as_array()
+                                .or_else(|| row.get("cells").and_then(Value::as_array))
+                                .and_then(|cells| cells.get(column))
+                        })
+                        .and_then(Value::as_str)
+                        .is_some_and(|value| value.to_lowercase().contains(&filter.to_lowercase()))
+                })
                 .map(|(r_idx, r)| {
                     let mut cells: Vec<Cell> = if let Some(arr) = r.as_array() {
                         arr.iter().map(json_to_cell).collect()
@@ -3836,6 +3885,7 @@ fn render_data_table_interactive(
                     } else {
                         vec![json_to_cell(r)]
                     };
+                    cells.truncate(col_count);
                     cells.resize(col_count, Cell::Empty);
                     Row::new(format!("row-{r_idx}"), cells)
                 })
@@ -3843,16 +3893,89 @@ fn render_data_table_interactive(
         })
         .unwrap_or_default();
 
-    let mut table = DataTable::new(SharedString::from(format!("{eid}-table")), columns).rows(rows);
-    if let (Some(sk), Some(vs), Some(v)) = (state_key, view_state, view) {
-        if let Some(sel) = vs.value(sk).and_then(Value::as_array) {
-            let keys: Vec<String> = sel
-                .iter()
-                .filter_map(Value::as_str)
-                .map(ToOwned::to_owned)
-                .collect();
-            table = table.selected(keys);
+    let grouped = prop_bool(node, "grouped") && !prop_bool(node, "paged");
+    if node
+        .props
+        .get("rows")
+        .and_then(Value::as_array)
+        .is_none_or(Vec::is_empty)
+    {
+        if let Some(groups) = node.props.get("groups").and_then(Value::as_array) {
+            for (group_index, group) in groups.iter().enumerate() {
+                let label = group
+                    .get("label")
+                    .or_else(|| group.get("value"))
+                    .and_then(Value::as_str)
+                    .unwrap_or("");
+                if let Some(group_rows) = group.get("rows").and_then(Value::as_array) {
+                    for (row_index, row) in group_rows.iter().enumerate() {
+                        if !filter.is_empty()
+                            && !filter_column
+                                .and_then(|column| {
+                                    row.get("cells")
+                                        .and_then(Value::as_array)
+                                        .and_then(|cells| cells.get(column))
+                                })
+                                .and_then(Value::as_str)
+                                .is_some_and(|value| {
+                                    value.to_lowercase().contains(&filter.to_lowercase())
+                                })
+                        {
+                            continue;
+                        }
+                        let mut cells: Vec<Cell> = row
+                            .get("cells")
+                            .and_then(Value::as_array)
+                            .map(|cells| cells.iter().map(json_to_cell).collect())
+                            .unwrap_or_default();
+                        cells.truncate(col_count);
+                        cells.resize(col_count, Cell::Empty);
+                        if grouped {
+                            cells.push(Cell::Text(label.to_owned().into()));
+                        }
+                        rows.push(Row::new(
+                            format!("group-{group_index}-row-{row_index}"),
+                            cells,
+                        ));
+                    }
+                }
+            }
         }
+    }
+    let has_group_column = grouped
+        && !rows.is_empty()
+        && node
+            .props
+            .get("rows")
+            .and_then(Value::as_array)
+            .is_none_or(Vec::is_empty);
+    if has_group_column {
+        columns.push(Column::new("__group", "Group"));
+    }
+
+    let mut table = DataTable::new(SharedString::from(format!("{eid}-table")), columns).rows(rows);
+    if has_group_column {
+        table = table.hidden(["__group"]).group_by("__group");
+    }
+    if prop_bool(node, "paged") {
+        let page_size = node
+            .props
+            .get("pageSize")
+            .and_then(Value::as_u64)
+            .unwrap_or(8)
+            .clamp(1, 10_000) as usize;
+        table = table.paged(page_size);
+    }
+    if let (Some(sk), Some(vs), Some(v)) = (state_key, view_state, view) {
+        let keys: Vec<String> = vs
+            .value(sk)
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .map(ToOwned::to_owned)
+            .collect();
+        table = table.selected(keys);
         let v = v.clone();
         let sk = sk.to_owned();
         let ntype = node.node_type.clone();
@@ -3863,7 +3986,40 @@ fn render_data_table_interactive(
             });
         });
     }
-    table.into_any_element()
+    if let (Some(options), Some(v), Some(column)) = (filter_options, view, filter_column) {
+        let mut choices = vec![Choice::new("", "All")];
+        choices.extend(options.iter().filter_map(|item| {
+            let value = item.get("value").and_then(Value::as_str)?;
+            let label = item.get("label").and_then(Value::as_str).unwrap_or(value);
+            Some(Choice::new(value.to_owned(), label.to_owned()))
+        }));
+        let v = v.clone();
+        let id = node.id.clone();
+        let ntype = node.node_type.clone();
+        let filter_select = Select::new(SharedString::from(format!("{eid}-filter")), choices)
+            .label("Filter")
+            .selected(filter)
+            .on_change(move |value, _, cx| {
+                let value = value.to_string();
+                let _ = v.update(cx, |this, cx| {
+                    this.table_filters.insert(id.clone(), value.clone());
+                    this.trigger_event(
+                        &id,
+                        &ntype,
+                        "ely:action",
+                        json!({"action":"filter", "column":column + 1, "value":value}),
+                        cx,
+                    );
+                });
+            });
+        v_stack()
+            .gap_2()
+            .child(filter_select)
+            .child(table)
+            .into_any_element()
+    } else {
+        table.into_any_element()
+    }
 }
 
 fn json_to_cell(v: &Value) -> Cell {

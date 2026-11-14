@@ -2,6 +2,9 @@
 
 Status: in progress. A rendered fixture or a generic click does not establish that
 its interactions, payload, disabled behavior, and state restoration work.
+`MOBILE_CATALOGUE.csv` tracks all catalogue names separately. Its smoke column
+only records the earlier generic fixture probe; `partial-*` records only the
+specific device interactions named there, not full contract coverage.
 
 ## Verified behavior
 
@@ -18,16 +21,19 @@ its interactions, payload, disabled behavior, and state restoration work.
   exercised in the preceding validation run. On the current build, the iOS
   navigation Tabs fixture initially showed Activity and its supplied content;
   tapping Overview changed both content and the recorded event.
+- In 390×844 GPUI windows, VirtualList and InfiniteList preserve initial and
+  multiple selection and emit caller values; DataTable filtering, grouping,
+  row selection and paging have focused tests. On Android and iOS the first
+  table fixture filtered to Live and emitted the filter payload; iOS also
+  changed from page 1 to page 2. The Android check required an emulator restart.
 
 ## Known gaps
 
 - Generic fixture probes have no per-component behavioral oracle. They are not
   evidence that all 1,361 contracts work on mobile. Full iOS and Android
   component-by-component verification remains outstanding.
-- Source review identified missing selection for VirtualList and InfiniteList;
-  incomplete grouped/paged DataTable behavior; and generic dialog behavior
-  that does not yet match its full catalogue contract. These require targeted
-  implementations and behavior tests.
+- DataTable grouping and paging are not combined, and paging does not emit a
+  page action. Dialog presentation and form/prompt contracts still need work.
 - Android emulator rapid chapter switching produced an input timeout and GPU
   fence hang, including a system-process ANR. Restarting the emulator and
   switching more slowly allowed the forms check. The underlying cause remains
