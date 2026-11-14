@@ -67,6 +67,8 @@ specific device interactions named there, not full contract coverage.
   fence hang, including a system-process ANR. Restarting the emulator and
   switching more slowly allowed the forms check. The underlying cause remains
   unconfirmed; this is not a device performance result.
+  The SwiftShader emulator also later reported an app ANR with a stuck GPU
+  fence while testing TagInput, preventing Android Add verification.
 - The same emulator with host GPU exposed OpenGL ES 3.0 and could not create
   the GPUI renderer: the reported compute workgroup limit was zero. It was
   restored to SwiftShader, which can launch the app but had the fence hang above.
