@@ -69,3 +69,11 @@ specific device interactions named there, not full contract coverage.
   overlapping the following WebSocketConsole in the same fixture. Its toggle
   emitted the expected `toggle-socket` event. The layout regression test passes;
   other fixed-size wrappers still need an individual overflow audit.
+- Source comparison found incomplete form contracts: MultiSelect does not
+  restore selected options or component-wide disabled state; NumberInput lacks
+  a disabled/read-only presentation; checkbox option groups and switch item
+  groups render as single controls; and Slider ignores vertical orientation.
+  These findings need focused tests and implementation before device sign-off.
+- GraphQLExplorer and JSON/YAML/XML viewers contain content that may exceed
+  their fixed-height wrappers. Their actual bounds and post-interaction layout
+  remain unmeasured. SchemaTree intentionally uses a bounded scrollable tree.

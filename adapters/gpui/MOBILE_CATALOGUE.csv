@@ -661,7 +661,7 @@ finance/VolumeProfile,finance,MarketProfile,1,pass-f64e798,not-run,not-run
 finance/Watchlist,finance,Watchlist,1,pass-f64e798,not-run,not-run
 forms/AutoResizeInput,forms,TextArea,2,pass-f64e798,not-run,not-run
 forms/Autocomplete,forms,Combobox,3,pass-f64e798,not-run,not-run
-forms/Calendar,forms,Calendar,2,pass-f64e798,pass,not-run
+forms/Calendar,forms,Calendar,2,pass-f64e798,partial-date-selection,not-run
 forms/CascadeSelect,forms,CascadeSelect,2,pass-f64e798,not-run,not-run
 forms/Cascader,forms,CascadeSelect,2,pass-f64e798,not-run,not-run
 forms/Checkbox,forms,Checkbox,2,pass-f64e798,not-run,not-run
@@ -740,8 +740,8 @@ forms/Select,forms,Select,3,pass-f64e798,not-run,not-run
 forms/ShortcutRecorder,forms,HotkeyInput,2,pass-f64e798,not-run,not-run
 forms/SignaturePad,forms,SignaturePad,2,pass-f64e798,not-run,not-run
 forms/Slider,forms,Slider,2,pass-f64e798,not-run,not-run
-forms/Stepper,forms,Knob,1,pass-f64e798,pass,pass
-forms/Switch,forms,Switch,2,pass-f64e798,pass,pass
+forms/Stepper,forms,Knob,1,pass-f64e798,partial-increment,partial-increment
+forms/Switch,forms,Switch,2,pass-f64e798,partial-single-toggle,partial-single-toggle
 forms/TagInput,forms,TagInput,2,pass-f64e798,not-run,not-run
 forms/TextArea,forms,TextArea,2,pass-f64e798,not-run,not-run
 forms/TextField,forms,Input,2,pass-f64e798,not-run,not-run
@@ -937,7 +937,7 @@ maps/LocationPicker,maps,LocationPicker,2,pass-f64e798,not-run,not-run
 maps/MapCluster,maps,MapCluster,2,pass-f64e798,not-run,not-run
 maps/MapMarker,maps,MapView,2,pass-f64e798,not-run,not-run
 maps/MapPopup,maps,MapView,2,pass-f64e798,not-run,not-run
-maps/MapView,maps,MapView,2,pass-f64e798,pass,pass
+maps/MapView,maps,MapView,2,pass-f64e798,partial-map-interaction,partial-map-interaction
 maps/RouteLine,maps,RouteLine,2,pass-f64e798,not-run,not-run
 maps/WorldMap,maps,ChoroplethMap,2,pass-f64e798,not-run,not-run
 media/3DModelViewer,media,3DModelViewer,2,pass-f64e798,not-run,not-run
@@ -1098,7 +1098,7 @@ navigation/SpotlightSearch,navigation,SearchPalette,1,pass-f64e798,not-run,not-r
 navigation/Steps,navigation,Steps,3,pass-f64e798,not-run,not-run
 navigation/TabOverflowMenu,navigation,EditorTabs,1,pass-f64e798,not-run,not-run
 navigation/TableOfContents,navigation,Anchor,1,pass-f64e798,not-run,not-run
-navigation/Tabs,navigation,Tabs,3,pass-f64e798,not-run,pass
+navigation/Tabs,navigation,Tabs,3,pass-f64e798,not-run,partial-tab-selection
 navigation/Wizard,navigation,Steps,3,pass-f64e798,not-run,not-run
 onboarding/Checklist,onboarding,Checklist,1,pass-f64e798,not-run,not-run
 onboarding/Coachmark,onboarding,Coachmark,1,pass-f64e798,not-run,not-run
