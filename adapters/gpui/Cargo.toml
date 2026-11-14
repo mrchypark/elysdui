@@ -15,7 +15,7 @@ runtime_shaders = ["ely-gpui-component/runtime_shaders"]
 test-support = ["ely-gpui-component/test-support"]
 
 [dependencies]
-ely-gpui-component = { git = "https://github.com/mrchypark/Ely-GPUI-Components", rev = "d348259b4a436ae02fd823d787d8e9c9f89f741e", default-features = false }
+ely-gpui-component = { git = "https://github.com/mrchypark/Ely-GPUI-Components", rev = "63c6178ca94ea98b5e53b4acca2d9e2f7afd773a", default-features = false }
 flate2 = "1"
 gpui = { package = "gpui-fast", version = "=0.1.12", default-features = false, features = ["stacker"] }
 gpui-liveplot = { git = "https://github.com/mrchypark/gpui-liveplot.git", rev = "ba3bdbe72ab1480bee4420c5d2f2178ce76913dd", features = ["gpui-fast", "gpui_component_theme"] }
@@ -25,7 +25,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
 [dev-dependencies]
-ely-gpui-component = { git = "https://github.com/mrchypark/Ely-GPUI-Components", rev = "d348259b4a436ae02fd823d787d8e9c9f89f741e", default-features = false, features = ["test-support"] }
+ely-gpui-component = { git = "https://github.com/mrchypark/Ely-GPUI-Components", rev = "63c6178ca94ea98b5e53b4acca2d9e2f7afd773a", default-features = false, features = ["test-support"] }
 
 [patch.crates-io]
 gpui-fast = { git = "https://github.com/mrchypark/gpui-mobile.git", rev = "ac9c2144d5742496d2d5041a288cd40760717bea" }

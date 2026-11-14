@@ -53,6 +53,10 @@ specific device interactions named there, not full contract coverage.
 - Generic fixture probes have no per-component behavioral oracle. They are not
   evidence that all 1,361 contracts work on mobile. Full iOS and Android
   component-by-component verification remains outstanding.
+- Mobile touch mode is now the default. iPad and Android mouse/trackpad
+  activation, touch scrollbar dragging, and narrow-screen overlay placement
+  still need device checks. Source review found Playlist may activate twice on
+  a mouse double-click and iOS scrollbar thumb dragging may not receive a drag.
 - DataTable grouping and paging are not combined, and paging does not emit a
   page action. For dialogs, held generic forms can still be dismissed, prompt
   patterns use Rust rather than JavaScript regex syntax, unsupported patterns
@@ -85,9 +89,14 @@ specific device interactions named there, not full contract coverage.
 - InlineForm has focused tests for form-scoped text values, repeated names,
   disabled and readonly fields. Non-text fields and length or pattern
   constraints fail closed; generic forms still need their own contract work.
-- TagInput initial values are covered by GPUI tests and appeared on Android
-  and iOS. Adding and removing tags passes GPUI tests, but on iOS a typed draft
-  did not commit after Return; Android keyboard automation remains unconfirmed.
+- TagInput initial values appeared on Android and iOS. On iOS typing a comma
+  added a tag and removing it emitted the expected updated value. GPUI tests
+  cover addition and removal too. The iOS simulator's software Return key did
+  not commit a typed draft; its delivery path needs tracing. Android keyboard automation
+  remains unconfirmed.
+  With touch mode enabled by default, Add appeared on Android and iOS; iOS Add
+  committed the draft and emitted the expected value. Android Add still needs
+  verification with working text entry.
   InlineForm needs browser-equivalent change timing and `dirname` submission;
   caller-provided error and description rendering has focused GPUI tests.
 - Form submission still needs contract verification for repeated names,
