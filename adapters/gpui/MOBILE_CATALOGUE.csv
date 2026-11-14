@@ -1,5 +1,5 @@
 component,chapter,primary,fixture_instances,automated_smoke_baseline,android_behavior,ios_behavior
-account/AccountSwitcher,account,AccountSwitcher,1,pass-f64e798,not-run,partial-selection-and-add
+account/AccountSwitcher,account,AccountSwitcher,1,pass-f64e798,partial-selection-action,partial-selection-action
 account/ApiKeyManager,account,SessionList,1,pass-f64e798,not-run,not-run
 account/BillingHistory,account,BillingHistory,1,pass-f64e798,not-run,not-run
 account/ForgotPassword,account,MagicLinkForm,1,pass-f64e798,not-run,not-run
@@ -742,7 +742,7 @@ forms/SignaturePad,forms,SignaturePad,2,pass-f64e798,not-run,not-run
 forms/Slider,forms,Slider,2,pass-f64e798,not-run,not-run
 forms/Stepper,forms,Knob,1,pass-f64e798,partial-increment,partial-increment
 forms/Switch,forms,Switch,2,pass-f64e798,partial-single-toggle,partial-single-toggle
-forms/TagInput,forms,TagInput,2,pass-f64e798,partial-add-remove-return-failed,partial-add-remove-return-failed
+forms/TagInput,forms,TagInput,2,pass-f64e798,partial-add-remove-ime-return,partial-add-remove-return-failed
 forms/TextArea,forms,TextArea,2,pass-f64e798,not-run,not-run
 forms/TextField,forms,Input,2,pass-f64e798,not-run,not-run
 forms/TimePicker,forms,TimePicker,1,pass-f64e798,partial-time-selection,partial-time-selection

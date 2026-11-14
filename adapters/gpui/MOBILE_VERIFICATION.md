@@ -56,7 +56,9 @@ specific device interactions named there, not full contract coverage.
 - iOS: account/AccountSwitcher opened its menu, switched from `work` to `home`
   with the displayed account and change event updated, and emitted an add event
   for the fixture's `add-account` action. Custom actions and disabled state
-  need separate verification.
+  have focused GPUI tests. Android and iOS also selected `home` on the updated
+  component and displayed the `switch-account` action and selected value.
+  Menu label disambiguation still needs device verification.
 - Android: an upward touch swipe on the supplied VirtualList fixture brought
   rows 7 and 8 into view. On iOS the initial rows render but automated
   Simulator drag and scroll did not move the list; the input path and actual
@@ -122,8 +124,10 @@ specific device interactions named there, not full contract coverage.
   With touch mode enabled by default, Add appeared on Android and iOS; iOS Add
   committed the draft and emitted the expected value. On Android, typing beta
   with the software keyboard, tapping Add and then removing beta emitted
-  `alpha,beta` followed by `alpha`. Android software Return also left the
-  draft uncommitted; both platforms need a safe Return-key fix.
+  `alpha,beta` followed by `alpha`. Android software Return initially left the
+  draft uncommitted; after the test host installed Ely's global input-owner
+  reporter, Return added `beta` once and emitted the expected change event.
+  The iOS software Return path still needs a safe fix.
   InlineForm `dirname` submission remains unsupported; caller-provided error
   and description rendering has focused GPUI tests.
 - Form submission still needs contract verification for repeated names,
