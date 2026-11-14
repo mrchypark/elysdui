@@ -58,10 +58,10 @@ use ely_gpui_component::{
 };
 use flate2::read::GzDecoder;
 use gpui::{
-    AnyElement, App, Axis, Context, Entity, Hsla, IntoElement, ParentElement, Render, SharedString,
-    Styled, Subscription, Window, div, prelude::*, px,
+    AnyElement, App, Axis, Context, Entity, Hsla, IntoElement, ParentElement, Render, Rgba,
+    SharedString, Styled, Subscription, Window, div, prelude::*, px,
 };
-use jiff::Timestamp;
+use jiff::{Timestamp, civil::Date};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -1342,19 +1342,109 @@ impl CatalogueView {
                         (k, v)
                     })
                     .collect::<Vec<_>>();
-                KeyValueInput::new(eid, pairs).into_any_element()
+                let v = view.clone();
+                let sk = state_key.clone();
+                let ntype = node.node_type.clone();
+                KeyValueInput::new(eid, pairs)
+                    .on_change(move |next, _, cx| {
+                        let vals: Vec<Value> = next
+                            .into_iter()
+                            .map(|(k, val)| json!({"key": k, "value": val}))
+                            .collect();
+                        let _ = v.update(cx, |this, cx| {
+                            this.trigger_event(&sk, &ntype, "change", Value::Array(vals), cx);
+                        });
+                    })
+                    .into_any_element()
             }
-            "basic/calendar" | "forms/Calendar" => Calendar::new(eid).into_any_element(),
+            "basic/calendar" | "forms/Calendar" => {
+                let v = view.clone();
+                let sk = state_key.clone();
+                let ntype = node.node_type.clone();
+                let mut cal = Calendar::new(eid);
+                if let Some(d) = self.current_date(&state_key, node) {
+                    cal = cal.selected(d);
+                }
+                cal.on_pick(move |date, _, cx| {
+                    let _ = v.update(cx, |this, cx| {
+                        this.trigger_event(&sk, &ntype, "change", json!(date.to_string()), cx);
+                    });
+                })
+                .into_any_element()
+            }
             "basic/date-picker" | "forms/DatePicker" => {
-                DatePicker::new(eid, None).into_any_element()
+                let v = view.clone();
+                let sk = state_key.clone();
+                let ntype = node.node_type.clone();
+                let mut dp = DatePicker::new(eid, self.current_date(&state_key, node))
+                    .disabled(disabled || readonly);
+                let min_d = prop_str(node, "min").and_then(|s| s.trim().parse::<Date>().ok());
+                let max_d = prop_str(node, "max").and_then(|s| s.trim().parse::<Date>().ok());
+                if min_d.is_some() || max_d.is_some() {
+                    dp = dp.range(min_d, max_d);
+                }
+                dp.on_change(move |date, _, cx| {
+                    let _ = v.update(cx, |this, cx| {
+                        this.trigger_event(&sk, &ntype, "change", json!(date.to_string()), cx);
+                    });
+                })
+                .into_any_element()
             }
             "basic/color-picker" | "forms/ColorPicker" => {
-                ColorPicker::new(eid, Hsla::default()).into_any_element()
+                let raw = self
+                    .values
+                    .get(&state_key)
+                    .and_then(Value::as_str)
+                    .map(ToOwned::to_owned)
+                    .or_else(|| prop_str(node, "value"))
+                    .unwrap_or_default();
+                let color = parse_color_hsla(&raw, Hsla::default());
+                let v = view.clone();
+                let sk = state_key.clone();
+                let ntype = node.node_type.clone();
+                ColorPicker::new(eid, color)
+                    .on_change(move |picked, _, cx| {
+                        let rgba = Rgba::from(picked);
+                        let hex = format!(
+                            "#{:02x}{:02x}{:02x}",
+                            (rgba.r.clamp(0.0, 1.0) * 255.0).round() as u8,
+                            (rgba.g.clamp(0.0, 1.0) * 255.0).round() as u8,
+                            (rgba.b.clamp(0.0, 1.0) * 255.0).round() as u8
+                        );
+                        let _ = v.update(cx, |this, cx| {
+                            this.trigger_event(&sk, &ntype, "change", json!(hex), cx);
+                        });
+                    })
+                    .into_any_element()
             }
             "basic/signature-pad" | "forms/SignaturePad" => {
-                SignaturePad::new(eid, []).into_any_element()
+                let v = view.clone();
+                let sk = state_key.clone();
+                let ntype = node.node_type.clone();
+                SignaturePad::new(eid, [])
+                    .on_change(move |strokes, _, cx| {
+                        let _ = v.update(cx, |this, cx| {
+                            this.trigger_event(&sk, &ntype, "change", json!(strokes.len()), cx);
+                        });
+                    })
+                    .into_any_element()
             }
-            "basic/file-dropzone" | "forms/DropZone" => DropZone::new(eid).into_any_element(),
+            "basic/file-dropzone" | "forms/DropZone" => {
+                let v = view.clone();
+                let sk = state_key.clone();
+                let ntype = node.node_type.clone();
+                DropZone::new(eid)
+                    .on_drop(move |paths, _, cx| {
+                        let vals: Vec<Value> = paths
+                            .into_iter()
+                            .map(|p| json!(p.to_string_lossy().to_string()))
+                            .collect();
+                        let _ = v.update(cx, |this, cx| {
+                            this.trigger_event(&sk, &ntype, "change", Value::Array(vals), cx);
+                        });
+                    })
+                    .into_any_element()
+            }
             "basic/selectable-list" | "lists/ListBox" | "forms/ListBox" => {
                 let choices = extract_choices(node);
                 let safe_choices = if choices.is_empty() {
@@ -1721,8 +1811,25 @@ impl CatalogueView {
             }
             "forms/DateTimePicker" | "forms/TimePicker" => {
                 let label = non_empty_or(&best_label(node), "Date & time");
+                let v = view.clone();
+                let sk = state_key.clone();
+                let ntype = node.node_type.clone();
                 FormField::new(SharedString::from(format!("{eid}-field")), label)
-                    .child(DatePicker::new(eid, None).disabled(disabled || readonly))
+                    .child(
+                        DatePicker::new(eid, self.current_date(&state_key, node))
+                            .disabled(disabled || readonly)
+                            .on_change(move |date, _, cx| {
+                                let _ = v.update(cx, |this, cx| {
+                                    this.trigger_event(
+                                        &sk,
+                                        &ntype,
+                                        "change",
+                                        json!(date.to_string()),
+                                        cx,
+                                    );
+                                });
+                            }),
+                    )
                     .into_any_element()
             }
             "forms/SearchInput" => {
@@ -2527,7 +2634,53 @@ impl CatalogueView {
                 ProgressRing::new(eid, val).into_any_element()
             }
             "motion/Skeleton" => SkeletonText::new(eid, 3).into_any_element(),
-            "forms/ColorSwatch" => ColorSwatch::new(eid, Hsla::default()).into_any_element(),
+            "forms/ColorSwatch" => {
+                let raw_sel = self
+                    .values
+                    .get(&state_key)
+                    .and_then(Value::as_str)
+                    .map(ToOwned::to_owned)
+                    .or_else(|| prop_str(node, "value"))
+                    .unwrap_or_else(|| "#335cff".into());
+                let mut choices = extract_choices(node);
+                if choices.is_empty()
+                    && let Some(arr) = node.props.get("swatches").and_then(Value::as_array)
+                {
+                    for (ix, item) in arr.iter().enumerate() {
+                        if let Some(obj) = item.as_object()
+                            && let Some(val) = obj.get("value").and_then(Value::as_str)
+                        {
+                            let lbl = obj.get("label").and_then(Value::as_str).unwrap_or(val);
+                            choices.push(Choice::new(val.to_owned(), lbl.to_owned()));
+                        } else if let Some(s) = item.as_str() {
+                            choices.push(Choice::new(s.to_owned(), format!("Swatch {}", ix + 1)));
+                        }
+                    }
+                }
+                if choices.is_empty() {
+                    choices.push(Choice::new(raw_sel.clone(), raw_sel.clone()));
+                }
+                let mut row = h_stack().gap_2().flex_wrap();
+                for (ix, ch) in choices.into_iter().take(12).enumerate() {
+                    let val = ch.value.to_string();
+                    let selected = raw_sel.eq_ignore_ascii_case(&val);
+                    let color = parse_color_hsla(&val, Hsla::default());
+                    let v = view.clone();
+                    let sk = state_key.clone();
+                    let ntype = node.node_type.clone();
+                    row = row.child(
+                        ColorSwatch::new(SharedString::from(format!("{eid}-sw-{ix}")), color)
+                            .selected(selected)
+                            .tooltip(ch.label)
+                            .on_click(move |_, cx| {
+                                let _ = v.update(cx, |this, cx| {
+                                    this.trigger_event(&sk, &ntype, "change", json!(val), cx);
+                                });
+                            }),
+                    );
+                }
+                row.into_any_element()
+            }
             "forms/InlineForm" => {
                 let mut form = InlineForm::new();
                 if let Some(input_entity) = self.inputs.get(&state_key) {
@@ -2546,8 +2699,54 @@ impl CatalogueView {
                     .values
                     .get(&state_key)
                     .and_then(value_to_f64)
+                    .or_else(|| prop_f64(node, "value"))
                     .unwrap_or(0.0);
-                UnitInput::new(eid, val, ["ms", "s", "m"], "ms").into_any_element()
+                let units: Vec<SharedString> = node
+                    .props
+                    .get("units")
+                    .and_then(Value::as_array)
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(Value::as_str)
+                            .map(|s| SharedString::from(s.to_owned()))
+                            .collect()
+                    })
+                    .filter(|v: &Vec<SharedString>| !v.is_empty())
+                    .unwrap_or_else(|| {
+                        vec![
+                            SharedString::from("ms"),
+                            SharedString::from("s"),
+                            SharedString::from("m"),
+                        ]
+                    });
+                let unit = prop_str(node, "suffix")
+                    .filter(|s| units.iter().any(|u| u.as_ref() == s))
+                    .map(SharedString::from)
+                    .unwrap_or_else(|| units[0].clone());
+                let v1 = view.clone();
+                let sk1 = state_key.clone();
+                let nt1 = node.node_type.clone();
+                let v2 = view.clone();
+                let nid2 = node.id.clone();
+                let nt2 = node.node_type.clone();
+                UnitInput::new(eid, val, units, unit)
+                    .on_change(move |next, _, cx| {
+                        let _ = v1.update(cx, |this, cx| {
+                            this.trigger_event(&sk1, &nt1, "change", json!(next), cx);
+                        });
+                    })
+                    .on_unit(move |unit, _, cx| {
+                        let _ = v2.update(cx, |this, cx| {
+                            this.trigger_event(
+                                &nid2,
+                                &nt2,
+                                "ely:action",
+                                json!(unit.to_string()),
+                                cx,
+                            );
+                        });
+                    })
+                    .into_any_element()
             }
             "forms/PathInput" => {
                 if let Some(input_entity) = self.inputs.get(&state_key) {
@@ -2610,7 +2809,27 @@ impl CatalogueView {
                 } else {
                     choices
                 };
-                BackForwardNavigation::new(eid, safe, 0).into_any_element()
+                let seeded = extract_item_objects(node)
+                    .iter()
+                    .position(|o| o.get("selected").and_then(Value::as_bool) == Some(true))
+                    .unwrap_or(0);
+                let cur = self
+                    .values
+                    .get(&state_key)
+                    .and_then(value_to_f64)
+                    .map(|n| n as usize)
+                    .unwrap_or(seeded)
+                    .min(safe.len().saturating_sub(1));
+                let v = view.clone();
+                let sk = state_key.clone();
+                let ntype = node.node_type.clone();
+                BackForwardNavigation::new(eid, safe, cur)
+                    .on_go(move |ix, _, cx| {
+                        let _ = v.update(cx, |this, cx| {
+                            this.trigger_event(&sk, &ntype, "change", json!(ix), cx);
+                        });
+                    })
+                    .into_any_element()
             }
             "navigation/LoadMore" | "motion/LoadMore" => {
                 let loading = prop_bool(node, "loading");
@@ -2635,7 +2854,33 @@ impl CatalogueView {
                         .map(|c| EditorTab::new(c.value, c.label))
                         .collect()
                 };
-                EditorTabs::new(eid, tabs).into_any_element()
+                let v1 = view.clone();
+                let sk1 = state_key.clone();
+                let nt1 = node.node_type.clone();
+                let v2 = view.clone();
+                let nid2 = node.id.clone();
+                let nt2 = node.node_type.clone();
+                let mut et = EditorTabs::new(eid, tabs);
+                if let Some(sel) = self.values.get(&state_key).and_then(Value::as_str) {
+                    et = et.selected(sel.to_owned());
+                }
+                et.on_select(move |key, _, cx| {
+                    let _ = v1.update(cx, |this, cx| {
+                        this.trigger_event(&sk1, &nt1, "change", json!(key.to_string()), cx);
+                    });
+                })
+                .on_close(move |key, _, cx| {
+                    let _ = v2.update(cx, |this, cx| {
+                        this.trigger_event(
+                            &nid2,
+                            &nt2,
+                            "ely:action",
+                            json!({"close": key.as_ref()}),
+                            cx,
+                        );
+                    });
+                })
+                .into_any_element()
             }
             "project/PriorityIndicator" => PriorityIndicator::new(eid, Priority::High)
                 .labeled()
@@ -2654,7 +2899,32 @@ impl CatalogueView {
                 for ch in extract_choices(node).into_iter().take(6) {
                     bar = bar.tab(WindowTab::new(ch.value, ch.label));
                 }
-                bar.into_any_element()
+                if let Some(sel) = self.values.get(&state_key).and_then(Value::as_str) {
+                    bar = bar.selected(sel.to_owned());
+                }
+                let v1 = view.clone();
+                let sk1 = state_key.clone();
+                let nt1 = node.node_type.clone();
+                let v2 = view.clone();
+                let nid2 = node.id.clone();
+                let nt2 = node.node_type.clone();
+                bar.on_select(move |key, _, cx| {
+                    let _ = v1.update(cx, |this, cx| {
+                        this.trigger_event(&sk1, &nt1, "change", json!(key.to_string()), cx);
+                    });
+                })
+                .on_close(move |key, _, cx| {
+                    let _ = v2.update(cx, |this, cx| {
+                        this.trigger_event(
+                            &nid2,
+                            &nt2,
+                            "ely:action",
+                            json!({"close": key.as_ref()}),
+                            cx,
+                        );
+                    });
+                })
+                .into_any_element()
             }
             "tables/HeatmapTable" => HeatmapTable::new(["A", "B", "C"])
                 .row("Row 1", [10.0, 50.0, 90.0])
@@ -3036,12 +3306,47 @@ impl CatalogueView {
             .and_then(Value::as_bool)
             .unwrap_or_else(|| prop_bool(node, "checked"))
     }
+
+    fn current_date(&self, state_key: &str, node: &ScreenNode) -> Option<Date> {
+        self.values
+            .get(state_key)
+            .and_then(Value::as_str)
+            .and_then(|s| s.trim().parse::<Date>().ok())
+            .or_else(|| prop_str(node, "value").and_then(|s| s.trim().parse::<Date>().ok()))
+    }
+}
+
+fn parse_color_hsla(raw: &str, fallback: Hsla) -> Hsla {
+    let digits = raw.trim().trim_start_matches('#');
+    let expanded: String = match digits.len() {
+        3 | 4 => digits.chars().flat_map(|c| [c, c]).collect(),
+        6 | 8 => digits.to_owned(),
+        _ => return fallback,
+    };
+    let Ok(val) = u32::from_str_radix(&expanded, 16) else {
+        return fallback;
+    };
+    let rgba = if expanded.len() == 8 {
+        val
+    } else {
+        (val << 8) | 0xff
+    };
+    Rgba {
+        r: ((rgba >> 24) & 0xff) as f32 / 255.0,
+        g: ((rgba >> 16) & 0xff) as f32 / 255.0,
+        b: ((rgba >> 8) & 0xff) as f32 / 255.0,
+        a: (rgba & 0xff) as f32 / 255.0,
+    }
+    .into()
 }
 
 impl Render for CatalogueView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let view = cx.entity().downgrade();
-        let mut root = v_stack().w_full().gap_3();
+        let mut root = v_stack()
+            .w_full()
+            .gap_3()
+            .debug_selector(|| "cat-screen-root".into());
         if let Some(err) = &self.last_error {
             root = root.child(
                 Alert::new(

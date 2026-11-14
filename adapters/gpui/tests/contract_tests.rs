@@ -1270,3 +1270,283 @@ fn gpui_mobile_dialogs_and_account_roles_roundtrip(cx: &mut TestAppContext) {
             && e.value == json!("close")));
     });
 }
+
+#[gpui::test]
+fn gpui_clicks_and_audits_all_2166_fixtures(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        init_for_tests(cx);
+        Theme::update(cx, |t| {
+            t.touch_mode = true;
+            t.reduced_motion = true;
+        });
+    });
+
+    let fixtures = load_catalogue_fixtures();
+    assert_eq!(fixtures.len(), 2166);
+    let (view, vcx) = cx.add_window_view(|_, _| CatalogueView::new());
+    vcx.update(|window, _| {
+        window.resize(gpui::size(gpui::px(390.), gpui::px(844.)));
+    });
+    vcx.run_until_parked();
+
+    let mut zero_bounds = Vec::new();
+    let mut event_fired_names = std::collections::BTreeSet::new();
+    let mut no_event_names = std::collections::BTreeMap::<String, usize>::new();
+    let mut total_events = 0usize;
+
+    for (idx, f) in fixtures.iter().enumerate() {
+        let screen = Screen {
+            version: "1".into(),
+            id: format!("audit-fix-{idx}"),
+            loader: None,
+            templates: BTreeMap::new(),
+            root: ScreenNode {
+                id: "audit-root".into(),
+                node_type: "basic/stack".into(),
+                props: BTreeMap::from([("horizontal".into(), json!(false))]),
+                bindings: BTreeMap::new(),
+                children: vec![make_node("fix", &f.name, f.props.clone())],
+                event: None,
+                events: Vec::new(),
+                use_template: None,
+                params: BTreeMap::new(),
+                param_bindings: BTreeMap::new(),
+                slots: BTreeMap::new(),
+                when: None,
+                repeat: None,
+            },
+        };
+
+        let before = vcx.update(|window, cx| {
+            view.update(cx, |v, cx| {
+                v.load_screen(screen, window, cx)
+                    .unwrap_or_else(|e| panic!("fixture #{idx} ({}) failed: {e}", f.name));
+                v.events().len()
+            })
+        });
+        vcx.run_until_parked();
+
+        let bounds = vcx
+            .debug_bounds("cat-screen-root")
+            .unwrap_or_else(|| panic!("fixture #{idx} ({}) missing root bounds", f.name));
+        if bounds.size.width <= gpui::px(0.) || bounds.size.height <= gpui::px(0.) {
+            zero_bounds.push((idx, f.name.clone()));
+            continue;
+        }
+
+        let max_x = f32::from(bounds.right()).min(386.0);
+        let min_x = f32::from(bounds.left()).max(4.0);
+        let max_y = f32::from(bounds.bottom()).min(840.0);
+        let min_y = f32::from(bounds.top()).max(4.0);
+        if max_x > min_x && max_y > min_y {
+            let xs = [
+                (min_x + 14.0).min(max_x),
+                (min_x + max_x) * 0.5,
+                (max_x - 14.0).max(min_x),
+            ];
+            let ys = if max_y - min_y > 60.0 {
+                vec![
+                    (min_y + 20.0).min(max_y),
+                    (min_y + max_y) * 0.5,
+                    (max_y - 20.0).max(min_y),
+                ]
+            } else {
+                vec![(min_y + max_y) * 0.5]
+            };
+            // gpui TestWindow::minimize/zoom are unimplemented!(), so skip blind grid clicks on WindowControls.
+            let canonical = CatalogueRegistry::global()
+                .get(&f.name)
+                .and_then(|c| Some((c.chapter.as_deref()?, c.primary.as_deref()?)))
+                .map(|(ch, pr)| format!("{ch}/{pr}"))
+                .unwrap_or_else(|| f.name.clone());
+            if !matches!(
+                canonical.as_str(),
+                "shell/WindowControls"
+                    | "shell/WindowDragRegion"
+                    | "shell/TabBar"
+                    | "shell/TitleBar"
+                    | "shell/ColumnShell"
+            ) && !matches!(
+                f.name.as_str(),
+                "shell/WindowControls"
+                    | "shell/WindowDragRegion"
+                    | "shell/TabBar"
+                    | "shell/TitleBar"
+                    | "shell/ColumnShell"
+                    | "shell/TrafficLights"
+            ) {
+                for &y in &ys {
+                    for &x in &xs {
+                        vcx.simulate_click(
+                            gpui::point(gpui::px(x), gpui::px(y)),
+                            Modifiers::none(),
+                        );
+                        vcx.run_until_parked();
+                    }
+                }
+            }
+            vcx.simulate_keystrokes("a");
+            vcx.run_until_parked();
+            vcx.simulate_keystrokes("9 enter");
+            vcx.run_until_parked();
+            vcx.simulate_keystrokes("escape");
+            vcx.run_until_parked();
+        }
+
+        let fired = vcx.read_entity(&view, |v, _| {
+            assert!(
+                v.last_error().is_none(),
+                "fixture #{idx} ({}) error after interaction: {:?}",
+                f.name,
+                v.last_error()
+            );
+            v.events().len().saturating_sub(before)
+        });
+        total_events += fired;
+        if fired > 0 {
+            event_fired_names.insert(f.name.clone());
+        } else {
+            *no_event_names.entry(f.name.clone()).or_default() += 1;
+        }
+    }
+
+    eprintln!(
+        "AUDIT_SUMMARY total={} zero_bounds={} fired_types={} no_event_types={} total_events={}",
+        fixtures.len(),
+        zero_bounds.len(),
+        event_fired_names.len(),
+        no_event_names.len(),
+        total_events
+    );
+    for (name, count) in &no_event_names {
+        if !event_fired_names.contains(name) {
+            eprintln!("NO_EVENT: {name} ({count})");
+        }
+    }
+    if !zero_bounds.is_empty() {
+        eprintln!(
+            "ZERO_BOUNDS: {:?}",
+            &zero_bounds[..zero_bounds.len().min(20)]
+        );
+    }
+    assert!(
+        zero_bounds.is_empty(),
+        "found fixtures with zero bounds: {:?}",
+        zero_bounds
+    );
+}
+
+#[gpui::test]
+fn gpui_newly_wired_controls_emit_events_and_update_state(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        init_for_tests(cx);
+        Theme::update(cx, |t| {
+            t.touch_mode = true;
+            t.reduced_motion = true;
+        });
+    });
+
+    let (view, vcx) = cx.add_window_view(|_, _| CatalogueView::new());
+    vcx.update(|window, _| {
+        window.resize(gpui::size(gpui::px(390.), gpui::px(844.)));
+    });
+    vcx.run_until_parked();
+
+    let screen = Screen {
+        version: "1".into(),
+        id: "newly-wired".into(),
+        loader: None,
+        templates: BTreeMap::new(),
+        root: ScreenNode {
+            id: "root".into(),
+            node_type: "basic/stack".into(),
+            props: BTreeMap::from([("horizontal".into(), json!(false))]),
+            bindings: BTreeMap::new(),
+            children: vec![
+                make_node(
+                    "swatch",
+                    "forms/ColorSwatch",
+                    BTreeMap::from([
+                        ("name".into(), json!("accent")),
+                        ("value".into(), json!("#335cff")),
+                        (
+                            "options".into(),
+                            json!([
+                                {"label": "Blue", "value": "#335cff"},
+                                {"label": "Green", "value": "#228855"}
+                            ]),
+                        ),
+                    ]),
+                ),
+                make_node(
+                    "unit",
+                    "forms/UnitInput",
+                    BTreeMap::from([
+                        ("name".into(), json!("gap")),
+                        ("value".into(), json!("16")),
+                        ("units".into(), json!(["px", "%"])),
+                        ("suffix".into(), json!("px")),
+                    ]),
+                ),
+                make_node(
+                    "nav-hist",
+                    "navigation/BackForwardNavigation",
+                    BTreeMap::from([(
+                        "items".into(),
+                        json!([
+                            {"label": "Home", "value": "home"},
+                            {"label": "Detail", "value": "detail", "selected": true}
+                        ]),
+                    )]),
+                ),
+                make_node(
+                    "ed-tabs",
+                    "navigation/EditorTabs",
+                    BTreeMap::from([(
+                        "items".into(),
+                        json!([
+                            {"label": "a.rs", "value": "a"},
+                            {"label": "b.rs", "value": "b"}
+                        ]),
+                    )]),
+                ),
+                make_node(
+                    "cal",
+                    "basic/calendar",
+                    BTreeMap::from([
+                        ("name".into(), json!("day")),
+                        ("value".into(), json!("2026-10-14")),
+                    ]),
+                ),
+            ],
+            event: None,
+            events: Vec::new(),
+            use_template: None,
+            params: BTreeMap::new(),
+            param_bindings: BTreeMap::new(),
+            slots: BTreeMap::new(),
+            when: None,
+            repeat: None,
+        },
+    };
+
+    vcx.update(|window, cx| {
+        view.update(cx, |v, cx| v.load_screen(screen, window, cx).unwrap());
+    });
+    vcx.run_until_parked();
+
+    // Click second ColorSwatch (#228855): swatch is 24x24 + 8px gap -> second center at (44, 12)
+    vcx.simulate_click(gpui::point(gpui::px(44.), gpui::px(12.)), Modifiers::none());
+    vcx.run_until_parked();
+
+    vcx.read_entity(&view, |v, _| {
+        assert_eq!(v.value("accent"), Some(&json!("#228855")));
+        assert!(
+            v.events()
+                .iter()
+                .any(|e| e.node_id == "accent" && e.event == "change"),
+            "expected ColorSwatch event, got {:?}",
+            v.events()
+        );
+    });
+}
