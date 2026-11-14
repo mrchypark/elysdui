@@ -85,6 +85,11 @@ specific device interactions named there, not full contract coverage.
 - InlineForm has focused tests for form-scoped text values, repeated names,
   disabled and readonly fields. Non-text fields and length or pattern
   constraints fail closed; generic forms still need their own contract work.
+- TagInput initial values are covered by GPUI tests and appeared on Android
+  and iOS. Adding and removing tags passes GPUI tests, but on iOS a typed draft
+  did not commit after Return; Android keyboard automation remains unconfirmed.
+  InlineForm needs browser-equivalent change timing and `dirname` submission;
+  caller-provided error and description rendering has focused GPUI tests.
 - Form submission still needs contract verification for repeated names,
   multi-value fields, disabled fields, and form ownership. The current generic
   submit snapshots internal state rather than browser-style form entries. A

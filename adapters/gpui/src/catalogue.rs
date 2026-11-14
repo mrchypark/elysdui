@@ -30,10 +30,10 @@ use ely_gpui_component::{
     feedback::{Alert, Banner, Callout, ConfirmationCard, EmptyState, SaveState, SavingIndicator},
     forms::{
         Calendar, Checkbox, Choice, ChoiceChips, CodeInput, ColorPicker, ColorSwatch, Combobox,
-        DatePicker, DropZone, Form, FormField, FormLabel, HotkeyInput, InlineForm, Input,
-        InputEvent, KeyValueInput, ListBox, MultiSelect, NumberInput, PasswordInput, PathInput,
-        PinInput, RadioGroup, RangeSlider, Rating, SearchInput, Select, SignaturePad, Slider,
-        Stepper, Switch, TagInput, TextInput, TimePicker, UnitInput,
+        DatePicker, DropZone, Form, FormError, FormField, FormLabel, HotkeyInput, InlineForm,
+        Input, InputEvent, KeyValueInput, ListBox, MultiSelect, NumberInput, PasswordInput,
+        PathInput, PinInput, RadioGroup, RangeSlider, Rating, SearchInput, Select, SignaturePad,
+        Slider, Stepper, Switch, TagInput, TextInput, TimePicker, UnitInput,
     },
     layout::{
         Accordion, AccordionItem, AppShell, Card, CardHeader, MasterDetail, Sheet, Sidebar,
@@ -59,7 +59,7 @@ use ely_gpui_component::{
 };
 use flate2::read::GzDecoder;
 use gpui::{
-    AnyElement, App, Axis, Context, Entity, Hsla, IntoElement, ParentElement, Render, Rgba,
+    AnyElement, App, Axis, Context, Entity, Hsla, IntoElement, ParentElement, Render, Rgba, Role,
     SharedString, Styled, Subscription, Window, div, prelude::*, px,
 };
 use jiff::{
@@ -662,26 +662,57 @@ impl CatalogueView {
         self.trigger_event(node_id, "form", "submit", snapshot, cx);
     }
 
-    fn inline_field_changed(&mut self, node_id: &str, index: usize, text: String, cx: &mut Context<Self>) {
-        let Some(node) = self.screen.as_ref().and_then(|screen| find_node(&screen.root, node_id)).cloned() else { return; };
-        let Some(field) = inline_form_fields(&node).get(index) else { return; };
-        if prop_bool(&node, "disabled") || prop_bool(&node, "readonly")
+    fn inline_field_changed(
+        &mut self,
+        node_id: &str,
+        index: usize,
+        text: String,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(node) = self
+            .screen
+            .as_ref()
+            .and_then(|screen| find_node(&screen.root, node_id))
+            .cloned()
+        else {
+            return;
+        };
+        let Some(field) = inline_form_fields(&node).get(index) else {
+            return;
+        };
+        if prop_bool(&node, "disabled")
+            || prop_bool(&node, "readonly")
             || field.get("disabled").and_then(Value::as_bool) == Some(true)
-            || field.get("readonly").and_then(Value::as_bool) == Some(true) {
+            || field.get("readonly").and_then(Value::as_bool) == Some(true)
+        {
             return;
         }
         let name = field.get("name").and_then(Value::as_str).unwrap_or("");
-        let kind = field.get("type").and_then(Value::as_str).filter(|s| !s.is_empty()).unwrap_or("text").to_ascii_lowercase();
-        let checked = field.get("checked").and_then(Value::as_bool).unwrap_or(false);
+        let kind = field
+            .get("type")
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+            .unwrap_or("text")
+            .to_ascii_lowercase();
+        let checked = field
+            .get("checked")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
         let detail = json!({"id": node_id, "component": node.node_type, "name": name, "value": text, "checked": checked, "type": kind});
-        self.inline_values.insert((node_id.to_owned(), index), Value::String(text.clone()));
+        self.inline_values
+            .insert((node_id.to_owned(), index), Value::String(text.clone()));
         // The Go wrapper dispatches ely:change while the native change is bubbling.
         self.trigger_event(node_id, &node.node_type, "ely:change", detail, cx);
         match resolve_event_bindings(&node, "change", &Value::Null) {
             Ok(requests) => self.action_requests.extend(requests),
             Err(error) => self.last_error = Some(error.message),
         }
-        self.events.push(CatalogueEvent { node_id: node_id.to_owned(), component_type: node.node_type.clone(), event: "change".into(), value: Value::String(text) });
+        self.events.push(CatalogueEvent {
+            node_id: node_id.to_owned(),
+            component_type: node.node_type.clone(),
+            event: "change".into(),
+            value: Value::String(text),
+        });
         cx.notify();
     }
 
@@ -761,6 +792,14 @@ impl CatalogueView {
             self.locked_keys.insert(key.clone());
         }
         if matches!(
+            node.node_type.as_str(),
+            "basic/tag-input" | "forms/TagInput"
+        ) {
+            self.values.insert(
+                key.clone(),
+                Value::String(prop_str(node, "value").unwrap_or_default()),
+            );
+        } else if matches!(
             node.node_type.as_str(),
             "basic/multi-select" | "forms/MultiSelect"
         ) {
@@ -857,10 +896,10 @@ impl CatalogueView {
                     continue;
                 }
                 let fkey = field
-                        .get("name")
-                        .and_then(Value::as_str)
-                        .map(|n| format!("{}:{n}", node.id))
-                        .unwrap_or_else(|| format!("{}:field-{idx}", node.id));
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .map(|n| format!("{}:{n}", node.id))
+                    .unwrap_or_else(|| format!("{}:field-{idx}", node.id));
                 if prop_bool(node, "readonly")
                     || prop_bool(node, "disabled")
                     || field.get("readonly").and_then(Value::as_bool) == Some(true)
@@ -892,19 +931,39 @@ impl CatalogueView {
         };
         let mut specs = Vec::new();
         collect_input_specs(&screen.root, &self.duplicate_names, &mut specs);
-        let active_keys: BTreeSet<String> = specs.iter().filter(|s| s.inline_index.is_none()).map(|s| s.key.clone()).collect();
-        let active_inline: BTreeSet<(String, usize)> = specs.iter().filter_map(|s| s.inline_index.map(|index| (s.node_id.clone(), index))).collect();
+        let active_keys: BTreeSet<String> = specs
+            .iter()
+            .filter(|s| s.inline_index.is_none())
+            .map(|s| s.key.clone())
+            .collect();
+        let active_inline: BTreeSet<(String, usize)> = specs
+            .iter()
+            .filter_map(|s| s.inline_index.map(|index| (s.node_id.clone(), index)))
+            .collect();
         self.inputs.retain(|k, _| active_keys.contains(k));
         self.inline_inputs.retain(|k, _| active_inline.contains(k));
 
         let mut subs = Vec::new();
         for spec in specs {
             let inline_key = spec.inline_index.map(|index| (spec.node_id.clone(), index));
-            let initial = inline_key.as_ref().and_then(|key| self.inline_values.get(key)).or_else(|| if inline_key.is_none() { self.values.get(&spec.key) } else { None })
+            let initial = inline_key
+                .as_ref()
+                .and_then(|key| self.inline_values.get(key))
+                .or_else(|| {
+                    if inline_key.is_none() {
+                        self.values.get(&spec.key)
+                    } else {
+                        None
+                    }
+                })
                 .and_then(Value::as_str)
                 .unwrap_or(&spec.initial)
                 .to_owned();
-            let existing = if let Some(key) = &inline_key { self.inline_inputs.get(key) } else { self.inputs.get(&spec.key) };
+            let existing = if let Some(key) = &inline_key {
+                self.inline_inputs.get(key)
+            } else {
+                self.inputs.get(&spec.key)
+            };
             let entity = if let Some(existing) = existing {
                 existing.clone()
             } else {
@@ -958,7 +1017,11 @@ impl CatalogueView {
                 },
             );
             subs.push(sub);
-            if let Some(key) = inline_key { self.inline_inputs.insert(key, entity); } else { self.inputs.insert(spec.key, entity); }
+            if let Some(key) = inline_key {
+                self.inline_inputs.insert(key, entity);
+            } else {
+                self.inputs.insert(spec.key, entity);
+            }
         }
         self._input_subs = subs;
     }
@@ -1748,26 +1811,54 @@ impl CatalogueView {
                 Badge::new(label).tone(Tone::Neutral).into_any_element()
             }
             "basic/tag-input" | "forms/TagInput" => {
-                let tags: Vec<String> = self
+                let original = self
                     .values
                     .get(&state_key)
-                    .and_then(Value::as_array)
-                    .map(|arr| {
-                        arr.iter()
-                            .filter_map(Value::as_str)
-                            .map(ToOwned::to_owned)
-                            .collect()
-                    })
-                    .unwrap_or_default();
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_owned();
+                let tags: Vec<String> = original
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|tag| !tag.is_empty())
+                    .map(ToOwned::to_owned)
+                    .collect();
+                if disabled || readonly {
+                    return Some(
+                        div()
+                            .flex()
+                            .flex_wrap()
+                            .gap_1()
+                            .children(tags.into_iter().map(Badge::new))
+                            .into_any_element(),
+                    );
+                }
                 let v = view.clone();
                 let ntype = node.node_type.clone();
                 let sk = state_key.clone();
+                let nid = node.id.clone();
+                let name = prop_str(node, "name").unwrap_or_default();
+                let placeholder =
+                    prop_str(node, "placeholder").unwrap_or_else(|| "Add a tag".into());
+                let old_tags = tags.clone();
                 TagInput::new(eid, tags)
+                    .placeholder(placeholder)
                     .on_change(move |next, _, cx| {
-                        let vals: Vec<Value> =
-                            next.iter().map(|s| Value::String(s.to_string())).collect();
+                        let value = if next.len() > old_tags.len() {
+                            let added = next.last().map(|s| s.as_ref()).unwrap_or("");
+                            if original.is_empty() { added.to_owned() } else { format!("{original},{added}") }
+                        } else if next.len() < old_tags.len() {
+                            let removed = old_tags.iter().zip(next.iter()).position(|(old, new)| old != new.as_ref()).unwrap_or(next.len());
+                            let removed = &old_tags[removed];
+                            old_tags.iter().filter(|tag| *tag != removed).cloned().collect::<Vec<_>>().join(",")
+                        } else {
+                            return;
+                        };
                         let _ = v.update(cx, |this, cx| {
-                            this.trigger_event(&sk, &ntype, "change", Value::Array(vals), cx);
+                            this.trigger_event(&sk, &ntype, "change", json!(value), cx);
+                            if ntype == "forms/TagInput" {
+                                this.trigger_event(&nid, &ntype, "ely:change", json!({"id":nid,"component":ntype,"name":name,"value":value,"checked":false,"type":"hidden"}), cx);
+                            }
                         });
                     })
                     .into_any_element()
@@ -3229,10 +3320,60 @@ impl CatalogueView {
                     } else if let Some(input_entity) = self.inline_inputs.get(&key) {
                         row = row.child(Input::new(input_entity));
                     }
+                    let mut field_content = div().flex().flex_col().child(row);
+                    if let Some(error) = field
+                        .get("error")
+                        .and_then(Value::as_str)
+                        .filter(|s| !s.is_empty())
+                    {
+                        let text = error.to_owned();
+                        let selector_text = text.clone();
+                        field_content = field_content.child(
+                            div()
+                                .id(SharedString::from(format!("{eid}-field-alert-{index}")))
+                                .role(Role::Alert)
+                                .aria_label(text.clone())
+                                .debug_selector(move || {
+                                    format!("inline-field-error-{index}-{selector_text}")
+                                })
+                                .child(FormError::new(
+                                    SharedString::from(format!("{eid}-field-error-{index}")),
+                                    text,
+                                )),
+                        );
+                    } else if let Some(description) = field
+                        .get("description")
+                        .and_then(Value::as_str)
+                        .filter(|s| !s.is_empty())
+                    {
+                        let text = description.to_owned();
+                        let selector_text = text.clone();
+                        field_content = field_content.child(
+                            div()
+                                .debug_selector(move || {
+                                    format!("inline-field-description-{index}-{selector_text}")
+                                })
+                                .child(Caption::new(text)),
+                        );
+                    }
                     form = form.child(
                         div()
                             .debug_selector(move || format!("inline-form-field-{index}"))
-                            .child(row),
+                            .child(field_content),
+                    );
+                }
+                if let Some(error) = prop_str(node, "error").filter(|s| !s.is_empty()) {
+                    let selector_text = error.clone();
+                    form = form.child(
+                        div()
+                            .id(SharedString::from(format!("{eid}-form-alert")))
+                            .role(Role::Alert)
+                            .aria_label(error.clone())
+                            .debug_selector(move || format!("inline-form-error-{selector_text}"))
+                            .child(FormError::new(
+                                SharedString::from(format!("{eid}-form-error")),
+                                error,
+                            )),
                     );
                 }
                 let label = prop_str(node, "actionLabel").unwrap_or_else(|| "Save".into());

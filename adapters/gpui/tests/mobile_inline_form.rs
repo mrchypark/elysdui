@@ -27,6 +27,63 @@ fn node(id: &str, node_type: &str, props: BTreeMap<String, Value>) -> ScreenNode
 }
 
 #[gpui::test]
+fn inline_form_renders_caller_errors_and_descriptions_after_reload(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        init_for_tests(cx);
+        Theme::update(cx, |theme| {
+            theme.touch_mode = true;
+            theme.reduced_motion = true;
+        });
+    });
+    let window = cx.open_window(gpui::size(gpui::px(390.), gpui::px(844.)), |_, _| {
+        CatalogueView::new()
+    });
+    let view = window.root(cx).expect("catalogue view");
+    let vcx = gpui::VisualTestContext::from_window(window.into(), cx).into_mut();
+    let screen = |value: &str, field_error: &str, description: &str, root_error: &str| Screen {
+        version: "1".into(),
+        id: "inline-messages".into(),
+        loader: None,
+        templates: BTreeMap::new(),
+        root: node("inline", "forms/InlineForm", BTreeMap::from([
+            ("error".into(), json!(root_error)),
+            ("fields".into(), json!([{
+                "name":"message", "label":"Message", "value":value,
+                "error":field_error, "description":description
+            }])),
+        ])),
+    };
+    vcx.update(|window, cx| {
+        assert_eq!(window.viewport_size(), gpui::size(gpui::px(390.), gpui::px(844.)));
+        view.update(cx, |view, cx| view.load_screen(screen("first", "Field invalid", "Field help", "Save failed"), window, cx).unwrap());
+    });
+    vcx.run_until_parked();
+    assert!(vcx.debug_bounds("inline-field-error-0-Field invalid").is_some());
+    assert!(vcx.debug_bounds("inline-field-description-0-Field help").is_none());
+    assert!(vcx.debug_bounds("inline-form-error-Save failed").is_some());
+    let input = vcx.debug_bounds("input-text").expect("inline text input");
+    vcx.simulate_click(input.center(), Modifiers::none());
+    vcx.simulate_keystrokes("end");
+    vcx.simulate_input(" edited");
+    vcx.run_until_parked();
+    vcx.update(|window, cx| view.update(cx, |view, cx| {
+        view.load_screen(screen("reloaded", "", "New field help", "New save error"), window, cx).unwrap();
+    }));
+    vcx.run_until_parked();
+    assert!(vcx.debug_bounds("inline-field-error-0-Field invalid").is_none());
+    assert!(vcx.debug_bounds("inline-field-description-0-New field help").is_some());
+    assert!(vcx.debug_bounds("inline-form-error-Save failed").is_none());
+    assert!(vcx.debug_bounds("inline-form-error-New save error").is_some());
+    let submit = vcx.debug_bounds("inline-form-submit-inline").expect("submit button");
+    vcx.simulate_click(submit.center(), Modifiers::none());
+    vcx.run_until_parked();
+    vcx.read_entity(&view, |view, _| assert!(view.events().iter().any(|event| {
+        event.node_id == "inline" && event.event == "ely:action"
+            && event.value["formData"] == json!([["message", "reloaded"]])
+    })));
+}
+
+#[gpui::test]
 fn inline_fields_keep_private_identity_and_route_changes(cx: &mut TestAppContext) {
     cx.update(|cx| {
         init_for_tests(cx);
