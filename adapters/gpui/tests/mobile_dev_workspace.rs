@@ -72,12 +72,12 @@ fn mobile_socket_send_emits_host_action_with_message_and_url(cx: &mut TestAppCon
     let (view, vcx) = setup(cx, "open", false);
     let input = vcx.debug_bounds("input-text").expect("socket input");
     vcx.simulate_click(input.center(), Modifiers::none());
-    vcx.simulate_input("hello mobile");
+    vcx.simulate_input("  hello mobile  ");
     vcx.run_until_parked();
     vcx.simulate_keystrokes("enter");
     vcx.run_until_parked();
     vcx.read_entity(&view, |view, _| {
-        assert!(view.events().iter().any(|event| event.node_id == "socket" && event.event == "ely:action" && event.value == json!({"action":"send-socket", "text":"hello mobile", "url":"wss://example.test/live"})));
+        assert!(view.events().iter().any(|event| event.node_id == "socket" && event.event == "ely:action" && event.value == json!({"action":"send-socket", "text":"  hello mobile  ", "url":"wss://example.test/live"})));
     });
     vcx.simulate_keystrokes("enter");
     vcx.run_until_parked();

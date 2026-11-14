@@ -717,7 +717,7 @@ forms/ListInput,forms,KeyValueInput,2,pass-f64e798,not-run,not-run
 forms/MaskedInput,forms,PhoneInput,1,pass-f64e798,not-run,not-run
 forms/MentionInput,forms,MentionInput,2,pass-f64e798,not-run,not-run
 forms/MonthPicker,forms,MonthPicker,2,pass-f64e798,not-run,not-run
-forms/MultiSelect,forms,MultiSelect,2,pass-f64e798,not-run,not-run
+forms/MultiSelect,forms,MultiSelect,2,pass-f64e798,partial-selection-isolation,partial-selection-isolation
 forms/NativeSelect,forms,Select,3,pass-f64e798,not-run,not-run
 forms/NumberInput,forms,NumberInput,2,pass-f64e798,not-run,not-run
 forms/OTPInput,forms,PinInput,2,pass-f64e798,not-run,not-run

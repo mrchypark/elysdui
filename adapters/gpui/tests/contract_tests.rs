@@ -1999,7 +1999,7 @@ fn gpui_map_marker_emits_declared_action(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn gpui_shared_input_names_without_bindings_do_not_cause_event_error(cx: &mut TestAppContext) {
+fn gpui_shared_input_names_keep_independent_state(cx: &mut TestAppContext) {
     cx.update(|cx| init_for_tests(cx));
     let (view, vcx) = cx.add_window_view(|_, _| CatalogueView::new());
     let mut root = make_node("root", "basic/stack", BTreeMap::new());
@@ -2025,11 +2025,12 @@ fn gpui_shared_input_names_without_bindings_do_not_cause_event_error(cx: &mut Te
     vcx.update(|window, cx| view.update(cx, |v, cx| v.load_screen(screen, window, cx).unwrap()));
     vcx.update(|_, cx| {
         view.update(cx, |v, cx| {
-            v.trigger_event("shared", "forms/Input", "change", json!("hello"), cx)
+            v.trigger_event("first", "forms/Input", "change", json!("hello"), cx)
         })
     });
     vcx.read_entity(&view, |v, _| {
-        assert_eq!(v.value("shared"), Some(&json!("hello")));
+        assert_eq!(v.value("first"), Some(&json!("hello")));
+        assert_ne!(v.value("second"), Some(&json!("hello")));
         assert!(
             v.last_error().is_none(),
             "unexpected error: {:?}",
@@ -2358,4 +2359,125 @@ fn gpui_dialog_reload_restores_server_form_values(cx: &mut TestAppContext) {
     vcx.simulate_click(submit.center(), Modifiers::none());
     vcx.run_until_parked();
     vcx.read_entity(&view,|v,_|assert!(v.events().iter().any(|e|e.node_id=="form" && e.value==json!({"action":"save","formData":[["name","Grace"]],"values":[["name","Grace"]],"submitter":""}))));
+}
+
+#[gpui::test]
+fn gpui_mobile_multi_select_retains_initial_and_changed_values(cx: &mut TestAppContext) {
+    cx.update(init_for_tests);
+    cx.update(|cx| Theme::update(cx, |theme| theme.touch_mode = true));
+    let window = cx.open_window(gpui::size(gpui::px(390.), gpui::px(844.)), |_, _| {
+        CatalogueView::new()
+    });
+    let view = window.root(cx).unwrap();
+    let vcx = gpui::VisualTestContext::from_window(window.into(), cx).into_mut();
+    let screen = Screen {
+        version: "1".into(),
+        id: "multi-select".into(),
+        loader: None,
+        templates: BTreeMap::new(),
+        root: make_node(
+            "multi",
+            "forms/MultiSelect",
+            BTreeMap::from([
+                ("value".into(), json!("alpha")),
+                (
+                    "options".into(),
+                    json!([
+                        {"value":"alpha", "label":"Alpha"},
+                        {"value":"beta", "label":"Beta", "selected":true},
+                        {"value":"locked", "label":"Locked", "disabled":true}
+                    ]),
+                ),
+            ]),
+        ),
+    };
+    vcx.update(|window, cx| view.update(cx, |v, cx| v.load_screen(screen, window, cx).unwrap()));
+    vcx.run_until_parked();
+    vcx.read_entity(&view, |v, _| {
+        assert_eq!(v.value("multi"), Some(&json!(["alpha", "beta"])))
+    });
+    let bounds = vcx.debug_bounds("multi-select-control").unwrap();
+    vcx.simulate_click(
+        gpui::point(bounds.right() - gpui::px(8.), bounds.center().y),
+        Modifiers::none(),
+    );
+    vcx.run_until_parked();
+    vcx.simulate_keystrokes("enter");
+    vcx.run_until_parked();
+    vcx.read_entity(&view, |v, _| {
+        assert_eq!(v.value("multi"), Some(&json!(["beta"])))
+    });
+}
+
+#[gpui::test]
+fn gpui_mobile_disabled_multi_select_cannot_change(cx: &mut TestAppContext) {
+    cx.update(init_for_tests);
+    cx.update(|cx| Theme::update(cx, |theme| theme.touch_mode = true));
+    let window = cx.open_window(gpui::size(gpui::px(390.), gpui::px(844.)), |_, _| {
+        CatalogueView::new()
+    });
+    let view = window.root(cx).unwrap();
+    let vcx = gpui::VisualTestContext::from_window(window.into(), cx).into_mut();
+    let screen = Screen {
+        version: "1".into(),
+        id: "disabled-multi".into(),
+        loader: None,
+        templates: BTreeMap::new(),
+        root: make_node(
+            "multi",
+            "forms/MultiSelect",
+            BTreeMap::from([
+                ("disabled".into(), json!(true)),
+                ("value".into(), json!("alpha")),
+                (
+                    "options".into(),
+                    json!([{"value":"alpha","label":"Alpha"},{"value":"beta","label":"Beta"}]),
+                ),
+            ]),
+        ),
+    };
+    vcx.update(|window, cx| view.update(cx, |v, cx| v.load_screen(screen, window, cx).unwrap()));
+    vcx.run_until_parked();
+    let control = vcx.debug_bounds("multi-select-control").unwrap();
+    vcx.simulate_click(
+        gpui::point(control.right() - gpui::px(8.), control.center().y),
+        Modifiers::none(),
+    );
+    vcx.run_until_parked();
+    assert!(vcx.debug_bounds("option-list").is_none());
+    vcx.simulate_keystrokes("enter down enter backspace");
+    vcx.run_until_parked();
+    vcx.read_entity(&view, |v, _| {
+        assert_eq!(v.value("multi"), Some(&json!(["alpha"])));
+        assert!(v.events().is_empty());
+    });
+}
+
+#[gpui::test]
+fn gpui_mobile_empty_multi_select_does_not_fabricate_choice(cx: &mut TestAppContext) {
+    cx.update(init_for_tests);
+    cx.update(|cx| Theme::update(cx, |theme| theme.touch_mode = true));
+    let window = cx.open_window(gpui::size(gpui::px(390.), gpui::px(844.)), |_, _| {
+        CatalogueView::new()
+    });
+    let view = window.root(cx).unwrap();
+    let vcx = gpui::VisualTestContext::from_window(window.into(), cx).into_mut();
+    let screen = Screen {
+        version: "1".into(),
+        id: "empty-multi".into(),
+        loader: None,
+        templates: BTreeMap::new(),
+        root: make_node(
+            "multi",
+            "forms/MultiSelect",
+            BTreeMap::from([
+                ("label".into(), json!("Choose")),
+                ("options".into(), json!([])),
+            ]),
+        ),
+    };
+    vcx.update(|window, cx| view.update(cx, |v, cx| v.load_screen(screen, window, cx).unwrap()));
+    vcx.run_until_parked();
+    assert!(vcx.debug_bounds("multi-select-control").is_none());
+    vcx.read_entity(&view, |v, _| assert_eq!(v.value("multi"), Some(&json!([]))));
 }

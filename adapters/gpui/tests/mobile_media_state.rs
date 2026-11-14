@@ -5,7 +5,7 @@ use elysdui_gpui::{
     catalogue::CatalogueView,
     dashboard::{Screen, ScreenNode},
 };
-use gpui::{AppContext, Modifiers, MouseButton, MouseDownEvent, MouseUpEvent, TestAppContext};
+use gpui::{AppContext, Modifiers, TestAppContext};
 use serde_json::json;
 
 #[gpui::test]
@@ -63,29 +63,14 @@ fn mobile_playlist_activation_emits_htmx_change_and_track_action(cx: &mut TestAp
     vcx.simulate_click(position, Modifiers::none());
     vcx.run_until_parked();
     vcx.read_entity(&view, |view, _| {
-        assert!(
-            !view
-                .events()
-                .iter()
-                .any(|event| event.event == "ely:action")
-        );
-    });
-    vcx.simulate_event(MouseDownEvent {
-        button: MouseButton::Left,
-        position,
-        modifiers: Modifiers::none(),
-        click_count: 2,
-        first_mouse: false,
-    });
-    vcx.simulate_event(MouseUpEvent {
-        button: MouseButton::Left,
-        position,
-        modifiers: Modifiers::none(),
-        click_count: 2,
-    });
-    vcx.run_until_parked();
-    vcx.read_entity(&view, |view, _| {
         assert_eq!(view.value("playlist"), Some(&json!("two")));
+        assert_eq!(
+            view.events()
+                .iter()
+                .filter(|event| event.event == "ely:action")
+                .count(),
+            1
+        );
         assert!(view.events().iter().any(|event| event.node_id == "playlist"
             && event.event == "ely:change"
             && event.value == json!({"selection":"two", "playing":true})));

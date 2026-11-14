@@ -401,6 +401,7 @@ pub struct CatalogueView {
     screen: Option<Screen>,
     screen_generation: u64,
     values: BTreeMap<String, Value>,
+    duplicate_names: BTreeSet<String>,
     nav_groups: BTreeMap<(String, usize), bool>,
     table_filters: BTreeMap<String, String>,
     locked_keys: BTreeSet<String>,
@@ -424,6 +425,7 @@ impl CatalogueView {
             screen: None,
             screen_generation: 0,
             values: BTreeMap::new(),
+            duplicate_names: BTreeSet::new(),
             nav_groups: BTreeMap::new(),
             table_filters: BTreeMap::new(),
             locked_keys: BTreeSet::new(),
@@ -505,6 +507,21 @@ impl CatalogueView {
         self.values.clear();
         self.action_requests.clear();
         self.locked_keys.clear();
+        let mut names = BTreeMap::new();
+        collect_name_counts(&screen.root, &mut names);
+        self.duplicate_names = names
+            .into_iter()
+            .filter_map(|(name, count)| (count > 1).then_some(name))
+            .collect();
+        loop {
+            let mut counts = BTreeMap::new();
+            collect_state_key_counts(&screen.root, &self.duplicate_names, &mut counts);
+            let before = self.duplicate_names.len();
+            collect_colliding_names(&screen.root, &counts, &mut self.duplicate_names);
+            if before == self.duplicate_names.len() {
+                break;
+            }
+        }
         self.seed_node_state(&screen.root);
         self.screen = Some(screen);
         self.sync_inputs(window, cx);
@@ -513,8 +530,28 @@ impl CatalogueView {
     }
 
     pub fn set_value(&mut self, key: impl Into<String>, value: Value, cx: &mut Context<Self>) {
-        self.values.insert(key.into(), value);
+        let key = key.into();
+        if self.reject_ambiguous_alias(&key, cx) {
+            return;
+        }
+        self.values.insert(key, value);
         cx.notify();
+    }
+
+    fn reject_ambiguous_alias(&mut self, key: &str, cx: &mut Context<Self>) -> bool {
+        if !self.duplicate_names.contains(key) {
+            return false;
+        }
+        let mut matches = Vec::new();
+        if let Some(screen) = &self.screen {
+            find_event_nodes(&screen.root, key, true, &self.duplicate_names, &mut matches);
+        }
+        if matches.len() == 1 {
+            return false;
+        }
+        self.last_error = Some(format!("Ambiguous state key: {key}; use a node ID"));
+        cx.notify();
+        true
     }
 
     pub(crate) fn nav_group_open(&self, id: &str, index: usize, default: bool) -> bool {
@@ -536,7 +573,7 @@ impl CatalogueView {
     }
 
     pub fn set_text(&mut self, state_key: &str, text: impl Into<String>, cx: &mut Context<Self>) {
-        if self.locked_keys.contains(state_key) {
+        if self.reject_ambiguous_alias(state_key, cx) || self.locked_keys.contains(state_key) {
             return;
         }
         let text = text.into();
@@ -562,14 +599,20 @@ impl CatalogueView {
         cx: &mut Context<Self>,
     ) {
         if event == "change" {
-            if self.locked_keys.contains(node_id) {
+            if self.reject_ambiguous_alias(node_id, cx) || self.locked_keys.contains(node_id) {
                 return;
             }
             self.values.insert(node_id.to_owned(), value.clone());
         }
         if let Some(screen) = &self.screen {
             let mut matches = Vec::new();
-            find_event_nodes(&screen.root, node_id, event == "change", &mut matches);
+            find_event_nodes(
+                &screen.root,
+                node_id,
+                event == "change",
+                &self.duplicate_names,
+                &mut matches,
+            );
             if matches.len() == 1 {
                 let mut detail = match &value {
                     Value::Object(fields) => fields.clone(),
@@ -612,11 +655,40 @@ impl CatalogueView {
     }
 
     fn seed_node_state(&mut self, node: &ScreenNode) {
-        let key = state_key_for_node(node);
+        let key = state_key_for_node(node, &self.duplicate_names);
         if prop_bool(node, "readonly") || prop_bool(node, "disabled") {
             self.locked_keys.insert(key.clone());
         }
-        if let Some(checked) = node.props.get("checked").and_then(Value::as_bool) {
+        if matches!(
+            node.node_type.as_str(),
+            "basic/multi-select" | "forms/MultiSelect"
+        ) {
+            let value = node.props.get("value");
+            let choices = extract_choices(node);
+            let selected = ["options", "items", "tabs"]
+                .into_iter()
+                .filter_map(|key| node.props.get(key).and_then(Value::as_array))
+                .find(|items| {
+                    items
+                        .iter()
+                        .any(|item| item.is_string() || item.is_object())
+                })
+                .into_iter()
+                .flatten()
+                .filter(|item| item.is_string() || item.is_object())
+                .zip(choices)
+                .filter_map(|(item, choice)| {
+                    let option = Value::String(choice.value.to_string());
+                    let selected = item.get("selected").and_then(Value::as_bool) == Some(true)
+                        || value.is_some_and(|v| {
+                            v == &option
+                                || v.as_array().is_some_and(|values| values.contains(&option))
+                        });
+                    selected.then_some(option)
+                })
+                .collect();
+            self.values.insert(key.clone(), Value::Array(selected));
+        } else if let Some(checked) = node.props.get("checked").and_then(Value::as_bool) {
             self.values.insert(key.clone(), Value::Bool(checked));
         } else if let Some(val) = node.props.get("value")
             && !val.is_null()
@@ -705,7 +777,7 @@ impl CatalogueView {
             return;
         };
         let mut specs = Vec::new();
-        collect_input_specs(&screen.root, &mut specs);
+        collect_input_specs(&screen.root, &self.duplicate_names, &mut specs);
         let active_keys: BTreeSet<String> = specs.iter().map(|s| s.key.clone()).collect();
         self.inputs.retain(|k, _| active_keys.contains(k));
 
@@ -776,7 +848,7 @@ impl CatalogueView {
     ) -> AnyElement {
         let eid = SharedString::from(format!("{prefix}-{}", node.id));
         let contract = self.registry.get(&node.node_type);
-        let state_key = state_key_for_node(node);
+        let state_key = state_key_for_node(node, &self.duplicate_names);
         if let Some(el) = self.render_specific_node(
             &node.node_type,
             node,
@@ -1259,15 +1331,28 @@ impl CatalogueView {
             }
             "basic/multi-select" | "forms/MultiSelect" => {
                 let choices = extract_choices(node);
-                let safe_choices = if choices.is_empty() {
-                    vec![Choice::new("default", "Default")]
-                } else {
-                    choices
-                };
+                if choices.is_empty() {
+                    let mut empty = v_stack().gap_1();
+                    if let Some(label) = prop_str(node, "label").filter(|label| !label.is_empty()) {
+                        empty = empty.child(Label::new(label));
+                    }
+                    return Some(empty.into_any_element());
+                }
                 let v = view.clone();
                 let ntype = node.node_type.clone();
                 let sk = state_key.clone();
-                MultiSelect::new(eid, safe_choices)
+                let selected: Vec<String> = self
+                    .values
+                    .get(&state_key)
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str)
+                    .map(ToOwned::to_owned)
+                    .collect();
+                let control = MultiSelect::new(eid, choices)
+                    .selected(selected)
+                    .disabled(disabled || readonly)
                     .on_change(move |picked, _, cx| {
                         let vals: Vec<Value> = picked
                             .iter()
@@ -1276,7 +1361,17 @@ impl CatalogueView {
                         let _ = v.update(cx, |this, cx| {
                             this.trigger_event(&sk, &ntype, "change", Value::Array(vals), cx);
                         });
-                    })
+                    });
+                let mut field = v_stack().gap_1();
+                if let Some(label) = prop_str(node, "label").filter(|label| !label.is_empty()) {
+                    field = field.child(Label::new(label));
+                }
+                field
+                    .child(
+                        div()
+                            .debug_selector(|| "multi-select-control".into())
+                            .child(control),
+                    )
                     .into_any_element()
             }
             "basic/radio-group" | "forms/RadioGroup" | "forms/Radio" => {
@@ -3681,25 +3776,68 @@ struct InputSpec {
     disabled: bool,
 }
 
-fn state_key_for_node(node: &ScreenNode) -> String {
-    prop_str(node, "name").unwrap_or_else(|| node.id.clone())
+fn state_key_for_node(node: &ScreenNode, duplicate_names: &BTreeSet<String>) -> String {
+    prop_str(node, "name")
+        .filter(|name| !duplicate_names.contains(name))
+        .unwrap_or_else(|| node.id.clone())
+}
+
+fn collect_name_counts(node: &ScreenNode, counts: &mut BTreeMap<String, usize>) {
+    if let Some(name) = prop_str(node, "name") {
+        *counts.entry(name).or_default() += 1;
+    }
+    for child in node.children.iter().chain(node.slots.values().flatten()) {
+        collect_name_counts(child, counts);
+    }
+}
+
+fn collect_state_key_counts(
+    node: &ScreenNode,
+    names: &BTreeSet<String>,
+    counts: &mut BTreeMap<String, usize>,
+) {
+    *counts.entry(state_key_for_node(node, names)).or_default() += 1;
+    for child in node.children.iter().chain(node.slots.values().flatten()) {
+        collect_state_key_counts(child, names, counts);
+    }
+}
+
+fn collect_colliding_names(
+    node: &ScreenNode,
+    counts: &BTreeMap<String, usize>,
+    names: &mut BTreeSet<String>,
+) {
+    if let Some(name) = prop_str(node, "name")
+        && counts
+            .get(&state_key_for_node(node, names))
+            .copied()
+            .unwrap_or(0)
+            > 1
+        && name != node.id
+    {
+        names.insert(name);
+    }
+    for child in node.children.iter().chain(node.slots.values().flatten()) {
+        collect_colliding_names(child, counts, names);
+    }
 }
 
 fn find_event_nodes<'a>(
     node: &'a ScreenNode,
     key: &str,
     change: bool,
+    duplicate_names: &BTreeSet<String>,
     found: &mut Vec<&'a ScreenNode>,
 ) {
-    if (change && state_key_for_node(node) == key) || (!change && node.id == key) {
+    if (change && state_key_for_node(node, duplicate_names) == key) || (!change && node.id == key) {
         found.push(node);
     }
     for child in &node.children {
-        find_event_nodes(child, key, change, found);
+        find_event_nodes(child, key, change, duplicate_names, found);
     }
     for children in node.slots.values() {
         for child in children {
-            find_event_nodes(child, key, change, found);
+            find_event_nodes(child, key, change, duplicate_names, found);
         }
     }
 }
@@ -3744,12 +3882,16 @@ fn canonical_component_type(node_type: &str, contract: Option<&CatalogueContract
     node_type.to_owned()
 }
 
-fn collect_input_specs(node: &ScreenNode, out: &mut Vec<InputSpec>) {
+fn collect_input_specs(
+    node: &ScreenNode,
+    duplicate_names: &BTreeSet<String>,
+    out: &mut Vec<InputSpec>,
+) {
     let disabled = prop_bool(node, "disabled");
     let readonly = prop_bool(node, "readonly");
     if is_text_input_node(node) && !(readonly && !disabled) {
         out.push(InputSpec {
-            key: state_key_for_node(node),
+            key: state_key_for_node(node, duplicate_names),
             node_id: node.id.clone(),
             component_type: node.node_type.clone(),
             label: non_empty_or(&best_label(node), "Input"),
@@ -3801,11 +3943,11 @@ fn collect_input_specs(node: &ScreenNode, out: &mut Vec<InputSpec>) {
         }
     }
     for child in &node.children {
-        collect_input_specs(child, out);
+        collect_input_specs(child, duplicate_names, out);
     }
     for slot in node.slots.values() {
         for child in slot {
-            collect_input_specs(child, out);
+            collect_input_specs(child, duplicate_names, out);
         }
     }
 }

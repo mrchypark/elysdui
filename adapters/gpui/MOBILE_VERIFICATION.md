@@ -34,6 +34,9 @@ specific device interactions named there, not full contract coverage.
   This covers that form scenario, not every dialog presentation or validation.
 - Android: the MailItem fixture's star changed appearance and emitted a
   `star-mail` action containing the caller's item value.
+- Android and iOS: MultiSelect retained Alpha, added Beta, and emitted both
+  values. A nearby MonthPicker with the same name remained unchanged. GPUI
+  tests additionally cover disabled selections and duplicate-name isolation.
 - Android: an upward touch swipe on the supplied VirtualList fixture brought
   rows 7 and 8 into view. On iOS the initial rows render but automated
   Simulator drag and scroll did not move the list; the input path and actual
@@ -62,18 +65,21 @@ specific device interactions named there, not full contract coverage.
 - The disabled prompt's event guard is tested, but the upstream SendButton can
   still appear enabled for a nonempty disabled field. File drop and attachment
   removal were not exercised on a device.
-- Playlist activation still requires a double press or Enter. WebSocketConsole
-  trims message whitespace in the underlying Ely component; both need further
-  mobile and contract work. Their latest event fixes have GPUI tests only.
+- Playlist single-touch activation and WebSocketConsole whitespace retention
+  have GPUI tests; these fixes still need Android and iOS interaction checks.
 - Android: removing the TableStructureEditor's fixed-height wrapper stopped it
   overlapping the following WebSocketConsole in the same fixture. Its toggle
   emitted the expected `toggle-socket` event. The layout regression test passes;
   other fixed-size wrappers still need an individual overflow audit.
-- Source comparison found incomplete form contracts: MultiSelect does not
-  restore selected options or component-wide disabled state; NumberInput lacks
+- Source comparison found incomplete form contracts: NumberInput lacks
   a disabled/read-only presentation; checkbox option groups and switch item
   groups render as single controls; and Slider ignores vertical orientation.
   These findings need focused tests and implementation before device sign-off.
+- Form submission still needs contract verification for repeated names,
+  multi-value fields, disabled fields, and form ownership. The current generic
+  submit snapshots internal state rather than browser-style form entries. A
+  duplicate field name also changes lookups to node IDs; callers must use IDs
+  for those fields until state identity and name lookup are separated.
 - GraphQLExplorer and JSON/YAML/XML viewers contain content that may exceed
   their fixed-height wrappers. Their actual bounds and post-interaction layout
   remain unmeasured. SchemaTree intentionally uses a bounded scrollable tree.
