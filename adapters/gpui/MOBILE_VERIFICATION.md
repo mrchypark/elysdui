@@ -32,6 +32,8 @@ specific device interactions named there, not full contract coverage.
 - Android and iOS: the first AlertDialog fixture opened its profile form,
   submitted the caller-provided values as `ely:action`, and closed with Cancel.
   This covers that form scenario, not every dialog presentation or validation.
+- Android: the MailItem fixture's star changed appearance and emitted a
+  `star-mail` action containing the caller's item value.
 - Android: an upward touch swipe on the supplied VirtualList fixture brought
   rows 7 and 8 into view. On iOS the initial rows render but automated
   Simulator drag and scroll did not move the list; the input path and actual

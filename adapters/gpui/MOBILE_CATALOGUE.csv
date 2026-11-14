@@ -919,7 +919,7 @@ mail/FolderList,mail,MailboxList,1,pass-f64e798,not-run,not-run
 mail/InboxZeroState,mail,InboxZeroState,1,pass-f64e798,not-run,not-run
 mail/LabelPicker,mail,LabelPicker,1,pass-f64e798,not-run,not-run
 mail/MailComposer,mail,MailComposer,1,pass-f64e798,not-run,not-run
-mail/MailItem,mail,MailList,2,pass-f64e798,not-run,not-run
+mail/MailItem,mail,MailList,2,pass-f64e798,partial-star-action,not-run
 mail/MailList,mail,MailList,2,pass-f64e798,not-run,not-run
 mail/MailReader,mail,MailReader,1,pass-f64e798,not-run,not-run
 mail/MailThreadView,mail,MailThreadView,1,pass-f64e798,not-run,not-run
