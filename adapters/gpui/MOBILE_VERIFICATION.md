@@ -59,6 +59,8 @@ specific device interactions named there, not full contract coverage.
 - Android: forms/JsonInput rendered its initial JSON and emitted the changed
   text after a software-keyboard character insertion. JSON validation,
   multiline behavior, and iOS remain unverified.
+- Android: forms/CascadeSelect changed Alpha to Beta and emitted the selected
+  value, label path, and action. Disabled options and iOS remain unverified.
 - iOS: account/AccountSwitcher opened its menu, switched from `work` to `home`
   with the displayed account and change event updated, and emitted an add event
   for the fixture's `add-account` action. Custom actions and disabled state

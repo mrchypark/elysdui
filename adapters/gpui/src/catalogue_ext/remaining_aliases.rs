@@ -2106,10 +2106,29 @@ pub(crate) fn render(
             let v1 = view.clone();
             let sk1 = sk.clone();
             let nt1 = ntype.clone();
+            let node_id = node.id.clone();
+            let event_roots = roots.clone();
             let mut casc =
                 Cascader::new((id.clone(), "casc"), roots).on_change(move |path, _, cx| {
-                    let vals: Vec<Value> = path.iter().map(|s| json!(s.to_string())).collect();
-                    emit_event(&v1, &sk1, &nt1, "change", Value::Array(vals), cx);
+                    let Some(value) = path.last() else {
+                        return;
+                    };
+                    let mut level = event_roots.as_slice();
+                    let mut labels = Vec::new();
+                    for part in path {
+                        let Some(item) = level.iter().find(|item| item.value == *part) else {
+                            return;
+                        };
+                        labels.push(item.label.to_string());
+                        level = &item.children;
+                    }
+                    let value = value.to_string();
+                    emit_event(&v1, &sk1, &nt1, "change", json!(value), cx);
+                    let detail = json!({"id": node_id, "component": nt1, "value": value, "path": labels});
+                    emit_event(&v1, &node_id, &nt1, "ely:change", detail.clone(), cx);
+                    let mut action = detail;
+                    action["action"] = json!("select");
+                    emit_event(&v1, &node_id, &nt1, "ely:action", action, cx);
                 });
             if !selected.is_empty() {
                 casc = casc.selected(selected);

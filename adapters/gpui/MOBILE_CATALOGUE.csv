@@ -662,7 +662,7 @@ finance/Watchlist,finance,Watchlist,1,pass-f64e798,not-run,not-run
 forms/AutoResizeInput,forms,TextArea,2,pass-f64e798,not-run,not-run
 forms/Autocomplete,forms,Combobox,3,pass-f64e798,not-run,not-run
 forms/Calendar,forms,Calendar,2,pass-f64e798,partial-date-selection,not-run
-forms/CascadeSelect,forms,CascadeSelect,2,pass-f64e798,not-run,not-run
+forms/CascadeSelect,forms,CascadeSelect,2,pass-f64e798,partial-leaf-selection,not-run
 forms/Cascader,forms,CascadeSelect,2,pass-f64e798,not-run,not-run
 forms/Checkbox,forms,Checkbox,2,pass-f64e798,not-run,not-run
 forms/CheckboxCard,forms,CheckboxCard,2,pass-f64e798,not-run,not-run
