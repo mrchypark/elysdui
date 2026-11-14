@@ -58,7 +58,8 @@ specific device interactions named there, not full contract coverage.
   for the fixture's `add-account` action. Custom actions and disabled state
   have focused GPUI tests. Android and iOS also selected `home` on the updated
   component and displayed the `switch-account` action and selected value.
-  Menu label disambiguation still needs device verification.
+  On Android and iOS, two accounts with the same name showed their different
+  email addresses in the menu.
 - Android: an upward touch swipe on the supplied VirtualList fixture brought
   rows 7 and 8 into view. On iOS the initial rows render but automated
   Simulator drag and scroll did not move the list; the input path and actual
