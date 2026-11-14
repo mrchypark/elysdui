@@ -1388,6 +1388,16 @@ fn run_2166_fixture_click_audit(
                         vcx.run_until_parked();
                     }
                 }
+                // Exercise horizontal drag (sliders, knobs, split panes, maps, sortable lists).
+                let drag_y = (min_y + max_y) * 0.5;
+                let start = gpui::point(gpui::px((min_x + 16.0).min(max_x)), gpui::px(drag_y));
+                let end = gpui::point(gpui::px((max_x - 16.0).max(min_x)), gpui::px(drag_y));
+                vcx.simulate_mouse_down(start, MouseButton::Left, Modifiers::none());
+                vcx.simulate_mouse_move(end, Some(MouseButton::Left), Modifiers::none());
+                vcx.simulate_mouse_up(end, MouseButton::Left, Modifiers::none());
+                vcx.run_until_parked();
+                vcx.simulate_keystrokes("space down enter");
+                vcx.run_until_parked();
             }
             vcx.simulate_keystrokes("a");
             vcx.run_until_parked();
@@ -1558,5 +1568,425 @@ fn gpui_newly_wired_controls_emit_events_and_update_state(cx: &mut TestAppContex
             "expected ColorSwatch event, got {:?}",
             v.events()
         );
+    });
+}
+use gpui::MouseButton;
+
+#[gpui::test]
+fn gpui_secondary_interactions_drag_and_extended_callbacks_work(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        init_for_tests(cx);
+        Theme::update(cx, |t| {
+            t.touch_mode = true;
+            t.reduced_motion = true;
+        });
+    });
+
+    let (view, vcx) = cx.add_window_view(|_, _| CatalogueView::new());
+    vcx.update(|window, _| {
+        window.resize(gpui::size(gpui::px(390.), gpui::px(844.)));
+    });
+    vcx.run_until_parked();
+
+    // Select with the keyboard, then drag the slider.
+    let screen = Screen {
+        version: "1".into(),
+        id: "secondary-interactions".into(),
+        loader: None,
+        templates: BTreeMap::new(),
+        root: ScreenNode {
+            id: "root".into(),
+            node_type: "basic/stack".into(),
+            props: BTreeMap::from([("horizontal".into(), json!(false))]),
+            bindings: BTreeMap::new(),
+            children: vec![
+                make_node(
+                    "role-sel",
+                    "forms/Select",
+                    BTreeMap::from([
+                        ("name".into(), json!("role")),
+                        ("label".into(), json!("Role")),
+                        (
+                            "options".into(),
+                            json!([
+                                {"label": "Viewer", "value": "viewer"},
+                                {"label": "Editor", "value": "editor"},
+                                {"label": "Admin", "value": "admin"}
+                            ]),
+                        ),
+                    ]),
+                ),
+                make_node(
+                    "vol-slider",
+                    "forms/Slider",
+                    BTreeMap::from([
+                        ("name".into(), json!("vol")),
+                        ("title".into(), json!("Volume")),
+                        ("min".into(), json!("0")),
+                        ("max".into(), json!(100)),
+                        ("value".into(), json!("20")),
+                    ]),
+                ),
+                make_node(
+                    "notice-banner",
+                    "feedback/Banner",
+                    BTreeMap::from([
+                        ("title".into(), json!("Notice")),
+                        ("content".into(), json!("Dismiss me")),
+                        ("actionLabel".into(), json!("Retry")),
+                        ("action".into(), json!("retry")),
+                    ]),
+                ),
+                make_node(
+                    "rem-tag",
+                    "data/Tag",
+                    BTreeMap::from([
+                        ("label".into(), json!("Alpha")),
+                        (
+                            "tagRows".into(),
+                            json!([[{ "label": "Alpha", "value": "alpha", "removable": true }]]),
+                        ),
+                    ]),
+                ),
+                make_node(
+                    "alerts",
+                    "dashboard/AlertList",
+                    BTreeMap::from([(
+                        "items".into(),
+                        json!([{"key": "cpu-1", "label": "High CPU", "source": "node-1"}]),
+                    )]),
+                ),
+                make_node(
+                    "cmd-blk",
+                    "terminal/CommandBlock",
+                    BTreeMap::from([
+                        ("command".into(), json!("echo hi")),
+                        ("output".into(), json!("hi")),
+                    ]),
+                ),
+                make_node(
+                    "dt",
+                    "tables/DataTable",
+                    BTreeMap::from([
+                        (
+                            "columns".into(),
+                            json!([{ "label": "Name" }, { "label": "Role" }]),
+                        ),
+                        (
+                            "rows".into(),
+                            json!([{ "cells": ["Ada", "Admin"] }, { "cells": ["Grace", "Editor"] }]),
+                        ),
+                    ]),
+                ),
+            ],
+            event: None,
+            events: Vec::new(),
+            use_template: None,
+            params: BTreeMap::new(),
+            param_bindings: BTreeMap::new(),
+            slots: BTreeMap::new(),
+            when: None,
+            repeat: None,
+        },
+    };
+
+    vcx.update(|window, cx| {
+        view.update(cx, |v, cx| v.load_screen(screen, window, cx).unwrap());
+    });
+    vcx.run_until_parked();
+
+    // Open Select and pick second option via keyboard Down+Enter
+    vcx.simulate_click(
+        gpui::point(gpui::px(120.), gpui::px(38.)),
+        Modifiers::none(),
+    );
+    vcx.run_until_parked();
+    vcx.simulate_keystrokes("down enter");
+    vcx.run_until_parked();
+
+    // Drag from the current value to 80% of the measured track.
+    let track = vcx
+        .debug_bounds("slider-track")
+        .expect("slider track bounds");
+    let at = |fraction| {
+        gpui::point(
+            track.origin.x + track.size.width * fraction,
+            track.center().y,
+        )
+    };
+    vcx.simulate_mouse_down(at(0.2), MouseButton::Left, Modifiers::none());
+    vcx.simulate_mouse_move(at(0.3), Some(MouseButton::Left), Modifiers::none());
+    vcx.simulate_mouse_move(at(0.8), Some(MouseButton::Left), Modifiers::none());
+    vcx.simulate_mouse_up(at(0.8), MouseButton::Left, Modifiers::none());
+    vcx.run_until_parked();
+
+    vcx.read_entity(&view, |v, _| {
+        assert_eq!(v.value("role"), Some(&json!("editor")));
+        let vol = v
+            .value("vol")
+            .and_then(Value::as_f64)
+            .expect("slider value");
+        assert!(
+            (75.0..=85.0).contains(&vol),
+            "expected drag near 80%, got {vol}, events={:?}",
+            v.events()
+        );
+    });
+}
+
+#[gpui::test]
+fn gpui_map_viewport_action_preserves_form_state(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        init_for_tests(cx);
+        Theme::update(cx, |t| {
+            t.touch_mode = true;
+            t.reduced_motion = true;
+        });
+    });
+    let (view, vcx) = cx.add_window_view(|_, _| CatalogueView::new());
+    let screen = Screen {
+        version: "1".into(),
+        id: "map-test".into(),
+        loader: None,
+        templates: BTreeMap::new(),
+        root: make_node(
+            "map",
+            "maps/MapView",
+            BTreeMap::from([
+                ("center".into(), json!({"latitude": 0.0, "longitude": 0.0})),
+                ("zoom".into(), json!(2)),
+                ("viewportAction".into(), json!("caller-view")),
+            ]),
+        ),
+    };
+    vcx.update(|window, cx| view.update(cx, |v, cx| v.load_screen(screen, window, cx).unwrap()));
+    vcx.run_until_parked();
+    let bounds = vcx.debug_bounds("cat-screen-root").expect("screen bounds");
+    vcx.simulate_click(
+        gpui::point(bounds.right() - gpui::px(28.), bounds.top() + gpui::px(28.)),
+        Modifiers::none(),
+    );
+    vcx.run_until_parked();
+    vcx.simulate_click(
+        gpui::point(bounds.right() - gpui::px(28.), bounds.top() + gpui::px(28.)),
+        Modifiers::none(),
+    );
+    vcx.run_until_parked();
+    vcx.read_entity(&view, |v, _| {
+        let event = v
+            .events()
+            .iter()
+            .rev()
+            .find(|e| e.node_id == "map" && e.event == "ely:action")
+            .expect("viewport action");
+        assert_eq!(event.value["action"], "caller-view");
+        assert_eq!(event.value["viewport"]["zoom"], 4.0);
+        assert!(event.value["viewport"]["latitude"].is_number());
+        assert!(event.value["viewport"]["longitude"].is_number());
+        assert!(
+            v.value("map").is_none(),
+            "viewport must not replace a form value"
+        );
+    });
+}
+
+#[gpui::test]
+fn gpui_virtual_table_keeps_selection_after_redraw(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        init_for_tests(cx);
+        Theme::update(cx, |t| {
+            t.touch_mode = true;
+            t.reduced_motion = true;
+        });
+    });
+    let (view, vcx) = cx.add_window_view(|_, _| CatalogueView::new());
+    let screen = Screen {
+        version: "1".into(),
+        id: "table-test".into(),
+        loader: None,
+        templates: BTreeMap::new(),
+        root: make_node(
+            "table",
+            "tables/VirtualTable",
+            BTreeMap::from([
+                ("columns".into(), json!([{ "label": "Name" }])),
+                ("rows".into(), json!([{ "key": "ada", "cells": ["Ada"] }])),
+            ]),
+        ),
+    };
+    vcx.update(|window, cx| view.update(cx, |v, cx| v.load_screen(screen, window, cx).unwrap()));
+    vcx.run_until_parked();
+    let row = vcx.debug_bounds("table-row ada").expect("caller row");
+    let checkbox = gpui::point(row.left() + gpui::px(16.), row.center().y);
+    vcx.simulate_click(checkbox, Modifiers::none());
+    vcx.run_until_parked();
+    vcx.read_entity(&view, |v, _| {
+        assert_eq!(v.value("table"), Some(&json!(["ada"])))
+    });
+    vcx.simulate_click(checkbox, Modifiers::none());
+    vcx.run_until_parked();
+    vcx.read_entity(&view, |v, _| assert_eq!(v.value("table"), Some(&json!([]))));
+}
+
+#[gpui::test]
+fn gpui_navigation_group_preserves_selection_on_toggle(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        init_for_tests(cx);
+        Theme::update(cx, |t| t.reduced_motion = true);
+    });
+    let (view, vcx) = cx.add_window_view(|_, _| CatalogueView::new());
+    let screen = Screen {
+        version: "1".into(),
+        id: "nav-test".into(),
+        loader: None,
+        templates: BTreeMap::new(),
+        root: make_node(
+            "navigation",
+            "navigation/Sidebar Navigation",
+            BTreeMap::from([(
+                "groups".into(),
+                json!([{ "label": "Projects", "items": [{"label": "Home", "value": "home"}]}]),
+            )]),
+        ),
+    };
+    vcx.update(|window, cx| view.update(cx, |v, cx| v.load_screen(screen, window, cx).unwrap()));
+    vcx.run_until_parked();
+    let title = vcx.debug_bounds("nav-group-title").expect("group title");
+    let item = vcx.debug_bounds("nav-item").expect("open group item");
+    vcx.simulate_click(item.center(), Modifiers::none());
+    vcx.run_until_parked();
+    vcx.read_entity(&view, |v, _| {
+        assert_eq!(v.value("navigation"), Some(&json!("home")))
+    });
+    vcx.simulate_click(title.center(), Modifiers::none());
+    vcx.run_until_parked();
+    vcx.read_entity(&view, |v, _| {
+        assert_eq!(v.value("navigation"), Some(&json!("home")))
+    });
+    vcx.simulate_click(title.center(), Modifiers::none());
+    vcx.run_until_parked();
+    vcx.read_entity(&view, |v, _| {
+        assert_eq!(v.value("navigation"), Some(&json!("home")))
+    });
+}
+
+#[gpui::test]
+fn gpui_split_pane_applies_changed_weights(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        init_for_tests(cx);
+        Theme::update(cx, |t| t.reduced_motion = true);
+    });
+    let (view, vcx) = cx.add_window_view(|_, _| CatalogueView::new());
+    let screen = Screen {
+        version: "1".into(),
+        id: "pane-test".into(),
+        loader: None,
+        templates: BTreeMap::new(),
+        root: make_node("pane", "layout/SplitPane", BTreeMap::new()),
+    };
+    vcx.update(|window, cx| view.update(cx, |v, cx| v.load_screen(screen, window, cx).unwrap()));
+    vcx.run_until_parked();
+    vcx.update(|_, cx| view.update(cx, |v, cx| v.set_value("pane", json!([0.25, 0.75]), cx)));
+    vcx.run_until_parked();
+    let left = vcx
+        .debug_bounds("split-handle")
+        .expect("divider")
+        .center()
+        .x;
+    vcx.update(|_, cx| view.update(cx, |v, cx| v.set_value("pane", json!([0.75, 0.25]), cx)));
+    vcx.run_until_parked();
+    let right = vcx
+        .debug_bounds("split-handle")
+        .expect("divider")
+        .center()
+        .x;
+    assert!(
+        right > left + gpui::px(50.),
+        "divider should follow state: {left:?} -> {right:?}"
+    );
+}
+
+#[gpui::test]
+fn gpui_declared_event_resolves_from_real_button_click(cx: &mut TestAppContext) {
+    cx.update(|cx| init_for_tests(cx));
+    let (view, vcx) = cx.add_window_view(|_, _| CatalogueView::new());
+    let mut button = make_node(
+        "save",
+        "buttons/Button",
+        BTreeMap::from([
+            ("label".into(), json!("Save")),
+            ("value".into(), json!("draft")),
+        ]),
+    );
+    button.event = Some(
+        json!({"on":"click", "action":"save-record", "target":"result", "payload":{"value":{"path":"/value","type":"string"}}}),
+    );
+    let screen = Screen {
+        version: "1".into(),
+        id: "binding-test".into(),
+        loader: None,
+        templates: BTreeMap::new(),
+        root: button,
+    };
+    vcx.update(|window, cx| view.update(cx, |v, cx| v.load_screen(screen, window, cx).unwrap()));
+    vcx.run_until_parked();
+    let bounds = vcx.debug_bounds("cat-btn-save").expect("button");
+    vcx.simulate_click(bounds.center(), Modifiers::none());
+    vcx.run_until_parked();
+    vcx.update(|_, cx| {
+        view.update(cx, |v, _| {
+            let requests = v.take_action_requests();
+            assert_eq!(requests.len(), 1);
+            assert_eq!(requests[0].action, "save-record");
+            assert_eq!(requests[0].target, "result");
+            assert_eq!(requests[0].payload["value"], json!("draft"));
+            assert!(v.take_action_requests().is_empty());
+        })
+    });
+}
+
+#[gpui::test]
+fn gpui_map_marker_emits_declared_action(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        init_for_tests(cx);
+        Theme::update(cx, |t| t.reduced_motion = true);
+    });
+    let (view, vcx) = cx.add_window_view(|_, _| CatalogueView::new());
+    let mut map = make_node(
+        "map",
+        "maps/MapView",
+        BTreeMap::from([
+            ("center".into(), json!({"latitude": 0.0, "longitude": 0.0})),
+            ("zoom".into(), json!(2)),
+            ("markerAction".into(), json!("choose")),
+            (
+                "points".into(),
+                json!([{ "key":"origin", "label":"Origin", "latitude":0.0, "longitude":0.0, "value":"point-1" }]),
+            ),
+        ]),
+    );
+    map.event = Some(
+        json!({"on":"ely:action", "sourceAction":"choose", "action":"open-record", "target":"result", "payload":{"key":{"path":"/key","type":"string"}}}),
+    );
+    let screen = Screen {
+        version: "1".into(),
+        id: "map-marker-test".into(),
+        loader: None,
+        templates: BTreeMap::new(),
+        root: map,
+    };
+    vcx.update(|window, cx| view.update(cx, |v, cx| v.load_screen(screen, window, cx).unwrap()));
+    vcx.run_until_parked();
+    let bounds = vcx.debug_bounds("cat-screen-root").expect("screen");
+    let marker = gpui::point(bounds.center().x, bounds.top() + gpui::px(148.));
+    vcx.simulate_click(marker, Modifiers::none());
+    vcx.run_until_parked();
+    vcx.update(|_, cx| {
+        view.update(cx, |v, _| {
+            let requests = v.take_action_requests();
+            assert_eq!(requests.len(), 1, "events: {:?}", v.events());
+            assert_eq!(requests[0].action, "open-record");
+            assert_eq!(requests[0].payload["key"], json!("origin"));
+        })
     });
 }

@@ -74,7 +74,7 @@ use serde_json::{Value, json};
 use crate::{
     catalogue::{
         CatalogueView, best_body, best_label, best_title, extract_choices, extract_item_objects,
-        non_empty_or, parse_tree_nodes, prop_bool, prop_f64, prop_str, value_to_f64,
+        non_empty_or, parse_tree_nodes, prop_bool, prop_f64, prop_str, split_weights, value_to_f64,
     },
     dashboard::ScreenNode,
 };
@@ -354,6 +354,20 @@ fn extract_table_rows(node: &ScreenNode, col_count: usize) -> Vec<Row> {
                     cells.resize(col_count, Cell::Empty);
                     Row::new(key, cells)
                 })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn selected_table_rows(view_state: &CatalogueView, state_key: &str) -> Vec<String> {
+    view_state
+        .value(state_key)
+        .and_then(Value::as_array)
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_owned)
                 .collect()
         })
         .unwrap_or_default()
@@ -1313,10 +1327,17 @@ pub(crate) fn render(
                 );
                 let tok = prop_f64(node, "systemTokens").unwrap_or(32.0).max(0.0) as usize;
                 let lim = prop_f64(node, "systemLimit").unwrap_or(2000.0).max(1.0) as usize;
+                let (vr, skr, ntr) = (view.clone(), node.id.clone(), ntype.clone());
                 v_stack()
                     .gap_2()
                     .child(panel)
-                    .child(SystemPromptEditor::new((id, "sys"), &ti, tok, lim))
+                    .child(
+                        SystemPromptEditor::new((id, "sys"), &ti, tok, lim).on_reset(
+                            move |_, cx| {
+                                emit_event(&vr, &skr, &ntr, "ely:action", json!("reset"), cx);
+                            },
+                        ),
+                    )
                     .into_any_element()
             } else {
                 panel.into_any_element()
@@ -2391,7 +2412,15 @@ pub(crate) fn render(
                     )
                 })
                 .collect();
-            DataTable::new(id, cols).rows(rows).into_any_element()
+            let (vt, skt, ntt) = (view.clone(), sk.clone(), ntype.clone());
+            DataTable::new(id, cols)
+                .rows(rows)
+                .selected(selected_table_rows(view_state, &sk))
+                .on_select(move |keys, _, cx| {
+                    let vals: Vec<Value> = keys.iter().map(|k| json!(k.to_string())).collect();
+                    emit_event(&vt, &skt, &ntt, "change", Value::Array(vals), cx);
+                })
+                .into_any_element()
         }
 
         "generative/ImageGenerationPanel" => {
@@ -3151,10 +3180,18 @@ pub(crate) fn render(
             while items.len() < 2 {
                 items.push(format!("Pane {}", items.len() + 1));
             }
+            let count = items.len().min(4);
             let mut split = SplitPane::new(id, Axis::Horizontal, px(60.));
-            for item in items.into_iter().take(4) {
+            for item in items.into_iter().take(count) {
                 split = split.pane(Well::new().child(div().p_3().child(Label::new(item))));
             }
+            if let Some(sizes) = split_weights(view_state.value(&sk), count) {
+                split = split.sizes(&sizes);
+            }
+            let (vs, sks, nts) = (view.clone(), sk.clone(), ntype.clone());
+            split = split.on_resize(move |sizes, _, cx| {
+                emit_event(&vs, &sks, &nts, "change", json!(sizes), cx);
+            });
             div().w_full().h(px(120.)).child(split).into_any_element()
         }
 
@@ -3610,9 +3647,16 @@ pub(crate) fn render(
             for (gix, grp) in arr_objs(node, "groups").iter().enumerate() {
                 let gtitle =
                     obj_str(grp, &["label"]).unwrap_or_else(|| format!("Group {}", gix + 1));
+                let open = view_state.nav_group_open(&node.id, gix, !obj_bool(grp, "collapsed"));
                 let mut ng =
-                    NavGroup::new(SharedString::from(format!("{eid}-ng-{gix}")), gtitle, true)
+                    NavGroup::new(SharedString::from(format!("{eid}-ng-{gix}")), gtitle, open)
                         .folded(folded);
+                let (vg, node_id) = (view.clone(), node.id.clone());
+                ng = ng.on_toggle(move |open, _, cx| {
+                    let _ = vg.update(cx, |this, cx| {
+                        this.set_nav_group_open(&node_id, gix, open, cx)
+                    });
+                });
                 if let Some(sub) = grp.get("items").and_then(Value::as_array) {
                     for (ix, it) in sub.iter().filter_map(Value::as_object).enumerate() {
                         let lbl =
@@ -3687,9 +3731,13 @@ pub(crate) fn render(
             let lbl = non_empty_or(&best_label(node), "Hover target");
             let tip = best_body(node).unwrap_or_else(|| "Tooltip details".into());
             let sc = prop_str(node, "shortcut").unwrap_or_default();
+            let (vb, idb, ntb) = (view.clone(), node.id.clone(), ntype.clone());
             let trigger = Button::new((id.clone(), "tt-btn"), lbl)
                 .variant(button_variant(prop_str(node, "buttonVariant").as_deref()))
-                .disabled(disabled);
+                .disabled(disabled)
+                .on_click(move |_, _, cx| {
+                    emit_event(&vb, &idb, &ntb, "click", json!("tooltip"), cx);
+                });
             TooltipTrigger::new(id, trigger, move |_, _| {
                 if sc.is_empty() {
                     Label::new(tip.clone()).into_any_element()
@@ -4157,7 +4205,15 @@ pub(crate) fn render(
                 })
                 .collect();
             let rows = extract_table_rows(node, col_count);
-            DataTable::new(id, columns).rows(rows).into_any_element()
+            let (vt, skt, ntt) = (view.clone(), sk.clone(), ntype.clone());
+            DataTable::new(id, columns)
+                .rows(rows)
+                .selected(selected_table_rows(view_state, &sk))
+                .on_select(move |keys, _, cx| {
+                    let vals: Vec<Value> = keys.iter().map(|k| json!(k.to_string())).collect();
+                    emit_event(&vt, &skt, &ntt, "change", Value::Array(vals), cx);
+                })
+                .into_any_element()
         }
 
         "tables/RowExpansion" => {
@@ -4169,13 +4225,19 @@ pub(crate) fn render(
                 .map(|(i, title)| Column::new(format!("col-{i}"), title))
                 .collect();
             let rows = extract_table_rows(node, col_count);
+            let (vt, skt, ntt) = (view.clone(), sk.clone(), ntype.clone());
             DataTable::new(id, columns)
                 .rows(rows)
+                .selected(selected_table_rows(view_state, &sk))
                 .detail(|row_key, _, _| {
                     div()
                         .p_2()
                         .child(Caption::new(format!("Details for {row_key}")))
                         .into_any_element()
+                })
+                .on_select(move |keys, _, cx| {
+                    let vals: Vec<Value> = keys.iter().map(|k| json!(k.to_string())).collect();
+                    emit_event(&vt, &skt, &ntt, "change", Value::Array(vals), cx);
                 })
                 .into_any_element()
         }
@@ -4192,6 +4254,10 @@ pub(crate) fn render(
             for (gix, grp) in arr_objs(node, "groups").iter().enumerate() {
                 if let Some(g_rows) = grp.get("rows").and_then(Value::as_array) {
                     for (rix, r) in g_rows.iter().enumerate() {
+                        let key = r
+                            .as_object()
+                            .and_then(|m| obj_str(m, &["key", "id", "value"]))
+                            .unwrap_or_else(|| format!("g{gix}-r{rix}"));
                         let mut cells: Vec<Cell> =
                             if let Some(arr) = r.get("cells").and_then(Value::as_array) {
                                 arr.iter().map(json_to_cell).collect()
@@ -4199,7 +4265,7 @@ pub(crate) fn render(
                                 Vec::new()
                             };
                         cells.resize(col_count, Cell::Empty);
-                        rows.push(Row::new(format!("g{gix}-r{rix}"), cells));
+                        rows.push(Row::new(key, cells));
                     }
                 }
             }
@@ -4207,9 +4273,16 @@ pub(crate) fn render(
                 rows = extract_table_rows(node, col_count);
             }
             let group_key = if col_count > 2 { "col-2" } else { "col-0" };
+            let selected = selected_table_rows(view_state, &sk);
+            let (vt, skt, ntt) = (view.clone(), sk.clone(), ntype.clone());
             DataTable::new(id, columns)
                 .rows(rows)
+                .selected(selected)
                 .group_by(group_key)
+                .on_select(move |keys, _, cx| {
+                    let vals: Vec<Value> = keys.iter().map(|k| json!(k.to_string())).collect();
+                    emit_event(&vt, &skt, &ntt, "change", Value::Array(vals), cx);
+                })
                 .into_any_element()
         }
 
@@ -4222,11 +4295,17 @@ pub(crate) fn render(
                 .map(|(i, title)| Column::new(format!("col-{i}"), title))
                 .collect();
             let rows = extract_table_rows(node, col_count);
+            let (vt, skt, ntt) = (view.clone(), sk.clone(), ntype.clone());
             DataTable::new(id, columns)
                 .rows(rows)
+                .selected(selected_table_rows(view_state, &sk))
                 .virtualized()
                 .w_full()
                 .h(px(240.))
+                .on_select(move |keys, _, cx| {
+                    let vals: Vec<Value> = keys.iter().map(|k| json!(k.to_string())).collect();
+                    emit_event(&vt, &skt, &ntt, "change", Value::Array(vals), cx);
+                })
                 .into_any_element()
         }
 
@@ -4515,18 +4594,35 @@ pub(crate) fn render(
             let v1 = view.clone();
             let sk1 = sk.clone();
             let nt1 = ntype.clone();
+            let (vc1, skc1, ntc1) = (view.clone(), sk.clone(), ntype.clone());
+            let (vc2, skc2, ntc2) = (view.clone(), node.id.clone(), ntype.clone());
             v_stack()
                 .gap_2()
-                .child(CommandBlock::new(
-                    (id.clone(), "cmd"),
-                    "~",
-                    cmd,
-                    best_body(node).unwrap_or_default(),
-                    CommandState::Done {
-                        code: 0,
-                        took: Duration::from_millis(12),
-                    },
-                ))
+                .child(
+                    CommandBlock::new(
+                        (id.clone(), "cmd"),
+                        "~",
+                        cmd,
+                        best_body(node).unwrap_or_default(),
+                        CommandState::Done {
+                            code: 0,
+                            took: Duration::from_millis(12),
+                        },
+                    )
+                    .on_fold(move |folded, _, cx| {
+                        emit_event(
+                            &vc1,
+                            &skc1,
+                            &ntc1,
+                            "change",
+                            json!({ "folded": folded }),
+                            cx,
+                        );
+                    })
+                    .on_rerun(move |_, cx| {
+                        emit_event(&vc2, &skc2, &ntc2, "ely:action", json!("rerun"), cx);
+                    }),
+                )
                 .child(Button::new((id, "cap"), lbl).disabled(disabled).on_click(
                     move |_, _, cx| {
                         emit_event(&v1, &sk1, &nt1, "ely:action", json!("capture"), cx);

@@ -1,4 +1,8 @@
-use std::{collections::HashSet, path::Path, rc::Rc};
+use std::{
+    collections::{BTreeMap, HashSet},
+    path::Path,
+    rc::Rc,
+};
 
 use ely_gpui_component::{
     calendar::{
@@ -30,7 +34,7 @@ use ely_gpui_component::{
     layout::{Card, CardHeader, h_stack, v_stack},
     maps::{
         ChoroplethLayer, ChoroplethMap, CoordFormat, GeoHeatmap, GeoJsonLayer, LatLon,
-        LocationPicker, MapView, MapViewport, RouteLine, WorldMap, read_geojson,
+        LocationPicker, MapMarker, MapView, MapViewport, RouteLine, WorldMap, read_geojson,
     },
     overlays::Slide,
     tables::{Cell, Column, Row},
@@ -97,7 +101,7 @@ pub(crate) fn render(
         "charts/SankeyChart" => render_sankey_chart(node, eid),
         "charts/Treemap" => render_treemap(node, eid),
 
-        "finance/CandlestickChart" => render_candlestick(node, eid),
+        "finance/CandlestickChart" => render_candlestick(node, eid, state_key, view),
         "finance/CurrencyConverter" => {
             render_currency_converter(node, eid, state_key, view_state, view)
         }
@@ -118,10 +122,10 @@ pub(crate) fn render(
         "finance/TimeAndSales" => render_time_and_sales(node, eid),
         "finance/Watchlist" => render_watchlist(node, eid, state_key, view_state, view),
 
-        "maps/ChoroplethMap" => render_choropleth(node, eid),
-        "maps/GeoHeatmap" => render_geo_heatmap(node, eid),
+        "maps/ChoroplethMap" => render_choropleth(node, eid, state_key, view),
+        "maps/GeoHeatmap" => render_geo_heatmap(node, eid, state_key, view),
         "maps/LocationPicker" => render_location_picker(node, eid, state_key, view),
-        "maps/RouteLine" => render_route_line(node, eid),
+        "maps/RouteLine" => render_route_line(node, eid, state_key, view),
 
         "data/Changelog" => render_changelog(node),
         "data/Gallery" => render_gallery(node, eid),
@@ -1871,10 +1875,21 @@ fn parse_candles(node: &ScreenNode) -> Vec<Candle> {
     out
 }
 
-fn render_candlestick(node: &ScreenNode, eid: &SharedString) -> AnyElement {
+fn render_candlestick(
+    node: &ScreenNode,
+    eid: &SharedString,
+    state_key: &str,
+    view: &WeakEntity<CatalogueView>,
+) -> AnyElement {
     let candles = Rc::new(parse_candles(node));
-    let mut chart =
-        CandlestickChart::new(gpui::ElementId::from(eid.clone()), candles).zone(TimeZone::UTC);
+    let v = view.clone();
+    let sk = state_key.to_owned();
+    let ntype = node.node_type.clone();
+    let mut chart = CandlestickChart::new(gpui::ElementId::from(eid.clone()), candles)
+        .zone(TimeZone::UTC)
+        .on_draw(move |drawing, _, cx| {
+            emit_change(&v, &sk, &ntype, json!(format!("{drawing:?}")), cx);
+        });
     chart = match node.node_type.as_str() {
         "finance/HeikinAshiChart" => chart.kind(ChartKind::HeikinAshi),
         "finance/LineQuoteChart" => chart.kind(ChartKind::Line),
@@ -2743,12 +2758,122 @@ fn parse_map_viewport(node: &ScreenNode) -> MapViewport {
     MapViewport::new(safe_latlon(lat, lon), zoom)
 }
 
-fn base_map_view(node: &ScreenNode, eid: &SharedString) -> MapView {
+fn base_map_view_bare(node: &ScreenNode, eid: &SharedString) -> MapView {
     let mut map = MapView::new(gpui::ElementId::from(eid.clone()), parse_map_viewport(node));
     if let Some(attr) = prop_str(node, "attribution").filter(|s| !s.trim().is_empty()) {
         map = map.attribution(attr);
     }
     map
+}
+
+fn base_map_view(
+    node: &ScreenNode,
+    eid: &SharedString,
+    _state_key: &str,
+    view: &WeakEntity<CatalogueView>,
+) -> MapView {
+    let v = view.clone();
+    let id = node.id.clone();
+    let ntype = node.node_type.clone();
+    let action = prop_str(node, "viewportAction").unwrap_or_else(|| "change-viewport".into());
+    base_map_view_bare(node, eid).on_viewport(move |vp, _, cx| {
+        emit_action(
+            &v,
+            &id,
+            &ntype,
+            "ely:action",
+            json!({
+                "action": action,
+                "viewport": {"latitude": vp.center.lat, "longitude": vp.center.lon, "zoom": vp.zoom},
+                "value": format!("{:.4}, {:.4}", vp.center.lat, vp.center.lon),
+            }),
+            cx,
+        );
+    })
+}
+
+pub(crate) fn render_map_view(
+    node: &ScreenNode,
+    eid: &SharedString,
+    state_key: &str,
+    view: &WeakEntity<CatalogueView>,
+) -> AnyElement {
+    let disabled = prop_bool(node, "disabled");
+    let marker_action = prop_str(node, "markerAction").unwrap_or_else(|| "select-marker".into());
+    let mut seen = HashSet::new();
+    let mut payloads = BTreeMap::new();
+    let markers: Vec<MapMarker> = node
+        .props
+        .get("points")
+        .and_then(Value::as_array)
+        .map(|points| {
+            points
+                .iter()
+                .enumerate()
+                .filter_map(|(index, point)| {
+                    let lat = point.get("latitude").and_then(value_to_f64)?;
+                    let lon = point.get("longitude").and_then(value_to_f64)?;
+                    let raw_key = point
+                        .get("key")
+                        .or_else(|| point.get("label"))
+                        .and_then(Value::as_str)
+                        .filter(|key| !key.is_empty())
+                        .map(ToOwned::to_owned)
+                        .unwrap_or_else(|| format!("marker-{index}"));
+                    let mut key = raw_key.clone();
+                    let mut suffix = 0;
+                    while !seen.insert(key.clone()) {
+                        suffix += 1;
+                        key = format!("{raw_key}-{suffix}");
+                    }
+                    let at = safe_latlon(lat, lon);
+                    payloads.insert(
+                        key.clone(),
+                        json!({
+                            "action": marker_action,
+                            "key": key,
+                            "value": point.get("value").cloned().unwrap_or(Value::Null),
+                            "latitude": at.lat,
+                            "longitude": at.lon,
+                        }),
+                    );
+                    let mut marker = MapMarker::new(key, at);
+                    if let Some(label) = point.get("label").and_then(Value::as_str) {
+                        marker = marker.label(label);
+                    }
+                    if let Some(hue) = point.get("hue").and_then(Value::as_u64) {
+                        marker = marker.hue(hue as usize);
+                    }
+                    Some(marker)
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let mut map = if disabled {
+        base_map_view_bare(node, eid)
+    } else {
+        base_map_view(node, eid, state_key, view)
+    }
+    .markers(markers);
+    if !disabled {
+        let v = view.clone();
+        let id = node.id.clone();
+        let ntype = node.node_type.clone();
+        map = map.on_marker(move |key, _, cx| {
+            if let Some(payload) = payloads.get(key.as_ref()) {
+                emit_action(&v, &id, &ntype, "ely:action", payload.clone(), cx);
+            }
+        });
+    }
+    div()
+        .w_full()
+        .h(px(box_height(node, 320.0)))
+        .child(WorldMap::new(
+            (gpui::ElementId::from(eid.clone()), "world"),
+            map,
+            Vec::<(String, f64)>::new(),
+        ))
+        .into_any_element()
 }
 
 fn is_iso_alpha2(code: &str) -> bool {
@@ -2774,8 +2899,13 @@ fn is_iso_alpha2(code: &str) -> bool {
     CODES.binary_search(&code).is_ok()
 }
 
-fn render_choropleth(node: &ScreenNode, eid: &SharedString) -> AnyElement {
-    let map = base_map_view(node, eid);
+fn render_choropleth(
+    node: &ScreenNode,
+    eid: &SharedString,
+    state_key: &str,
+    view: &WeakEntity<CatalogueView>,
+) -> AnyElement {
+    let map = base_map_view(node, eid, state_key, view);
     let hue = prop_f64(node, "hue").unwrap_or(0.0).max(0.0) as usize;
     let mut seen = HashSet::new();
     let mut pairs: Vec<(String, f64)> = node
@@ -2821,7 +2951,12 @@ fn render_choropleth(node: &ScreenNode, eid: &SharedString) -> AnyElement {
     div().w_full().h(px(h)).child(cm).into_any_element()
 }
 
-fn render_geo_heatmap(node: &ScreenNode, eid: &SharedString) -> AnyElement {
+fn render_geo_heatmap(
+    node: &ScreenNode,
+    eid: &SharedString,
+    state_key: &str,
+    view: &WeakEntity<CatalogueView>,
+) -> AnyElement {
     let hue = prop_f64(node, "hue").unwrap_or(0.0).max(0.0) as usize;
     let points: Vec<(LatLon, f32)> = node
         .props
@@ -2842,7 +2977,7 @@ fn render_geo_heatmap(node: &ScreenNode, eid: &SharedString) -> AnyElement {
                 .collect()
         })
         .unwrap_or_default();
-    let map = base_map_view(node, eid).layer(GeoHeatmap::new(points).hue(hue));
+    let map = base_map_view(node, eid, state_key, view).layer(GeoHeatmap::new(points).hue(hue));
     div()
         .w_full()
         .h(px(box_height(node, 320.0)))
@@ -2856,7 +2991,7 @@ fn render_location_picker(
     state_key: &str,
     view: &WeakEntity<CatalogueView>,
 ) -> AnyElement {
-    let map = base_map_view(node, eid);
+    let map = base_map_view_bare(node, eid);
     let fmt = match prop_str(node, "format").as_deref() {
         Some("dms") => CoordFormat::Dms,
         _ => CoordFormat::Decimal,
@@ -2882,9 +3017,14 @@ fn render_location_picker(
         .into_any_element()
 }
 
-fn render_route_line(node: &ScreenNode, eid: &SharedString) -> AnyElement {
+fn render_route_line(
+    node: &ScreenNode,
+    eid: &SharedString,
+    state_key: &str,
+    view: &WeakEntity<CatalogueView>,
+) -> AnyElement {
     let hue = prop_f64(node, "hue").unwrap_or(0.0).max(0.0) as usize;
-    let mut map = base_map_view(node, eid);
+    let mut map = base_map_view(node, eid, state_key, view);
     if let Some(features) = prop_str(node, "geoJSON")
         .filter(|s| !s.trim().is_empty())
         .and_then(|raw| read_geojson(&raw).ok())

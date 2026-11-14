@@ -1031,6 +1031,7 @@ pub(crate) fn render(
             let field = keyed_text_input(&eid, "chat-composer", &ph, "", true, window, cx);
             let (v, nid, nt) = (view.clone(), nid.clone(), ntype.clone());
             let f2 = field.clone();
+            let (vd, nid_d, ntd) = (view.clone(), nid.clone(), ntype.clone());
             let composer = PromptInput::new(
                 (gpui::ElementId::from(eid.clone()), "composer"),
                 &field,
@@ -1038,7 +1039,14 @@ pub(crate) fn render(
                     let text = f2.read(cx).text().to_owned();
                     emit_event(&v, &nid, &nt, "ely:action", json!({ "send": text }), cx);
                 },
-            );
+            )
+            .on_drop(move |paths, _, cx| {
+                let vals: Vec<String> = paths
+                    .into_iter()
+                    .map(|p| p.to_string_lossy().into_owned())
+                    .collect();
+                emit_event(&vd, &nid_d, &ntd, "ely:action", json!({ "drop": vals }), cx);
+            });
             ChatContainer::new(messages)
                 .composer(composer)
                 .into_any_element()
@@ -1223,10 +1231,18 @@ pub(crate) fn render(
             let field = keyed_text_input(&eid, "prompt", &ph, &init, true, window, cx);
             let (v, nid_s, nt) = (view.clone(), nid.clone(), ntype.clone());
             let f2 = field.clone();
+            let (vd, nid_d, ntd) = (view.clone(), nid_s.clone(), ntype.clone());
             let mut pi =
                 PromptInput::new(gpui::ElementId::from(eid.clone()), &field, move |_, cx| {
                     let text = f2.read(cx).text().to_owned();
                     emit_event(&v, &nid_s, &nt, "ely:action", json!({ "send": text }), cx);
+                })
+                .on_drop(move |paths, _, cx| {
+                    let vals: Vec<String> = paths
+                        .into_iter()
+                        .map(|p| p.to_string_lossy().into_owned())
+                        .collect();
+                    emit_event(&vd, &nid_d, &ntd, "ely:action", json!({ "drop": vals }), cx);
                 });
             for (ix, att) in arr_objs(node, "attachments").into_iter().enumerate() {
                 let progress = att
@@ -1234,20 +1250,27 @@ pub(crate) fn render(
                     .and_then(value_to_f64)
                     .filter(|v| v.is_finite())
                     .map(|v| (v as f32).clamp(0.0, 1.0));
-                pi = pi.above(AttachmentChip::new(
-                    (gpui::ElementId::from(eid.clone()), format!("att-{ix}")),
-                    Attachment {
-                        key: obj_str(&att, &["value", "id"])
-                            .unwrap_or_else(|| format!("att-{ix}"))
-                            .into(),
-                        name: obj_str(&att, &["name", "label"])
-                            .unwrap_or_else(|| "file".into())
-                            .into(),
-                        bytes: att.get("bytes").and_then(Value::as_u64).unwrap_or(1024),
-                        preview: None,
-                        progress,
-                    },
-                ));
+                let att_key =
+                    obj_str(&att, &["value", "id"]).unwrap_or_else(|| format!("att-{ix}"));
+                let (va, nida, nta, ak) =
+                    (view.clone(), nid.clone(), ntype.clone(), att_key.clone());
+                pi = pi.above(
+                    AttachmentChip::new(
+                        (gpui::ElementId::from(eid.clone()), format!("att-{ix}")),
+                        Attachment {
+                            key: att_key.into(),
+                            name: obj_str(&att, &["name", "label"])
+                                .unwrap_or_else(|| "file".into())
+                                .into(),
+                            bytes: att.get("bytes").and_then(Value::as_u64).unwrap_or(1024),
+                            preview: None,
+                            progress,
+                        },
+                    )
+                    .on_remove(move |_, cx| {
+                        emit_event(&va, &nida, &nta, "ely:action", json!({ "remove": ak }), cx);
+                    }),
+                );
             }
             let cmds: Vec<Choice> = arr_objs(node, "commands")
                 .into_iter()

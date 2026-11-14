@@ -8,6 +8,7 @@ use std::{
     sync::OnceLock,
 };
 
+use crate::event_bindings::{ActionRequest, resolve_event_bindings};
 use ely_gpui_component::{
     buttons::{
         ActionBar, BulkActionBar, Button, ButtonGroup, ButtonVariant, ConfirmButton, ConfirmMode,
@@ -230,6 +231,18 @@ impl CatalogueRegistry {
             )));
         };
         validate_object_against_props(&node.node_type, &node.props, &contract.properties, None)?;
+        resolve_event_bindings(node, "", &Value::Null)
+            .map_err(|err| CatalogueError::new(err.message))?;
+        for binding in node.event.iter().chain(node.events.iter()) {
+            if let Some(on) = binding.get("on").and_then(Value::as_str) {
+                if !contract.events.iter().any(|supported| supported == on) {
+                    return Err(CatalogueError::new(format!(
+                        "{} does not support event {on}",
+                        node.node_type
+                    )));
+                }
+            }
+        }
         for child in &node.children {
             self.validate_node(child)?;
         }
@@ -387,10 +400,12 @@ pub struct CatalogueView {
     registry: &'static CatalogueRegistry,
     screen: Option<Screen>,
     values: BTreeMap<String, Value>,
+    nav_groups: BTreeMap<(String, usize), bool>,
     locked_keys: BTreeSet<String>,
     inputs: BTreeMap<String, Entity<TextInput>>,
     _input_subs: Vec<Subscription>,
     events: Vec<CatalogueEvent>,
+    action_requests: Vec<ActionRequest>,
     last_error: Option<String>,
 }
 
@@ -406,10 +421,12 @@ impl CatalogueView {
             registry: CatalogueRegistry::global(),
             screen: None,
             values: BTreeMap::new(),
+            nav_groups: BTreeMap::new(),
             locked_keys: BTreeSet::new(),
             inputs: BTreeMap::new(),
             _input_subs: Vec::new(),
             events: Vec::new(),
+            action_requests: Vec::new(),
             last_error: None,
         }
     }
@@ -432,6 +449,11 @@ impl CatalogueView {
 
     pub fn events(&self) -> &[CatalogueEvent] {
         &self.events
+    }
+
+    /// Consume resolved requests. The host must authorize actions before executing them.
+    pub fn take_action_requests(&mut self) -> Vec<ActionRequest> {
+        std::mem::take(&mut self.action_requests)
     }
 
     pub fn last_error(&self) -> Option<&str> {
@@ -467,7 +489,11 @@ impl CatalogueView {
             return Err(err);
         }
         self.last_error = None;
+        if self.screen.as_ref().is_none_or(|old| old.id != screen.id) {
+            self.nav_groups.clear();
+        }
         self.values.clear();
+        self.action_requests.clear();
         self.locked_keys.clear();
         self.seed_node_state(&screen.root);
         self.screen = Some(screen);
@@ -478,6 +504,24 @@ impl CatalogueView {
 
     pub fn set_value(&mut self, key: impl Into<String>, value: Value, cx: &mut Context<Self>) {
         self.values.insert(key.into(), value);
+        cx.notify();
+    }
+
+    pub(crate) fn nav_group_open(&self, id: &str, index: usize, default: bool) -> bool {
+        self.nav_groups
+            .get(&(id.to_owned(), index))
+            .copied()
+            .unwrap_or(default)
+    }
+
+    pub(crate) fn set_nav_group_open(
+        &mut self,
+        id: &str,
+        index: usize,
+        open: bool,
+        cx: &mut Context<Self>,
+    ) {
+        self.nav_groups.insert((id.to_owned(), index), open);
         cx.notify();
     }
 
@@ -496,15 +540,7 @@ impl CatalogueView {
                 return;
             }
         }
-        self.values
-            .insert(state_key.to_owned(), Value::String(text.clone()));
-        self.events.push(CatalogueEvent {
-            node_id: state_key.to_owned(),
-            component_type: "input".into(),
-            event: "change".into(),
-            value: Value::String(text),
-        });
-        cx.notify();
+        self.trigger_event(state_key, "input", "change", Value::String(text), cx);
     }
 
     pub fn trigger_event(
@@ -520,6 +556,27 @@ impl CatalogueView {
                 return;
             }
             self.values.insert(node_id.to_owned(), value.clone());
+        }
+        if let Some(screen) = &self.screen {
+            let mut matches = Vec::new();
+            find_event_nodes(&screen.root, node_id, event == "change", &mut matches);
+            if matches.len() == 1 {
+                let mut detail = match &value {
+                    Value::Object(fields) => fields.clone(),
+                    other => serde_json::Map::from_iter([("value".into(), other.clone())]),
+                };
+                if event == "ely:action" && !detail.contains_key("action") {
+                    if let Some(action) = value.as_str() {
+                        detail.insert("action".into(), Value::String(action.to_owned()));
+                    }
+                }
+                match resolve_event_bindings(matches[0], event, &Value::Object(detail)) {
+                    Ok(requests) => self.action_requests.extend(requests),
+                    Err(error) => self.last_error = Some(error.message),
+                }
+            } else if matches.len() > 1 {
+                self.last_error = Some(format!("Ambiguous event source: {node_id}"));
+            }
         }
         self.events.push(CatalogueEvent {
             node_id: node_id.to_owned(),
@@ -537,13 +594,7 @@ impl CatalogueView {
                 .map(|(k, v)| (k.clone(), v.clone()))
                 .collect(),
         );
-        self.events.push(CatalogueEvent {
-            node_id: node_id.to_owned(),
-            component_type: "form".into(),
-            event: "submit".into(),
-            value: snapshot,
-        });
-        cx.notify();
+        self.trigger_event(node_id, "form", "submit", snapshot, cx);
     }
 
     fn seed_node_state(&mut self, node: &ScreenNode) {
@@ -787,8 +838,28 @@ impl CatalogueView {
                     Severity::Info
                 };
                 if node.node_type == "feedback/Banner" {
-                    Banner::new(eid, severity, if body.is_empty() { title } else { body })
-                        .into_any_element()
+                    let mut banner =
+                        Banner::new(eid, severity, if body.is_empty() { title } else { body });
+                    if let Some(act_lbl) = prop_str(node, "actionLabel").filter(|s| !s.is_empty()) {
+                        let v = view.clone();
+                        let nid = node.id.clone();
+                        let ntype = node.node_type.clone();
+                        let act = prop_str(node, "action").unwrap_or_else(|| act_lbl.clone());
+                        banner = banner.action(act_lbl, move |_, cx| {
+                            let _ = v.update(cx, |this, cx| {
+                                this.trigger_event(&nid, &ntype, "ely:action", json!(act), cx);
+                            });
+                        });
+                    }
+                    let v = view.clone();
+                    let nid = node.id.clone();
+                    let ntype = node.node_type.clone();
+                    banner = banner.on_dismiss(move |_, cx| {
+                        let _ = v.update(cx, |this, cx| {
+                            this.trigger_event(&nid, &ntype, "ely:action", json!("dismiss"), cx);
+                        });
+                    });
+                    banner.into_any_element()
                 } else if matches!(
                     node.node_type.as_str(),
                     "feedback/Callout" | "feedback/Admonition"
@@ -813,6 +884,22 @@ impl CatalogueView {
                     );
                     if !body.is_empty() {
                         alert = alert.body(body);
+                    }
+                    if prop_bool(node, "dismissible") {
+                        let v = view.clone();
+                        let nid = node.id.clone();
+                        let ntype = node.node_type.clone();
+                        alert = alert.on_dismiss(move |_, cx| {
+                            let _ = v.update(cx, |this, cx| {
+                                this.trigger_event(
+                                    &nid,
+                                    &ntype,
+                                    "ely:action",
+                                    json!("dismiss"),
+                                    cx,
+                                );
+                            });
+                        });
                     }
                     alert.into_any_element()
                 }
@@ -843,7 +930,69 @@ impl CatalogueView {
             | "account/PlanBadge" => {
                 let label = non_empty_or(&best_label(node), "Badge");
                 if node.node_type == "data/Tag" {
-                    Tag::new(eid, label).into_any_element()
+                    if let Some(rows) = node.props.get("tagRows").and_then(Value::as_array) {
+                        let mut col = v_stack().gap_2();
+                        for (r_idx, row_val) in rows.iter().enumerate() {
+                            if let Some(items) = row_val.as_array() {
+                                let mut row = h_stack().gap_2().flex_wrap();
+                                for (t_idx, item) in items.iter().enumerate() {
+                                    let lbl = item
+                                        .get("label")
+                                        .and_then(Value::as_str)
+                                        .unwrap_or("Tag")
+                                        .to_owned();
+                                    let val = item
+                                        .get("value")
+                                        .and_then(Value::as_str)
+                                        .unwrap_or(&lbl)
+                                        .to_owned();
+                                    let mut tag = Tag::new(
+                                        SharedString::from(format!("{eid}-t-{r_idx}-{t_idx}")),
+                                        lbl,
+                                    );
+                                    if item.get("removable").and_then(Value::as_bool) == Some(true)
+                                    {
+                                        let v = view.clone();
+                                        let nid = node.id.clone();
+                                        let ntype = node.node_type.clone();
+                                        tag = tag.on_remove(move |_, cx| {
+                                            let _ = v.update(cx, |this, cx| {
+                                                this.trigger_event(
+                                                    &nid,
+                                                    &ntype,
+                                                    "ely:action",
+                                                    json!({"remove": val}),
+                                                    cx,
+                                                );
+                                            });
+                                        });
+                                    }
+                                    row = row.child(tag);
+                                }
+                                col = col.child(row);
+                            }
+                        }
+                        col.into_any_element()
+                    } else {
+                        let mut tag = Tag::new(eid, label);
+                        let v = view.clone();
+                        let nid = node.id.clone();
+                        let ntype = node.node_type.clone();
+                        if prop_bool(node, "clearable") {
+                            tag = tag.on_remove(move |_, cx| {
+                                let _ = v.update(cx, |this, cx| {
+                                    this.trigger_event(
+                                        &nid,
+                                        &ntype,
+                                        "ely:action",
+                                        json!("remove"),
+                                        cx,
+                                    );
+                                });
+                            });
+                        }
+                        tag.into_any_element()
+                    }
                 } else {
                     Badge::new(label).tone(Tone::Info).into_any_element()
                 }
@@ -1225,7 +1374,7 @@ impl CatalogueView {
                 acc.into_any_element()
             }
             "basic/data-table" | "basic/table" | "tables/DataTable" | "tables/Table" => {
-                render_data_table(node, &eid)
+                render_data_table_interactive(node, &eid, &state_key, self, view)
             }
             "basic/datalist" | "data/DescriptionList" | "data/PropertyGrid" => {
                 let mut dl = DescriptionList::new();
@@ -1518,57 +1667,7 @@ impl CatalogueView {
                     .into_any_element()
             }
             "basic/map-view" | "maps/MapView" => {
-                let title = non_empty_or(&best_title(node), "Map");
-                let center_text = node
-                    .props
-                    .get("center")
-                    .and_then(|c| {
-                        let lat = c.get("latitude").and_then(Value::as_f64)?;
-                        let lon = c.get("longitude").and_then(Value::as_f64)?;
-                        Some(format!("{lat:.4}, {lon:.4}"))
-                    })
-                    .unwrap_or_else(|| "Map view".into());
-                let mut card = Card::new().header(
-                    CardHeader::new(title).description(center_text).action(
-                        Badge::new(prop_str(node, "mode").unwrap_or_else(|| "markers".into()))
-                            .tone(Tone::Info),
-                    ),
-                );
-                let points = node
-                    .props
-                    .get("points")
-                    .and_then(Value::as_array)
-                    .cloned()
-                    .unwrap_or_default();
-                let mut row = h_stack().flex_wrap().gap_1();
-                for (idx, pt) in points.iter().take(12).enumerate() {
-                    let lbl = pt
-                        .get("label")
-                        .and_then(Value::as_str)
-                        .unwrap_or("Marker")
-                        .to_owned();
-                    let val = pt
-                        .get("value")
-                        .and_then(Value::as_str)
-                        .unwrap_or(&lbl)
-                        .to_owned();
-                    let v = view.clone();
-                    let sk = state_key.clone();
-                    let ntype = node.node_type.clone();
-                    row = row.child(
-                        Button::new(SharedString::from(format!("{eid}-pt-{idx}")), lbl)
-                            .size(ControlSize::Sm)
-                            .variant(ButtonVariant::Outline)
-                            .disabled(disabled)
-                            .on_click(move |_, _, cx| {
-                                let _ = v.update(cx, |this, cx| {
-                                    this.trigger_event(&sk, &ntype, "change", json!(val), cx);
-                                });
-                            }),
-                    );
-                }
-                card = card.child(row);
-                card.into_any_element()
+                crate::catalogue_ext::visual_finance::render_map_view(node, &eid, &state_key, view)
             }
             "basic/dialog"
             | "overlays/Dialog"
@@ -2301,9 +2400,22 @@ impl CatalogueView {
             "layout/SplitPane" => {
                 let before = prop_str(node, "before").unwrap_or_else(|| "Before".into());
                 let after = prop_str(node, "after").unwrap_or_else(|| "After".into());
-                SplitPane::new(eid, Axis::Horizontal, px(120.))
+                let v = view.clone();
+                let sk = state_key.clone();
+                let ntype = node.node_type.clone();
+                let mut split = SplitPane::new(eid, Axis::Horizontal, px(120.))
                     .pane(Card::new().header(CardHeader::new(before)))
-                    .pane(Card::new().header(CardHeader::new(after)))
+                    .pane(Card::new().header(CardHeader::new(after)));
+                if let Some(sizes) = split_weights(self.value(&state_key), 2) {
+                    split = split.sizes(&sizes);
+                }
+                split
+                    .on_resize(move |sizes, _, cx| {
+                        let vals: Vec<f32> = sizes.to_vec();
+                        let _ = v.update(cx, |this, cx| {
+                            this.trigger_event(&sk, &ntype, "change", json!(vals), cx);
+                        });
+                    })
                     .into_any_element()
             }
             "layout/MasterDetail" => {
@@ -2444,6 +2556,14 @@ impl CatalogueView {
                             }),
                     );
                 }
+                let v = view.clone();
+                let nid = node.id.clone();
+                let ntype = node.node_type.clone();
+                bar = bar.on_clear(move |_, cx| {
+                    let _ = v.update(cx, |this, cx| {
+                        this.trigger_event(&nid, &ntype, "ely:action", json!("clear"), cx);
+                    });
+                });
                 bar.into_any_element()
             }
             "buttons/SplitButton" => {
@@ -2517,27 +2637,71 @@ impl CatalogueView {
                 let items: Vec<MonitorAlert> = extract_item_objects(node)
                     .into_iter()
                     .enumerate()
-                    .map(|(i, m)| MonitorAlert {
-                        key: format!("alert-{i}").into(),
-                        title: m
-                            .get("title")
-                            .or_else(|| m.get("label"))
-                            .and_then(Value::as_str)
-                            .unwrap_or("Alert")
-                            .to_owned()
-                            .into(),
-                        source: m
-                            .get("source")
-                            .and_then(Value::as_str)
-                            .unwrap_or("system")
-                            .to_owned()
-                            .into(),
-                        severity: Severity::Warning,
-                        state: AlertState::Firing,
-                        since: now,
+                    .map(|(i, m)| {
+                        let severity = match m.get("severity").and_then(Value::as_str) {
+                            Some("danger") => Severity::Danger,
+                            Some("info") => Severity::Info,
+                            Some("success") => Severity::Success,
+                            _ => Severity::Warning,
+                        };
+                        let state = match m.get("state").and_then(Value::as_str) {
+                            Some("acknowledged") => AlertState::Acknowledged,
+                            Some("resolved") => AlertState::Resolved,
+                            _ => AlertState::Firing,
+                        };
+                        MonitorAlert {
+                            key: m
+                                .get("key")
+                                .or_else(|| m.get("value"))
+                                .and_then(Value::as_str)
+                                .map(ToOwned::to_owned)
+                                .unwrap_or_else(|| format!("alert-{i}"))
+                                .into(),
+                            title: m
+                                .get("title")
+                                .or_else(|| m.get("label"))
+                                .and_then(Value::as_str)
+                                .unwrap_or("Alert")
+                                .to_owned()
+                                .into(),
+                            source: m
+                                .get("source")
+                                .and_then(Value::as_str)
+                                .unwrap_or("system")
+                                .to_owned()
+                                .into(),
+                            severity,
+                            state,
+                            since: now,
+                        }
                     })
                     .collect();
-                AlertList::new(eid, items, now).into_any_element()
+                let v1 = view.clone();
+                let nid1 = node.id.clone();
+                let nt1 = node.node_type.clone();
+                let v2 = view.clone();
+                let nid2 = node.id.clone();
+                let nt2 = node.node_type.clone();
+                AlertList::new(eid, items, now)
+                    .on_open(move |key, _, cx| {
+                        let k = key.to_string();
+                        let _ = v1.update(cx, |this, cx| {
+                            this.trigger_event(&nid1, &nt1, "ely:action", json!({"open": k}), cx);
+                        });
+                    })
+                    .on_acknowledge(move |key, _, cx| {
+                        let k = key.to_string();
+                        let _ = v2.update(cx, |this, cx| {
+                            this.trigger_event(
+                                &nid2,
+                                &nt2,
+                                "ely:action",
+                                json!({"acknowledge": k}),
+                                cx,
+                            );
+                        });
+                    })
+                    .into_any_element()
             }
             "dashboard/UptimeBar" => {
                 let services = vec![Service {
@@ -2619,6 +2783,9 @@ impl CatalogueView {
             .into_any_element(),
             "feedback/SavingIndicator" => {
                 let saving = prop_bool(node, "saving") || prop_bool(node, "loading");
+                let v = view.clone();
+                let nid = node.id.clone();
+                let ntype = node.node_type.clone();
                 SavingIndicator::new(
                     eid,
                     if saving {
@@ -2627,6 +2794,11 @@ impl CatalogueView {
                         SaveState::Saved
                     },
                 )
+                .on_retry(move |_, cx| {
+                    let _ = v.update(cx, |this, cx| {
+                        this.trigger_event(&nid, &ntype, "ely:action", json!("retry"), cx);
+                    });
+                })
                 .into_any_element()
             }
             "motion/ProgressRing" => {
@@ -2885,12 +3057,22 @@ impl CatalogueView {
             "project/PriorityIndicator" => PriorityIndicator::new(eid, Priority::High)
                 .labeled()
                 .into_any_element(),
-            "shell/StatusBar" => StatusBar::new()
-                .left(
-                    StatusBarItem::new(eid)
-                        .label(prop_str(node, "status").unwrap_or_else(|| "Ready".into())),
-                )
-                .into_any_element(),
+            "shell/StatusBar" => {
+                let v = view.clone();
+                let nid = node.id.clone();
+                let ntype = node.node_type.clone();
+                StatusBar::new()
+                    .left(
+                        StatusBarItem::new(eid)
+                            .label(prop_str(node, "status").unwrap_or_else(|| "Ready".into()))
+                            .on_click(move |_, _, cx| {
+                                let _ = v.update(cx, |this, cx| {
+                                    this.trigger_event(&nid, &ntype, "click", json!("status"), cx);
+                                });
+                            }),
+                    )
+                    .into_any_element()
+            }
             "shell/TitleBar" => TitleBar::new(eid)
                 .title(non_empty_or(&best_title(node), "Window"))
                 .into_any_element(),
@@ -2942,19 +3124,60 @@ impl CatalogueView {
                     target: "app".into(),
                     message: best_body(node).unwrap_or_else(|| "Ready".into()).into(),
                 }]);
-                LogViewer::new(eid, lines).into_any_element()
+                let v1 = view.clone();
+                let sk1 = state_key.clone();
+                let nt1 = node.node_type.clone();
+                let v2 = view.clone();
+                let sk2 = state_key.clone();
+                let nt2 = node.node_type.clone();
+                LogViewer::new(eid, lines)
+                    .on_follow(move |follow, _, cx| {
+                        let _ = v1.update(cx, |this, cx| {
+                            this.trigger_event(&sk1, &nt1, "change", json!({"follow": follow}), cx);
+                        });
+                    })
+                    .on_least(move |lvl, _, cx| {
+                        let _ = v2.update(cx, |this, cx| {
+                            this.trigger_event(
+                                &sk2,
+                                &nt2,
+                                "change",
+                                json!({"level": format!("{lvl:?}")}),
+                                cx,
+                            );
+                        });
+                    })
+                    .into_any_element()
             }
-            "terminal/CommandBlock" => CommandBlock::new(
-                eid,
-                "~",
-                prop_str(node, "command").unwrap_or_else(|| "echo ok".into()),
-                best_body(node).unwrap_or_default(),
-                CommandState::Done {
-                    code: 0,
-                    took: std::time::Duration::from_millis(12),
-                },
-            )
-            .into_any_element(),
+            "terminal/CommandBlock" => {
+                let v1 = view.clone();
+                let sk1 = state_key.clone();
+                let nt1 = node.node_type.clone();
+                let v2 = view.clone();
+                let nid2 = node.id.clone();
+                let nt2 = node.node_type.clone();
+                CommandBlock::new(
+                    eid,
+                    "~",
+                    prop_str(node, "command").unwrap_or_else(|| "echo ok".into()),
+                    prop_str(node, "output").unwrap_or_default(),
+                    CommandState::Done {
+                        code: 0,
+                        took: std::time::Duration::from_millis(12),
+                    },
+                )
+                .on_fold(move |folded, _, cx| {
+                    let _ = v1.update(cx, |this, cx| {
+                        this.trigger_event(&sk1, &nt1, "change", json!({"folded": folded}), cx);
+                    });
+                })
+                .on_rerun(move |_, cx| {
+                    let _ = v2.update(cx, |this, cx| {
+                        this.trigger_event(&nid2, &nt2, "ely:action", json!("rerun"), cx);
+                    });
+                })
+                .into_any_element()
+            }
             "typography/Heading" => {
                 Heading::h2(non_empty_or(&best_title(node), "Heading")).into_any_element()
             }
@@ -3265,7 +3488,9 @@ impl CatalogueView {
         }
 
         if node.props.contains_key("columns") || node.props.contains_key("rows") {
-            card = card.child(render_data_table(node, eid));
+            card = card.child(render_data_table_interactive(
+                node, eid, state_key, self, view,
+            ));
         }
 
         if let Some(metric) = prop_f64(node, "value")
@@ -3382,6 +3607,25 @@ fn state_key_for_node(node: &ScreenNode) -> String {
     prop_str(node, "name").unwrap_or_else(|| node.id.clone())
 }
 
+fn find_event_nodes<'a>(
+    node: &'a ScreenNode,
+    key: &str,
+    change: bool,
+    found: &mut Vec<&'a ScreenNode>,
+) {
+    if (change && state_key_for_node(node) == key) || (!change && node.id == key) {
+        found.push(node);
+    }
+    for child in &node.children {
+        find_event_nodes(child, key, change, found);
+    }
+    for children in node.slots.values() {
+        for child in children {
+            find_event_nodes(child, key, change, found);
+        }
+    }
+}
+
 fn is_text_input_node(node: &ScreenNode) -> bool {
     let contract = CatalogueRegistry::global().get(&node.node_type);
     let canonical = canonical_component_type(&node.node_type, contract);
@@ -3488,7 +3732,16 @@ fn collect_input_specs(node: &ScreenNode, out: &mut Vec<InputSpec>) {
     }
 }
 
-pub(crate) fn render_data_table(node: &ScreenNode, eid: &SharedString) -> AnyElement {
+fn render_data_table_interactive(
+    node: &ScreenNode,
+    eid: &SharedString,
+    state_key: &str,
+    view_state: &CatalogueView,
+    view: &gpui::WeakEntity<CatalogueView>,
+) -> AnyElement {
+    let state_key = Some(state_key);
+    let view_state = Some(view_state);
+    let view = Some(view);
     let col_labels: Vec<String> = node
         .props
         .get("columns")
@@ -3543,9 +3796,27 @@ pub(crate) fn render_data_table(node: &ScreenNode, eid: &SharedString) -> AnyEle
         })
         .unwrap_or_default();
 
-    DataTable::new(SharedString::from(format!("{eid}-table")), columns)
-        .rows(rows)
-        .into_any_element()
+    let mut table = DataTable::new(SharedString::from(format!("{eid}-table")), columns).rows(rows);
+    if let (Some(sk), Some(vs), Some(v)) = (state_key, view_state, view) {
+        if let Some(sel) = vs.value(sk).and_then(Value::as_array) {
+            let keys: Vec<String> = sel
+                .iter()
+                .filter_map(Value::as_str)
+                .map(ToOwned::to_owned)
+                .collect();
+            table = table.selected(keys);
+        }
+        let v = v.clone();
+        let sk = sk.to_owned();
+        let ntype = node.node_type.clone();
+        table = table.on_select(move |keys, _, cx| {
+            let vals: Vec<Value> = keys.iter().map(|k| json!(k.to_string())).collect();
+            let _ = v.update(cx, |this, cx| {
+                this.trigger_event(&sk, &ntype, "change", Value::Array(vals), cx);
+            });
+        });
+    }
+    table.into_any_element()
 }
 
 fn json_to_cell(v: &Value) -> Cell {
@@ -3663,6 +3934,20 @@ pub(crate) fn value_to_f64(v: &Value) -> Option<f64> {
             .filter(|f| f.is_finite()),
         _ => None,
     }
+}
+
+pub(crate) fn split_weights(value: Option<&Value>, count: usize) -> Option<Vec<f32>> {
+    let values = value?.as_array()?;
+    if values.len() != count {
+        return None;
+    }
+    let weights: Vec<f32> = values
+        .iter()
+        .map(|v| v.as_f64().unwrap_or(f64::NAN) as f32)
+        .collect();
+    let sum: f32 = weights.iter().sum();
+    (weights.iter().all(|v| v.is_finite() && *v >= 0.0) && sum.is_finite() && sum > 0.0)
+        .then_some(weights)
 }
 
 pub(crate) fn extract_grouped_choices(node: &ScreenNode) -> Vec<Choice> {
