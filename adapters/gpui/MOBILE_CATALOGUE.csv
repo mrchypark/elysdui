@@ -705,11 +705,11 @@ forms/HotkeyInput,forms,HotkeyInput,2,pass-f64e798,not-run,not-run
 forms/IconPicker,forms,IconPicker,2,pass-f64e798,not-run,not-run
 forms/InlineEdit,forms,InlineEdit,2,pass-f64e798,not-run,not-run
 forms/InlineForm,forms,InlineForm,2,pass-f64e798,partial-required-email-submit,partial-email-submit-layout
-forms/Input,forms,Input,2,pass-f64e798,partial-software-text-change,partial-hardware-text-change
+forms/Input,forms,Input,2,pass-f64e798,partial-text-and-keyboard-reveal,partial-hardware-text-change
 forms/InputAddon,forms,InputGroup,3,pass-f64e798,partial-software-text-change,not-run
 forms/InputGroup,forms,InputGroup,3,pass-f64e798,partial-software-text-change,not-run
 forms/JsonInput,forms,CodeInput,1,pass-f64e798,partial-software-text-change,not-run
-forms/KeyValueInput,forms,KeyValueInput,2,pass-f64e798,not-run,not-run
+forms/KeyValueInput,forms,KeyValueInput,2,pass-f64e798,partial-disabled-blocked-keyboard-overlap,failed-disabled-row-removal
 forms/Knob,forms,Knob,2,pass-f64e798,not-run,not-run
 forms/LanguageSelect,forms,LanguageSelect,2,pass-f64e798,not-run,not-run
 forms/ListBox,forms,ListBox,2,pass-f64e798,not-run,not-run

@@ -47,9 +47,9 @@ specific device interactions named there, not full contract coverage.
   restored the caller's initial value. Software keyboard and other input
   contract variants remain unverified by this check.
 - Android: the forms/Input fixture showed `alpha`; tapping `z` on the software
-  keyboard changed it to `alphaz` and emitted the change event. The keyboard
-  obscured the focused field. After Back hid it, tapping that still-focused
-  field did not reopen it; `dumpsys input_method` reported `mInputShown=false`.
+  keyboard changed it to `alphaz` and emitted the change event. After adding
+  host keyboard bounds and caret reveal, the focused caret moved above the
+  software keyboard. Retapping a focused field after Back needs a platform fix.
 - Android: the forms/InputAddon fixture displayed its `@` prefix and initial
   value. The software keyboard changed `alpha` to `alphaz` and emitted the
   corresponding event. Its other variants and iOS remain unverified.
@@ -110,6 +110,10 @@ specific device interactions named there, not full contract coverage.
   a disabled/read-only presentation; checkbox option groups and switch item
   groups render as single controls; and Slider ignores vertical orientation.
   These findings need focused tests and implementation before device sign-off.
+- Android and iOS initially allowed removal of KeyValueInput's disabled
+  `READ_ONLY` row. The Android fix displayed it as disabled, blocked removal,
+  and did not show the IME when tapped. An enabled internal field still needed
+  manual scrolling while the keyboard was open. The iOS fix needs device checks.
 - TimePicker range limits and non-quarter-hour step bases have GPUI tests but
   need device checks. Seconds remain in the value but are not shown in option
   labels; unavailable choices lack a native disabled accessibility attribute.

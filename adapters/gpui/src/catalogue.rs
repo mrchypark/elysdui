@@ -60,8 +60,9 @@ use ely_gpui_component::{
 };
 use flate2::read::GzDecoder;
 use gpui::{
-    AnyElement, App, Axis, Context, Entity, Hsla, IntoElement, ParentElement, Render, Rgba, Role,
-    SharedString, Styled, Subscription, Window, div, prelude::*, px,
+    AnyElement, App, Axis, Bounds, Context, Entity, FocusHandle, Focusable, Hsla, IntoElement,
+    ParentElement, Pixels, Render, Rgba, Role, SharedString, Styled, Subscription, Window, div,
+    prelude::*, px,
 };
 use jiff::{
     Timestamp,
@@ -480,6 +481,21 @@ impl CatalogueView {
 
     pub fn last_error(&self) -> Option<&str> {
         self.last_error.as_deref()
+    }
+
+    /// The focused catalogue-owned text input and its last painted caret bounds.
+    pub fn focused_text_caret(
+        &self,
+        window: &Window,
+        cx: &App,
+    ) -> Option<(FocusHandle, Bounds<Pixels>)> {
+        self.inputs.values().chain(self.inline_inputs.values()).find_map(|input| {
+            let input = input.read(cx);
+            let focus = input.focus_handle(cx);
+            (focus.is_focused(window) && !input.is_disabled())
+                .then(|| input.caret_bounds().map(|bounds| (focus, bounds)))
+                .flatten()
+        })
     }
 
     pub fn load_screen_json(
@@ -1094,8 +1110,9 @@ impl CatalogueView {
                             );
                             this.commit_inline_field(&node_id, index, cx);
                         }
+                        cx.notify();
                     }
-                    InputEvent::Focus => {}
+                    InputEvent::Focus => cx.notify(),
                 },
             );
             subs.push(sub);
@@ -1946,7 +1963,16 @@ impl CatalogueView {
                     .into_any_element()
             }
             "basic/key-value-input" | "forms/KeyValueInput" => {
-                let pairs = extract_item_objects(node)
+                let items = extract_item_objects(node);
+                let disabled_rows = items
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(index, item)| {
+                        (item.get("disabled").and_then(Value::as_bool) == Some(true))
+                            .then_some(index)
+                    })
+                    .collect::<Vec<_>>();
+                let pairs = items
                     .into_iter()
                     .map(|m| {
                         let k = m
@@ -1966,7 +1992,9 @@ impl CatalogueView {
                 let v = view.clone();
                 let sk = state_key.clone();
                 let ntype = node.node_type.clone();
-                KeyValueInput::new(eid, pairs)
+                KeyValueInput::new(format!("{eid}-screen-{}", self.screen_generation), pairs)
+                    .disabled(disabled)
+                    .disabled_rows(disabled_rows)
                     .on_change(move |next, _, cx| {
                         let vals: Vec<Value> = next
                             .into_iter()
