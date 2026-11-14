@@ -108,7 +108,9 @@ specific device interactions named there, not full contract coverage.
   disabled and readonly fields. The Newsletter fixture displayed a full-width
   input on narrow Android and iOS screens; iOS showed a field-level required
   error on empty submission, cleared it while editing, and submitted a valid
-  email with the expected event payload. Android submission remains pending.
+  email with the expected event payload. Android also showed and cleared the
+  required error, then submitted an email entered with the software keyboard
+  with the expected event payload; the keyboard obscured the input while open.
   Other field types, multiple email addresses,
   and length or pattern constraints still need work; generic forms also need
   their own contract checks.
