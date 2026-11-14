@@ -27,6 +27,7 @@ use ely_gpui_component::{
         Avatar, Badge, BeforeAfter, Carousel, Comparison, DescriptionList, Gauge, KpiCard, Meter,
         QrCode, Sparkline, Stars, Statistic, Tag, Timeline, TimelineItem, Tone, UsageBar,
     },
+    devtools::find as regex_find,
     feedback::{Alert, Banner, Callout, ConfirmationCard, EmptyState, SaveState, SavingIndicator},
     forms::{
         Calendar, Checkbox, Choice, ChoiceChips, CodeInput, ColorPicker, ColorSwatch, Combobox,
@@ -405,6 +406,7 @@ pub struct CatalogueView {
     screen_generation: u64,
     values: BTreeMap<String, Value>,
     inline_values: BTreeMap<(String, usize), Value>,
+    inline_committed: BTreeMap<(String, usize), Value>,
     duplicate_names: BTreeSet<String>,
     nav_groups: BTreeMap<(String, usize), bool>,
     table_filters: BTreeMap<String, String>,
@@ -431,6 +433,7 @@ impl CatalogueView {
             screen_generation: 0,
             values: BTreeMap::new(),
             inline_values: BTreeMap::new(),
+            inline_committed: BTreeMap::new(),
             duplicate_names: BTreeSet::new(),
             nav_groups: BTreeMap::new(),
             table_filters: BTreeMap::new(),
@@ -513,6 +516,8 @@ impl CatalogueView {
         }
         self.values.clear();
         self.inline_values.clear();
+        self.inline_committed.clear();
+        self._input_subs.clear();
         self.action_requests.clear();
         self.locked_keys.clear();
         let mut names = BTreeMap::new();
@@ -662,13 +667,7 @@ impl CatalogueView {
         self.trigger_event(node_id, "form", "submit", snapshot, cx);
     }
 
-    fn inline_field_changed(
-        &mut self,
-        node_id: &str,
-        index: usize,
-        text: String,
-        cx: &mut Context<Self>,
-    ) {
+    fn commit_inline_field(&mut self, node_id: &str, index: usize, cx: &mut Context<Self>) {
         let Some(node) = self
             .screen
             .as_ref()
@@ -687,6 +686,17 @@ impl CatalogueView {
         {
             return;
         }
+        let key = (node_id.to_owned(), index);
+        let Some(value) = self.inline_values.get(&key).cloned() else {
+            return;
+        };
+        if self.inline_committed.get(&key) == Some(&value) {
+            return;
+        }
+        let Some(text) = value.as_str().map(ToOwned::to_owned) else {
+            return;
+        };
+        self.inline_committed.insert(key, value);
         let name = field.get("name").and_then(Value::as_str).unwrap_or("");
         let kind = field
             .get("type")
@@ -699,8 +709,6 @@ impl CatalogueView {
             .and_then(Value::as_bool)
             .unwrap_or(false);
         let detail = json!({"id": node_id, "component": node.node_type, "name": name, "value": text, "checked": checked, "type": kind});
-        self.inline_values
-            .insert((node_id.to_owned(), index), Value::String(text.clone()));
         // The Go wrapper dispatches ely:change while the native change is bubbling.
         self.trigger_event(node_id, &node.node_type, "ely:change", detail, cx);
         match resolve_event_bindings(&node, "change", &Value::Null) {
@@ -728,13 +736,18 @@ impl CatalogueView {
         if prop_bool(&node, "disabled") {
             return;
         }
+        for index in 0..inline_form_fields(&node).len() {
+            self.commit_inline_field(node_id, index, cx);
+        }
         let mut entries = Vec::new();
         for (index, field) in inline_form_fields(&node).iter().enumerate() {
             if field.get("disabled").and_then(Value::as_bool) == Some(true) {
                 continue;
             }
             let kind = field.get("type").and_then(Value::as_str).unwrap_or("text");
-            if !kind.is_empty() && !kind.eq_ignore_ascii_case("text")
+            let email = kind.eq_ignore_ascii_case("email");
+            if !kind.is_empty() && !kind.eq_ignore_ascii_case("text") && !email
+                || email && field.get("multiple").and_then(Value::as_bool) == Some(true)
                 || ["pattern", "minLength", "maxLength"]
                     .iter()
                     .any(|key| constraint_present(field.get(*key)))
@@ -758,6 +771,15 @@ impl CatalogueView {
                 self.last_error = Some(format!("InlineForm {node_id}: required field is empty"));
                 cx.notify();
                 return;
+            }
+            if email && !readonly && !value.is_empty() {
+                // The same checked single-address HTML syntax used by dialogs.
+                let pattern = r"\A[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*\z";
+                if !regex_find(pattern, &[], value).is_ok_and(|matches| !matches.is_empty()) {
+                    self.last_error = Some(format!("InlineForm {node_id}: invalid email address"));
+                    cx.notify();
+                    return;
+                }
             }
             if let Some(name) = field
                 .get("name")
@@ -892,7 +914,9 @@ impl CatalogueView {
             for (idx, field) in fields.iter().enumerate() {
                 if node.node_type == "forms/InlineForm" {
                     let fval = field.get("value").cloned().unwrap_or_else(|| json!(""));
-                    self.inline_values.insert((node.id.clone(), idx), fval);
+                    let key = (node.id.clone(), idx);
+                    self.inline_values.insert(key.clone(), fval.clone());
+                    self.inline_committed.insert(key, fval);
                     continue;
                 }
                 let fkey = field
@@ -1001,19 +1025,36 @@ impl CatalogueView {
                     InputEvent::Changed => {
                         let text = input.read(cx).text().to_owned();
                         if let Some(index) = inline_index {
-                            this.inline_field_changed(&node_id, index, text, cx);
+                            this.inline_values
+                                .insert((node_id.clone(), index), Value::String(text));
+                            cx.notify();
                         } else {
                             this.trigger_event(&key, &comp_type, "change", Value::String(text), cx);
                         }
                     }
                     InputEvent::Submit => {
                         if comp_type == "forms/InlineForm" {
+                            if let Some(index) = inline_index {
+                                this.inline_values.insert(
+                                    (node_id.clone(), index),
+                                    Value::String(input.read(cx).text().to_owned()),
+                                );
+                            }
                             this.submit_inline_form(&node_id, cx);
                         } else {
                             this.submit(&node_id, cx);
                         }
                     }
-                    InputEvent::Focus | InputEvent::Blur => {}
+                    InputEvent::Blur => {
+                        if let Some(index) = inline_index {
+                            this.inline_values.insert(
+                                (node_id.clone(), index),
+                                Value::String(input.read(cx).text().to_owned()),
+                            );
+                            this.commit_inline_field(&node_id, index, cx);
+                        }
+                    }
+                    InputEvent::Focus => {}
                 },
             );
             subs.push(sub);
@@ -3295,6 +3336,7 @@ impl CatalogueView {
             }
             "forms/InlineForm" => {
                 let mut form = InlineForm::new();
+                let narrow = window.viewport_size().width < px(480.);
                 for (index, field) in inline_form_fields(node).iter().enumerate() {
                     let key = (node.id.clone(), index);
                     let label = field.get("label").and_then(Value::as_str).unwrap_or("");
@@ -3359,6 +3401,7 @@ impl CatalogueView {
                     form = form.child(
                         div()
                             .debug_selector(move || format!("inline-form-field-{index}"))
+                            .when(narrow, |field| field.w_full().min_w_0())
                             .child(field_content),
                     );
                 }

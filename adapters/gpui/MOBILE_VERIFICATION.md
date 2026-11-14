@@ -89,8 +89,12 @@ specific device interactions named there, not full contract coverage.
   need device checks. Seconds remain in the value but are not shown in option
   labels; unavailable choices lack a native disabled accessibility attribute.
 - InlineForm has focused tests for form-scoped text values, repeated names,
-  disabled and readonly fields. Non-text fields and length or pattern
-  constraints fail closed; generic forms still need their own contract work.
+  disabled and readonly fields. The Newsletter fixture displayed a full-width
+  input on narrow Android and iOS screens; iOS submitted a single valid email
+  with the expected action payload. Android input automation remains pending.
+  Other field types, multiple email addresses,
+  and length or pattern constraints still need work; generic forms also need
+  their own contract checks.
 - TagInput initial values appeared on Android and iOS. On iOS typing a comma
   added a tag and removing it emitted the expected updated value. GPUI tests
   cover addition and removal too. The iOS simulator's software Return key did
@@ -99,8 +103,8 @@ specific device interactions named there, not full contract coverage.
   With touch mode enabled by default, Add appeared on Android and iOS; iOS Add
   committed the draft and emitted the expected value. Android Add still needs
   verification with working text entry.
-  InlineForm needs browser-equivalent change timing and `dirname` submission;
-  caller-provided error and description rendering has focused GPUI tests.
+  InlineForm `dirname` submission remains unsupported; caller-provided error
+  and description rendering has focused GPUI tests.
 - Form submission still needs contract verification for repeated names,
   multi-value fields, disabled fields, and form ownership. The current generic
   submit snapshots internal state rather than browser-style form entries. A

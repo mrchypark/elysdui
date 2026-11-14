@@ -118,6 +118,7 @@ fn inline_fields_keep_private_identity_and_route_changes(cx: &mut TestAppContext
     let screen = Screen { version: "1".into(), id: "inline-private".into(), loader: None, templates: BTreeMap::new(), root };
     vcx.update(|window, cx| {
         assert_eq!(window.viewport_size(), gpui::size(gpui::px(390.), gpui::px(844.)));
+        window.activate_window();
         view.update(cx, |view, cx| view.load_screen(screen, window, cx).unwrap());
     });
     vcx.run_until_parked();
@@ -128,10 +129,15 @@ fn inline_fields_keep_private_identity_and_route_changes(cx: &mut TestAppContext
     vcx.simulate_keystrokes("end");
     vcx.simulate_input("!");
     vcx.run_until_parked();
+    vcx.read_entity(&view, |view, _| {
+        assert!(!view.events().iter().any(|event| event.node_id == "inline" && (event.event == "change" || event.event == "ely:change")));
+    });
+    vcx.update(|window, cx| window.blur(cx));
+    vcx.run_until_parked();
     vcx.update(|_, cx| view.update(cx, |view, _| {
         assert_eq!(view.value("inline:inline-0"), Some(&json!("outside changed")));
         let detail = json!({"id":"inline", "component":"forms/InlineForm", "name":"message", "value":"inside!", "checked":false, "type":"text"});
-        assert!(view.events().iter().any(|event| event.node_id == "inline" && event.event == "ely:change" && event.value == detail));
+        assert!(view.events().iter().any(|event| event.node_id == "inline" && event.event == "ely:change" && event.value == detail), "events: {:?}", view.events());
         let requests = view.take_action_requests();
         assert!(requests.iter().any(|request| request.action == "native-changed"));
         let request = requests.iter().find(|request| request.action == "field-changed" && request.payload.get("value") == Some(&json!("inside!"))).expect("field change binding");
@@ -145,6 +151,33 @@ fn inline_fields_keep_private_identity_and_route_changes(cx: &mut TestAppContext
     vcx.simulate_click(submit.center(), Modifiers::none());
     vcx.run_until_parked();
     vcx.read_entity(&view, |view, _| assert!(view.events().iter().any(|event| event.node_id == "inline" && event.event == "ely:action" && event.value["formData"] == json!([["message", "inside!"]]))));
+}
+
+#[gpui::test]
+fn inline_form_blur_skips_unchanged_and_reverted_text(cx: &mut TestAppContext) {
+    cx.update(init_for_tests);
+    let window = cx.open_window(gpui::size(gpui::px(390.), gpui::px(844.)), |_, _| CatalogueView::new());
+    let view = window.root(cx).expect("catalogue view");
+    let vcx = gpui::VisualTestContext::from_window(window.into(), cx).into_mut();
+    let form = node("inline", "forms/InlineForm", BTreeMap::from([("fields".into(), json!([{"name":"message", "label":"Message", "value":"ready"}]))]));
+    let outside = node("outside", "forms/Input", BTreeMap::from([("name".into(), json!("outside"))]));
+    let mut root = node("root", "basic/stack", BTreeMap::new());
+    root.children = vec![form, outside];
+    let screen = Screen { version: "1".into(), id: "inline-revert".into(), loader: None, templates: BTreeMap::new(), root };
+    vcx.update(|window, cx| {
+        assert_eq!(window.viewport_size(), gpui::size(gpui::px(390.), gpui::px(844.)));
+        view.update(cx, |view, cx| view.load_screen(screen, window, cx).unwrap());
+        window.activate_window();
+        window.focus_next(cx);
+    });
+    vcx.run_until_parked();
+    vcx.simulate_keystrokes("end");
+    vcx.simulate_input("!");
+    vcx.simulate_keystrokes("backspace");
+    vcx.run_until_parked();
+    vcx.update(|window, cx| window.focus_next(cx));
+    vcx.run_until_parked();
+    vcx.read_entity(&view, |view, _| assert!(!view.events().iter().any(|event| event.node_id == "inline" && (event.event == "change" || event.event == "ely:change"))));
 }
 
 #[gpui::test]
@@ -280,7 +313,7 @@ fn inline_form_rejects_unsupported_field_type_instead_of_submitting(cx: &mut Tes
             "forms/InlineForm",
             BTreeMap::from([(
                 "items".into(),
-                json!([{"name":"mail", "type":"email", "value":"bad"}]),
+                json!([{"name":"website", "type":"url", "value":"bad"}]),
             )]),
         ),
     };
@@ -305,6 +338,111 @@ fn inline_form_rejects_unsupported_field_type_instead_of_submitting(cx: &mut Tes
                 .any(|event| event.event == "ely:action")
         );
     });
+}
+
+#[gpui::test]
+fn mobile_newsletter_email_rejects_invalid_then_submits_valid(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        init_for_tests(cx);
+        Theme::update(cx, |theme| {
+            theme.touch_mode = true;
+            theme.reduced_motion = true;
+        });
+    });
+    let window = cx.open_window(gpui::size(gpui::px(390.), gpui::px(844.)), |_, _| CatalogueView::new());
+    let view = window.root(cx).expect("catalogue view");
+    let vcx = gpui::VisualTestContext::from_window(window.into(), cx).into_mut();
+    let screen = Screen {
+        version: "1".into(), id: "newsletter".into(), loader: None, templates: BTreeMap::new(),
+        root: node("inline", "forms/InlineForm", BTreeMap::from([
+            ("label".into(), json!("Newsletter")), ("actionLabel".into(), json!("Subscribe")),
+            ("fields".into(), json!([{"name":"email", "label":"Newsletter", "type":"email", "value":"bad", "required":true}])),
+        ])),
+    };
+    vcx.update(|window, cx| {
+        assert_eq!(window.viewport_size(), gpui::size(gpui::px(390.), gpui::px(844.)));
+        window.activate_window();
+        view.update(cx, |view, cx| view.load_screen(screen, window, cx).unwrap());
+    });
+    vcx.run_until_parked();
+    let submit = vcx.debug_bounds("inline-form-submit-inline").expect("subscribe button");
+    vcx.simulate_click(submit.center(), Modifiers::none());
+    vcx.run_until_parked();
+    vcx.read_entity(&view, |view, _| {
+        assert!(view.last_error().is_some_and(|error| error.contains("invalid email")));
+        assert!(!view.events().iter().any(|event| event.event == "ely:action"));
+    });
+    let input = vcx.debug_bounds("input-text").expect("newsletter email");
+    vcx.simulate_click(input.center(), Modifiers::none());
+    vcx.simulate_keystrokes("secondary-a");
+    vcx.simulate_input("ada@example.org");
+    vcx.run_until_parked();
+    let submit = vcx.debug_bounds("inline-form-submit-inline").expect("subscribe button");
+    vcx.simulate_click(submit.center(), Modifiers::none());
+    vcx.run_until_parked();
+    vcx.read_entity(&view, |view, _| {
+        assert!(view.last_error().is_none());
+        assert!(view.events().iter().any(|event| event.node_id == "inline" && event.event == "ely:action" && event.value["formData"] == json!([["email", "ada@example.org"]])));
+    });
+}
+
+#[gpui::test]
+fn mobile_newsletter_field_uses_available_width_and_button_fits(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        init_for_tests(cx);
+        Theme::update(cx, |theme| theme.touch_mode = true);
+    });
+    let window = cx.open_window(gpui::size(gpui::px(390.), gpui::px(844.)), |_, _| CatalogueView::new());
+    let view = window.root(cx).expect("catalogue view");
+    let vcx = gpui::VisualTestContext::from_window(window.into(), cx).into_mut();
+    let screen = Screen {
+        version: "1".into(), id: "newsletter-layout".into(), loader: None, templates: BTreeMap::new(),
+        root: node("inline", "forms/InlineForm", BTreeMap::from([
+            ("label".into(), json!("Newsletter")), ("actionLabel".into(), json!("Subscribe")),
+            ("fields".into(), json!([{"name":"email", "label":"Newsletter", "type":"email", "placeholder":"you@example.com", "required":true}])),
+        ])),
+    };
+    vcx.update(|window, cx| {
+        assert_eq!(window.viewport_size(), gpui::size(gpui::px(390.), gpui::px(844.)));
+        view.update(cx, |view, cx| view.load_screen(screen, window, cx).unwrap());
+    });
+    vcx.run_until_parked();
+    let input = vcx.debug_bounds("input-root").expect("email input");
+    let button = vcx.debug_bounds("inline-form-submit-inline").expect("subscribe button");
+    eprintln!("390px newsletter: input={input:?}, button={button:?}");
+    assert!(input.size.width >= gpui::px(250.), "email input too narrow: {input:?}");
+    assert!(input.left() >= gpui::px(0.) && input.right() <= gpui::px(390.), "email outside viewport: {input:?}");
+    assert!(button.left() >= gpui::px(0.) && button.right() <= gpui::px(390.), "button outside viewport: {button:?}");
+    assert!(button.top() >= input.bottom(), "button must wrap below field: input={input:?}, button={button:?}");
+}
+
+#[gpui::test]
+fn inline_email_allows_optional_empty_and_readonly_but_blocks_multiple(cx: &mut TestAppContext) {
+    cx.update(init_for_tests);
+    let window = cx.open_window(gpui::size(gpui::px(390.), gpui::px(844.)), |_, _| CatalogueView::new());
+    let view = window.root(cx).expect("catalogue view");
+    let vcx = gpui::VisualTestContext::from_window(window.into(), cx).into_mut();
+    for (index, (field, expected)) in [
+        (json!({"name":"mail", "type":"email", "value":""}), true),
+        (json!({"name":"mail", "type":"email", "value":"bad", "readonly":true}), true),
+        (json!({"name":"mail", "type":"email", "value":"a@b,c@d", "multiple":true}), false),
+    ].into_iter().enumerate() {
+        let screen = Screen {
+            version: "1".into(), id: format!("email-case-{index}"), loader: None, templates: BTreeMap::new(),
+            root: node("inline", "forms/InlineForm", BTreeMap::from([("fields".into(), json!([field]))])),
+        };
+        vcx.update(|window, cx| view.update(cx, |view, cx| view.load_screen(screen, window, cx).unwrap()));
+        vcx.run_until_parked();
+        let previous = vcx.read_entity(&view, |view, _| view.events().iter().filter(|event| event.event == "ely:action").count());
+        let submit = vcx.debug_bounds("inline-form-submit-inline").expect("submit");
+        vcx.simulate_click(submit.center(), Modifiers::none());
+        vcx.run_until_parked();
+        vcx.read_entity(&view, |view, _| {
+            let count = view.events().iter().filter(|event| event.event == "ely:action").count();
+            assert_eq!(count, previous + usize::from(expected), "case {index}");
+            if !expected { assert!(view.last_error().is_some_and(|error| error.contains("unsupported"))); }
+        });
+    }
 }
 
 #[gpui::test]
@@ -371,9 +509,19 @@ fn inline_form_blocks_disabled_submission_and_enter_submits_items(cx: &mut TestA
     vcx.simulate_keystrokes("end");
     vcx.simulate_input("!");
     vcx.run_until_parked();
+    vcx.read_entity(&view, |view, _| assert!(!view.events().iter().any(|event| event.node_id == "inline" && (event.event == "change" || event.event == "ely:change"))));
     vcx.simulate_keystrokes("enter");
     vcx.run_until_parked();
-    vcx.read_entity(&view, |view, _| assert!(view.events().iter().any(|event| event.event == "ely:action" && event.value == json!({"action":"update", "formData":[["message","ready!"]], "values":[["message","ready!"]], "submitter":""}))));
+    vcx.read_entity(&view, |view, _| {
+        let events = view.events();
+        let change = events.iter().position(|event| event.node_id == "inline" && event.event == "ely:change" && event.value["value"] == json!("ready!")).expect("committed change");
+        let submit = events.iter().position(|event| event.event == "ely:action" && event.value == json!({"action":"update", "formData":[["message","ready!"]], "values":[["message","ready!"]], "submitter":""})).expect("submit");
+        assert!(change < submit);
+        assert_eq!(events.iter().filter(|event| event.node_id == "inline" && event.event == "ely:change").count(), 1);
+    });
+    vcx.update(|window, cx| window.focus_next(cx));
+    vcx.run_until_parked();
+    vcx.read_entity(&view, |view, _| assert_eq!(view.events().iter().filter(|event| event.node_id == "inline" && event.event == "ely:change").count(), 1));
 }
 
 #[gpui::test]

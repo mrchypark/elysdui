@@ -704,7 +704,7 @@ forms/HashtagInput,forms,MentionInput,2,pass-f64e798,not-run,not-run
 forms/HotkeyInput,forms,HotkeyInput,2,pass-f64e798,not-run,not-run
 forms/IconPicker,forms,IconPicker,2,pass-f64e798,not-run,not-run
 forms/InlineEdit,forms,InlineEdit,2,pass-f64e798,not-run,not-run
-forms/InlineForm,forms,InlineForm,2,pass-f64e798,not-run,not-run
+forms/InlineForm,forms,InlineForm,2,pass-f64e798,partial-layout,partial-email-submit-layout
 forms/Input,forms,Input,2,pass-f64e798,not-run,not-run
 forms/InputAddon,forms,InputGroup,3,pass-f64e798,not-run,not-run
 forms/InputGroup,forms,InputGroup,3,pass-f64e798,not-run,not-run
