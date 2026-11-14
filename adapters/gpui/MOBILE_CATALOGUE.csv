@@ -708,7 +708,7 @@ forms/InlineForm,forms,InlineForm,2,pass-f64e798,partial-required-email-submit,p
 forms/Input,forms,Input,2,pass-f64e798,partial-software-text-change,partial-hardware-text-change
 forms/InputAddon,forms,InputGroup,3,pass-f64e798,partial-software-text-change,not-run
 forms/InputGroup,forms,InputGroup,3,pass-f64e798,partial-software-text-change,not-run
-forms/JsonInput,forms,CodeInput,1,pass-f64e798,not-run,not-run
+forms/JsonInput,forms,CodeInput,1,pass-f64e798,partial-software-text-change,not-run
 forms/KeyValueInput,forms,KeyValueInput,2,pass-f64e798,not-run,not-run
 forms/Knob,forms,Knob,2,pass-f64e798,not-run,not-run
 forms/LanguageSelect,forms,LanguageSelect,2,pass-f64e798,not-run,not-run

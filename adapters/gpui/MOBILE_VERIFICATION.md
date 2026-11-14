@@ -56,6 +56,9 @@ specific device interactions named there, not full contract coverage.
 - Android: the forms/InputGroup fixture showed `alpha`; software keyboard
   input changed it to `alphaz` and emitted the change event. This does not
   cover its other fixtures or iOS.
+- Android: forms/JsonInput rendered its initial JSON and emitted the changed
+  text after a software-keyboard character insertion. JSON validation,
+  multiline behavior, and iOS remain unverified.
 - iOS: account/AccountSwitcher opened its menu, switched from `work` to `home`
   with the displayed account and change event updated, and emitted an add event
   for the fixture's `add-account` action. Custom actions and disabled state
