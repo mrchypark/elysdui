@@ -41,6 +41,22 @@ specific device interactions named there, not full contract coverage.
 - Android and iOS: the TimePicker opened hour and minute choices and changed
   12:30 to 12:45 with the expected event. Focused GPUI tests cover time bounds,
   midnight wrapping, stable step bases, disabled state, and field isolation.
+- iOS: the forms/Input fixture showed its initial `alpha` value. Typing `z`
+  through the simulator's hardware input changed it to `alphaz` and emitted
+  the corresponding change event. Switching away and reloading the fixture
+  restored the caller's initial value. Software keyboard and other input
+  contract variants remain unverified by this check.
+- Android: the forms/Input fixture showed `alpha`; tapping `z` on the software
+  keyboard changed it to `alphaz` and emitted the change event. The keyboard
+  obscured the focused field. After Back hid it, tapping that still-focused
+  field did not reopen it; `dumpsys input_method` reported `mInputShown=false`.
+- Android: the forms/InputAddon fixture displayed its `@` prefix and initial
+  value. The software keyboard changed `alpha` to `alphaz` and emitted the
+  corresponding event. Its other variants and iOS remain unverified.
+- iOS: account/AccountSwitcher opened its menu, switched from `work` to `home`
+  with the displayed account and change event updated, and emitted an add event
+  for the fixture's `add-account` action. Custom actions and disabled state
+  need separate verification.
 - Android: an upward touch swipe on the supplied VirtualList fixture brought
   rows 7 and 8 into view. On iOS the initial rows render but automated
   Simulator drag and scroll did not move the list; the input path and actual
@@ -90,8 +106,9 @@ specific device interactions named there, not full contract coverage.
   labels; unavailable choices lack a native disabled accessibility attribute.
 - InlineForm has focused tests for form-scoped text values, repeated names,
   disabled and readonly fields. The Newsletter fixture displayed a full-width
-  input on narrow Android and iOS screens; iOS submitted a single valid email
-  with the expected action payload. Android input automation remains pending.
+  input on narrow Android and iOS screens; iOS showed a field-level required
+  error on empty submission, cleared it while editing, and submitted a valid
+  email with the expected event payload. Android submission remains pending.
   Other field types, multiple email addresses,
   and length or pattern constraints still need work; generic forms also need
   their own contract checks.

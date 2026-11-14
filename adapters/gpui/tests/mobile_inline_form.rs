@@ -258,6 +258,7 @@ fn inline_form_submits_only_its_ordered_successful_text_fields(cx: &mut TestAppC
             window.viewport_size(),
             gpui::size(gpui::px(390.), gpui::px(844.))
         );
+        window.activate_window();
         view.update(cx, |view, cx| view.load_screen(screen, window, cx).unwrap());
     });
     vcx.run_until_parked();
@@ -266,6 +267,7 @@ fn inline_form_submits_only_its_ordered_successful_text_fields(cx: &mut TestAppC
         .expect("submit button");
     vcx.simulate_click(submit.center(), Modifiers::none());
     vcx.run_until_parked();
+    assert!(vcx.debug_bounds("inline-field-error-0-This field is required.").is_some());
     vcx.read_entity(&view, |view, _| {
         assert!(
             !view
@@ -277,12 +279,10 @@ fn inline_form_submits_only_its_ordered_successful_text_fields(cx: &mut TestAppC
     let field = vcx
         .debug_bounds("inline-form-field-0")
         .expect("required field");
-    vcx.simulate_click(
-        gpui::point(field.center().x, field.bottom() - gpui::px(10.)),
-        Modifiers::none(),
-    );
+    vcx.simulate_click(gpui::point(field.center().x, field.top() + gpui::px(48.)), Modifiers::none());
     vcx.simulate_input("first");
     vcx.run_until_parked();
+    assert!(vcx.debug_bounds("inline-field-error-0-This field is required.").is_none());
     let submit = vcx
         .debug_bounds("inline-form-submit-inline")
         .expect("submit button");
@@ -291,7 +291,10 @@ fn inline_form_submits_only_its_ordered_successful_text_fields(cx: &mut TestAppC
     vcx.update(|_, cx| view.update(cx, |view, _| {
         let event = view.events().iter().find(|event| event.node_id == "inline" && event.event == "ely:action").expect("inline action");
         assert_eq!(event.value, json!({"action":"save", "formData":[["tag","first"],["tag","second"]], "values":[["tag","first"],["tag","second"]], "submitter":""}));
-        assert!(view.take_action_requests().iter().any(|request| request.action == "save-inline" && request.target == "inline"));
+        let requests = view.take_action_requests();
+        let request = requests.iter().find(|request| request.action == "save-inline" && request.target == "inline").expect("form action request");
+        assert_eq!(request.payload.get("tag"), Some(&json!(["first", "second"])));
+        assert!(!request.payload.contains_key("skip") && !request.payload.contains_key("outside"));
     }));
 }
 
@@ -326,11 +329,8 @@ fn inline_form_rejects_unsupported_field_type_instead_of_submitting(cx: &mut Tes
         .expect("submit button");
     vcx.simulate_click(submit.center(), Modifiers::none());
     vcx.run_until_parked();
+    assert!(vcx.debug_bounds("inline-field-error-0-Unsupported field validation or type.").is_some());
     vcx.read_entity(&view, |view, _| {
-        assert!(
-            view.last_error()
-                .is_some_and(|error| error.contains("unsupported"))
-        );
         assert!(
             !view
                 .events()
@@ -368,15 +368,29 @@ fn mobile_newsletter_email_rejects_invalid_then_submits_valid(cx: &mut TestAppCo
     let submit = vcx.debug_bounds("inline-form-submit-inline").expect("subscribe button");
     vcx.simulate_click(submit.center(), Modifiers::none());
     vcx.run_until_parked();
+    assert!(vcx.debug_bounds("inline-field-error-0-Enter a valid email address.").is_some());
     vcx.read_entity(&view, |view, _| {
-        assert!(view.last_error().is_some_and(|error| error.contains("invalid email")));
         assert!(!view.events().iter().any(|event| event.event == "ely:action"));
     });
     let input = vcx.debug_bounds("input-text").expect("newsletter email");
     vcx.simulate_click(input.center(), Modifiers::none());
     vcx.simulate_keystrokes("secondary-a");
-    vcx.simulate_input("ada@example.org");
+    vcx.simulate_input("ada");
+    vcx.simulate_input(" ");
+    vcx.simulate_input("@example.org");
     vcx.run_until_parked();
+    assert!(vcx.debug_bounds("inline-field-error-0-Enter a valid email address.").is_none());
+    let submit = vcx.debug_bounds("inline-form-submit-inline").expect("subscribe button");
+    vcx.simulate_click(submit.center(), Modifiers::none());
+    vcx.run_until_parked();
+    assert!(vcx.debug_bounds("inline-field-error-0-Enter a valid email address.").is_some(), "interior space must survive editing and fail validation");
+    vcx.read_entity(&view, |view, _| assert!(!view.events().iter().any(|event| event.event == "ely:action")));
+    let input = vcx.debug_bounds("input-text").expect("newsletter email");
+    vcx.simulate_click(input.center(), Modifiers::none());
+    vcx.simulate_keystrokes("secondary-a");
+    vcx.simulate_input("  ada@example.org  ");
+    vcx.run_until_parked();
+    assert!(vcx.debug_bounds("inline-field-error-0-Enter a valid email address.").is_none());
     let submit = vcx.debug_bounds("inline-form-submit-inline").expect("subscribe button");
     vcx.simulate_click(submit.center(), Modifiers::none());
     vcx.run_until_parked();
@@ -417,6 +431,35 @@ fn mobile_newsletter_field_uses_available_width_and_button_fits(cx: &mut TestApp
 }
 
 #[gpui::test]
+fn inline_action_explicit_payload_overrides_form_field(cx: &mut TestAppContext) {
+    cx.update(init_for_tests);
+    let window = cx.open_window(gpui::size(gpui::px(390.), gpui::px(844.)), |_, _| CatalogueView::new());
+    let view = window.root(cx).expect("catalogue view");
+    let vcx = gpui::VisualTestContext::from_window(window.into(), cx).into_mut();
+    let mut form = node("inline", "forms/InlineForm", BTreeMap::from([("fields".into(), json!([
+        {"name":"email", "type":"email", "value":"  ada@example.org  "},
+        {"name":"other", "value":"kept"}
+    ]))]));
+    form.event = Some(json!({"on":"ely:action", "action":"send", "target":"inline", "payload":{
+        "email":{"path":"/action", "type":"string"}
+    }}));
+    let screen = Screen { version:"1".into(), id:"payload-override".into(), loader:None, templates:BTreeMap::new(), root:form };
+    vcx.update(|window, cx| view.update(cx, |view, cx| view.load_screen(screen, window, cx).unwrap()));
+    vcx.run_until_parked();
+    let submit = vcx.debug_bounds("inline-form-submit-inline").expect("submit");
+    vcx.simulate_click(submit.center(), Modifiers::none());
+    vcx.run_until_parked();
+    vcx.update(|_, cx| view.update(cx, |view, _| {
+        let event = view.events().iter().find(|event| event.event == "ely:action").expect("action event");
+        assert_eq!(event.value["formData"], json!([["email", "ada@example.org"], ["other", "kept"]]));
+        let requests = view.take_action_requests();
+        let request = requests.iter().find(|request| request.action == "send").expect("action request");
+        assert_eq!(request.payload.get("email"), Some(&json!("save")));
+        assert_eq!(request.payload.get("other"), Some(&json!("kept")));
+    }));
+}
+
+#[gpui::test]
 fn inline_email_allows_optional_empty_and_readonly_but_blocks_multiple(cx: &mut TestAppContext) {
     cx.update(init_for_tests);
     let window = cx.open_window(gpui::size(gpui::px(390.), gpui::px(844.)), |_, _| CatalogueView::new());
@@ -437,10 +480,10 @@ fn inline_email_allows_optional_empty_and_readonly_but_blocks_multiple(cx: &mut 
         let submit = vcx.debug_bounds("inline-form-submit-inline").expect("submit");
         vcx.simulate_click(submit.center(), Modifiers::none());
         vcx.run_until_parked();
+        if !expected { assert!(vcx.debug_bounds("inline-field-error-0-Unsupported field validation or type.").is_some()); }
         vcx.read_entity(&view, |view, _| {
             let count = view.events().iter().filter(|event| event.event == "ely:action").count();
             assert_eq!(count, previous + usize::from(expected), "case {index}");
-            if !expected { assert!(view.last_error().is_some_and(|error| error.contains("unsupported"))); }
         });
     }
 }
@@ -675,11 +718,8 @@ fn mobile_inline_form_never_submits_unchecked_length_constraints(cx: &mut TestAp
             .expect("submit");
         vcx.simulate_click(submit.center(), Modifiers::none());
         vcx.run_until_parked();
+        assert!(vcx.debug_bounds("inline-field-error-0-Unsupported field validation or type.").is_some());
         vcx.read_entity(&view, |view, _| {
-            assert!(
-                view.last_error()
-                    .is_some_and(|error| error.contains("unsupported"))
-            );
             assert!(
                 !view
                     .events()

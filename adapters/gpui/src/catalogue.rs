@@ -407,6 +407,7 @@ pub struct CatalogueView {
     values: BTreeMap<String, Value>,
     inline_values: BTreeMap<(String, usize), Value>,
     inline_committed: BTreeMap<(String, usize), Value>,
+    inline_errors: BTreeMap<(String, usize), String>,
     duplicate_names: BTreeSet<String>,
     nav_groups: BTreeMap<(String, usize), bool>,
     table_filters: BTreeMap<String, String>,
@@ -434,6 +435,7 @@ impl CatalogueView {
             values: BTreeMap::new(),
             inline_values: BTreeMap::new(),
             inline_committed: BTreeMap::new(),
+            inline_errors: BTreeMap::new(),
             duplicate_names: BTreeSet::new(),
             nav_groups: BTreeMap::new(),
             table_filters: BTreeMap::new(),
@@ -517,6 +519,7 @@ impl CatalogueView {
         self.values.clear();
         self.inline_values.clear();
         self.inline_committed.clear();
+        self.inline_errors.clear();
         self._input_subs.clear();
         self.action_requests.clear();
         self.locked_keys.clear();
@@ -637,7 +640,18 @@ impl CatalogueView {
                     }
                 }
                 match resolve_event_bindings(matches[0], event, &Value::Object(detail)) {
-                    Ok(requests) => self.action_requests.extend(requests),
+                    Ok(mut requests) => {
+                        if matches[0].node_type == "forms/InlineForm" && event == "ely:action" {
+                            if let Some(entries) = value.get("formData").and_then(Value::as_array) {
+                                for request in &mut requests {
+                                    let mut form_payload = inline_action_payload(entries);
+                                    form_payload.append(&mut request.payload);
+                                    request.payload = form_payload;
+                                }
+                            }
+                        }
+                        self.action_requests.extend(requests)
+                    }
                     Err(error) => self.last_error = Some(error.message),
                 }
             } else if matches.len() > 1
@@ -687,15 +701,15 @@ impl CatalogueView {
             return;
         }
         let key = (node_id.to_owned(), index);
-        let Some(value) = self.inline_values.get(&key).cloned() else {
+        let Some(raw) = self.inline_values.get(&key).and_then(Value::as_str) else {
             return;
         };
+        let text = self.inline_input_text(node_id, index, raw);
+        let value = Value::String(text.clone());
+        self.inline_values.insert(key.clone(), value.clone());
         if self.inline_committed.get(&key) == Some(&value) {
             return;
         }
-        let Some(text) = value.as_str().map(ToOwned::to_owned) else {
-            return;
-        };
         self.inline_committed.insert(key, value);
         let name = field.get("name").and_then(Value::as_str).unwrap_or("");
         let kind = field
@@ -724,6 +738,22 @@ impl CatalogueView {
         cx.notify();
     }
 
+    fn inline_input_text(&self, node_id: &str, index: usize, text: &str) -> String {
+        let email = self
+            .screen
+            .as_ref()
+            .and_then(|screen| find_node(&screen.root, node_id))
+            .and_then(|node| inline_form_fields(node).get(index))
+            .and_then(|field| field.get("type"))
+            .and_then(Value::as_str)
+            .is_some_and(|kind| kind.eq_ignore_ascii_case("email"));
+        if email {
+            sanitize_email(text)
+        } else {
+            text.to_owned()
+        }
+    }
+
     fn submit_inline_form(&mut self, node_id: &str, cx: &mut Context<Self>) {
         let Some(node) = self
             .screen
@@ -736,6 +766,7 @@ impl CatalogueView {
         if prop_bool(&node, "disabled") {
             return;
         }
+        self.inline_errors.retain(|(id, _), _| id != node_id);
         for index in 0..inline_form_fields(&node).len() {
             self.commit_inline_field(node_id, index, cx);
         }
@@ -752,9 +783,10 @@ impl CatalogueView {
                     .iter()
                     .any(|key| constraint_present(field.get(*key)))
             {
-                self.last_error = Some(format!(
-                    "InlineForm {node_id}: unsupported field validation or type"
-                ));
+                self.inline_errors.insert(
+                    (node_id.to_owned(), index),
+                    "Unsupported field validation or type.".into(),
+                );
                 cx.notify();
                 return;
             }
@@ -768,7 +800,10 @@ impl CatalogueView {
                 && field.get("required").and_then(Value::as_bool) == Some(true)
                 && value.is_empty()
             {
-                self.last_error = Some(format!("InlineForm {node_id}: required field is empty"));
+                self.inline_errors.insert(
+                    (node_id.to_owned(), index),
+                    "This field is required.".into(),
+                );
                 cx.notify();
                 return;
             }
@@ -776,7 +811,10 @@ impl CatalogueView {
                 // The same checked single-address HTML syntax used by dialogs.
                 let pattern = r"\A[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*\z";
                 if !regex_find(pattern, &[], value).is_ok_and(|matches| !matches.is_empty()) {
-                    self.last_error = Some(format!("InlineForm {node_id}: invalid email address"));
+                    self.inline_errors.insert(
+                        (node_id.to_owned(), index),
+                        "Enter a valid email address.".into(),
+                    );
                     cx.notify();
                     return;
                 }
@@ -788,13 +826,6 @@ impl CatalogueView {
             {
                 entries.push(json!([name, value]));
             }
-        }
-        if self
-            .last_error
-            .as_deref()
-            .is_some_and(|error| error.starts_with(&format!("InlineForm {node_id}:")))
-        {
-            self.last_error = None;
         }
         let action = prop_str(&node, "action")
             .filter(|action| !action.is_empty())
@@ -913,7 +944,16 @@ impl CatalogueView {
         } {
             for (idx, field) in fields.iter().enumerate() {
                 if node.node_type == "forms/InlineForm" {
-                    let fval = field.get("value").cloned().unwrap_or_else(|| json!(""));
+                    let raw = field.get("value").and_then(Value::as_str).unwrap_or("");
+                    let email = field
+                        .get("type")
+                        .and_then(Value::as_str)
+                        .is_some_and(|kind| kind.eq_ignore_ascii_case("email"));
+                    let fval = Value::String(if email {
+                        sanitize_email(raw)
+                    } else {
+                        raw.to_owned()
+                    });
                     let key = (node.id.clone(), idx);
                     self.inline_values.insert(key.clone(), fval.clone());
                     self.inline_committed.insert(key, fval);
@@ -1027,6 +1067,7 @@ impl CatalogueView {
                         if let Some(index) = inline_index {
                             this.inline_values
                                 .insert((node_id.clone(), index), Value::String(text));
+                            this.inline_errors.remove(&(node_id.clone(), index));
                             cx.notify();
                         } else {
                             this.trigger_event(&key, &comp_type, "change", Value::String(text), cx);
@@ -3363,10 +3404,16 @@ impl CatalogueView {
                         row = row.child(Input::new(input_entity));
                     }
                     let mut field_content = div().flex().flex_col().child(row);
-                    if let Some(error) = field
-                        .get("error")
-                        .and_then(Value::as_str)
-                        .filter(|s| !s.is_empty())
+                    if let Some(error) =
+                        self.inline_errors
+                            .get(&key)
+                            .map(String::as_str)
+                            .or_else(|| {
+                                field
+                                    .get("error")
+                                    .and_then(Value::as_str)
+                                    .filter(|s| !s.is_empty())
+                            })
                     {
                         let text = error.to_owned();
                         let selector_text = text.clone();
@@ -4170,6 +4217,39 @@ struct InputSpec {
     masked: bool,
     multiline: bool,
     disabled: bool,
+}
+
+fn sanitize_email(value: &str) -> String {
+    value
+        .replace(['\r', '\n'], "")
+        .trim_matches([' ', '\t', '\u{000c}'])
+        .to_owned()
+}
+
+fn inline_action_payload(entries: &[Value]) -> BTreeMap<String, Value> {
+    let mut payload = BTreeMap::new();
+    for entry in entries {
+        let Some(pair) = entry.as_array().filter(|pair| pair.len() == 2) else {
+            continue;
+        };
+        let Some(name) = pair[0].as_str() else {
+            continue;
+        };
+        match payload.entry(name.to_owned()) {
+            std::collections::btree_map::Entry::Vacant(slot) => {
+                slot.insert(pair[1].clone());
+            }
+            std::collections::btree_map::Entry::Occupied(mut slot) => {
+                if let Value::Array(values) = slot.get_mut() {
+                    values.push(pair[1].clone());
+                } else {
+                    let first = slot.get().clone();
+                    slot.insert(Value::Array(vec![first, pair[1].clone()]));
+                }
+            }
+        }
+    }
+    payload
 }
 
 fn constraint_present(value: Option<&Value>) -> bool {
