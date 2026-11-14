@@ -10,42 +10,58 @@ use std::{
 
 use ely_gpui_component::{
     buttons::{
-        ActionBar, Button, ButtonGroup, ButtonVariant, CopyButton, SegmentedControl, ToggleGroup,
-        ToggleItem,
+        ActionBar, BulkActionBar, Button, ButtonGroup, ButtonVariant, ConfirmButton, ConfirmMode,
+        CopyButton, FloatingActionButton, SegmentedControl, ToggleButton, ToggleGroup, ToggleItem,
     },
     charts::{
-        AreaChart, BarChart, LIMIT as CHART_LIMIT, LineChart, PieChart, Points, ScatterChart,
-        Series as ChartSeries,
+        AreaChart, BarChart, Bullet, BulletChart, BurndownChart, FunnelChart, Histogram,
+        LIMIT as CHART_LIMIT, LineChart, PieChart, Points, RadarChart, ScatterChart,
+        Series as ChartSeries, WaterfallChart,
+    },
+    dashboard::{
+        AlertList, AlertState, EventStream, Health, MonitorAlert, Service, ServiceStatus,
+        StreamEvent, UptimeBar,
     },
     data_display::{
-        Avatar, Badge, Carousel, DescriptionList, Gauge, KpiCard, Meter, Sparkline, Statistic, Tag,
-        Timeline, TimelineItem, Tone, UsageBar,
+        Avatar, Badge, BeforeAfter, Carousel, Comparison, DescriptionList, Gauge, KpiCard, Meter,
+        QrCode, Sparkline, Stars, Statistic, Tag, Timeline, TimelineItem, Tone, UsageBar,
     },
-    feedback::{Alert, Banner, Callout, ConfirmationCard, EmptyState},
+    feedback::{Alert, Banner, Callout, ConfirmationCard, EmptyState, SaveState, SavingIndicator},
     forms::{
-        Calendar, Checkbox, Choice, ChoiceChips, CodeInput, ColorPicker, Combobox, DatePicker,
-        DropZone, Form, FormField, FormLabel, HotkeyInput, Input, InputEvent, KeyValueInput,
-        ListBox, MultiSelect, NumberInput, PasswordInput, PinInput, RadioGroup, RangeSlider,
-        Rating, SearchInput, Select, SignaturePad, Slider, Stepper, Switch, TagInput, TextInput,
+        Calendar, Checkbox, Choice, ChoiceChips, CodeInput, ColorPicker, ColorSwatch, Combobox,
+        DatePicker, DropZone, Form, FormField, FormLabel, HotkeyInput, InlineForm, Input,
+        InputEvent, KeyValueInput, ListBox, MultiSelect, NumberInput, PasswordInput, PathInput,
+        PinInput, RadioGroup, RangeSlider, Rating, SearchInput, Select, SignaturePad, Slider,
+        Stepper, Switch, TagInput, TextInput, UnitInput,
     },
     layout::{
         Accordion, AccordionItem, AppShell, Card, CardHeader, MasterDetail, Sheet, Sidebar,
         SimpleGrid, SplitPane, h_stack, v_stack,
     },
-    lists::{Tree, TreeNode},
-    motion::{ProgressBar, Spinner},
-    navigation::{Breadcrumb, Crumb, Pagination, Steps, Tabs},
+    lists::{Tree, TreeNode, TreeSelect},
+    misc::{Calculator, Clock, Poll, Stopwatch},
+    motion::{ProgressBar, ProgressRing, SkeletonText, Spinner},
+    navigation::{
+        BackForwardNavigation, Breadcrumb, Crumb, EditorTab, EditorTabs, LoadMore, Pagination,
+        Steps, Tabs,
+    },
     primitives::{Divider, IconName, Place, Severity},
-    project::{KanbanBoard, KanbanCard, KanbanColumn},
-    tables::{Cell, Column, DataTable, Row},
+    project::{KanbanBoard, KanbanCard, KanbanColumn, Priority, PriorityIndicator},
+    shell::{StatusBar, StatusBarItem, TabBar, TitleBar, WindowTab},
+    tables::{Cell, Column, DataTable, HeatmapTable, Row},
+    terminal::{AnsiText, CommandBlock, CommandState, LogLevel, LogLine, LogViewer},
     theme::{ActiveTheme, ControlSize},
-    typography::{Caption, Code, Label, Paragraph, SelectableText},
+    typography::{
+        AnimatedNumber, Blockquote, Caption, Code, Emoji, Heading, Highlight, Label, Latex, Link,
+        Overline, Paragraph, SelectableText, Subtitle, Title,
+    },
 };
 use flate2::read::GzDecoder;
 use gpui::{
     AnyElement, App, Axis, Context, Entity, Hsla, IntoElement, ParentElement, Render, SharedString,
     Styled, Subscription, Window, div, prelude::*, px,
 };
+use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -661,10 +677,45 @@ impl CatalogueView {
         let eid = SharedString::from(format!("{prefix}-{}", node.id));
         let contract = self.registry.get(&node.node_type);
         let state_key = state_key_for_node(node);
+        if let Some(el) = self.render_specific_node(
+            &node.node_type,
+            node,
+            &eid,
+            &state_key,
+            prefix,
+            window,
+            cx,
+            view,
+        ) {
+            return el;
+        }
+        let canonical = canonical_component_type(&node.node_type, contract);
+        if canonical != node.node_type
+            && let Some(el) = self
+                .render_specific_node(&canonical, node, &eid, &state_key, prefix, window, cx, view)
+        {
+            return el;
+        }
+        self.render_family_component(node, contract, &eid, &state_key, window, cx, view)
+    }
+
+    fn render_specific_node(
+        &self,
+        kind: &str,
+        node: &ScreenNode,
+        eid: &SharedString,
+        state_key: &str,
+        prefix: &str,
+        window: &mut Window,
+        cx: &mut App,
+        view: &gpui::WeakEntity<Self>,
+    ) -> Option<AnyElement> {
+        let eid = eid.clone();
+        let state_key = state_key.to_owned();
         let disabled = prop_bool(node, "disabled");
         let readonly = prop_bool(node, "readonly");
 
-        match node.node_type.as_str() {
+        let el: AnyElement = match kind {
             "basic/stack" | "layout/Stack" | "layout/HStack" | "layout/VStack" => {
                 let row = prop_bool(node, "horizontal")
                     || prop_str(node, "direction").as_deref() == Some("row")
@@ -2226,8 +2277,503 @@ impl CatalogueView {
                     .into_any_element()
             }
             "motion/Spinner" => Spinner::new(eid).into_any_element(),
-            _ => self.render_family_component(node, contract, &eid, &state_key, window, cx, view),
-        }
+            "buttons/ToggleButton" => {
+                let on = self.current_bool(&state_key, node);
+                let label = non_empty_or(&best_label(node), "Toggle");
+                let v = view.clone();
+                let sk = state_key.clone();
+                let ntype = node.node_type.clone();
+                ToggleButton::new(eid, ToggleItem::new(sk.clone()).label(label), on)
+                    .disabled(disabled)
+                    .on_toggle(move |next, _, cx| {
+                        let _ = v.update(cx, |this, cx| {
+                            this.trigger_event(&sk, &ntype, "change", json!(next), cx);
+                        });
+                    })
+                    .into_any_element()
+            }
+            "buttons/ConfirmButton" => {
+                let label = non_empty_or(&best_label(node), "Confirm");
+                let v = view.clone();
+                let nid = node.id.clone();
+                let ntype = node.node_type.clone();
+                ConfirmButton::new(eid, label, ConfirmMode::Twice)
+                    .on_confirm(move |_, cx| {
+                        let _ = v.update(cx, |this, cx| {
+                            this.trigger_event(&nid, &ntype, "ely:action", json!("confirm"), cx);
+                        });
+                    })
+                    .into_any_element()
+            }
+            "buttons/FloatingActionButton" => {
+                let label = non_empty_or(&best_label(node), "Add");
+                let v = view.clone();
+                let nid = node.id.clone();
+                let ntype = node.node_type.clone();
+                FloatingActionButton::new(eid, IconName::Plus)
+                    .label(label)
+                    .on_click(move |_, _, cx| {
+                        let _ = v.update(cx, |this, cx| {
+                            this.trigger_event(&nid, &ntype, "click", json!("fab"), cx);
+                        });
+                    })
+                    .into_any_element()
+            }
+            "buttons/BulkActionBar" => {
+                let count = extract_choices(node).len().max(1);
+                let mut bar = BulkActionBar::new(eid, count);
+                for (idx, ch) in extract_choices(node).into_iter().take(4).enumerate() {
+                    let v = view.clone();
+                    let nid = node.id.clone();
+                    let ntype = node.node_type.clone();
+                    let val = ch.value.to_string();
+                    bar = bar.action(
+                        Button::new(SharedString::from(format!("{nid}-bulk-{idx}")), ch.label)
+                            .size(ControlSize::Sm)
+                            .on_click(move |_, _, cx| {
+                                let _ = v.update(cx, |this, cx| {
+                                    this.trigger_event(&nid, &ntype, "click", json!(val), cx);
+                                });
+                            }),
+                    );
+                }
+                bar.into_any_element()
+            }
+            "buttons/SplitButton" => {
+                let choices = extract_choices(node);
+                let primary = non_empty_or(&best_label(node), "Run");
+                let v = view.clone();
+                let nid = node.id.clone();
+                let ntype = node.node_type.clone();
+                let mut grp = ButtonGroup::new().button(
+                    Button::new(SharedString::from(format!("{eid}-main")), primary)
+                        .variant(ButtonVariant::Primary)
+                        .disabled(disabled)
+                        .on_click(move |_, _, cx| {
+                            let _ = v.update(cx, |this, cx| {
+                                this.trigger_event(&nid, &ntype, "click", json!("primary"), cx);
+                            });
+                        }),
+                );
+                if let Some(first) = choices.into_iter().next() {
+                    let v2 = view.clone();
+                    let nid2 = node.id.clone();
+                    let ntype2 = node.node_type.clone();
+                    let val2 = first.value.to_string();
+                    grp = grp.button(
+                        Button::new(SharedString::from(format!("{eid}-alt")), first.label)
+                            .variant(ButtonVariant::Secondary)
+                            .disabled(disabled)
+                            .on_click(move |_, _, cx| {
+                                let _ = v2.update(cx, |this, cx| {
+                                    this.trigger_event(&nid2, &ntype2, "click", json!(val2), cx);
+                                });
+                            }),
+                    );
+                }
+                grp.into_any_element()
+            }
+            "data/Stars" => {
+                let max = prop_f64(node, "max").unwrap_or(5.0).clamp(1.0, 10.0) as u8;
+                let score = prop_f64(node, "value")
+                    .unwrap_or(4.0)
+                    .clamp(0.0, f64::from(max)) as f32;
+                Stars::new(score).max(max).into_any_element()
+            }
+            "data/QRCode" => {
+                let value = prop_str(node, "value").unwrap_or_else(|| "https://ely.dev".into());
+                match QrCode::new(value.as_bytes()) {
+                    Ok(qr) => qr.into_any_element(),
+                    Err(_) => Badge::new(value).tone(Tone::Info).into_any_element(),
+                }
+            }
+            "data/Comparison" => {
+                let cols: Vec<String> = extract_choices(node)
+                    .into_iter()
+                    .take(3)
+                    .map(|c| c.label.to_string())
+                    .collect();
+                let cols = if cols.is_empty() {
+                    vec!["Standard".into(), "Pro".into()]
+                } else {
+                    cols
+                };
+                Comparison::new(cols).into_any_element()
+            }
+            "data/BeforeAfter" => {
+                let before = prop_str(node, "before").unwrap_or_else(|| "Before".into());
+                let after = prop_str(node, "after").unwrap_or_else(|| "After".into());
+                BeforeAfter::new(eid, Label::new(before), Label::new(after)).into_any_element()
+            }
+            "dashboard/AlertList" => {
+                let now = Timestamp::UNIX_EPOCH;
+                let items: Vec<MonitorAlert> = extract_item_objects(node)
+                    .into_iter()
+                    .enumerate()
+                    .map(|(i, m)| MonitorAlert {
+                        key: format!("alert-{i}").into(),
+                        title: m
+                            .get("title")
+                            .or_else(|| m.get("label"))
+                            .and_then(Value::as_str)
+                            .unwrap_or("Alert")
+                            .to_owned()
+                            .into(),
+                        source: m
+                            .get("source")
+                            .and_then(Value::as_str)
+                            .unwrap_or("system")
+                            .to_owned()
+                            .into(),
+                        severity: Severity::Warning,
+                        state: AlertState::Firing,
+                        since: now,
+                    })
+                    .collect();
+                AlertList::new(eid, items, now).into_any_element()
+            }
+            "dashboard/UptimeBar" => {
+                let services = vec![Service {
+                    name: non_empty_or(&best_title(node), "API").into(),
+                    health: Health::Operational,
+                    uptime: Some(0.999),
+                }];
+                v_stack()
+                    .gap_2()
+                    .child(ServiceStatus::new(services))
+                    .child(UptimeBar::new(
+                        eid,
+                        non_empty_or(&best_title(node), "API"),
+                        jiff::civil::date(2026, 11, 1),
+                        [Some(1.0), Some(1.0), Some(0.995), Some(1.0)],
+                    ))
+                    .into_any_element()
+            }
+            "dashboard/EventStream" => {
+                let now = Timestamp::UNIX_EPOCH;
+                let events: Vec<StreamEvent> = extract_item_objects(node)
+                    .into_iter()
+                    .enumerate()
+                    .map(|(i, m)| StreamEvent {
+                        key: format!("ev-{i}").into(),
+                        at: now,
+                        kind: m
+                            .get("kind")
+                            .or_else(|| m.get("source"))
+                            .and_then(Value::as_str)
+                            .unwrap_or("app")
+                            .to_owned()
+                            .into(),
+                        text: m
+                            .get("text")
+                            .or_else(|| m.get("message"))
+                            .or_else(|| m.get("title"))
+                            .and_then(Value::as_str)
+                            .unwrap_or("Event")
+                            .to_owned()
+                            .into(),
+                        tone: Tone::Info,
+                    })
+                    .collect();
+                EventStream::new(eid, events, now).into_any_element()
+            }
+            "charts/RadarChart" => RadarChart::new(eid, ["CPU", "Memory", "Disk", "Net"])
+                .series(ChartSeries::new(
+                    non_empty_or(&best_label(node), "Usage"),
+                    [65.0, 80.0, 45.0, 70.0],
+                ))
+                .into_any_element(),
+            "charts/FunnelChart" => FunnelChart::new(eid)
+                .stage("Visits", 1000.0)
+                .stage("Signups", 420.0)
+                .stage("Active", 180.0)
+                .into_any_element(),
+            "charts/Bullet Chart" => BulletChart::new(eid)
+                .bullet(Bullet::new(
+                    non_empty_or(&best_label(node), "Target"),
+                    72.0,
+                    85.0,
+                ))
+                .into_any_element(),
+            "charts/WaterfallChart" => WaterfallChart::new(eid)
+                .step("Start", 100.0)
+                .step("Delta", 25.0)
+                .step("Loss", -10.0)
+                .into_any_element(),
+            "charts/Histogram" => {
+                Histogram::new(eid, [10.0, 14.0, 18.0, 22.0, 25.0, 30.0]).into_any_element()
+            }
+            "project/Burndown Chart" => BurndownChart::new(
+                eid,
+                jiff::civil::date(2026, 11, 1),
+                jiff::civil::date(2026, 11, 10),
+                30.0,
+            )
+            .into_any_element(),
+            "feedback/SavingIndicator" => {
+                let saving = prop_bool(node, "saving") || prop_bool(node, "loading");
+                SavingIndicator::new(
+                    eid,
+                    if saving {
+                        SaveState::Saving
+                    } else {
+                        SaveState::Saved
+                    },
+                )
+                .into_any_element()
+            }
+            "motion/ProgressRing" => {
+                let val = prop_f64(node, "value").unwrap_or(0.6).clamp(0.0, 1.0) as f32;
+                ProgressRing::new(eid, val).into_any_element()
+            }
+            "motion/Skeleton" => SkeletonText::new(eid, 3).into_any_element(),
+            "forms/ColorSwatch" => ColorSwatch::new(eid, Hsla::default()).into_any_element(),
+            "forms/InlineForm" => {
+                let mut form = InlineForm::new();
+                if let Some(input_entity) = self.inputs.get(&state_key) {
+                    form = form.child(Input::new(input_entity));
+                }
+                let label = prop_str(node, "actionLabel").unwrap_or_else(|| "Apply".into());
+                let v = view.clone();
+                let nid = node.id.clone();
+                form.child(Button::new(eid, label).primary().on_click(move |_, _, cx| {
+                    let _ = v.update(cx, |this, cx| this.submit(&nid, cx));
+                }))
+                .into_any_element()
+            }
+            "forms/UnitInput" => {
+                let val = self
+                    .values
+                    .get(&state_key)
+                    .and_then(value_to_f64)
+                    .unwrap_or(0.0);
+                UnitInput::new(eid, val, ["ms", "s", "m"], "ms").into_any_element()
+            }
+            "forms/PathInput" => {
+                if let Some(input_entity) = self.inputs.get(&state_key) {
+                    PathInput::new(eid, input_entity).into_any_element()
+                } else {
+                    Label::new(prop_str(node, "value").unwrap_or_else(|| "/".into()))
+                        .into_any_element()
+                }
+            }
+            "lists/TreeSelect" => {
+                let nodes = parse_tree_nodes(
+                    node.props
+                        .get("items")
+                        .and_then(Value::as_array)
+                        .map(Vec::as_slice)
+                        .unwrap_or(&[]),
+                );
+                let v = view.clone();
+                let sk = state_key.clone();
+                let ntype = node.node_type.clone();
+                TreeSelect::new(eid, nodes)
+                    .on_change(move |picked, _, cx| {
+                        let val = picked.to_string();
+                        let _ = v.update(cx, |this, cx| {
+                            this.trigger_event(&sk, &ntype, "change", json!(val), cx);
+                        });
+                    })
+                    .into_any_element()
+            }
+            "lists/SelectableList"
+            | "lists/List"
+            | "lists/DirectoryListing"
+            | "lists/GroupedList"
+            | "lists/Outline" => {
+                let choices = extract_choices(node);
+                let safe = if choices.is_empty() {
+                    vec![Choice::new("item-1", "Item 1")]
+                } else {
+                    choices
+                };
+                let v = view.clone();
+                let sk = state_key.clone();
+                let ntype = node.node_type.clone();
+                ListBox::new(eid, safe)
+                    .on_change(move |picked, _, cx| {
+                        let next = picked
+                            .first()
+                            .map(|s| json!(s.to_string()))
+                            .unwrap_or(Value::Null);
+                        let _ = v.update(cx, |this, cx| {
+                            this.trigger_event(&sk, &ntype, "change", next, cx);
+                        });
+                    })
+                    .into_any_element()
+            }
+            "navigation/BackForwardNavigation" => {
+                let choices = extract_choices(node);
+                let safe = if choices.is_empty() {
+                    vec![Choice::new("home", "Home"), Choice::new("next", "Detail")]
+                } else {
+                    choices
+                };
+                BackForwardNavigation::new(eid, safe, 0).into_any_element()
+            }
+            "navigation/LoadMore" | "motion/LoadMore" => {
+                let loading = prop_bool(node, "loading");
+                let v = view.clone();
+                let nid = node.id.clone();
+                let ntype = node.node_type.clone();
+                LoadMore::new(eid, loading)
+                    .on_load(move |_, cx| {
+                        let _ = v.update(cx, |this, cx| {
+                            this.trigger_event(&nid, &ntype, "click", json!("load-more"), cx);
+                        });
+                    })
+                    .into_any_element()
+            }
+            "navigation/EditorTabs" => {
+                let choices = extract_choices(node);
+                let tabs: Vec<EditorTab> = if choices.is_empty() {
+                    vec![EditorTab::new("main", "main.rs")]
+                } else {
+                    choices
+                        .into_iter()
+                        .map(|c| EditorTab::new(c.value, c.label))
+                        .collect()
+                };
+                EditorTabs::new(eid, tabs).into_any_element()
+            }
+            "project/PriorityIndicator" => PriorityIndicator::new(eid, Priority::High)
+                .labeled()
+                .into_any_element(),
+            "shell/StatusBar" => StatusBar::new()
+                .left(
+                    StatusBarItem::new(eid)
+                        .label(prop_str(node, "status").unwrap_or_else(|| "Ready".into())),
+                )
+                .into_any_element(),
+            "shell/TitleBar" => TitleBar::new(eid)
+                .title(non_empty_or(&best_title(node), "Window"))
+                .into_any_element(),
+            "shell/TabBar" => {
+                let mut bar = TabBar::new(eid);
+                for ch in extract_choices(node).into_iter().take(6) {
+                    bar = bar.tab(WindowTab::new(ch.value, ch.label));
+                }
+                bar.into_any_element()
+            }
+            "tables/HeatmapTable" => HeatmapTable::new(["A", "B", "C"])
+                .row("Row 1", [10.0, 50.0, 90.0])
+                .into_any_element(),
+            "terminal/AnsiText" => AnsiText::new(
+                best_body(node)
+                    .or_else(|| prop_str(node, "value"))
+                    .unwrap_or_default(),
+            )
+            .into_any_element(),
+            "terminal/LogViewer" => {
+                let lines = std::rc::Rc::new(vec![LogLine {
+                    at: "00:00:00".into(),
+                    level: LogLevel::Info,
+                    target: "app".into(),
+                    message: best_body(node).unwrap_or_else(|| "Ready".into()).into(),
+                }]);
+                LogViewer::new(eid, lines).into_any_element()
+            }
+            "terminal/CommandBlock" => CommandBlock::new(
+                eid,
+                "~",
+                prop_str(node, "command").unwrap_or_else(|| "echo ok".into()),
+                best_body(node).unwrap_or_default(),
+                CommandState::Done {
+                    code: 0,
+                    took: std::time::Duration::from_millis(12),
+                },
+            )
+            .into_any_element(),
+            "typography/Heading" => {
+                Heading::h2(non_empty_or(&best_title(node), "Heading")).into_any_element()
+            }
+            "typography/Title" => {
+                Title::new(non_empty_or(&best_title(node), "Title")).into_any_element()
+            }
+            "typography/Subtitle" => {
+                Subtitle::new(non_empty_or(&best_title(node), "Subtitle")).into_any_element()
+            }
+            "typography/Label" => {
+                Label::new(non_empty_or(&best_label(node), "Label")).into_any_element()
+            }
+            "typography/Caption" => {
+                Caption::new(best_body(node).unwrap_or_default()).into_any_element()
+            }
+            "typography/Overline" => {
+                Overline::new(non_empty_or(&best_label(node), "SECTION")).into_any_element()
+            }
+            "typography/Paragraph" => {
+                Paragraph::new(best_body(node).unwrap_or_default()).into_any_element()
+            }
+            "typography/Blockquote" => Blockquote::new()
+                .child(Paragraph::new(best_body(node).unwrap_or_default()))
+                .into_any_element(),
+            "typography/ExternalLink" | "typography/Link" => {
+                let label = non_empty_or(&best_label(node), "Open");
+                let v = view.clone();
+                let nid = node.id.clone();
+                let ntype = node.node_type.clone();
+                let target = prop_str(node, "href").unwrap_or_else(|| label.clone());
+                Link::new(eid, label, move |_, _, cx| {
+                    let _ = v.update(cx, |this, cx| {
+                        this.trigger_event(&nid, &ntype, "click", json!(target), cx);
+                    });
+                })
+                .into_any_element()
+            }
+            "typography/Latex" => {
+                let expr = best_body(node)
+                    .or_else(|| prop_str(node, "value"))
+                    .unwrap_or_else(|| "x^2".into());
+                match Latex::parse(&expr) {
+                    Ok(math) => math.into_any_element(),
+                    Err(_) => Code::new(expr).into_any_element(),
+                }
+            }
+            "typography/AnimatedNumber" => {
+                AnimatedNumber::new(eid, prop_f64(node, "value").unwrap_or(0.0)).into_any_element()
+            }
+            "typography/Highlight" => {
+                let txt = best_body(node).unwrap_or_default();
+                let query = prop_str(node, "query").unwrap_or_default();
+                Highlight::matching(txt, &query).into_any_element()
+            }
+            "typography/Emoji" => {
+                Emoji::new(prop_str(node, "value").unwrap_or_else(|| "✨".into()))
+                    .into_any_element()
+            }
+            "misc/Clock" => Clock::new(eid).into_any_element(),
+            "misc/Stopwatch" => Stopwatch::new(eid).into_any_element(),
+            "misc/Calculator" => Calculator::new(eid).into_any_element(),
+            "misc/Poll" => {
+                let q = non_empty_or(&best_title(node), "Poll");
+                let opts: Vec<String> = extract_choices(node)
+                    .into_iter()
+                    .map(|c| c.label.to_string())
+                    .collect();
+                let opts = if opts.is_empty() {
+                    vec!["Yes".into(), "No".into()]
+                } else {
+                    opts
+                };
+                let v = view.clone();
+                let sk = state_key.clone();
+                let ntype = node.node_type.clone();
+                Poll::new(eid, q, opts, move |idx, _, cx| {
+                    let _ = v.update(cx, |this, cx| {
+                        this.trigger_event(&sk, &ntype, "change", json!(idx), cx);
+                    });
+                })
+                .into_any_element()
+            }
+            _ => {
+                return crate::catalogue_ext::render(
+                    kind, node, &eid, &state_key, self, window, cx, view,
+                );
+            }
+        };
+        Some(el)
     }
 
     fn render_text_input_node(
@@ -2484,7 +3030,7 @@ impl CatalogueView {
         card.into_any_element()
     }
 
-    fn current_bool(&self, state_key: &str, node: &ScreenNode) -> bool {
+    pub(crate) fn current_bool(&self, state_key: &str, node: &ScreenNode) -> bool {
         self.values
             .get(state_key)
             .and_then(Value::as_bool)
@@ -2532,6 +3078,8 @@ fn state_key_for_node(node: &ScreenNode) -> String {
 }
 
 fn is_text_input_node(node: &ScreenNode) -> bool {
+    let contract = CatalogueRegistry::global().get(&node.node_type);
+    let canonical = canonical_component_type(&node.node_type, contract);
     matches!(
         node.node_type.as_str(),
         "basic/input"
@@ -2541,24 +3089,32 @@ fn is_text_input_node(node: &ScreenNode) -> bool {
             | "basic/hotkey-input"
             | "basic/pin-input"
             | "basic/combobox"
-            | "forms/Input"
-            | "forms/PasswordInput"
-            | "forms/SearchInput"
-            | "forms/EmailInput"
-            | "forms/UrlInput"
-            | "forms/MaskedInput"
-            | "forms/PhoneInput"
-            | "forms/NumberInput"
-            | "forms/CodeInput"
-            | "forms/JsonInput"
-            | "forms/ExpressionInput"
-            | "forms/RegexInput"
-            | "forms/AutoResizeInput"
-            | "forms/PinInput"
-            | "forms/HotkeyInput"
-            | "forms/InlineEdit"
-            | "forms/Combobox"
-    )
+    ) || matches!(canonical.as_str(), |"forms/Input"| "forms/PasswordInput"
+        | "forms/SearchInput"
+        | "forms/EmailInput"
+        | "forms/UrlInput"
+        | "forms/MaskedInput"
+        | "forms/PhoneInput"
+        | "forms/NumberInput"
+        | "forms/CodeInput"
+        | "forms/JsonInput"
+        | "forms/ExpressionInput"
+        | "forms/RegexInput"
+        | "forms/AutoResizeInput"
+        | "forms/PinInput"
+        | "forms/HotkeyInput"
+        | "forms/InlineEdit"
+        | "forms/Combobox"
+        | "forms/PathInput")
+}
+
+fn canonical_component_type(node_type: &str, contract: Option<&CatalogueContract>) -> String {
+    if let Some(c) = contract
+        && let (Some(ch), Some(pr)) = (c.chapter.as_deref(), c.primary.as_deref())
+    {
+        return format!("{ch}/{pr}");
+    }
+    node_type.to_owned()
 }
 
 fn collect_input_specs(node: &ScreenNode, out: &mut Vec<InputSpec>) {
@@ -2627,7 +3183,7 @@ fn collect_input_specs(node: &ScreenNode, out: &mut Vec<InputSpec>) {
     }
 }
 
-fn render_data_table(node: &ScreenNode, eid: &SharedString) -> AnyElement {
+pub(crate) fn render_data_table(node: &ScreenNode, eid: &SharedString) -> AnyElement {
     let col_labels: Vec<String> = node
         .props
         .get("columns")
@@ -2713,7 +3269,7 @@ fn json_to_cell(v: &Value) -> Cell {
     }
 }
 
-fn extract_choices(node: &ScreenNode) -> Vec<Choice> {
+pub(crate) fn extract_choices(node: &ScreenNode) -> Vec<Choice> {
     for key in ["options", "items", "tabs"] {
         if let Some(arr) = node.props.get(key).and_then(Value::as_array) {
             let mut choices = Vec::new();
@@ -2758,7 +3314,7 @@ fn extract_choices(node: &ScreenNode) -> Vec<Choice> {
     Vec::new()
 }
 
-fn extract_item_objects(node: &ScreenNode) -> Vec<serde_json::Map<String, Value>> {
+pub(crate) fn extract_item_objects(node: &ScreenNode) -> Vec<serde_json::Map<String, Value>> {
     for key in ["items", "rows", "entries"] {
         if let Some(arr) = node.props.get(key).and_then(Value::as_array) {
             let objs: Vec<_> = arr.iter().filter_map(|v| v.as_object().cloned()).collect();
@@ -2770,7 +3326,7 @@ fn extract_item_objects(node: &ScreenNode) -> Vec<serde_json::Map<String, Value>
     Vec::new()
 }
 
-fn prop_str(node: &ScreenNode, key: &str) -> Option<String> {
+pub(crate) fn prop_str(node: &ScreenNode, key: &str) -> Option<String> {
     node.props.get(key).and_then(|v| match v {
         Value::String(s) => Some(s.clone()),
         Value::Number(n) => Some(n.to_string()),
@@ -2778,18 +3334,18 @@ fn prop_str(node: &ScreenNode, key: &str) -> Option<String> {
     })
 }
 
-fn prop_bool(node: &ScreenNode, key: &str) -> bool {
+pub(crate) fn prop_bool(node: &ScreenNode, key: &str) -> bool {
     node.props
         .get(key)
         .and_then(Value::as_bool)
         .unwrap_or(false)
 }
 
-fn prop_f64(node: &ScreenNode, key: &str) -> Option<f64> {
+pub(crate) fn prop_f64(node: &ScreenNode, key: &str) -> Option<f64> {
     node.props.get(key).and_then(value_to_f64)
 }
 
-fn value_to_f64(v: &Value) -> Option<f64> {
+pub(crate) fn value_to_f64(v: &Value) -> Option<f64> {
     match v {
         Value::Number(n) => n.as_f64().filter(|f| f.is_finite()),
         Value::String(s) => s
@@ -2804,7 +3360,7 @@ fn value_to_f64(v: &Value) -> Option<f64> {
     }
 }
 
-fn extract_grouped_choices(node: &ScreenNode) -> Vec<Choice> {
+pub(crate) fn extract_grouped_choices(node: &ScreenNode) -> Vec<Choice> {
     let direct = extract_choices(node);
     if !direct.is_empty() {
         return direct;
@@ -2833,7 +3389,7 @@ fn extract_grouped_choices(node: &ScreenNode) -> Vec<Choice> {
     out
 }
 
-fn parse_tree_nodes(items: &[Value]) -> Vec<TreeNode> {
+pub(crate) fn parse_tree_nodes(items: &[Value]) -> Vec<TreeNode> {
     items
         .iter()
         .enumerate()
@@ -2935,14 +3491,14 @@ fn render_ely_chart(node: &ScreenNode, eid: &SharedString) -> AnyElement {
     }
 }
 
-fn best_title(node: &ScreenNode) -> String {
+pub(crate) fn best_title(node: &ScreenNode) -> String {
     prop_str(node, "title")
         .or_else(|| prop_str(node, "label"))
         .or_else(|| prop_str(node, "name"))
         .unwrap_or_default()
 }
 
-fn best_label(node: &ScreenNode) -> String {
+pub(crate) fn best_label(node: &ScreenNode) -> String {
     prop_str(node, "label")
         .or_else(|| prop_str(node, "ariaLabel"))
         .or_else(|| prop_str(node, "title"))
@@ -2951,7 +3507,7 @@ fn best_label(node: &ScreenNode) -> String {
         .unwrap_or_default()
 }
 
-fn best_body(node: &ScreenNode) -> Option<String> {
+pub(crate) fn best_body(node: &ScreenNode) -> Option<String> {
     prop_str(node, "text")
         .or_else(|| prop_str(node, "content"))
         .or_else(|| prop_str(node, "body"))
@@ -2959,7 +3515,7 @@ fn best_body(node: &ScreenNode) -> Option<String> {
         .or_else(|| prop_str(node, "description"))
 }
 
-fn non_empty_or(s: &str, fallback: &str) -> String {
+pub(crate) fn non_empty_or(s: &str, fallback: &str) -> String {
     if s.trim().is_empty() {
         fallback.to_owned()
     } else {

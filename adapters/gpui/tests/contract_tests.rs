@@ -1160,3 +1160,113 @@ fn gpui_mobile_touch_widgets_roundtrip(cx: &mut TestAppContext) {
     });
     vcx.run_until_parked();
 }
+
+#[gpui::test]
+fn gpui_mobile_dialogs_and_account_roles_roundtrip(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        init_for_tests(cx);
+        Theme::update(cx, |t| {
+            t.touch_mode = true;
+            t.reduced_motion = true;
+        });
+    });
+
+    let (view, vcx) = cx.add_window_view(|_, _| CatalogueView::new());
+    vcx.update(|window, _| {
+        window.resize(gpui::size(gpui::px(390.), gpui::px(844.)));
+    });
+    vcx.run_until_parked();
+
+    let screen = Screen {
+        version: "1".into(),
+        id: "dialogs-and-account".into(),
+        loader: None,
+        templates: BTreeMap::new(),
+        root: ScreenNode {
+            id: "root".into(),
+            node_type: "basic/stack".into(),
+            props: BTreeMap::from([("horizontal".into(), json!(false))]),
+            bindings: BTreeMap::new(),
+            children: vec![
+                make_node(
+                    "invites",
+                    "account/InvitationList",
+                    BTreeMap::from([
+                        (
+                            "fields".into(),
+                            json!([
+                                {"name": "email", "type": "email"},
+                                {
+                                    "name": "role",
+                                    "type": "select",
+                                    "options": [
+                                        {"label": "Member", "value": "member"},
+                                        {"label": "Admin", "value": "admin"},
+                                        {"label": "Guest", "value": "guest"}
+                                    ]
+                                }
+                            ]),
+                        ),
+                        (
+                            "items".into(),
+                            json!([
+                                {"value": "kat", "email": "katherine@nasa.gov", "text": "Member", "time": "Sent 2 days ago"},
+                                {"value": "edsger", "email": "edsger@tue.nl", "text": "Guest", "time": "Sent 9 days ago", "expired": true}
+                            ]),
+                        ),
+                    ]),
+                ),
+                make_node(
+                    "share-dlg",
+                    "collab/ShareDialog",
+                    BTreeMap::from([("documentTitle".into(), json!("Lift"))]),
+                ),
+                make_node(
+                    "tool-dlg",
+                    "agent/ToolApprovalDialog",
+                    BTreeMap::from([("tool".into(), json!("deploy"))]),
+                ),
+                make_node(
+                    "call-dlg",
+                    "messaging/IncomingCallDialog",
+                    BTreeMap::from([("caller".into(), json!("Ada"))]),
+                ),
+            ],
+            event: None,
+            events: Vec::new(),
+            use_template: None,
+            params: BTreeMap::new(),
+            param_bindings: BTreeMap::new(),
+            slots: BTreeMap::new(),
+            when: None,
+            repeat: None,
+        },
+    };
+
+    vcx.update(|window, cx| {
+        view.update(cx, |v, cx| v.load_screen(screen, window, cx).unwrap());
+    });
+    vcx.run_until_parked();
+
+    // Dialogs stay closed on initial load; tapping trigger opens ShareDialog.
+    assert!(vcx.debug_bounds("cat-dlg-open-share-dlg").is_some());
+    assert!(vcx.debug_bounds("cat-dlg-open-tool-dlg").is_some());
+    assert!(vcx.debug_bounds("cat-dlg-open-call-dlg").is_some());
+
+    let share_btn = vcx.debug_bounds("cat-dlg-open-share-dlg").unwrap();
+    vcx.simulate_click(share_btn.center(), Modifiers::none());
+    vcx.run_until_parked();
+    vcx.read_entity(&view, |v, _| {
+        assert_eq!(v.value("share-dlg"), Some(&json!(true)));
+    });
+
+    // Pressing Escape closes the open ShareDialog and clears open state.
+    vcx.simulate_keystrokes("escape");
+    vcx.run_until_parked();
+    vcx.read_entity(&view, |v, _| {
+        assert_eq!(v.value("share-dlg"), Some(&json!(false)));
+        assert!(v.events().iter().any(|e| e.node_id == "share-dlg"
+            && e.event == "ely:action"
+            && e.value == json!("close")));
+    });
+}

@@ -1625,6 +1625,7 @@ dependencies = [
  "flate2",
  "gpui-fast",
  "gpui-liveplot",
+ "image",
  "jiff",
  "serde",
  "serde_json",
