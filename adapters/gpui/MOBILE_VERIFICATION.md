@@ -122,7 +122,8 @@ specific device interactions named there, not full contract coverage.
   With touch mode enabled by default, Add appeared on Android and iOS; iOS Add
   committed the draft and emitted the expected value. On Android, typing beta
   with the software keyboard, tapping Add and then removing beta emitted
-  `alpha,beta` followed by `alpha`.
+  `alpha,beta` followed by `alpha`. Android software Return also left the
+  draft uncommitted; both platforms need a safe Return-key fix.
   InlineForm `dirname` submission remains unsupported; caller-provided error
   and description rendering has focused GPUI tests.
 - Form submission still needs contract verification for repeated names,

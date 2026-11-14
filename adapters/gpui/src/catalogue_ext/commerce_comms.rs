@@ -327,6 +327,12 @@ pub(crate) fn render(
     let el: AnyElement = match kind {
         // ---- account ----
         "account/AccountSwitcher" => {
+            let disabled_indices: Vec<usize> = extract_item_objects(node)
+                .into_iter()
+                .enumerate()
+                .filter(|(_, item)| obj_bool(item, "disabled"))
+                .map(|(ix, _)| ix)
+                .collect();
             let mut accounts: Vec<Account> = extract_item_objects(node)
                 .into_iter()
                 .enumerate()
@@ -357,14 +363,48 @@ pub(crate) fn render(
                 .map(ToOwned::to_owned)
                 .or_else(|| prop_str(node, "value"))
                 .unwrap_or_else(|| accounts[0].key.to_string());
-            let (v, sk, nt) = (view.clone(), state_key.clone(), ntype.clone());
+            let action = prop_str(node, "action")
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| "switch-account".into());
+            let (v, sk, nt, id) = (view.clone(), state_key.clone(), ntype.clone(), nid.clone());
             let mut sw = AccountSwitcher::new(eid, accounts, current, move |key, _, cx| {
-                emit_event(&v, &sk, &nt, "change", json!(key.to_string()), cx);
-            });
-            let (v2, nid2, nt2) = (view.clone(), nid.clone(), ntype.clone());
-            if prop_str(node, "addAction").is_some() {
+                let value = key.to_string();
+                let _ = v.update(cx, |this, cx| {
+                    this.set_value(sk.clone(), json!(value), cx);
+                    this.trigger_event(
+                        &id,
+                        &nt,
+                        "ely:change",
+                        json!({"id":id,"component":nt,"name":"account","value":value}),
+                        cx,
+                    );
+                    this.trigger_event(
+                        &id,
+                        &nt,
+                        "ely:action",
+                        json!({"id":id,"component":nt,"action":action,"value":value}),
+                        cx,
+                    );
+                });
+            })
+            .disabled(prop_bool(node, "disabled"))
+            .disabled_indices(disabled_indices)
+            .menu_names(true);
+            let add_label = prop_str(node, "addLabel").filter(|s| !s.is_empty());
+            let add_action = prop_str(node, "addAction").filter(|s| !s.is_empty());
+            if add_label.is_some() || add_action.is_some() {
+                sw = sw.add_label(add_label.unwrap_or_else(|| "Add account".into()));
+                let action = add_action.unwrap_or_else(|| "add-account".into());
+                let (v, id, nt) = (view.clone(), nid.clone(), ntype.clone());
                 sw = sw.on_add(move |_, cx| {
-                    emit_event(&v2, &nid2, &nt2, "ely:action", json!("add-account"), cx);
+                    emit_event(
+                        &v,
+                        &id,
+                        &nt,
+                        "ely:action",
+                        json!({"id":id,"component":nt,"action":action}),
+                        cx,
+                    );
                 });
             }
             sw.into_any_element()
