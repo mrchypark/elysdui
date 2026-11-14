@@ -2,6 +2,7 @@
 
 use ely_gpui_component::{
     buttons::{Button, ButtonVariant},
+    devtools::find as regex_find,
     forms::{FormField, Input, PasswordInput, TextInput},
     overlays::{AlertDialog, ConfirmDialog, Dialog},
     primitives::Severity,
@@ -139,12 +140,21 @@ fn validate_form(
         .collect();
     let mut errors = vec![None; state.fields.len()];
     for (index, field) in state.fields.iter().enumerate() {
-        if !field.spec.disabled && field.spec.required && values[index].is_empty() {
+        if field.spec.disabled {
+            continue;
+        }
+        if field.spec.required && values[index].is_empty() {
             errors[index] = Some("This field is required.".to_owned());
+        } else if !values[index].is_empty() && field.spec.input_type.eq_ignore_ascii_case("email") {
+            // HTML's single-address email syntax; dialogs do not expose `multiple`.
+            let pattern = r"\A[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*\z";
+            if !regex_find(pattern, &[], &values[index]).is_ok_and(|matches| !matches.is_empty()) {
+                errors[index] = Some("Enter a valid email address.".to_owned());
+            }
         }
     }
     let first = (!state.fields.is_empty()).then_some(0);
-    if let Some(first) = first {
+    if let Some(first) = first.filter(|index| !state.fields[*index].spec.disabled) {
         if props.get("trimRequired").and_then(Value::as_bool) == Some(true)
             && values[first].trim().is_empty()
         {
@@ -160,10 +170,23 @@ fn validate_form(
             );
         }
         if text(props, "presentation") == Some("prompt")
-            && text(props, "pattern").is_some_and(|pattern| !pattern.is_empty())
+            && props
+                .get("fields")
+                .and_then(Value::as_array)
+                .is_none_or(Vec::is_empty)
+            && !values[first].is_empty()
+            && let Some(pattern) = text(props, "pattern")
         {
-            // shortcut: HTML pattern matching is unsupported; replace when this crate exposes its regex dependency.
-            errors[first] = Some("This input pattern cannot be validated here.".to_owned());
+            let full_pattern = format!(r"\A(?:{pattern})\z");
+            match regex_find(&full_pattern, &[], &values[first]) {
+                Ok(matches) if matches.is_empty() => {
+                    errors[first] = Some("Match the requested format.".to_owned());
+                }
+                Err(_) => {
+                    errors[first] = Some("This input pattern cannot be validated here.".to_owned());
+                }
+                _ => {}
+            }
         }
     }
     if errors.iter().any(Option::is_some) {

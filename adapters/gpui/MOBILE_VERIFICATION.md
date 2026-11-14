@@ -35,7 +35,9 @@ specific device interactions named there, not full contract coverage.
 - Android: an upward touch swipe on the supplied VirtualList fixture brought
   rows 7 and 8 into view. On iOS the initial rows render but automated
   Simulator drag and scroll did not move the list; the input path and actual
-  touch behavior need further investigation.
+  touch behavior need further investigation. A 390×844 GPUI test dispatching
+  a touch-sourced scroll event moved the last row into view; it does not test
+  UIKit touch delivery or the simulator automation path.
 
 ## Known gaps
 
@@ -43,10 +45,11 @@ specific device interactions named there, not full contract coverage.
   evidence that all 1,361 contracts work on mobile. Full iOS and Android
   component-by-component verification remains outstanding.
 - DataTable grouping and paging are not combined, and paging does not emit a
-  page action. For dialogs, held generic forms can still be dismissed, HTML
-  pattern validation fails closed, and native input-type validation and the
-  host's result-driven close behavior are not implemented. Other dialog
-  presentations and validation paths still need device interaction checks.
+  page action. For dialogs, held generic forms can still be dismissed, prompt
+  patterns use Rust rather than JavaScript regex syntax, unsupported patterns
+  fail closed, and input types other than email lack browser-equivalent
+  validation. The host's result-driven close behavior is not implemented.
+  Other dialog presentations and validation paths still need device checks.
 - Android emulator rapid chapter switching produced an input timeout and GPU
   fence hang, including a system-process ANR. Restarting the emulator and
   switching more slowly allowed the forms check. The underlying cause remains

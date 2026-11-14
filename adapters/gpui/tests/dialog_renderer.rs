@@ -57,12 +57,21 @@ fn host<'a>(
     cx: &'a mut TestAppContext,
     node: ScreenNode,
 ) -> (Entity<DialogHost>, &'a mut gpui::VisualTestContext) {
-    let (host, window) = cx.add_window_view(|_, cx| DialogHost {
-        node,
-        events: cx.new(|_| CatalogueView::new()),
+    let window = cx.open_window(gpui::size(gpui::px(390.), gpui::px(844.)), |_, cx| {
+        DialogHost {
+            node,
+            events: cx.new(|_| CatalogueView::new()),
+        }
     });
-    window.update(|window, _| window.resize(gpui::size(gpui::px(390.), gpui::px(844.))));
+    let host = window.root(cx).expect("dialog host");
+    let window = gpui::VisualTestContext::from_window(window.into(), cx).into_mut();
     window.run_until_parked();
+    window.update(|window, _| {
+        assert_eq!(
+            window.viewport_size(),
+            gpui::size(gpui::px(390.), gpui::px(844.))
+        );
+    });
     (host, window)
 }
 
@@ -285,4 +294,102 @@ fn prompt_uses_boolean_dismissible_and_trim_validation(cx: &mut TestAppContext) 
 fn isolated_renderer_module_compiles_with_the_public_host_types() {
     let _ = std::any::type_name::<dashboard::ScreenNode>();
     let _ = std::any::type_name::<catalogue::CatalogueView>();
+}
+
+#[gpui::test]
+fn mobile_prompt_pattern_requires_a_full_match(cx: &mut TestAppContext) {
+    cx.update(init_for_tests);
+    cx.update(|cx| Theme::update(cx, |theme| theme.touch_mode = true));
+    let node = node(
+        "rename-pattern",
+        "overlays/Dialog",
+        BTreeMap::from([
+            ("label".into(), json!("Rename")),
+            ("presentation".into(), json!("prompt")),
+            ("pattern".into(), json!("[A-Z]{2}[0-9]{2}")),
+        ]),
+    );
+    let (host, window) = host(cx, node);
+    click_selector(window, "sdui-dialog-trigger");
+    click_selector(window, "sdui-dialog-field");
+    window.simulate_input("XAB12");
+    window.run_until_parked();
+    click_selector(window, "sdui-dialog-submit");
+    window.read_entity(&host, |host, cx| {
+        assert!(host.events.read(cx).events().is_empty())
+    });
+    click_selector(window, "sdui-dialog-field");
+    window.simulate_keystrokes("cmd-a backspace");
+    window.simulate_input("AB12");
+    window.run_until_parked();
+    click_selector(window, "sdui-dialog-submit");
+    window.read_entity(&host, |host, cx| {
+        assert_eq!(host.events.read(cx).events().len(), 1);
+        assert_eq!(
+            host.events.read(cx).events()[0].value["formData"],
+            json!([["value", "AB12"]])
+        );
+    });
+}
+
+#[gpui::test]
+fn mobile_dialog_email_rejects_invalid_and_accepts_valid_address(cx: &mut TestAppContext) {
+    cx.update(init_for_tests);
+    cx.update(|cx| Theme::update(cx, |theme| theme.touch_mode = true));
+    let node = node(
+        "email-dialog",
+        "overlays/Dialog",
+        BTreeMap::from([
+            ("label".into(), json!("Contact")),
+            ("presentation".into(), json!("modal")),
+            (
+                "fields".into(),
+                json!([{"name":"email", "type":"email", "required":true}]),
+            ),
+        ]),
+    );
+    let (host, window) = host(cx, node);
+    click_selector(window, "sdui-dialog-trigger");
+    click_selector(window, "sdui-dialog-field");
+    window.simulate_input("bad@-example.com");
+    window.run_until_parked();
+    click_selector(window, "sdui-dialog-submit");
+    window.read_entity(&host, |host, cx| {
+        assert!(host.events.read(cx).events().is_empty())
+    });
+    click_selector(window, "sdui-dialog-field");
+    window.simulate_keystrokes("cmd-a backspace");
+    window.simulate_input("ada@example.org");
+    window.run_until_parked();
+    click_selector(window, "sdui-dialog-submit");
+    window.read_entity(&host, |host, cx| {
+        assert_eq!(host.events.read(cx).events().len(), 1);
+        assert_eq!(
+            host.events.read(cx).events()[0].value["formData"],
+            json!([["email", "ada@example.org"]])
+        );
+    });
+}
+
+#[gpui::test]
+fn mobile_prompt_unsupported_pattern_does_not_submit(cx: &mut TestAppContext) {
+    cx.update(init_for_tests);
+    cx.update(|cx| Theme::update(cx, |theme| theme.touch_mode = true));
+    let node = node(
+        "unsupported-pattern",
+        "overlays/Dialog",
+        BTreeMap::from([
+            ("label".into(), json!("Rename")),
+            ("presentation".into(), json!("prompt")),
+            ("pattern".into(), json!("(?=a)a")),
+            ("value".into(), json!("a")),
+        ]),
+    );
+    let (host, window) = host(cx, node);
+    click_selector(window, "sdui-dialog-trigger");
+    click_selector(window, "sdui-dialog-submit");
+    window.read_entity(&host, |host, cx| {
+        assert!(host.events.read(cx).events().is_empty())
+    });
+    assert!(window.debug_bounds("sdui-dialog-surface").is_some());
 }

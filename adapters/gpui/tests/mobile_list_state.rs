@@ -214,3 +214,62 @@ fn mobile_single_select_replaces_the_previous_value(cx: &mut TestAppContext) {
     assert!(vcx.debug_bounds("item-selected-One").is_none());
     assert!(vcx.debug_bounds("item-selected-Two").is_some());
 }
+
+#[gpui::test]
+fn mobile_virtual_list_consumes_touch_scroll(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        init_for_tests(cx);
+        Theme::update(cx, |theme| {
+            theme.touch_mode = true;
+            theme.reduced_motion = true;
+        });
+    });
+    let window = cx.open_window(gpui::size(gpui::px(390.), gpui::px(844.)), |_, _| {
+        CatalogueView::new()
+    });
+    let view = window.root(cx).unwrap();
+    let vcx = gpui::VisualTestContext::from_window(window.into(), cx).into_mut();
+    let screen = Screen {
+        version: "1".into(),
+        id: "scroll-list".into(),
+        loader: None,
+        templates: BTreeMap::new(),
+        root: node(
+            "virtual",
+            "lists/VirtualList",
+            BTreeMap::from([
+                (
+                    "items".into(),
+                    json!(
+                        (1..=8)
+                            .map(|i| json!({"value":format!("row-{i}"),"label":format!("Row {i}")}))
+                            .collect::<Vec<_>>()
+                    ),
+                ),
+                ("total".into(), json!(10000)),
+                ("start".into(), json!(1)),
+                ("end".into(), json!(8)),
+            ]),
+        ),
+    };
+    vcx.update(|window, cx| {
+        view.update(cx, |view, cx| view.load_screen(screen, window, cx).unwrap())
+    });
+    vcx.run_until_parked();
+    let first = vcx.debug_bounds("list-item-Row 1").expect("first row");
+    vcx.simulate_event(gpui::ScrollEvent {
+        position: first.center(),
+        delta: gpui::ScrollDelta::Pixels(gpui::point(gpui::px(0.), gpui::px(-160.))),
+        modifiers: Modifiers::none(),
+        touch_phase: gpui::TouchPhase::Moved,
+        source: gpui::ScrollSource::Touch,
+    });
+    vcx.run_until_parked();
+    let last = vcx
+        .debug_bounds("list-item-Row 8")
+        .expect("last row is laid out after scrolling");
+    assert!(
+        last.top() < gpui::px(200.),
+        "last row must move into the list viewport: {last:?}"
+    );
+}
