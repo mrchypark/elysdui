@@ -1271,12 +1271,16 @@ fn gpui_mobile_dialogs_and_account_roles_roundtrip(cx: &mut TestAppContext) {
     });
 }
 
-#[gpui::test]
-fn gpui_clicks_and_audits_all_2166_fixtures(cx: &mut TestAppContext) {
+fn run_2166_fixture_click_audit(
+    cx: &mut TestAppContext,
+    width: f32,
+    height: f32,
+    touch_mode: bool,
+) {
     cx.update(|cx| {
         init_for_tests(cx);
         Theme::update(cx, |t| {
-            t.touch_mode = true;
+            t.touch_mode = touch_mode;
             t.reduced_motion = true;
         });
     });
@@ -1285,7 +1289,7 @@ fn gpui_clicks_and_audits_all_2166_fixtures(cx: &mut TestAppContext) {
     assert_eq!(fixtures.len(), 2166);
     let (view, vcx) = cx.add_window_view(|_, _| CatalogueView::new());
     vcx.update(|window, _| {
-        window.resize(gpui::size(gpui::px(390.), gpui::px(844.)));
+        window.resize(gpui::size(gpui::px(width), gpui::px(height)));
     });
     vcx.run_until_parked();
 
@@ -1334,9 +1338,9 @@ fn gpui_clicks_and_audits_all_2166_fixtures(cx: &mut TestAppContext) {
             continue;
         }
 
-        let max_x = f32::from(bounds.right()).min(386.0);
+        let max_x = f32::from(bounds.right()).min(width - 4.0);
         let min_x = f32::from(bounds.left()).max(4.0);
-        let max_y = f32::from(bounds.bottom()).min(840.0);
+        let max_y = f32::from(bounds.bottom()).min(height - 4.0);
         let min_y = f32::from(bounds.top()).max(4.0);
         if max_x > min_x && max_y > min_y {
             let xs = [
@@ -1411,18 +1415,14 @@ fn gpui_clicks_and_audits_all_2166_fixtures(cx: &mut TestAppContext) {
     }
 
     eprintln!(
-        "AUDIT_SUMMARY total={} zero_bounds={} fired_types={} no_event_types={} total_events={}",
+        "AUDIT_SUMMARY mode={} total={} zero_bounds={} fired_types={} no_event_types={} total_events={}",
+        if touch_mode { "mobile" } else { "desktop" },
         fixtures.len(),
         zero_bounds.len(),
         event_fired_names.len(),
         no_event_names.len(),
         total_events
     );
-    for (name, count) in &no_event_names {
-        if !event_fired_names.contains(name) {
-            eprintln!("NO_EVENT: {name} ({count})");
-        }
-    }
     if !zero_bounds.is_empty() {
         eprintln!(
             "ZERO_BOUNDS: {:?}",
@@ -1434,6 +1434,16 @@ fn gpui_clicks_and_audits_all_2166_fixtures(cx: &mut TestAppContext) {
         "found fixtures with zero bounds: {:?}",
         zero_bounds
     );
+}
+
+#[gpui::test]
+fn gpui_clicks_and_audits_all_2166_fixtures(cx: &mut TestAppContext) {
+    run_2166_fixture_click_audit(cx, 390.0, 844.0, true);
+}
+
+#[gpui::test]
+fn gpui_desktop_clicks_and_audits_all_2166_fixtures(cx: &mut TestAppContext) {
+    run_2166_fixture_click_audit(cx, 1280.0, 800.0, false);
 }
 
 #[gpui::test]
