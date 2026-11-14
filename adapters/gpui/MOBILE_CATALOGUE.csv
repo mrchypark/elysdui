@@ -686,7 +686,7 @@ forms/DirtyIndicator,forms,Form,2,pass-f64e798,not-run,not-run
 forms/DropZone,forms,FileInput,1,pass-f64e798,not-run,not-run
 forms/DurationPicker,forms,RelativeDatePicker,1,pass-f64e798,not-run,not-run
 forms/EditableText,forms,InlineEdit,2,pass-f64e798,not-run,not-run
-forms/EmailInput,forms,EmailInput,2,pass-f64e798,not-run,not-run
+forms/EmailInput,forms,EmailInput,2,pass-f64e798,partial-text-generic-keyboard,not-run
 forms/EmojiPicker,forms,IconPicker,1,pass-f64e798,not-run,not-run
 forms/ExpressionInput,forms,ExpressionInput,2,pass-f64e798,not-run,not-run
 forms/EyeDropper,forms,ColorSwatch,1,pass-f64e798,not-run,not-run
