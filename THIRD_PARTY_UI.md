@@ -7,6 +7,8 @@ The application also uses the locally vendored [htmx 4.0.0 distribution](https:/
 
 The visual reference is [Ely](https://elygpui.com/). The catalogue and shared HTML implementations in the root package derive from [Ely GPUI Component](https://git.zacharyzhang.com/ZacharyZhang-NY/Ely-GPUI-Components), revision `49ed1f84056fa13347d68801b479a4a5a8e03b53`, under MIT. The license is included in `assets/ely/LICENSE.txt`. elysdui renders native HTML/SVG adaptations; it does not run the Ely/GPUI WASM runtime.
 
+The circle-packing layout in `assets/ely-relation-charts.js` adapts the MIT-licensed chart implementation in [mrchypark/Ely-GPUI-Components](https://github.com/mrchypark/Ely-GPUI-Components), revision `a51394acfceb6d5759d36c50faf8329a7c1fdbdc`. The same MIT license is included in `assets/ely/LICENSE.txt`.
+
 The SVG icons in `assets/ely/icons` are bundled from that Ely source revision. They carry the Lucide ISC notice and the Feather MIT notice in `assets/ely/icons/LICENSE`. Preserve that complete license file when exporting or copying the icons. The deployed reference gallery can use a different icon set from this source revision.
 
 [shadcn-htmx](https://github.com/productdevbook/shadcn-htmx), revision `7c96261`, is an independent shadcn-style Go/htmx port under MIT. Adapted sources are in `templates/shadcn-*.html`; the license is in `assets/shadcn-htmx.LICENSE.txt`. Progress uses native `<progress>` for strict CSP. Badge uses a fixed `<span>` for `html/template` compatibility; keyboard initialization is external JavaScript. These sources do not introduce a React runtime.
@@ -21,6 +23,10 @@ boombuler/barcode v1.1.0 (MIT) encodes caller values as QR, Code128 and EAN-13. 
 
 Lottie-web v5.13.0 light SVG distribution (MIT), from the npm registry with SHA-512 integrity verification, is vendored at `assets/lottie-light.min.js`. Source: https://github.com/airbnb/lottie-web. License: `assets/ely/licenses/lottie-web-LICENSE.md`. The light build omits expression execution.
 Tailwind CSS and @tailwindcss/cli v4.1.18 (MIT) build the checked-in stylesheet. Source: https://github.com/tailwindlabs/tailwindcss. License: `assets/tailwindcss.LICENSE.txt`.
+
+uPlot v1.6.32 (MIT) is vendored from the npm distribution as `assets/uPlot.esm.js` and `assets/uPlot.min.css`. Source: https://github.com/leeoniya/uPlot. License: `assets/uPlot.LICENSE`.
+
+Apache ECharts v6.1.0 (Apache-2.0) is vendored from the npm distribution as `assets/echarts.esm.min.js`. Source: https://github.com/apache/echarts. License and notice: `assets/echarts.LICENSE` and `assets/echarts.NOTICE`.
 
 KaTeX v0.19.0 (MIT), from the npm registry, is vendored at `assets/ely/katex/katex.js` with its license at `assets/ely/katex/LICENSE`. Source: https://github.com/KaTeX/KaTeX. Formula components load it only when needed and use MathML output with trusted HTML and external-resource commands disabled. Native MathML displays the result without KaTeX's HTML styles or font assets.
 

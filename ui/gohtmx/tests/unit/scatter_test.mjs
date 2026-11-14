@@ -1,0 +1,31 @@
+import assert from 'node:assert/strict';
+import {performance} from 'node:perf_hooks';
+import {readFileSync} from 'node:fs';
+import {runInNewContext} from 'node:vm';
+
+const source = readFileSync(new URL('../../assets/ely-scatter.js', import.meta.url), 'utf8').replace("import uPlot from '/assets/uPlot.esm.js';", 'const uPlot = {};').replace("import {watchChart} from '/assets/ely-chart-lifecycle.js';", 'const watchChart=()=>()=>{};').replaceAll('export function ', 'function ') + '\nglobalThis.api={createScatterIndex};';
+const sandbox = {Float64Array, Uint32Array, Int32Array, Number, Infinity, Math, RangeError, TypeError}; runInNewContext(source, sandbox);
+const {createScatterIndex} = sandbox.api;
+const x = Float64Array.from([0, 1, 2, 99, NaN]), y = Float64Array.from([0, 1, 2, 99, 3]);
+const index = createScatterIndex(x, y, {leafSize: 4});
+assert.equal(index.query({minX:-1,maxX:3,minY:-1,maxY:3}, 100, 100).filter(item => item.index != null).length, 3, 'visible query retains isolated originals');
+const selected = index.nearest({x:99.1,y:99.1}, 1, 1);
+assert.deepEqual({index:selected.index,x:selected.x,y:selected.y}, {index:3,x:99,y:99}, 'nearest selection returns original coordinates');
+assert.throws(() => createScatterIndex([1], Float64Array.of(1)), TypeError);
+const duplicates = createScatterIndex(Float64Array.from({length: 10000}, () => 7), Float64Array.from({length: 10000}, () => 8));
+assert.deepEqual({...duplicates.query({minX:6,maxX:8,minY:7,maxY:9}, 100, 100)[0]}, {index:0,x:7,y:8,count:10000}, 'identical clusters summarize without scanning a giant leaf');
+const clusterX = Float64Array.from({length: 200000}, (_, i) => 1 + i * 1e-12), clusterY = Float64Array.from({length: 200000}, (_, i) => 1 + i * 1e-12);
+const cluster = createScatterIndex(clusterX, clusterY);
+assert.ok(cluster.query({minX:1,maxX:1.00000001,minY:1,maxY:1.00000001}, 100, 100).every(point => point.x >= 1 && point.x <= 1.00000001), 'clustered non-identical points split into bounded leaves and respect partial views');
+const partial = createScatterIndex(Float64Array.from([0, 0.001, 0.002, 0.003]), Float64Array.from([0, 0.001, 0.002, 0.003]), {leafSize: 4});
+const partialResult = partial.query({minX:0,maxX:0.0015,minY:0,maxY:0.0015}, 1, 1);
+assert.deepEqual(Array.from(partialResult, item => item.index).sort(), [0,1], 'partially visible leaves never aggregate hidden samples');
+assert.throws(() => createScatterIndex(Float64Array.of(-Number.MAX_VALUE, Number.MAX_VALUE), Float64Array.of(0,1)), /domain span/);
+const count = 1_000_000, millionX = new Float64Array(count), millionY = new Float64Array(count);
+for (let i = 0; i < count; i++) { millionX[i] = (i * 48271 % count) / 1000; millionY[i] = (i * 69621 % count) / 1000; }
+const started = performance.now(), million = createScatterIndex(millionX, millionY), buildMs = performance.now() - started;
+const full = million.query(million.bounds, .9, .4); assert.ok(full.length < 100000, `full view must summarize dense data, got ${full.length}`);
+const queryStart = performance.now(); for (let i = 0; i < 120; i++) million.query({minX:i,maxX:i+20,minY:i,maxY:i+20}, 40, 40); const queryMs = performance.now() - queryStart;
+assert.ok(Number.isFinite(queryMs), 'query timing is finite');
+assert.equal(million.nearest({x:10,y:10}, 1, 1)?.index != null, true);
+console.log(`Scatter index: original points, density summaries, indexed nearest selection passed; 1M build ${buildMs.toFixed(1)}ms, 120 queries ${queryMs.toFixed(1)}ms`);
