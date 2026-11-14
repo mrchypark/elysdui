@@ -42,6 +42,7 @@ fn dismissible(props: &Value) -> bool {
         .unwrap_or(text(props, "presentation") != Some("alert"))
 }
 
+#[derive(Clone)]
 struct FieldSpec {
     name: String,
     label: String,
@@ -58,7 +59,36 @@ struct DialogField {
 }
 
 struct DialogFormState {
+    generation: u64,
     fields: Vec<DialogField>,
+}
+
+fn new_form_state(
+    specs: Vec<FieldSpec>,
+    generation: u64,
+    window: &mut Window,
+    cx: &mut App,
+) -> DialogFormState {
+    let fields = specs
+        .into_iter()
+        .map(|spec| {
+            let input = cx.new(|cx| {
+                let mut input = TextInput::new(window, cx);
+                input.set_text(spec.value.clone(), cx);
+                input.set_disabled(spec.disabled, cx);
+                if spec.input_type == "password" {
+                    input.set_masked(true, cx);
+                }
+                input
+            });
+            DialogField {
+                spec,
+                input,
+                error: None,
+            }
+        })
+        .collect();
+    DialogFormState { generation, fields }
 }
 
 fn field_specs(props: &Value, disabled: bool, simple_form: bool) -> Vec<FieldSpec> {
@@ -231,6 +261,7 @@ pub(crate) fn render(
     window: &mut Window,
     cx: &mut App,
     view: &gpui::WeakEntity<CatalogueView>,
+    generation: u64,
 ) -> AnyElement {
     let root_props = Value::Object(
         node.props
@@ -261,6 +292,7 @@ pub(crate) fn render(
                 window,
                 cx,
                 view,
+                generation,
             ));
         }
     } else {
@@ -274,6 +306,7 @@ pub(crate) fn render(
             window,
             cx,
             view,
+            generation,
         ));
     }
     launchers.into_any_element()
@@ -289,10 +322,14 @@ fn render_one(
     window: &mut Window,
     cx: &mut App,
     view: &gpui::WeakEntity<CatalogueView>,
+    generation: u64,
 ) -> AnyElement {
     let id = format!("{eid}-dialog-{index}");
     let element_id = ElementId::from(id.clone());
-    let open = window.use_keyed_state((element_id.clone(), "open"), cx, |_, _| false);
+    let open = window.use_keyed_state((element_id.clone(), "open"), cx, |_, _| (generation, false));
+    if open.read(cx).0 != generation {
+        open.update(cx, |state, _| *state = (generation, false));
+    }
     let disabled = disabled(node) || props.get("disabled").and_then(Value::as_bool) == Some(true);
     let trigger_label = if simple_form {
         text(props, "label").or_else(|| text(props, "title"))
@@ -308,12 +345,12 @@ fn render_one(
             .disabled(disabled)
             .on_click(move |_, _, cx| {
                 trigger_open.update(cx, |open, cx| {
-                    *open = true;
+                    open.1 = true;
                     cx.notify();
                 })
             }),
     );
-    if !*open.read(cx) {
+    if !open.read(cx).1 {
         return root.into_any_element();
     }
 
@@ -321,28 +358,15 @@ fn render_one(
     let form_present = !specs.is_empty();
     let form_state = form_present.then(|| {
         window.use_keyed_state((element_id.clone(), "fields"), cx, |window, cx| {
-            let fields = specs
-                .into_iter()
-                .map(|spec| {
-                    let input = cx.new(|cx| {
-                        let mut input = TextInput::new(window, cx);
-                        input.set_text(spec.value.clone(), cx);
-                        input.set_disabled(spec.disabled, cx);
-                        if spec.input_type == "password" {
-                            input.set_masked(true, cx);
-                        }
-                        input
-                    });
-                    DialogField {
-                        spec,
-                        input,
-                        error: None,
-                    }
-                })
-                .collect();
-            DialogFormState { fields }
+            new_form_state(specs.clone(), generation, window, cx)
         })
     });
+    if let Some(state) = &form_state {
+        if state.read(cx).generation != generation {
+            let replacement = new_form_state(specs, generation, window, cx);
+            state.update(cx, |state, _| *state = replacement);
+        }
+    }
 
     let title = text(props, "title")
         .or_else(|| text(props, "label"))
@@ -367,7 +391,7 @@ fn render_one(
     let dialog_close = open.clone();
     let close = move |_: &mut Window, cx: &mut App| {
         dialog_close.update(cx, |open, cx| {
-            *open = false;
+            open.1 = false;
             cx.notify();
         })
     };

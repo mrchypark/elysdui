@@ -62,3 +62,6 @@ specific device interactions named there, not full contract coverage.
 - The disabled prompt's event guard is tested, but the upstream SendButton can
   still appear enabled for a nonempty disabled field. File drop and attachment
   removal were not exercised on a device.
+- Playlist activation still requires a double press or Enter. WebSocketConsole
+  trims message whitespace in the underlying Ely component; both need further
+  mobile and contract work. Their latest event fixes have GPUI tests only.

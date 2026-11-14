@@ -1749,7 +1749,7 @@ impl CatalogueView {
                 crate::catalogue_ext::visual_finance::render_map_view(node, &eid, &state_key, view)
             }
             "overlays/Dialog" | "overlays/AlertDialog" | "overlays/ConfirmDialog" => {
-                crate::dialog_renderer::render(node, &eid, window, cx, view)
+                crate::dialog_renderer::render(node, &eid, window, cx, view, self.screen_generation)
             }
             "basic/dialog" | "feedback/ConfirmationCard" => {
                 let title = non_empty_or(&best_title(node), "Confirm");

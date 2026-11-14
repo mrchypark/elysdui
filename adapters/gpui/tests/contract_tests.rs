@@ -2272,11 +2272,22 @@ fn gpui_catalogue_dialog_opens_and_emits_confirm_action(cx: &mut TestAppContext)
             ]),
         ),
     };
-    vcx.update(|window, cx| view.update(cx, |v, cx| v.load_screen(screen, window, cx).unwrap()));
+    vcx.update(|window, cx| {
+        view.update(cx, |v, cx| {
+            v.load_screen(screen.clone(), window, cx).unwrap()
+        })
+    });
     vcx.run_until_parked();
     let trigger = vcx
         .debug_bounds("sdui-dialog-trigger")
         .expect("dialog trigger");
+    vcx.simulate_click(trigger.center(), Modifiers::none());
+    vcx.run_until_parked();
+    assert!(vcx.debug_bounds("sdui-dialog-surface").is_some());
+    vcx.update(|window, cx| view.update(cx, |v, cx| v.load_screen(screen, window, cx).unwrap()));
+    vcx.run_until_parked();
+    assert!(vcx.debug_bounds("sdui-dialog-surface").is_none());
+    let trigger = vcx.debug_bounds("sdui-dialog-trigger").unwrap();
     vcx.simulate_click(trigger.center(), Modifiers::none());
     vcx.run_until_parked();
     let actions = vcx
@@ -2293,4 +2304,58 @@ fn gpui_catalogue_dialog_opens_and_emits_confirm_action(cx: &mut TestAppContext)
             && e.event == "ely:action"
             && e.value == json!("delete")))
     });
+}
+
+#[gpui::test]
+fn gpui_dialog_reload_restores_server_form_values(cx: &mut TestAppContext) {
+    cx.update(init_for_tests);
+    cx.update(|cx| Theme::update(cx, |theme| theme.touch_mode = true));
+    let window = cx.open_window(gpui::size(gpui::px(390.), gpui::px(844.)), |_, _| {
+        CatalogueView::new()
+    });
+    let view = window.root(cx).unwrap();
+    let vcx = gpui::VisualTestContext::from_window(window.into(), cx).into_mut();
+    let screen = |value: &str| Screen {
+        version: "1".into(),
+        id: "dialog-form".into(),
+        loader: None,
+        templates: BTreeMap::new(),
+        root: make_node(
+            "form",
+            "overlays/Dialog",
+            BTreeMap::from([
+                ("label".into(), json!("Edit")),
+                ("title".into(), json!("Profile")),
+                ("action".into(), json!("save")),
+                (
+                    "fields".into(),
+                    json!([{"name":"name","label":"Name","value":value,"required":true}]),
+                ),
+            ]),
+        ),
+    };
+    vcx.update(|window, cx| {
+        view.update(cx, |v, cx| {
+            v.load_screen(screen("Ada"), window, cx).unwrap()
+        })
+    });
+    vcx.run_until_parked();
+    let trigger = vcx.debug_bounds("sdui-dialog-trigger").unwrap();
+    vcx.simulate_click(trigger.center(), Modifiers::none());
+    vcx.run_until_parked();
+    assert!(vcx.debug_bounds("sdui-dialog-field").is_some());
+    vcx.update(|window, cx| {
+        view.update(cx, |v, cx| {
+            v.load_screen(screen("Grace"), window, cx).unwrap()
+        })
+    });
+    vcx.run_until_parked();
+    assert!(vcx.debug_bounds("sdui-dialog-surface").is_none());
+    let trigger = vcx.debug_bounds("sdui-dialog-trigger").unwrap();
+    vcx.simulate_click(trigger.center(), Modifiers::none());
+    vcx.run_until_parked();
+    let submit = vcx.debug_bounds("sdui-dialog-submit").unwrap();
+    vcx.simulate_click(submit.center(), Modifiers::none());
+    vcx.run_until_parked();
+    vcx.read_entity(&view,|v,_|assert!(v.events().iter().any(|e|e.node_id=="form" && e.value==json!({"action":"save","formData":[["name","Grace"]],"values":[["name","Grace"]],"submitter":""}))));
 }

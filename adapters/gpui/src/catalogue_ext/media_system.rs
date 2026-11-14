@@ -57,9 +57,9 @@ use ely_gpui_component::{
     typography::{Caption, Label, Paragraph},
 };
 use gpui::{
-    AnyElement, App, DevicePixels, FontStyle, HighlightStyle, Hsla, ImageSource, IntoElement,
-    ParentElement, RenderImage, Resource, Rgba, SharedString, SharedUri, Size, Styled, StyledText,
-    WeakEntity, Window, div, px, rgb,
+    AnyElement, App, DevicePixels, FontStyle, HighlightStyle, Hsla, ImageSource,
+    InteractiveElement, IntoElement, ParentElement, RenderImage, Resource, Rgba, SharedString,
+    SharedUri, Size, Styled, StyledText, WeakEntity, Window, div, px, rgb,
 };
 use jiff::Timestamp;
 use serde_json::{Value, json};
@@ -1358,7 +1358,7 @@ fn render_media(
     node: &ScreenNode,
     eid: &SharedString,
     state_key: &str,
-    _view_state: &CatalogueView,
+    view_state: &CatalogueView,
     window: &mut Window,
     cx: &mut App,
     view: &WeakEntity<CatalogueView>,
@@ -2053,6 +2053,10 @@ fn render_media(
         "media/Playlist" => {
             let mut seen = HashSet::new();
             let mut def_cur = None;
+            let mut actions = Vec::new();
+            let default_action = prop_str(node, "playAction")
+                .filter(|action| !action.is_empty())
+                .unwrap_or_else(|| "play-track".to_owned());
             let tracks: Vec<Track> = extract_item_objects(node)
                 .into_iter()
                 .enumerate()
@@ -2065,6 +2069,14 @@ fn render_media(
                     if !seen.insert(key.clone()) {
                         return None;
                     }
+                    actions.push((
+                        key.clone(),
+                        item.get("action")
+                            .and_then(Value::as_str)
+                            .filter(|action| !action.is_empty())
+                            .unwrap_or(&default_action)
+                            .to_owned(),
+                    ));
                     if def_cur.is_none()
                         && item.get("selected").and_then(Value::as_bool) == Some(true)
                     {
@@ -2092,13 +2104,22 @@ fn render_media(
                     })
                 })
                 .collect();
-            let state = window.use_keyed_state(
-                (gpui::ElementId::from(eid.clone()), "playlist"),
-                cx,
-                |_, _| (def_cur, prop_bool(node, "playing")),
-            );
-            let (cur, playing) = state.read(cx).clone();
-            let mut pl = Playlist::new(gpui::ElementId::from(eid.clone()), tracks);
+            let playlist_id = gpui::ElementId::from(eid.clone());
+            let generation = view_state.screen_generation();
+            let initial = (def_cur, prop_bool(node, "playing"));
+            let state = window.use_keyed_state((playlist_id.clone(), "state"), cx, |_, _| {
+                (generation, initial.clone())
+            });
+            let (stored_generation, mut current) = state.read(cx).clone();
+            if stored_generation != generation {
+                current = initial.clone();
+                state.update(cx, |state, cx| {
+                    *state = (generation, initial);
+                    cx.notify();
+                });
+            }
+            let (cur, playing) = current;
+            let mut pl = Playlist::new(playlist_id, tracks);
             if let Some(c) = cur {
                 pl = pl.current(c, playing);
             }
@@ -2106,17 +2127,38 @@ fn render_media(
                 let st = state.clone();
                 let v = view.clone();
                 let sk1 = sk.clone();
+                let id1 = nid.clone();
                 let nt1 = ntype.clone();
                 pl = pl.on_play(move |k, _, cx| {
                     st.update(cx, |s, cx| {
-                        s.0 = Some(k.to_string());
-                        s.1 = true;
+                        s.1 = (Some(k.to_string()), true);
                         cx.notify();
                     });
                     emit_event(&v, &sk1, &nt1, "change", json!(k.as_ref()), cx);
+                    emit_event(
+                        &v,
+                        &id1,
+                        &nt1,
+                        "ely:change",
+                        json!({"selection": k.as_ref(), "playing": true}),
+                        cx,
+                    );
+                    if let Some((_, action)) = actions.iter().find(|(key, _)| key == k.as_ref()) {
+                        emit_event(
+                            &v,
+                            &id1,
+                            &nt1,
+                            "ely:action",
+                            json!({"action": action, "key": k.as_ref()}),
+                            cx,
+                        );
+                    }
                 });
             }
-            pl.into_any_element()
+            div()
+                .debug_selector(move || format!("playlist-playing-{playing}"))
+                .child(pl)
+                .into_any_element()
         }
         "media/ScreenRecorderControls" => {
             let init_rec = match prop_str(node, "recording").as_deref() {

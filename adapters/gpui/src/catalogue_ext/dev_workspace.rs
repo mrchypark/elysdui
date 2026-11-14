@@ -1393,7 +1393,9 @@ fn render_websocket_console(
     let url = devtools_str(node, "url")
         .or_else(|| prop_str(node, "endpoint"))
         .unwrap_or_else(|| "wss://localhost/socket".into());
-    let state = match devtools_str(node, "state")
+    let source_state = devtools_str(node, "state");
+    let state = match source_state
+        .as_deref()
         .unwrap_or_default()
         .to_ascii_lowercase()
         .as_str()
@@ -1427,13 +1429,31 @@ fn render_websocket_console(
         })
         .unwrap_or_default();
 
-    let draft = keyed_text_input(eid, "ws-draft", "Send message...", "", false, window, cx);
+    let disabled = prop_bool(node, "disabled");
+    let draft = keyed_text_input(
+        eid,
+        if disabled {
+            "ws-draft-disabled"
+        } else {
+            "ws-draft"
+        },
+        "Send message...",
+        "",
+        false,
+        window,
+        cx,
+    );
+    if draft.read(cx).is_disabled() != disabled {
+        draft.update(cx, |draft, cx| draft.set_disabled(disabled, cx));
+    }
+    let send_url = url.clone();
+    let toggle_url = url.clone();
     let v1 = view.clone();
     let v2 = view.clone();
     let (nid1, nid2) = (node.id.clone(), node.id.clone());
     let (nt1, nt2) = (node.node_type.clone(), node.node_type.clone());
 
-    WebSocketConsole::new(
+    let console = WebSocketConsole::new(
         gpui::ElementId::from(eid.clone()),
         url,
         state,
@@ -1441,20 +1461,42 @@ fn render_websocket_console(
         &draft,
         now,
         move |msg, _, cx| {
+            if disabled {
+                return;
+            }
             emit_event(
                 &v1,
                 &nid1,
                 &nt1,
                 "ely:action",
-                json!({ "send": msg.as_ref() }),
+                json!({ "action": "send-socket", "text": msg.as_ref(), "url": send_url }),
                 cx,
             );
         },
+    );
+    let toggle = Button::new(
+        (gpui::ElementId::from(eid.clone()), "socket-toggle"),
+        if state == SocketState::Open {
+            "Disconnect"
+        } else {
+            "Connect"
+        },
     )
-    .on_toggle(move |_, cx| {
-        emit_event(&v2, &nid2, &nt2, "ely:action", json!("toggle"), cx);
-    })
-    .into_any_element()
+    .variant(ButtonVariant::Secondary)
+    .debug_selector(|| "socket-toggle".into())
+    .disabled(disabled || state == SocketState::Opening)
+    .on_click(move |_, _, cx| {
+        let mut detail = json!({ "action": "toggle-socket", "url": toggle_url });
+        if let Some(state) = &source_state {
+            detail["state"] = json!(state);
+        }
+        emit_event(&v2, &nid2, &nt2, "ely:action", detail, cx);
+    });
+    v_stack()
+        .gap_2()
+        .child(toggle)
+        .child(console)
+        .into_any_element()
 }
 
 // ============================================================================

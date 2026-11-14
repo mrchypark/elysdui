@@ -31,6 +31,7 @@ impl Render for DialogHost {
             window,
             cx,
             &self.events.downgrade(),
+            0,
         )
     }
 }
