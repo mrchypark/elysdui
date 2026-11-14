@@ -1029,6 +1029,10 @@ pub(crate) fn render(
             let messages = render_message_bubbles(node, &eid);
             let ph = prop_str(node, "placeholder").unwrap_or_else(|| "Ask anything".into());
             let field = keyed_text_input(&eid, "chat-composer", &ph, "", true, window, cx);
+            let disabled = prop_bool(node, "disabled");
+            if field.read(cx).is_disabled() != disabled {
+                field.update(cx, |input, cx| input.set_disabled(disabled, cx));
+            }
             let (v, nid, nt) = (view.clone(), nid.clone(), ntype.clone());
             let f2 = field.clone();
             let (vd, nid_d, ntd) = (view.clone(), nid.clone(), ntype.clone());
@@ -1036,16 +1040,20 @@ pub(crate) fn render(
                 (gpui::ElementId::from(eid.clone()), "composer"),
                 &field,
                 move |_, cx| {
-                    let text = f2.read(cx).text().to_owned();
-                    emit_event(&v, &nid, &nt, "ely:action", json!({ "send": text }), cx);
+                    if !disabled {
+                        let text = f2.read(cx).text().to_owned();
+                        emit_event(&v, &nid, &nt, "ely:action", json!({ "send": text }), cx);
+                    }
                 },
             )
             .on_drop(move |paths, _, cx| {
-                let vals: Vec<String> = paths
-                    .into_iter()
-                    .map(|p| p.to_string_lossy().into_owned())
-                    .collect();
-                emit_event(&vd, &nid_d, &ntd, "ely:action", json!({ "drop": vals }), cx);
+                if !disabled {
+                    let vals: Vec<String> = paths
+                        .into_iter()
+                        .map(|p| p.to_string_lossy().into_owned())
+                        .collect();
+                    emit_event(&vd, &nid_d, &ntd, "ely:action", json!({ "drop": vals }), cx);
+                }
             });
             ChatContainer::new(messages)
                 .composer(composer)
@@ -1229,20 +1237,28 @@ pub(crate) fn render(
                 .or_else(|| prop_str(node, "value"))
                 .unwrap_or_default();
             let field = keyed_text_input(&eid, "prompt", &ph, &init, true, window, cx);
+            let disabled = prop_bool(node, "disabled");
+            if field.read(cx).is_disabled() != disabled {
+                field.update(cx, |input, cx| input.set_disabled(disabled, cx));
+            }
             let (v, nid_s, nt) = (view.clone(), nid.clone(), ntype.clone());
             let f2 = field.clone();
             let (vd, nid_d, ntd) = (view.clone(), nid_s.clone(), ntype.clone());
             let mut pi =
                 PromptInput::new(gpui::ElementId::from(eid.clone()), &field, move |_, cx| {
-                    let text = f2.read(cx).text().to_owned();
-                    emit_event(&v, &nid_s, &nt, "ely:action", json!({ "send": text }), cx);
+                    if !disabled {
+                        let text = f2.read(cx).text().to_owned();
+                        emit_event(&v, &nid_s, &nt, "ely:action", json!({ "send": text }), cx);
+                    }
                 })
                 .on_drop(move |paths, _, cx| {
-                    let vals: Vec<String> = paths
-                        .into_iter()
-                        .map(|p| p.to_string_lossy().into_owned())
-                        .collect();
-                    emit_event(&vd, &nid_d, &ntd, "ely:action", json!({ "drop": vals }), cx);
+                    if !disabled {
+                        let vals: Vec<String> = paths
+                            .into_iter()
+                            .map(|p| p.to_string_lossy().into_owned())
+                            .collect();
+                        emit_event(&vd, &nid_d, &ntd, "ely:action", json!({ "drop": vals }), cx);
+                    }
                 });
             for (ix, att) in arr_objs(node, "attachments").into_iter().enumerate() {
                 let progress = att
@@ -1268,7 +1284,9 @@ pub(crate) fn render(
                         },
                     )
                     .on_remove(move |_, cx| {
-                        emit_event(&va, &nida, &nta, "ely:action", json!({ "remove": ak }), cx);
+                        if !disabled {
+                            emit_event(&va, &nida, &nta, "ely:action", json!({ "remove": ak }), cx);
+                        }
                     }),
                 );
             }

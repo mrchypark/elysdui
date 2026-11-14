@@ -574,7 +574,11 @@ impl CatalogueView {
                     Ok(requests) => self.action_requests.extend(requests),
                     Err(error) => self.last_error = Some(error.message),
                 }
-            } else if matches.len() > 1 {
+            } else if matches.len() > 1
+                && matches
+                    .iter()
+                    .any(|node| node.event.is_some() || !node.events.is_empty())
+            {
                 self.last_error = Some(format!("Ambiguous event source: {node_id}"));
             }
         }
@@ -610,6 +614,19 @@ impl CatalogueView {
             self.values.insert(key.clone(), val.clone());
         } else if let Some(tags) = node.props.get("tags").and_then(Value::as_array) {
             self.values.insert(key.clone(), Value::Array(tags.clone()));
+        } else if matches!(node.node_type.as_str(), "basic/tabs" | "navigation/Tabs")
+            && let Some(selected) = node
+                .props
+                .get("items")
+                .and_then(Value::as_array)
+                .and_then(|items| {
+                    items
+                        .iter()
+                        .find(|item| item.get("selected").and_then(Value::as_bool) == Some(true))
+                })
+                .and_then(|item| item.get("value").or_else(|| item.get("label")))
+        {
+            self.values.insert(key.clone(), selected.clone());
         } else if let Some(items) = node.props.get("items").and_then(Value::as_array)
             && let Some(first) = items.first().and_then(|item| {
                 item.get("value")
@@ -1299,6 +1316,7 @@ impl CatalogueView {
                 }
             }
             "basic/tabs" | "navigation/Tabs" => {
+                let items = extract_item_objects(node);
                 let tabs = extract_choices(node);
                 let safe_tabs = if tabs.is_empty() {
                     vec![Choice::new("tab-1", "Overview")]
@@ -1311,12 +1329,41 @@ impl CatalogueView {
                     .and_then(Value::as_str)
                     .filter(|s| safe_tabs.iter().any(|c| c.value.as_ref() == *s))
                     .map(ToOwned::to_owned)
+                    .or_else(|| {
+                        items.iter().enumerate().find_map(|(index, item)| {
+                            (item.get("selected").and_then(Value::as_bool) == Some(true))
+                                .then(|| safe_tabs.get(index).map(|tab| tab.value.to_string()))
+                                .flatten()
+                        })
+                    })
                     .unwrap_or_else(|| safe_tabs[0].value.to_string());
+                let content = items
+                    .iter()
+                    .enumerate()
+                    .find_map(|(index, item)| {
+                        (safe_tabs
+                            .get(index)
+                            .is_some_and(|tab| tab.value.as_ref() == selected))
+                        .then(|| {
+                            item.get("content")
+                                .and_then(Value::as_str)
+                                .map(ToOwned::to_owned)
+                        })
+                        .flatten()
+                    })
+                    .unwrap_or_default();
                 let v = view.clone();
                 let ntype = node.node_type.clone();
                 let sk = state_key.clone();
                 Tabs::new(eid, safe_tabs, selected.clone())
-                    .panel(Caption::new(format!("Active tab: {selected}")))
+                    .panel(
+                        div()
+                            .debug_selector({
+                                let content = content.clone();
+                                move || format!("tab-panel-content-{content}")
+                            })
+                            .child(Caption::new(content)),
+                    )
                     .on_change(move |picked, _, cx| {
                         let val = picked.to_string();
                         let _ = v.update(cx, |this, cx| {

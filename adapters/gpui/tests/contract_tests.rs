@@ -1287,11 +1287,18 @@ fn run_2166_fixture_click_audit(
 
     let fixtures = load_catalogue_fixtures();
     assert_eq!(fixtures.len(), 2166);
-    let (view, vcx) = cx.add_window_view(|_, _| CatalogueView::new());
-    vcx.update(|window, _| {
-        window.resize(gpui::size(gpui::px(width), gpui::px(height)));
+    let window = cx.open_window(gpui::size(gpui::px(width), gpui::px(height)), |_, _| {
+        CatalogueView::new()
     });
+    let view = window.root(cx).expect("catalogue view");
+    let vcx = gpui::VisualTestContext::from_window(window.into(), cx).into_mut();
     vcx.run_until_parked();
+    vcx.update(|window, _| {
+        assert_eq!(
+            window.viewport_size(),
+            gpui::size(gpui::px(width), gpui::px(height))
+        );
+    });
 
     let mut zero_bounds = Vec::new();
     let mut event_fired_names = std::collections::BTreeSet::new();
@@ -1989,4 +1996,90 @@ fn gpui_map_marker_emits_declared_action(cx: &mut TestAppContext) {
             assert_eq!(requests[0].payload["key"], json!("origin"));
         })
     });
+}
+
+#[gpui::test]
+fn gpui_shared_input_names_without_bindings_do_not_cause_event_error(cx: &mut TestAppContext) {
+    cx.update(|cx| init_for_tests(cx));
+    let (view, vcx) = cx.add_window_view(|_, _| CatalogueView::new());
+    let mut root = make_node("root", "basic/stack", BTreeMap::new());
+    root.children = vec![
+        make_node(
+            "first",
+            "forms/Input",
+            BTreeMap::from([("name".into(), json!("shared"))]),
+        ),
+        make_node(
+            "second",
+            "forms/Input",
+            BTreeMap::from([("name".into(), json!("shared"))]),
+        ),
+    ];
+    let screen = Screen {
+        version: "1".into(),
+        id: "shared-input-test".into(),
+        loader: None,
+        templates: BTreeMap::new(),
+        root,
+    };
+    vcx.update(|window, cx| view.update(cx, |v, cx| v.load_screen(screen, window, cx).unwrap()));
+    vcx.update(|_, cx| {
+        view.update(cx, |v, cx| {
+            v.trigger_event("shared", "forms/Input", "change", json!("hello"), cx)
+        })
+    });
+    vcx.read_entity(&view, |v, _| {
+        assert_eq!(v.value("shared"), Some(&json!("hello")));
+        assert!(
+            v.last_error().is_none(),
+            "unexpected error: {:?}",
+            v.last_error()
+        );
+    });
+}
+
+#[gpui::test]
+fn gpui_mobile_tabs_use_selected_item_and_caller_content(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        init_for_tests(cx);
+        Theme::update(cx, |t| {
+            t.touch_mode = true;
+            t.reduced_motion = true;
+        });
+    });
+    let window = cx.open_window(gpui::size(gpui::px(390.), gpui::px(844.)), |_, _| {
+        CatalogueView::new()
+    });
+    let view = window.root(cx).unwrap();
+    let vcx = gpui::VisualTestContext::from_window(window.into(), cx).into_mut();
+    let screen = Screen {
+        version: "1".into(),
+        id: "tabs-test".into(),
+        loader: None,
+        templates: BTreeMap::new(),
+        root: make_node(
+            "tabs",
+            "navigation/Tabs",
+            BTreeMap::from([(
+                "items".into(),
+                json!([
+                    {"label":"First", "value":"one", "content":"One content"},
+                    {"label":"Second", "value":"two", "content":"Two content", "selected":true}
+                ]),
+            )]),
+        ),
+    };
+    vcx.update(|window, cx| view.update(cx, |v, cx| v.load_screen(screen, window, cx).unwrap()));
+    vcx.run_until_parked();
+    vcx.read_entity(&view, |v, _| {
+        assert_eq!(v.value("tabs"), Some(&json!("two")))
+    });
+    assert!(vcx.debug_bounds("tab-panel-content-Two content").is_some());
+    let first = vcx.debug_bounds("tabs-cat-tabs-tab-0").expect("first tab");
+    vcx.simulate_click(first.center(), Modifiers::none());
+    vcx.run_until_parked();
+    vcx.read_entity(&view, |v, _| {
+        assert_eq!(v.value("tabs"), Some(&json!("one")))
+    });
+    assert!(vcx.debug_bounds("tab-panel-content-One content").is_some());
 }
