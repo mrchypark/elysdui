@@ -120,8 +120,9 @@ specific device interactions named there, not full contract coverage.
   not commit a typed draft; its delivery path needs tracing. Android keyboard automation
   remains unconfirmed.
   With touch mode enabled by default, Add appeared on Android and iOS; iOS Add
-  committed the draft and emitted the expected value. Android Add still needs
-  verification with working text entry.
+  committed the draft and emitted the expected value. On Android, typing beta
+  with the software keyboard, tapping Add and then removing beta emitted
+  `alpha,beta` followed by `alpha`.
   InlineForm `dirname` submission remains unsupported; caller-provided error
   and description rendering has focused GPUI tests.
 - Form submission still needs contract verification for repeated names,
