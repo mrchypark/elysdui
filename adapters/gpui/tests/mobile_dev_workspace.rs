@@ -124,3 +124,57 @@ fn mobile_opening_socket_cannot_toggle(cx: &mut TestAppContext) {
     vcx.run_until_parked();
     vcx.read_entity(&view, |view, _| assert!(view.events().is_empty()));
 }
+
+#[gpui::test]
+fn mobile_table_structure_does_not_overlap_following_control(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        init_for_tests(cx);
+        Theme::update(cx, |theme| {
+            theme.touch_mode = true;
+            theme.reduced_motion = true;
+        });
+    });
+    let window = cx.open_window(gpui::size(gpui::px(390.), gpui::px(2000.)), |_, _| {
+        CatalogueView::new()
+    });
+    let view = window.root(cx).unwrap();
+    let vcx = gpui::VisualTestContext::from_window(window.into(), cx).into_mut();
+    let mut socket = socket_screen("open", false).root;
+    let mut editor = socket.clone();
+    editor.id = "structure".into();
+    editor.node_type = "devtools/TableStructureEditor".into();
+    editor.props = BTreeMap::from([(
+        "devtools".into(),
+        json!({"fields":[
+            {"name":"id","type":"int"}, {"name":"user_id","type":"int"},
+            {"name":"total","type":"numeric"}, {"name":"placed_at","type":"text"}
+        ]}),
+    )]);
+    socket.id = "socket".into();
+    let mut root = socket.clone();
+    root.id = "stack".into();
+    root.node_type = "basic/stack".into();
+    root.props = BTreeMap::new();
+    root.children = vec![editor, socket];
+    let screen = Screen {
+        version: "1".into(),
+        id: "structure-stack".into(),
+        loader: None,
+        templates: BTreeMap::new(),
+        root,
+    };
+    vcx.update(|window, cx| view.update(cx, |v, cx| v.load_screen(screen, window, cx).unwrap()));
+    vcx.run_until_parked();
+    let editor = vcx
+        .debug_bounds("table-structure-container")
+        .expect("structure editor");
+    let toggle = vcx.debug_bounds("socket-toggle").expect("next component");
+    assert!(
+        editor.size.height > gpui::px(280.),
+        "mobile editor needs its natural height: {editor:?}"
+    );
+    assert!(
+        toggle.top() >= editor.bottom(),
+        "the following component must not overlap: {editor:?}, {toggle:?}"
+    );
+}

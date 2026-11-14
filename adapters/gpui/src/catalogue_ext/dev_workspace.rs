@@ -55,8 +55,8 @@ use ely_gpui_component::{
     theme::ControlSize,
 };
 use gpui::{
-    AnyElement, App, ImageSource, IntoElement, ParentElement, SharedString, SharedUri, Styled,
-    WeakEntity, Window, div, px,
+    AnyElement, App, ImageSource, InteractiveElement, IntoElement, ParentElement, SharedString,
+    SharedUri, Styled, WeakEntity, Window, div, px,
 };
 use jiff::{Timestamp, civil::Date};
 use serde_json::{Value, json};
@@ -1370,17 +1370,18 @@ fn render_table_structure_editor(
     let v = view.clone();
     let sk = state_key.to_owned();
     let ntype = node.node_type.clone();
-    sized_box(
-        280.,
-        TableStructureEditor::new(
+    div()
+        .w_full()
+        .debug_selector(|| "table-structure-container".into())
+        .child(TableStructureEditor::new(
             gpui::ElementId::from(eid.clone()),
             fields,
             move |updated, _, cx| {
                 let names: Vec<&str> = updated.iter().map(|f| f.name.as_ref()).collect();
                 emit_event(&v, &sk, &ntype, "change", json!(names), cx);
             },
-        ),
-    )
+        ))
+        .into_any_element()
 }
 
 fn render_websocket_console(

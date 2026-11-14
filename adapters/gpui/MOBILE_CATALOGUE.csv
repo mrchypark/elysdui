@@ -426,8 +426,8 @@ devtools/RegexTester,devtools,RegexTester,2,pass-f64e798,not-run,not-run
 devtools/ResourceMonitor,devtools,ContainerList,2,pass-f64e798,not-run,not-run
 devtools/ResponseViewer,devtools,ApiRequestBuilder,2,pass-f64e798,not-run,not-run
 devtools/SchemaTree,devtools,SchemaTree,2,pass-f64e798,not-run,not-run
-devtools/TableStructureEditor,devtools,TableStructureEditor,2,pass-f64e798,not-run,not-run
-devtools/WebSocketConsole,devtools,WebSocketConsole,2,pass-f64e798,not-run,not-run
+devtools/TableStructureEditor,devtools,TableStructureEditor,2,pass-f64e798,partial-responsive-no-overlap,not-run
+devtools/WebSocketConsole,devtools,WebSocketConsole,2,pass-f64e798,partial-toggle-event,not-run
 devtools/XmlViewer,devtools,DocumentViewer,2,pass-f64e798,not-run,not-run
 devtools/YamlViewer,devtools,DocumentViewer,2,pass-f64e798,not-run,not-run
 documents/Backlinks,documents,Backlinks,2,pass-f64e798,not-run,not-run

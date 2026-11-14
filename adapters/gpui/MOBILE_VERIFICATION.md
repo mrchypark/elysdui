@@ -65,3 +65,7 @@ specific device interactions named there, not full contract coverage.
 - Playlist activation still requires a double press or Enter. WebSocketConsole
   trims message whitespace in the underlying Ely component; both need further
   mobile and contract work. Their latest event fixes have GPUI tests only.
+- Android: removing the TableStructureEditor's fixed-height wrapper stopped it
+  overlapping the following WebSocketConsole in the same fixture. Its toggle
+  emitted the expected `toggle-socket` event. The layout regression test passes;
+  other fixed-size wrappers still need an individual overflow audit.
