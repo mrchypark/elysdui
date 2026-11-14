@@ -26,6 +26,16 @@ specific device interactions named there, not full contract coverage.
   row selection and paging have focused tests. On Android and iOS the first
   table fixture filtered to Live and emitted the filter payload; iOS also
   changed from page 1 to page 2. The Android check required an emulator restart.
+- Focused 390×844 GPUI tests cover dialog open, cancel, confirm and required
+  form validation; the catalogue dispatch is also tested. MailList tests cover
+  star events, retained row selection, and state reset on screen reload.
+- Android and iOS: the first AlertDialog fixture opened its profile form,
+  submitted the caller-provided values as `ely:action`, and closed with Cancel.
+  This covers that form scenario, not every dialog presentation or validation.
+- Android: an upward touch swipe on the supplied VirtualList fixture brought
+  rows 7 and 8 into view. On iOS the initial rows render but automated
+  Simulator drag and scroll did not move the list; the input path and actual
+  touch behavior need further investigation.
 
 ## Known gaps
 
@@ -33,11 +43,17 @@ specific device interactions named there, not full contract coverage.
   evidence that all 1,361 contracts work on mobile. Full iOS and Android
   component-by-component verification remains outstanding.
 - DataTable grouping and paging are not combined, and paging does not emit a
-  page action. Dialog presentation and form/prompt contracts still need work.
+  page action. For dialogs, held generic forms can still be dismissed, HTML
+  pattern validation fails closed, and native input-type validation and the
+  host's result-driven close behavior are not implemented. Other dialog
+  presentations and validation paths still need device interaction checks.
 - Android emulator rapid chapter switching produced an input timeout and GPU
   fence hang, including a system-process ANR. Restarting the emulator and
   switching more slowly allowed the forms check. The underlying cause remains
   unconfirmed; this is not a device performance result.
+- The same emulator with host GPU exposed OpenGL ES 3.0 and could not create
+  the GPUI renderer: the reported compute workgroup limit was zero. It was
+  restored to SwiftShader, which can launch the app but had the fence hang above.
 - The disabled prompt's event guard is tested, but the upstream SendButton can
   still appear enabled for a nonempty disabled field. File drop and attachment
   removal were not exercised on a device.

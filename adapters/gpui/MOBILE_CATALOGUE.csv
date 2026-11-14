@@ -913,7 +913,7 @@ lists/SwipeableListItem,lists,SwipeableListItem,2,pass-f64e798,not-run,not-run
 lists/Tree,lists,Tree,1,pass-f64e798,not-run,not-run
 lists/TreeSelect,lists,TreeSelect,1,pass-f64e798,not-run,not-run
 lists/TreeView,lists,Tree,1,pass-f64e798,not-run,not-run
-lists/VirtualList,lists,VirtualList,2,pass-f64e798,not-run,not-run
+lists/VirtualList,lists,VirtualList,2,pass-f64e798,partial-touch-scroll,render-only-scroll-unconfirmed
 lists/VirtualTree,lists,Tree,1,pass-f64e798,not-run,not-run
 mail/FolderList,mail,MailboxList,1,pass-f64e798,not-run,not-run
 mail/InboxZeroState,mail,InboxZeroState,1,pass-f64e798,not-run,not-run
@@ -1116,7 +1116,7 @@ onboarding/NewBadge,onboarding,Coachmark,1,pass-f64e798,not-run,not-run
 onboarding/OnboardingWizard,onboarding,OnboardingWizard,1,pass-f64e798,not-run,not-run
 onboarding/WelcomeTour,onboarding,OnboardingWizard,1,pass-f64e798,not-run,not-run
 onboarding/WhatsNewDialog,onboarding,KeyboardShortcutCheatsheet,1,pass-f64e798,not-run,not-run
-overlays/AlertDialog,overlays,Dialog,1,pass-f64e798,not-run,not-run
+overlays/AlertDialog,overlays,Dialog,1,pass-f64e798,partial-form-submit-cancel,partial-form-submit-cancel
 overlays/Callout,overlays,Callout,1,pass-f64e798,not-run,not-run
 overlays/Coachmark,overlays,Spotlight,1,pass-f64e798,not-run,not-run
 overlays/ConfirmDialog,overlays,Dialog,1,pass-f64e798,not-run,not-run

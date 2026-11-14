@@ -399,6 +399,7 @@ pub struct CatalogueEvent {
 pub struct CatalogueView {
     registry: &'static CatalogueRegistry,
     screen: Option<Screen>,
+    screen_generation: u64,
     values: BTreeMap<String, Value>,
     nav_groups: BTreeMap<(String, usize), bool>,
     table_filters: BTreeMap<String, String>,
@@ -421,6 +422,7 @@ impl CatalogueView {
         Self {
             registry: CatalogueRegistry::global(),
             screen: None,
+            screen_generation: 0,
             values: BTreeMap::new(),
             nav_groups: BTreeMap::new(),
             table_filters: BTreeMap::new(),
@@ -439,6 +441,10 @@ impl CatalogueView {
 
     pub fn screen(&self) -> Option<&Screen> {
         self.screen.as_ref()
+    }
+
+    pub(crate) fn screen_generation(&self) -> u64 {
+        self.screen_generation
     }
 
     pub fn values(&self) -> &BTreeMap<String, Value> {
@@ -491,6 +497,7 @@ impl CatalogueView {
             return Err(err);
         }
         self.last_error = None;
+        self.screen_generation = self.screen_generation.wrapping_add(1);
         if self.screen.as_ref().is_none_or(|old| old.id != screen.id) {
             self.nav_groups.clear();
             self.table_filters.clear();
@@ -1741,11 +1748,10 @@ impl CatalogueView {
             "basic/map-view" | "maps/MapView" => {
                 crate::catalogue_ext::visual_finance::render_map_view(node, &eid, &state_key, view)
             }
-            "basic/dialog"
-            | "overlays/Dialog"
-            | "overlays/AlertDialog"
-            | "overlays/ConfirmDialog"
-            | "feedback/ConfirmationCard" => {
+            "overlays/Dialog" | "overlays/AlertDialog" | "overlays/ConfirmDialog" => {
+                crate::dialog_renderer::render(node, &eid, window, cx, view)
+            }
+            "basic/dialog" | "feedback/ConfirmationCard" => {
                 let title = non_empty_or(&best_title(node), "Confirm");
                 let body = best_body(node).unwrap_or_default();
                 let confirm_label =
@@ -3986,6 +3992,7 @@ fn render_data_table_interactive(
             });
         });
     }
+    let mut content = v_stack().gap_2();
     if let (Some(options), Some(v), Some(column)) = (filter_options, view, filter_column) {
         let mut choices = vec![Choice::new("", "All")];
         choices.extend(options.iter().filter_map(|item| {
@@ -4012,14 +4019,22 @@ fn render_data_table_interactive(
                     );
                 });
             });
-        v_stack()
-            .gap_2()
-            .child(filter_select)
-            .child(table)
-            .into_any_element()
-    } else {
-        table.into_any_element()
+        content = content.child(filter_select);
     }
+    content = content.child(table);
+    if let Some(footer) = node.props.get("footer").and_then(Value::as_array) {
+        let mut summary = div().flex().flex_wrap().gap_2();
+        for text in footer.iter().filter_map(Value::as_str) {
+            let selector = format!("table-footer-{text}");
+            summary = summary.child(
+                div()
+                    .debug_selector(move || selector.clone())
+                    .child(text.to_owned()),
+            );
+        }
+        content = content.child(summary);
+    }
+    content.into_any_element()
 }
 
 fn json_to_cell(v: &Value) -> Cell {

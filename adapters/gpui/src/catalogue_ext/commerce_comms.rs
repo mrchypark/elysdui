@@ -1,4 +1,8 @@
-use std::{collections::BTreeSet, path::Path, time::Duration};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    path::Path,
+    time::Duration,
+};
 
 use ely_gpui_component::{
     account::{
@@ -1936,6 +1940,7 @@ pub(crate) fn render(
             let mut seen_keys = BTreeSet::new();
             let mut mails = Vec::new();
             let mut selected_init = Vec::new();
+            let mut starred_init = BTreeMap::new();
             for (ix, item) in extract_item_objects(node).into_iter().enumerate() {
                 let key =
                     obj_str(&item, &["value", "id", "key"]).unwrap_or_else(|| format!("mail-{ix}"));
@@ -1945,6 +1950,7 @@ pub(crate) fn render(
                 if obj_bool(&item, "selected") {
                     selected_init.push(key.clone());
                 }
+                starred_init.insert(key.clone(), obj_bool(&item, "starred"));
                 let from =
                     obj_str(&item, &["label", "from", "author"]).unwrap_or_else(|| "Sender".into());
                 let subject =
@@ -1959,6 +1965,28 @@ pub(crate) fn render(
                     mail = mail.snippet(snip);
                 }
                 mails.push(mail);
+            }
+            let screen_generation = view_state.screen_generation();
+            let initial_stars = starred_init.clone();
+            let stars = window.use_keyed_state(
+                (gpui::ElementId::from(eid.clone()), "mail-stars"),
+                cx,
+                move |_, _| (screen_generation, initial_stars),
+            );
+            let (stars_generation, mut starred) = stars.read(cx).clone();
+            if stars_generation != screen_generation {
+                starred = starred_init.clone();
+                let reset_stars = starred_init.clone();
+                stars.update(cx, |state, cx| {
+                    state.0 = screen_generation;
+                    state.1 = reset_stars;
+                    cx.notify();
+                });
+            }
+            for mail in &mut mails {
+                if let Some(is_starred) = starred.get(mail.key.as_ref()) {
+                    mail.starred = *is_starred;
+                }
             }
             let selected: Vec<String> = view_state
                 .value(&state_key)
@@ -1979,12 +2007,24 @@ pub(crate) fn render(
                     emit_event(&v1, &sk, &nt1, "change", json!(vals), cx);
                 })
                 .on_star(move |key, starred, _, cx| {
+                    stars.update(cx, |state, cx| {
+                        state.1.insert(key.to_string(), starred);
+                        cx.notify();
+                    });
+                    emit_event(
+                        &v2,
+                        &nid2,
+                        &nt2,
+                        "ely:change",
+                        json!({ "name": "starred", "value": key.as_ref(), "checked": starred }),
+                        cx,
+                    );
                     emit_event(
                         &v2,
                         &nid2,
                         &nt2,
                         "ely:action",
-                        json!({ "star": key.as_ref(), "starred": starred }),
+                        json!({ "action": "star-mail", "value": key.as_ref(), "starred": starred }),
                         cx,
                     );
                 })

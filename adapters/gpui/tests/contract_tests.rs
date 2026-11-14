@@ -2211,6 +2211,7 @@ fn gpui_mobile_data_table_filter_emits_action_and_keeps_matching_row(cx: &mut Te
                 ),
                 ("paged".into(), json!(true)),
                 ("filterColumn".into(), json!(2)),
+                ("footer".into(), json!(["Sum $12", "Avg 6%"])),
                 (
                     "filterOptions".into(),
                     json!([{ "label":"Live", "value":"Live" }]),
@@ -2220,6 +2221,8 @@ fn gpui_mobile_data_table_filter_emits_action_and_keeps_matching_row(cx: &mut Te
     };
     vcx.update(|window, cx| view.update(cx, |v, cx| v.load_screen(screen, window, cx).unwrap()));
     vcx.run_until_parked();
+    assert!(vcx.debug_bounds("table-footer-Sum $12").is_some());
+    assert!(vcx.debug_bounds("table-footer-Avg 6%").is_some());
     let filter = vcx.debug_bounds("field-root").expect("filter control");
     vcx.simulate_click(filter.center(), Modifiers::none());
     vcx.run_until_parked();
@@ -2241,5 +2244,53 @@ fn gpui_mobile_data_table_filter_emits_action_and_keeps_matching_row(cx: &mut Te
     vcx.run_until_parked();
     vcx.read_entity(&view, |v, _| {
         assert_eq!(v.value("table"), Some(&json!(["row-1"])))
+    });
+}
+
+#[gpui::test]
+fn gpui_catalogue_dialog_opens_and_emits_confirm_action(cx: &mut TestAppContext) {
+    cx.update(init_for_tests);
+    cx.update(|cx| Theme::update(cx, |theme| theme.touch_mode = true));
+    let window = cx.open_window(gpui::size(gpui::px(390.), gpui::px(844.)), |_, _| {
+        CatalogueView::new()
+    });
+    let view = window.root(cx).unwrap();
+    let vcx = gpui::VisualTestContext::from_window(window.into(), cx).into_mut();
+    let screen = Screen {
+        version: "1".into(),
+        id: "dialog-integration".into(),
+        loader: None,
+        templates: BTreeMap::new(),
+        root: make_node(
+            "confirm",
+            "overlays/ConfirmDialog",
+            BTreeMap::from([
+                ("label".into(), json!("Open")),
+                ("title".into(), json!("Delete?")),
+                ("presentation".into(), json!("confirm")),
+                ("action".into(), json!("delete")),
+            ]),
+        ),
+    };
+    vcx.update(|window, cx| view.update(cx, |v, cx| v.load_screen(screen, window, cx).unwrap()));
+    vcx.run_until_parked();
+    let trigger = vcx
+        .debug_bounds("sdui-dialog-trigger")
+        .expect("dialog trigger");
+    vcx.simulate_click(trigger.center(), Modifiers::none());
+    vcx.run_until_parked();
+    let actions = vcx
+        .debug_bounds("dialog-actions")
+        .expect("open dialog actions");
+    vcx.simulate_click(
+        gpui::point(actions.right() - gpui::px(20.), actions.center().y),
+        Modifiers::none(),
+    );
+    vcx.run_until_parked();
+    assert!(vcx.debug_bounds("sdui-dialog-surface").is_none());
+    vcx.read_entity(&view, |v, _| {
+        assert!(v.events().iter().any(|e| e.node_id == "confirm"
+            && e.event == "ely:action"
+            && e.value == json!("delete")))
     });
 }
