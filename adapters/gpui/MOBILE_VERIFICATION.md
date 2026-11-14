@@ -53,6 +53,9 @@ specific device interactions named there, not full contract coverage.
 - Android: the forms/InputAddon fixture displayed its `@` prefix and initial
   value. The software keyboard changed `alpha` to `alphaz` and emitted the
   corresponding event. Its other variants and iOS remain unverified.
+- Android: the forms/InputGroup fixture showed `alpha`; software keyboard
+  input changed it to `alphaz` and emitted the change event. This does not
+  cover its other fixtures or iOS.
 - iOS: account/AccountSwitcher opened its menu, switched from `work` to `home`
   with the displayed account and change event updated, and emitted an add event
   for the fixture's `add-account` action. Custom actions and disabled state
