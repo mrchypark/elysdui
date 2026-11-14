@@ -33,7 +33,7 @@ use ely_gpui_component::{
         DatePicker, DropZone, Form, FormField, FormLabel, HotkeyInput, InlineForm, Input,
         InputEvent, KeyValueInput, ListBox, MultiSelect, NumberInput, PasswordInput, PathInput,
         PinInput, RadioGroup, RangeSlider, Rating, SearchInput, Select, SignaturePad, Slider,
-        Stepper, Switch, TagInput, TextInput, UnitInput,
+        Stepper, Switch, TagInput, TextInput, TimePicker, UnitInput,
     },
     layout::{
         Accordion, AccordionItem, AppShell, Card, CardHeader, MasterDetail, Sheet, Sidebar,
@@ -62,7 +62,10 @@ use gpui::{
     AnyElement, App, Axis, Context, Entity, Hsla, IntoElement, ParentElement, Render, Rgba,
     SharedString, Styled, Subscription, Window, div, prelude::*, px,
 };
-use jiff::{Timestamp, civil::Date};
+use jiff::{
+    Timestamp,
+    civil::{Date, Time},
+};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -401,11 +404,13 @@ pub struct CatalogueView {
     screen: Option<Screen>,
     screen_generation: u64,
     values: BTreeMap<String, Value>,
+    inline_values: BTreeMap<(String, usize), Value>,
     duplicate_names: BTreeSet<String>,
     nav_groups: BTreeMap<(String, usize), bool>,
     table_filters: BTreeMap<String, String>,
     locked_keys: BTreeSet<String>,
     inputs: BTreeMap<String, Entity<TextInput>>,
+    inline_inputs: BTreeMap<(String, usize), Entity<TextInput>>,
     _input_subs: Vec<Subscription>,
     events: Vec<CatalogueEvent>,
     action_requests: Vec<ActionRequest>,
@@ -425,11 +430,13 @@ impl CatalogueView {
             screen: None,
             screen_generation: 0,
             values: BTreeMap::new(),
+            inline_values: BTreeMap::new(),
             duplicate_names: BTreeSet::new(),
             nav_groups: BTreeMap::new(),
             table_filters: BTreeMap::new(),
             locked_keys: BTreeSet::new(),
             inputs: BTreeMap::new(),
+            inline_inputs: BTreeMap::new(),
             _input_subs: Vec::new(),
             events: Vec::new(),
             action_requests: Vec::new(),
@@ -505,6 +512,7 @@ impl CatalogueView {
             self.table_filters.clear();
         }
         self.values.clear();
+        self.inline_values.clear();
         self.action_requests.clear();
         self.locked_keys.clear();
         let mut names = BTreeMap::new();
@@ -654,6 +662,99 @@ impl CatalogueView {
         self.trigger_event(node_id, "form", "submit", snapshot, cx);
     }
 
+    fn inline_field_changed(&mut self, node_id: &str, index: usize, text: String, cx: &mut Context<Self>) {
+        let Some(node) = self.screen.as_ref().and_then(|screen| find_node(&screen.root, node_id)).cloned() else { return; };
+        let Some(field) = inline_form_fields(&node).get(index) else { return; };
+        if prop_bool(&node, "disabled") || prop_bool(&node, "readonly")
+            || field.get("disabled").and_then(Value::as_bool) == Some(true)
+            || field.get("readonly").and_then(Value::as_bool) == Some(true) {
+            return;
+        }
+        let name = field.get("name").and_then(Value::as_str).unwrap_or("");
+        let kind = field.get("type").and_then(Value::as_str).filter(|s| !s.is_empty()).unwrap_or("text").to_ascii_lowercase();
+        let checked = field.get("checked").and_then(Value::as_bool).unwrap_or(false);
+        let detail = json!({"id": node_id, "component": node.node_type, "name": name, "value": text, "checked": checked, "type": kind});
+        self.inline_values.insert((node_id.to_owned(), index), Value::String(text.clone()));
+        // The Go wrapper dispatches ely:change while the native change is bubbling.
+        self.trigger_event(node_id, &node.node_type, "ely:change", detail, cx);
+        match resolve_event_bindings(&node, "change", &Value::Null) {
+            Ok(requests) => self.action_requests.extend(requests),
+            Err(error) => self.last_error = Some(error.message),
+        }
+        self.events.push(CatalogueEvent { node_id: node_id.to_owned(), component_type: node.node_type.clone(), event: "change".into(), value: Value::String(text) });
+        cx.notify();
+    }
+
+    fn submit_inline_form(&mut self, node_id: &str, cx: &mut Context<Self>) {
+        let Some(node) = self
+            .screen
+            .as_ref()
+            .and_then(|screen| find_node(&screen.root, node_id))
+            .cloned()
+        else {
+            return;
+        };
+        if prop_bool(&node, "disabled") {
+            return;
+        }
+        let mut entries = Vec::new();
+        for (index, field) in inline_form_fields(&node).iter().enumerate() {
+            if field.get("disabled").and_then(Value::as_bool) == Some(true) {
+                continue;
+            }
+            let kind = field.get("type").and_then(Value::as_str).unwrap_or("text");
+            if !kind.is_empty() && !kind.eq_ignore_ascii_case("text")
+                || ["pattern", "minLength", "maxLength"]
+                    .iter()
+                    .any(|key| constraint_present(field.get(*key)))
+            {
+                self.last_error = Some(format!(
+                    "InlineForm {node_id}: unsupported field validation or type"
+                ));
+                cx.notify();
+                return;
+            }
+            let value = self
+                .inline_values
+                .get(&(node.id.clone(), index))
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let readonly = field.get("readonly").and_then(Value::as_bool) == Some(true);
+            if !readonly
+                && field.get("required").and_then(Value::as_bool) == Some(true)
+                && value.is_empty()
+            {
+                self.last_error = Some(format!("InlineForm {node_id}: required field is empty"));
+                cx.notify();
+                return;
+            }
+            if let Some(name) = field
+                .get("name")
+                .and_then(Value::as_str)
+                .filter(|name| !name.is_empty())
+            {
+                entries.push(json!([name, value]));
+            }
+        }
+        if self
+            .last_error
+            .as_deref()
+            .is_some_and(|error| error.starts_with(&format!("InlineForm {node_id}:")))
+        {
+            self.last_error = None;
+        }
+        let action = prop_str(&node, "action")
+            .filter(|action| !action.is_empty())
+            .unwrap_or_else(|| "save".into());
+        self.trigger_event(
+            node_id,
+            &node.node_type,
+            "ely:action",
+            json!({"action": action, "formData": entries, "values": entries, "submitter": ""}),
+            cx,
+        );
+    }
+
     fn seed_node_state(&mut self, node: &ScreenNode) {
         let key = state_key_for_node(node, &self.duplicate_names);
         if prop_bool(node, "readonly") || prop_bool(node, "disabled") {
@@ -741,13 +842,25 @@ impl CatalogueView {
             self.values.insert(key.clone(), first.clone());
         }
 
-        if let Some(fields) = node.props.get("fields").and_then(Value::as_array) {
+        if let Some(fields) = if node.node_type == "forms/InlineForm" {
+            Some(inline_form_fields(node))
+        } else {
+            node.props
+                .get("fields")
+                .and_then(Value::as_array)
+                .map(Vec::as_slice)
+        } {
             for (idx, field) in fields.iter().enumerate() {
+                if node.node_type == "forms/InlineForm" {
+                    let fval = field.get("value").cloned().unwrap_or_else(|| json!(""));
+                    self.inline_values.insert((node.id.clone(), idx), fval);
+                    continue;
+                }
                 let fkey = field
-                    .get("name")
-                    .and_then(Value::as_str)
-                    .map(|n| format!("{}:{n}", node.id))
-                    .unwrap_or_else(|| format!("{}:field-{idx}", node.id));
+                        .get("name")
+                        .and_then(Value::as_str)
+                        .map(|n| format!("{}:{n}", node.id))
+                        .unwrap_or_else(|| format!("{}:field-{idx}", node.id));
                 if prop_bool(node, "readonly")
                     || prop_bool(node, "disabled")
                     || field.get("readonly").and_then(Value::as_bool) == Some(true)
@@ -773,23 +886,26 @@ impl CatalogueView {
     fn sync_inputs(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(screen) = self.screen.clone() else {
             self.inputs.clear();
+            self.inline_inputs.clear();
             self._input_subs.clear();
             return;
         };
         let mut specs = Vec::new();
         collect_input_specs(&screen.root, &self.duplicate_names, &mut specs);
-        let active_keys: BTreeSet<String> = specs.iter().map(|s| s.key.clone()).collect();
+        let active_keys: BTreeSet<String> = specs.iter().filter(|s| s.inline_index.is_none()).map(|s| s.key.clone()).collect();
+        let active_inline: BTreeSet<(String, usize)> = specs.iter().filter_map(|s| s.inline_index.map(|index| (s.node_id.clone(), index))).collect();
         self.inputs.retain(|k, _| active_keys.contains(k));
+        self.inline_inputs.retain(|k, _| active_inline.contains(k));
 
         let mut subs = Vec::new();
         for spec in specs {
-            let initial = self
-                .values
-                .get(&spec.key)
+            let inline_key = spec.inline_index.map(|index| (spec.node_id.clone(), index));
+            let initial = inline_key.as_ref().and_then(|key| self.inline_values.get(key)).or_else(|| if inline_key.is_none() { self.values.get(&spec.key) } else { None })
                 .and_then(Value::as_str)
                 .unwrap_or(&spec.initial)
                 .to_owned();
-            let entity = if let Some(existing) = self.inputs.get(&spec.key) {
+            let existing = if let Some(key) = &inline_key { self.inline_inputs.get(key) } else { self.inputs.get(&spec.key) };
+            let entity = if let Some(existing) = existing {
                 existing.clone()
             } else {
                 cx.new(|cx| {
@@ -818,22 +934,31 @@ impl CatalogueView {
             let key = spec.key.clone();
             let node_id = spec.node_id.clone();
             let comp_type = spec.component_type.clone();
+            let inline_index = spec.inline_index;
             let sub = cx.subscribe_in(
                 &entity,
                 window,
                 move |this, input, event: &InputEvent, _, cx| match event {
                     InputEvent::Changed => {
                         let text = input.read(cx).text().to_owned();
-                        this.trigger_event(&key, &comp_type, "change", Value::String(text), cx);
+                        if let Some(index) = inline_index {
+                            this.inline_field_changed(&node_id, index, text, cx);
+                        } else {
+                            this.trigger_event(&key, &comp_type, "change", Value::String(text), cx);
+                        }
                     }
                     InputEvent::Submit => {
-                        this.submit(&node_id, cx);
+                        if comp_type == "forms/InlineForm" {
+                            this.submit_inline_form(&node_id, cx);
+                        } else {
+                            this.submit(&node_id, cx);
+                        }
                     }
                     InputEvent::Focus | InputEvent::Blur => {}
                 },
             );
             subs.push(sub);
-            self.inputs.insert(spec.key, entity);
+            if let Some(key) = inline_key { self.inline_inputs.insert(key, entity); } else { self.inputs.insert(spec.key, entity); }
         }
         self._input_subs = subs;
     }
@@ -2081,7 +2206,58 @@ impl CatalogueView {
                     })
                     .into_any_element()
             }
-            "forms/DateTimePicker" | "forms/TimePicker" => {
+            "forms/TimePicker" => {
+                let label = non_empty_or(&best_label(node), "Time");
+                let min = node
+                    .props
+                    .get("min")
+                    .and_then(Value::as_str)
+                    .and_then(parse_html_time);
+                let max = node
+                    .props
+                    .get("max")
+                    .and_then(Value::as_str)
+                    .and_then(parse_html_time);
+                let step_base = node
+                    .props
+                    .get("value")
+                    .and_then(Value::as_str)
+                    .and_then(parse_html_time);
+                let current = self
+                    .values
+                    .get(&state_key)
+                    .and_then(Value::as_str)
+                    .or_else(|| node.props.get("value").and_then(Value::as_str))
+                    .and_then(|value| value.parse::<Time>().ok());
+                let v = view.clone();
+                let sk = state_key.clone();
+                let ntype = node.node_type.clone();
+                let field = FormField::new(SharedString::from(format!("{eid}-field")), label);
+                field
+                    .child(
+                        div().debug_selector(|| "time-picker-control".into()).child(
+                            TimePicker::new(eid, current)
+                                .step(15)
+                                .range(min, max)
+                                .step_base(step_base)
+                                .disabled(disabled || readonly)
+                                .on_change(move |time, _, cx| {
+                                    let _ = v.update(cx, |this, cx| {
+                                        let value = if time.second() == 0
+                                            && time.subsec_nanosecond() == 0
+                                        {
+                                            format!("{:02}:{:02}", time.hour(), time.minute())
+                                        } else {
+                                            time.to_string()
+                                        };
+                                        this.trigger_event(&sk, &ntype, "change", json!(value), cx);
+                                    });
+                                }),
+                        ),
+                    )
+                    .into_any_element()
+            }
+            "forms/DateTimePicker" => {
                 let label = non_empty_or(&best_label(node), "Date & time");
                 let v = view.clone();
                 let sk = state_key.clone();
@@ -3028,15 +3204,50 @@ impl CatalogueView {
             }
             "forms/InlineForm" => {
                 let mut form = InlineForm::new();
-                if let Some(input_entity) = self.inputs.get(&state_key) {
-                    form = form.child(Input::new(input_entity));
+                for (index, field) in inline_form_fields(node).iter().enumerate() {
+                    let key = (node.id.clone(), index);
+                    let label = field.get("label").and_then(Value::as_str).unwrap_or("");
+                    let mut row = FormField::new(
+                        SharedString::from(format!("{eid}-field-{index}")),
+                        label.to_owned(),
+                    );
+                    if field.get("required").and_then(Value::as_bool) == Some(true) {
+                        row = row.required();
+                    }
+                    if field.get("readonly").and_then(Value::as_bool) == Some(true)
+                        && !disabled
+                        && field.get("disabled").and_then(Value::as_bool) != Some(true)
+                    {
+                        row = row.child(SelectableText::new(
+                            SharedString::from(format!("{eid}-readonly-{index}")),
+                            self.inline_values
+                                .get(&key)
+                                .and_then(Value::as_str)
+                                .unwrap_or("")
+                                .to_owned(),
+                        ));
+                    } else if let Some(input_entity) = self.inline_inputs.get(&key) {
+                        row = row.child(Input::new(input_entity));
+                    }
+                    form = form.child(
+                        div()
+                            .debug_selector(move || format!("inline-form-field-{index}"))
+                            .child(row),
+                    );
                 }
-                let label = prop_str(node, "actionLabel").unwrap_or_else(|| "Apply".into());
+                let label = prop_str(node, "actionLabel").unwrap_or_else(|| "Save".into());
                 let v = view.clone();
                 let nid = node.id.clone();
-                form.child(Button::new(eid, label).primary().on_click(move |_, _, cx| {
-                    let _ = v.update(cx, |this, cx| this.submit(&nid, cx));
-                }))
+                let selector = format!("inline-form-submit-{}", node.id);
+                form.child(
+                    Button::new(eid, label)
+                        .primary()
+                        .disabled(disabled)
+                        .debug_selector(move || selector)
+                        .on_click(move |_, _, cx| {
+                            let _ = v.update(cx, |this, cx| this.submit_inline_form(&nid, cx));
+                        }),
+                )
                 .into_any_element()
             }
             "forms/UnitInput" => {
@@ -3766,6 +3977,7 @@ impl Render for CatalogueView {
 
 struct InputSpec {
     key: String,
+    inline_index: Option<usize>,
     node_id: String,
     component_type: String,
     label: String,
@@ -3774,6 +3986,95 @@ struct InputSpec {
     masked: bool,
     multiline: bool,
     disabled: bool,
+}
+
+fn constraint_present(value: Option<&Value>) -> bool {
+    value.is_some_and(|value| match value {
+        Value::Null => false,
+        Value::String(value) => !value.is_empty(),
+        _ => true,
+    })
+}
+
+fn parse_html_time(value: &str) -> Option<Time> {
+    let bytes = value.as_bytes();
+    if bytes.len() < 5
+        || bytes[2] != b':'
+        || ![0, 1, 3, 4]
+            .iter()
+            .all(|index| bytes[*index].is_ascii_digit())
+    {
+        return None;
+    }
+    if bytes.len() > 5 {
+        if bytes.len() < 8
+            || bytes[5] != b':'
+            || !bytes[6].is_ascii_digit()
+            || !bytes[7].is_ascii_digit()
+        {
+            return None;
+        }
+        if bytes.len() > 8
+            && (bytes[8] != b'.'
+                || !(10..=12).contains(&bytes.len())
+                || !bytes[9..].iter().all(u8::is_ascii_digit))
+        {
+            return None;
+        }
+    }
+    value.parse::<Time>().ok()
+}
+
+#[cfg(test)]
+mod constraint_tests {
+    use super::*;
+
+    #[test]
+    fn numeric_inline_lengths_and_time_bounds_are_not_ignored() {
+        for key in ["minLength", "maxLength", "min", "max"] {
+            let field = json!({(key): 0});
+            assert!(constraint_present(field.get(key)), "{key}");
+        }
+        assert!(!constraint_present(Some(&json!(""))));
+        assert!(!constraint_present(None));
+    }
+
+    #[test]
+    fn html_time_bounds_validate_syntax() {
+        let time = |value| parse_html_time(value).expect("valid time");
+        for invalid in [
+            "23",
+            "9:30",
+            "24:00",
+            "12:60",
+            "12:00:60",
+            "12:00:00.1234",
+            "12:00Z",
+        ] {
+            assert!(parse_html_time(invalid).is_none(), "{invalid}");
+        }
+        assert_eq!(time("09:30:05.123").subsec_nanosecond(), 123_000_000);
+    }
+}
+
+fn inline_form_fields(node: &ScreenNode) -> &[Value] {
+    node.props
+        .get("fields")
+        .and_then(Value::as_array)
+        .filter(|fields| !fields.is_empty())
+        .or_else(|| node.props.get("items").and_then(Value::as_array))
+        .map(Vec::as_slice)
+        .unwrap_or(&[])
+}
+
+fn find_node<'a>(node: &'a ScreenNode, id: &str) -> Option<&'a ScreenNode> {
+    if node.id == id {
+        return Some(node);
+    }
+    node.children
+        .iter()
+        .chain(node.slots.values().flatten())
+        .find_map(|child| find_node(child, id))
 }
 
 fn state_key_for_node(node: &ScreenNode, duplicate_names: &BTreeSet<String>) -> String {
@@ -3892,6 +4193,7 @@ fn collect_input_specs(
     if is_text_input_node(node) && !(readonly && !disabled) {
         out.push(InputSpec {
             key: state_key_for_node(node, duplicate_names),
+            inline_index: None,
             node_id: node.id.clone(),
             component_type: node.node_type.clone(),
             label: non_empty_or(&best_label(node), "Input"),
@@ -3905,7 +4207,14 @@ fn collect_input_specs(
             disabled,
         });
     }
-    if let Some(fields) = node.props.get("fields").and_then(Value::as_array) {
+    if let Some(fields) = if node.node_type == "forms/InlineForm" {
+        Some(inline_form_fields(node))
+    } else {
+        node.props
+            .get("fields")
+            .and_then(Value::as_array)
+            .map(Vec::as_slice)
+    } {
         for (idx, field) in fields.iter().enumerate() {
             let f_dis = disabled || field.get("disabled").and_then(Value::as_bool) == Some(true);
             let f_ro = readonly || field.get("readonly").and_then(Value::as_bool) == Some(true);
@@ -3918,7 +4227,12 @@ fn collect_input_specs(
                 .map(ToOwned::to_owned)
                 .unwrap_or_else(|| format!("field-{idx}"));
             out.push(InputSpec {
-                key: format!("{}:{fname}", node.id),
+                inline_index: (node.node_type == "forms/InlineForm").then_some(idx),
+                key: if node.node_type == "forms/InlineForm" {
+                    String::new()
+                } else {
+                    format!("{}:{fname}", node.id)
+                },
                 node_id: node.id.clone(),
                 component_type: node.node_type.clone(),
                 label: field

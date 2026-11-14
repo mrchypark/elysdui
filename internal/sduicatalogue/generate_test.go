@@ -8,6 +8,30 @@ import (
 	"testing"
 )
 
+func TestGeneratedTimePickerMaxAcceptsStringAndExistingInteger(t *testing.T) {
+	manifest, fixtures, err := Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, contract := range manifest.Contracts {
+		if contract.Name != "forms/TimePicker" {
+			continue
+		}
+		bound := contract.Properties["max"]
+		if bound.Target != "Max" || bound.Type != "" || len(bound.OneOf) != 2 ||
+			bound.OneOf[0].Type != "integer" || bound.OneOf[1].Type != "string" || bound.OneOf[1].Format != "text" {
+			t.Fatalf("unexpected TimePicker max: %+v", bound)
+		}
+		for _, fixture := range fixtures {
+			if fixture.Name == contract.Name && fixture.Props["max"] != nil {
+				return
+			}
+		}
+		t.Fatal("missing inherited numeric TimePicker fixture")
+	}
+	t.Fatal("missing TimePicker contract")
+}
+
 func TestGeneratedYearDurationKeepIntegerCallerBoundsWithoutFixtureMax(t *testing.T) {
 	manifest, fixtures, err := Build()
 	if err != nil {

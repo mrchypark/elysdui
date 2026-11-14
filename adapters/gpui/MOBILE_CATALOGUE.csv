@@ -745,7 +745,7 @@ forms/Switch,forms,Switch,2,pass-f64e798,partial-single-toggle,partial-single-to
 forms/TagInput,forms,TagInput,2,pass-f64e798,not-run,not-run
 forms/TextArea,forms,TextArea,2,pass-f64e798,not-run,not-run
 forms/TextField,forms,Input,2,pass-f64e798,not-run,not-run
-forms/TimePicker,forms,DatePicker,1,pass-f64e798,not-run,not-run
+forms/TimePicker,forms,TimePicker,1,pass-f64e798,partial-time-selection,partial-time-selection
 forms/TimezoneSelect,forms,RelativeDatePicker,1,pass-f64e798,not-run,not-run
 forms/Toggle,forms,Switch,2,pass-f64e798,not-run,not-run
 forms/TokenInput,forms,TagInput,2,pass-f64e798,not-run,not-run

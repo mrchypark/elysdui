@@ -107,6 +107,14 @@ func Build() (Manifest, []TestFixture, error) {
 			return manifest, nil, fmt.Errorf("%s: %w", key, err)
 		}
 		applyContextRequestContract(&c)
+		if c.Name == "forms/TimePicker" {
+			// The inherited numeric fixture is not representative of time input
+			// bounds. Keep accepting it while exposing the HTML time-string bound.
+			bound := c.Properties["max"]
+			bound.Type, bound.Format = "", ""
+			bound.OneOf = []Property{{Type: "integer"}, {Type: "string", Format: "text"}}
+			c.Properties["max"] = bound
+		}
 		if c.Name == "forms/YearPicker" || c.Name == "forms/DurationPicker" {
 			// Preserve the reviewed caller-bound type without an invalid fixture Max5.
 			bound := c.Properties["max"]

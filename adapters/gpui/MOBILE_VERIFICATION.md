@@ -35,8 +35,12 @@ specific device interactions named there, not full contract coverage.
 - Android: the MailItem fixture's star changed appearance and emitted a
   `star-mail` action containing the caller's item value.
 - Android and iOS: MultiSelect retained Alpha, added Beta, and emitted both
-  values. A nearby MonthPicker with the same name remained unchanged. GPUI
-  tests additionally cover disabled selections and duplicate-name isolation.
+  values. A nearby MonthPicker with the same name remained unchanged. On iOS,
+  tapping a disabled option preserved the selection and event count. GPUI tests
+  additionally cover disabled selections and duplicate-name isolation.
+- Android and iOS: the TimePicker opened hour and minute choices and changed
+  12:30 to 12:45 with the expected event. Focused GPUI tests cover time bounds,
+  midnight wrapping, stable step bases, disabled state, and field isolation.
 - Android: an upward touch swipe on the supplied VirtualList fixture brought
   rows 7 and 8 into view. On iOS the initial rows render but automated
   Simulator drag and scroll did not move the list; the input path and actual
@@ -75,6 +79,12 @@ specific device interactions named there, not full contract coverage.
   a disabled/read-only presentation; checkbox option groups and switch item
   groups render as single controls; and Slider ignores vertical orientation.
   These findings need focused tests and implementation before device sign-off.
+- TimePicker range limits and non-quarter-hour step bases have GPUI tests but
+  need device checks. Seconds remain in the value but are not shown in option
+  labels; unavailable choices lack a native disabled accessibility attribute.
+- InlineForm has focused tests for form-scoped text values, repeated names,
+  disabled and readonly fields. Non-text fields and length or pattern
+  constraints fail closed; generic forms still need their own contract work.
 - Form submission still needs contract verification for repeated names,
   multi-value fields, disabled fields, and form ownership. The current generic
   submit snapshots internal state rather than browser-style form entries. A
