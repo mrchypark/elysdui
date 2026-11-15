@@ -129,6 +129,7 @@ try{
   await page.getByRole('link',{name:'Open interactive chart gallery'}).click();
   await page.locator('[data-chart="Line"][data-ready="true"]').waitFor();
   assert.equal(await page.locator('.header-nav [aria-current=page]').innerText(),'Charts');
+  assert.deepEqual(await page.locator('.header-nav a').allTextContents(),['Components','Form examples','Themes','Charts','Playground']);
   await page.locator('[data-theme-toggle]').click();
   assert.equal(await page.locator('html').getAttribute('data-theme'),'dark');
   const plotColors=await page.locator('[data-stat="Histogram"]').evaluate(el=>({scheme:getComputedStyle(el).colorScheme,muted:getComputedStyle(el).getPropertyValue('--color-muted').trim()}));
