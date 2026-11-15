@@ -18,6 +18,22 @@ fi
 mkdir -p "$out/go-htmx"
 cp site/index.html "$out/index.html"
 go run ./cmd/ely-gallery-static -dir "$out/go-htmx" -base "$gallery_base"
+mkdir -p "$out/go-htmx/charts" "$out/go-htmx/time-series"
+node - "$out" "$gallery_base" <<'NODE'
+const fs = require('node:fs');
+const path = require('node:path');
+const [out, base] = process.argv.slice(2);
+for (const [source, destination] of [
+  ['examples/gohtmx/chart-gallery/index.html', 'go-htmx/charts/index.html'],
+  ['examples/gohtmx/timeseries/index.html', 'go-htmx/time-series/index.html'],
+]) {
+  let html = fs.readFileSync(source, 'utf8').replaceAll('/assets/', `${base}assets/`);
+  if (destination.includes('/charts/')) {
+    html = html.replace('<div id="gallery"', `<p>Explore pointer, keyboard and touch interactions. These charts use application data without SDUI.</p><p><a href="../time-series/">1 million timestamps × 3 series</a> · <a href="?chart=Scatter1M">1 million point scatter</a> · <a href="https://github.com/mrchypark/elysdui/blob/main/docs/gohtmx/charts.md">Chart documentation</a> · <a href="../">Component gallery</a></p><div id="gallery"`);
+  }
+  fs.writeFileSync(path.join(out, destination), html);
+}
+NODE
 go run ./cmd/sdui-playground-static -dir "$out/go-htmx/playground"
 GOOS=js GOARCH=wasm go build -trimpath -ldflags='-s -w' -o "$out/go-htmx/playground/renderer.wasm" ./cmd/sdui-playground-wasm
 cp "$(go env GOROOT)/lib/wasm/wasm_exec.js" "$out/go-htmx/playground/wasm_exec.js"
