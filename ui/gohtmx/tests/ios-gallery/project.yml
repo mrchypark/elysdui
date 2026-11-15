@@ -1,0 +1,34 @@
+name: UPlotGestureCheck
+options:
+  bundleIdPrefix: local.uplotcheck
+  deploymentTarget:
+    iOS: '16.0'
+targets:
+  UPlotGestureCheck:
+    type: application
+    platform: iOS
+    sources: [App]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: local.uplotcheck.host
+        GENERATE_INFOPLIST_FILE: YES
+        SWIFT_VERSION: '5.0'
+  UPlotGestureCheckUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [UITests]
+    dependencies:
+      - target: UPlotGestureCheck
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: local.uplotcheck.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        SWIFT_VERSION: '5.0'
+schemes:
+  UPlotGestureCheck:
+    build:
+      targets:
+        UPlotGestureCheck: all
+        UPlotGestureCheckUITests: [test]
+    test:
+      targets: [UPlotGestureCheckUITests]

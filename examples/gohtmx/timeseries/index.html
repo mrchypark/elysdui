@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Time series performance</title>
+  <link rel="stylesheet" href="/assets/uPlot.min.css">
+  <link rel="stylesheet" href="/assets/ely-timeseries.css">
+  <style>
+    body { font: 16px system-ui, sans-serif; margin: 0; color: #172033; background: #f4f7fb; }
+    main { max-width: 1200px; margin: auto; padding: 1rem; }
+    .card { background: white; padding: 1rem; border-radius: .75rem; }
+    #chart { width: 100%; overflow: hidden; }
+    #status { min-height: 2em; font-variant-numeric: tabular-nums; }
+    button { padding: .6rem; }
+  </style>
+</head>
+<body><main>
+  <h1>Time series performance</h1>
+  <p>One million timestamps, three independent series, gaps and spikes. Drag, zoom or pinch the chart.</p>
+  <div class="card"><div id="chart"></div><p id="status" role="status">Preparing data…</p><p id="metrics"></p></div>
+</main>
+<script type="module">
+import { mountTimeSeries } from '/assets/ely-timeseries.js';
+const status = document.querySelector('#status');
+try {
+  const start = performance.now(), count = 1_000_000;
+  const x = new Float64Array(count), series = Array.from({length: 3}, () => new Float64Array(count));
+  for (let i = 0; i < count; i++) {
+    x[i] = 1700000000 + i;
+    for (let s = 0; s < series.length; s++) {
+      series[s][i] = i % 100003 < 32 ? NaN : 20 * Math.sin(i / (4000 + s * 1700)) + s * 30 + (i % 81913 === 0 ? 35 : 0);
+    }
+  }
+  const generated = performance.now();
+  const chart = mountTimeSeries(document.querySelector('#chart'), {
+    x, series, labels: ['North', 'South', 'West'], colors: ['#2563eb', '#ea580c', '#059669'],
+    onViewport: ({min, max}) => { status.textContent = `Viewport: ${new Date(min * 1000).toISOString()} – ${new Date(max * 1000).toISOString()}`; },
+    onSelectX: value => { status.textContent = `Selected: ${new Date(value * 1000).toISOString()}`; },
+  });
+  window.chart = chart;
+  window.chartMetrics = { samples: count, series: series.length, generationMs: generated - start, mountMs: performance.now() - generated };
+  document.querySelector('#metrics').textContent = `Ready: ${count.toLocaleString()} timestamps × ${series.length} series; setup ${window.chartMetrics.mountMs.toFixed(0)} ms`;
+} catch (error) {
+  status.textContent = `Chart failed: ${error.message}`;
+  throw error;
+}
+</script>
+</body></html>

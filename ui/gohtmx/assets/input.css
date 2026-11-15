@@ -1,4 +1,8 @@
 @import 'tailwindcss';
+/* Vendored JavaScript and GPUI Rust are not web utility sources. */
+@source not './uPlot.esm.js';
+@source not './echarts.esm.min.js';
+@source not '../../../adapters/gpui/src/catalogue_ext';
 /* Frozen benchmark HTML is data, not application utility-class input. */
 @source not '../../../cmd/sdui-transport-bench/fixtures';
 /* The standalone editor uses its own CSS, not runtime component utilities. */

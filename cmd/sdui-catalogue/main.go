@@ -2,7 +2,6 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -41,7 +40,11 @@ func main() {
 		path := filepath.Join(*root, file.name)
 		if *check {
 			current, err := os.ReadFile(path)
-			if err != nil || !bytes.Equal(current, file.data) {
+			equal := false
+			if err == nil {
+				equal, err = sduicatalogue.EqualGzip(current, file.data)
+			}
+			if err != nil || !equal {
 				fail(fmt.Errorf("%s is stale; run go generate ./adapters/gohtmx", file.name))
 			}
 		} else {

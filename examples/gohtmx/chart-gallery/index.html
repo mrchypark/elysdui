@@ -1,0 +1,116 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ely web chart gallery</title><link rel="stylesheet" href="/assets/ely-charts.css"><link rel="stylesheet" href="/assets/ely-stat-charts.css"><link rel="stylesheet" href="/assets/ely-density-charts.css"><link rel="stylesheet" href="/assets/ely-relation-charts.css"><link rel="stylesheet" href="/assets/ely-comparison-charts.css"><link rel="stylesheet" href="/assets/ely-horizon-charts.css"><link rel="stylesheet" href="/assets/ely-parallel-sets.css"><link rel="stylesheet" href="/assets/ely-surface-chart.css">
+<style>body{font:16px system-ui,sans-serif;background:#f3f6fb;color:#172033;margin:0}main{max-width:1280px;margin:auto;padding:1rem}.gallery{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,28rem),1fr));gap:1rem}.card{background:white;border-radius:.75rem;padding:1rem;min-width:0}.card h2{font-size:1.1rem}.card output{display:block;min-height:1.5em}a{color:#2455b8}</style>
+</head><body><main><h1>Ely web chart gallery</h1><p>Interactive charts from application-supplied data. Open “Chart values” for keyboard access.</p><div id="gallery" class="gallery"></div></main>
+<script type="module">
+import {mountElyChart} from '/assets/ely-charts.js';
+import {mountStatChart} from '/assets/ely-stat-charts.js';
+import {mountDensityChart} from '/assets/ely-density-charts.js';
+import {mountRelationChart} from '/assets/ely-relation-charts.js';
+import {mountComparisonChart} from '/assets/ely-comparison-charts.js';
+import {mountHorizonChart} from '/assets/ely-horizon-charts.js';
+import {mountParallelSetsChart} from '/assets/ely-parallel-sets.js';
+import {mountSurfaceChart} from '/assets/ely-surface-chart.js';
+const categories = ['Mon','Tue','Wed','Thu'], values = [14,25,18,32], tree = [{name:'East',value:35,children:[{name:'One',value:20},{name:'Two',value:15}]},{name:'West',value:25}];
+const cartesian = series => ({xAxis:{type:'category',data:categories},yAxis:{type:'value'},dataZoom:[{type:'inside'}],tooltip:{trigger:'axis'},series:[series]});
+const presets = [
+ ['Line',cartesian({type:'line',data:values})],
+ ['Area',cartesian({type:'line',data:values,areaStyle:{}})],
+ ['Bar',cartesian({type:'bar',data:values})],
+ ['Scatter',{xAxis:{},yAxis:{},tooltip:{},series:[{type:'scatter',data:[[1,5],[2,8],[3,4],[4,10]]}]}],
+ ['Pie',{tooltip:{trigger:'item'},series:[{type:'pie',radius:['35%','70%'],data:[{name:'East',value:35},{name:'West',value:25},{name:'North',value:20}]}]}],
+ ['Radar',{radar:{indicator:[{name:'Speed',max:100},{name:'Quality',max:100},{name:'Cost',max:100}]},tooltip:{},series:[{type:'radar',data:[{name:'Current',value:[70,85,60]}]}]}],
+ ['Polar',{angleAxis:{type:'category',data:['N','E','S','W']},radiusAxis:{},polar:{},tooltip:{},series:[{type:'line',coordinateSystem:'polar',data:[6,9,4,7]}]}],
+ ['Heatmap',{xAxis:{type:'category',data:['A','B','C']},yAxis:{type:'category',data:['One','Two']},visualMap:{min:0,max:10,show:false},tooltip:{},series:[{type:'heatmap',data:[[0,0,3],[1,0,7],[2,0,2],[0,1,5],[1,1,9],[2,1,4]]}]}],
+ ['Calendar heatmap',{calendar:{range:'2024-01',cellSize:['auto',14],top:55},visualMap:{min:0,max:10,show:false},tooltip:{},series:[{type:'heatmap',coordinateSystem:'calendar',data:[['2024-01-01',3],['2024-01-02',8],['2024-01-08',6],['2024-01-17',10]]}]}],
+ ['Tree',{tooltip:{},series:[{type:'tree',data:[{name:'Root',children:tree}],left:'15%',right:'20%'}]}],
+ ['Treemap',{tooltip:{},series:[{type:'treemap',data:tree,roam:true}]}],
+ ['Sunburst',{tooltip:{},series:[{type:'sunburst',data:tree,radius:[0,'75%']}]}],
+ ['Sankey',{tooltip:{},series:[{type:'sankey',data:[{name:'Source'},{name:'East'},{name:'West'}],links:[{source:'Source',target:'East',value:20},{source:'Source',target:'West',value:15}]}]}],
+ ['Network',{tooltip:{},series:[{type:'graph',layout:'force',roam:true,data:[{name:'A',value:10},{name:'B',value:20},{name:'C',value:15}],links:[{source:'A',target:'B'},{source:'A',target:'C'}],force:{repulsion:160},label:{show:true}}]}],
+ ['Funnel',{tooltip:{},series:[{type:'funnel',data:[{name:'Visited',value:100},{name:'Started',value:65},{name:'Completed',value:35}]}]}],
+ ['Parallel',{parallelAxis:[{dim:0,name:'Speed'},{dim:1,name:'Quality'},{dim:2,name:'Cost'}],series:[{type:'parallel',data:[[1,3,2],[2,2,4],[4,1,3]]}]}],
+ ['Box plot',{xAxis:{type:'category',data:['A','B']},yAxis:{type:'value'},tooltip:{},series:[{type:'boxplot',data:[[1,2,3,4,6],[2,3,4,6,8]]}]}],
+ ['Gauge',{series:[{type:'gauge',data:[{name:'Progress',value:72}]}]}],
+ ['Progress',{series:[{type:'gauge',startAngle:180,endAngle:0,progress:{show:true},axisLine:{lineStyle:{width:16}},data:[{name:'Done',value:72}]}]}],
+ ['Bullet',{xAxis:{type:'value',max:100},yAxis:{type:'category',data:['Revenue']},series:[{type:'bar',name:'Capacity',data:[100],itemStyle:{color:'#e5e7eb'},barGap:'-100%'},{type:'bar',name:'Actual',data:[72],barWidth:12,markLine:{symbol:'none',data:[{xAxis:85}]}}]}],
+ ['Candlestick',{xAxis:{type:'category',data:categories},yAxis:{scale:true},series:[{type:'candlestick',data:[[10,13,9,14],[13,11,10,15],[11,15,10,16],[15,14,12,17]]}]}],
+];
+const gallery = document.querySelector('#gallery'), only = new URLSearchParams(location.search).get('chart');
+for (const [name, option] of presets) {
+  if (only && only !== name) continue;
+  const card=document.createElement('section'), heading=document.createElement('h2'), root=document.createElement('div'), status=document.createElement('output');
+  card.className='card'; card.dataset.chart=name; heading.textContent=name; status.setAttribute('aria-live','polite'); card.append(heading,root,status); gallery.append(card);
+  mountElyChart(root,{option,label:`${name} chart`,onSelect: item => {status.textContent=`Selected: ${item.name || item.dataIndex + 1}`;},onViewport: ranges => {if(ranges[0]) status.textContent=`Viewport: ${ranges[0].start.toFixed(0)}%–${ranges[0].end.toFixed(0)}%`;}});
+  card.dataset.ready='true';
+}
+const groups = [{label:'East',values:[2,3,3,4,5,6,9]},{label:'West',values:[1,3,4,5,5,7,8]}];
+const stats = [
+  ['Histogram',[1,2,2,3,4,4,4,5,6,7,8,9]],
+  ['BoxPlot',groups],
+  ['ViolinPlot',groups],
+  ['WaterfallChart',[{label:'Start',value:20},{label:'Gain',value:12},{label:'Loss',value:-6},{label:'Total',total:true}]],
+];
+for (const [type, data] of stats) {
+  if (only && only !== type) continue;
+  const card=document.createElement('section'), root=document.createElement('div');
+  card.className='card'; card.dataset.stat=type; card.append(root); gallery.append(card);
+  mountStatChart(root,{type,data}); card.dataset.ready='true';
+}
+const points=Array.from({length:240},(_,i)=>({x:Math.sin(i*1.7)*(.2+(i%19)/15)+(i%2)*2,y:Math.cos(i*2.3)*(.2+(i%17)/15)+(i%2)*1.2}));
+for(const type of ['ContourChart','HexbinChart']) {
+  if (only && only !== type) continue;
+  const card=document.createElement('section'),heading=document.createElement('h2'),root=document.createElement('div');
+  card.className='card';card.dataset.density=type;heading.textContent=type;card.append(heading,root);gallery.append(card);
+  mountDensityChart(root,{type,data:points});card.dataset.ready='true';
+}
+const relations=[
+  ['CirclePacking',{label:'All',children:[{label:'East',children:[{label:'One',value:12},{label:'Two',value:8}]},{label:'West',value:15}]}],
+  ['ChordDiagram',{labels:['East','West','North'],matrix:[[0,8,3],[4,0,6],[2,5,0]]}],
+];
+for(const [type,data] of relations) {
+  if (only && only !== type) continue;
+  const card=document.createElement('section'),root=document.createElement('div');
+  card.className='card';card.dataset.relation=type;card.append(root);gallery.append(card);
+  mountRelationChart(root,{type,data});card.dataset.ready='true';
+}
+const comparisons = [
+  ['DifferenceChart',{primary:[{x:0,y:2},{x:1,y:5},{x:2,y:3},{x:3,y:6}],baseline:[{x:0,y:4},{x:1,y:3},{x:2,y:4},{x:3,y:4}]}],
+  ['RidgelineChart',groups],
+];
+for (const [type,data] of comparisons) {
+  if (only && only !== type) continue;
+  const card=document.createElement('section'),root=document.createElement('div');
+  card.className='card';card.dataset.comparison=type;card.append(root);gallery.append(card);
+  mountComparisonChart(root,{type,data});card.dataset.ready='true';
+}
+const horizons = [
+ ['HorizonChart',[{label:'East',values:[1,3,-2,4,2,-3]},{label:'West',values:[-1,2,4,1,-2,3]}]],
+ ['RadialLineChart',[{label:'East',values:[2,4,3,5,2,4]},{label:'West',values:[3,2,4,2,5,3]}]],
+];
+for (const [type,data] of horizons) {
+  if (only && only !== type) continue;
+  const card=document.createElement('section'),heading=document.createElement('h2'),root=document.createElement('div');
+  card.className='card';card.dataset.horizon=type;heading.textContent=type;card.append(heading,root);gallery.append(card);
+  mountHorizonChart(root,{type,data});card.dataset.ready='true';
+}
+if (!only || only === 'ParallelSetsChart') {
+ const card=document.createElement('section'),root=document.createElement('div'); card.className='card'; card.dataset.parallel='ParallelSetsChart'; card.append(root); gallery.append(card);
+ mountParallelSetsChart(root,{data:{dimensions:['Region','Product','Result'],ribbons:[{path:['East','A','Won'],count:20},{path:['East','B','Lost'],count:10},{path:['West','A','Won'],count:15}]}}); card.dataset.ready='true';
+}
+if (!only || only === 'SurfaceChart') {
+ const card=document.createElement('section'),heading=document.createElement('h2'),root=document.createElement('div'); card.className='card'; card.dataset.surface='SurfaceChart'; heading.textContent='SurfaceChart'; card.append(heading,root); gallery.append(card);
+ const grid=Array.from({length:14},(_,y)=>Array.from({length:14},(_,x)=>Math.sin(x/3)*Math.cos(y/3)));
+ mountSurfaceChart(root,{grid}); card.dataset.ready='true';
+}
+if (only === 'Scatter1M') {
+ for (const href of ['/assets/uPlot.min.css','/assets/ely-scatter.css']) { const link=document.createElement('link'); link.rel='stylesheet'; link.href=href; document.head.append(link); }
+ const {mountScatter}=await import('/assets/ely-scatter.js');
+ const card=document.createElement('section'),heading=document.createElement('h2'),root=document.createElement('div'),metrics=document.createElement('output');
+ card.className='card'; card.dataset.scatter='Scatter1M'; heading.textContent='Scatter1M'; card.append(heading,root,metrics); gallery.append(card);
+ const count=1000000,x=new Float64Array(count),y=new Float64Array(count);
+ for(let i=0;i<count;i++){ x[i]=(i%1000)+Math.sin(i*1.37)*.3; y[i]=Math.floor(i/1000)+Math.cos(i*1.73)*.3; }
+ const started=performance.now(); const chart=mountScatter(root,{x,y,height:420,onSelect:point=>{metrics.textContent=`Selected point ${point.index}: ${point.x}, ${point.y}`;},onViewport:v=>{metrics.textContent=`Viewport: ${v.minX.toFixed(2)} ${v.maxX.toFixed(2)} ${v.minY.toFixed(2)} ${v.maxY.toFixed(2)}`;}});
+ window.scatterChart=chart; window.scatterMetrics={points:count,mountMs:performance.now()-started}; metrics.textContent=`Ready: ${count.toLocaleString()} points`;card.dataset.ready='true';
+}
+</script></body></html>
