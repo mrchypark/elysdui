@@ -131,6 +131,8 @@ try{
   assert.equal(await page.locator('.header-nav [aria-current=page]').innerText(),'Charts');
   await page.locator('[data-theme-toggle]').click();
   assert.equal(await page.locator('html').getAttribute('data-theme'),'dark');
+  const plotColors=await page.locator('[data-stat="Histogram"]').evaluate(el=>({scheme:getComputedStyle(el).colorScheme,muted:getComputedStyle(el).getPropertyValue('--color-muted').trim()}));
+  assert.deepEqual(plotColors,{scheme:'light',muted:'#605d5a'},'light plots retain readable labels in dark mode');
   assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+2),'chart gallery fits '+width);
   await page.getByRole('link',{name:'1 million timestamps × 3 series'}).click();
   await page.waitForFunction(()=>window.chartMetrics?.samples===1000000,{},{timeout:120000});
