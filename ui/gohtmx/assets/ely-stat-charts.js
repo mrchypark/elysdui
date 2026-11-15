@@ -39,7 +39,7 @@ export function density(values, samples = 40) {
   if (!Number.isInteger(samples) || samples < 2) throw new RangeError('samples must be at least 2');
   const mean = values.reduce((sum, value) => sum + value, 0) / values.length;
   const deviation = Math.sqrt(values.reduce((sum, value) => sum + (value - mean) ** 2, 0) / (values.length - 1));
-  const [low, high] = bounds(values), bandwidth = Math.max(1.06 * deviation * values.length ** -.2, Number.EPSILON), from = low - bandwidth, to = high + bandwidth, normal = 1 / (values.length * bandwidth * Math.sqrt(2 * Math.PI));
+  const [low, high] = bounds(values), rawBandwidth = 1.06 * deviation * values.length ** -.2, bandwidth = rawBandwidth > Number.EPSILON ? rawBandwidth : Math.max(Math.abs(mean) * .01, .01), from = low - bandwidth, to = high + bandwidth, normal = 1 / (values.length * bandwidth * Math.sqrt(2 * Math.PI));
   return Array.from({ length: samples }, (_, index) => { const value = from + (to - from) * index / (samples - 1); return [value, values.reduce((sum, item) => sum + Math.exp(-.5 * ((value - item) / bandwidth) ** 2), 0) * normal]; });
 }
 

@@ -22,6 +22,9 @@ const shape = density([0, .1, .2, 5], 40), peak = shape.reduce((best, point) => 
 assert.ok(peak[0] < 1, 'density peak remains near the clustered values');
 assert.ok(shape[0][0] < 0 && shape.at(-1)[0] > 5, 'density range includes its KDE tails');
 
+const constant = density([7, 7, 7]);
+assert.ok(constant.at(-1)[0] > constant[0][0] && constant.every(point => point.every(Number.isFinite)), 'constant groups have a finite visible density span');
+
 const steps = waterfallModel([{label: 'Start', value: 100}, {label: 'Loss', value: -30}, {label: 'Total', total: true}, {label: 'Gain', value: 20}]);
 assert.deepEqual(steps.map(step => [step.start, step.end, step.kind]), [[0, 100, 'up'], [70, 100, 'down'], [0, 70, 'total'], [70, 90, 'up']]);
 assert.throws(() => waterfallModel([{label: 'bad', value: Infinity}]));

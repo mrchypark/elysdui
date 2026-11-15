@@ -52,10 +52,17 @@ function extrema(index, from, to) {
 // are retained as breaks; each bucket keeps both extrema in original time order.
 export function reduceTimeSeries(x, series, indexes, minX, maxX, pixelWidth) {
   const start = lowerBound(x, minX), end = upperBound(x, maxX);
-  if (start >= end || pixelWidth <= 0) return [[], ...series.map(() => [])];
+  if (pixelWidth <= 0) return [[], ...series.map(() => [])];
   const width = Math.max(1, Math.floor(pixelWidth));
   const outX = [], outY = series.map(() => []);
   let lastIndex = -1;
+  const append = i => {
+    if (i <= lastIndex) return;
+    outX.push(x[i]);
+    for (let s = 0; s < series.length; s++) outY[s].push(Number.isFinite(series[s][i]) ? series[s][i] : null);
+    lastIndex = i;
+  };
+  if (start) append(start - 1);
   for (let bucket = 0; bucket < width; bucket++) {
     const a = lowerBound(x, minX + (maxX - minX) * bucket / width);
     const b = bucket === width - 1 ? end - 1 : Math.min(end - 1, lowerBound(x, minX + (maxX - minX) * (bucket + 1) / width) - 1);
@@ -77,13 +84,9 @@ export function reduceTimeSeries(x, series, indexes, minX, maxX, pixelWidth) {
       if (runStart >= 0) for (const point of extrema(indexes[s], runStart, b)) chosen.add(point);
     }
     const ordered = [...chosen].sort((p, q) => p - q);
-    for (const i of ordered) {
-      if (i <= lastIndex) continue;
-      outX.push(x[i]);
-      for (let s = 0; s < series.length; s++) outY[s].push(Number.isFinite(series[s][i]) ? series[s][i] : null);
-      lastIndex = i;
-    }
+    for (const i of ordered) append(i);
   }
+  if (end < x.length) append(end);
   return [outX, ...outY];
 }
 
@@ -277,7 +280,7 @@ export function mountTimeSeries(root, options) {
     if (destroyed) return;
     if (update.viewport) {
       const min = Math.max(domain[0], update.viewport.min), max = Math.min(domain[1], update.viewport.max);
-      if (min <= max) { syncing = true; try { plot.setScale('x', {min, max}); } finally { syncing = false; } }
+      if (min <= max) { syncing = true; try { plot.batch(() => plot.setScale('x', {min, max})); } finally { syncing = false; } }
     }
     if (Object.hasOwn(update, 'selectedX')) setSelectedX(update.selectedX, false);
   });

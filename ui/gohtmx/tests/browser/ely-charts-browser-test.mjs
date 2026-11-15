@@ -24,6 +24,17 @@ try {
     assert.equal(await page.locator('[data-stat] svg').count(),4,'each statistical chart renders');
     assert.equal(await page.locator('[data-density] svg').count(),2,'density charts render');
     assert.equal(await page.locator('[data-relation] svg').count(),2,'relation charts render');
+    const geometry = await page.evaluate(async () => {
+      const {mountStatChart} = await import('/assets/ely-stat-charts.js');
+      const {mountComparisonChart} = await import('/assets/ely-comparison-charts.js');
+      const a=document.createElement('div'), b=document.createElement('div'); document.body.append(a,b);
+      const da=mountStatChart(a,{type:'ViolinPlot',data:[{label:'Constant',values:[7,7,7]}]});
+      const db=mountComparisonChart(b,{type:'RidgelineChart',data:[{label:'Only',values:[1,2,3]}]});
+      const violin=a.querySelector('polygon').getBBox(), ridge=b.querySelector('.ely-comparison-ridge').getBBox();
+      const result={violinWidth:violin.width,violinHeight:violin.height,ridgeTop:ridge.y,ridgeBottom:ridge.y+ridge.height}; da();db();a.remove();b.remove();return result;
+    });
+    assert.ok(geometry.violinWidth>0 && geometry.violinHeight>0,'constant violin is visible');
+    assert.ok(geometry.ridgeTop>=0 && geometry.ridgeBottom<=360,'first ridge stays within its viewBox');
     const surface = page.locator('[data-surface]');
     await surface.locator('[data-surface-cell]').first().focus(); await page.keyboard.press('Enter');
     assert.match(await surface.locator('[aria-live=polite]').innerText(), /Cell/);
