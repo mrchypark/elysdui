@@ -5,10 +5,10 @@ import (
 	"compress/gzip"
 	"encoding/json"
 	"fmt"
-	ui "github.com/mrchypark/elysdui/ui/gohtmx"
 	sdui "github.com/mrchypark/elysdui/adapters/gohtmx"
 	gallery "github.com/mrchypark/elysdui/internal/gallery"
 	"github.com/mrchypark/elysdui/internal/sduicatalogue"
+	ui "github.com/mrchypark/elysdui/ui/gohtmx"
 	"io"
 	"os"
 	"sort"
@@ -45,7 +45,8 @@ func TestCatalogueGeneratedFilesCurrent(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !bytes.Equal(current, item.data) {
+		equal, err := sduicatalogue.EqualGzip(current, item.data)
+		if err != nil || !equal {
 			t.Errorf("%s is stale; run go generate ./adapters/gohtmx", item.name)
 		}
 	}
