@@ -128,9 +128,19 @@ try{
   await page.goto(origin+siteBase);
   await page.getByRole('link',{name:'Open interactive chart gallery'}).click();
   await page.locator('[data-chart="Line"][data-ready="true"]').waitFor();
+  assert.equal(await page.locator('.header-nav [aria-current=page]').innerText(),'Charts');
+  assert.deepEqual(await page.locator('.header-nav a').allTextContents(),['Components','Form examples','Themes','Charts','Playground']);
+  await page.locator('[data-theme-toggle]').click();
+  assert.equal(await page.locator('html').getAttribute('data-theme'),'dark');
+  const plotColors=await page.locator('[data-stat="Histogram"]').evaluate(el=>({scheme:getComputedStyle(el).colorScheme,muted:getComputedStyle(el).getPropertyValue('--color-muted').trim()}));
+  assert.deepEqual(plotColors,{scheme:'light',muted:'#605d5a'},'light plots retain readable labels in dark mode');
   assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+2),'chart gallery fits '+width);
   await page.getByRole('link',{name:'1 million timestamps × 3 series'}).click();
   await page.waitForFunction(()=>window.chartMetrics?.samples===1000000,{},{timeout:120000});
+  assert.equal(await page.locator('html').getAttribute('data-theme'),'dark','theme persists between chart pages');
+  assert.equal(await page.getByRole('link',{name:'← All chart examples'}).getAttribute('href'),base+'charts/');
+  await page.locator('[data-theme-toggle]').click();
+  assert.equal(await page.locator('html').getAttribute('data-theme'),'light');
   assert.equal(await page.evaluate(()=>window.chartMetrics.series),3);
   assert(await page.locator('#chart .uplot').isVisible());
   const span=await page.evaluate(()=>chart.plot.scales.x.max-chart.plot.scales.x.min);
@@ -138,6 +148,9 @@ try{
   await page.waitForFunction(initial=>chart.plot.scales.x.max-chart.plot.scales.x.min<initial,span);
   assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+2),'time series fits '+width);
  }
+ await page.goto(origin+base);
+ await page.getByRole('link',{name:'Explore charts'}).click();
+ assert.equal(new URL(page.url()).pathname,base+'charts/');
  await page.goto(origin+base+'charts/?chart=Scatter1M');
  await page.locator('[data-scatter="Scatter1M"][data-ready="true"]').waitFor({timeout:120000});
  assert.equal(await page.evaluate(()=>window.scatterMetrics.points),1000000);
