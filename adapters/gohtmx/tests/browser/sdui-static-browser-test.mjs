@@ -121,5 +121,29 @@ try{
  await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
  await page.locator('#preview-frame').screenshot({path:'test-results/static-pages/mobile-preview.png',animations:'disabled'});
  await page.screenshot({path:'test-results/static-pages/mobile.png',fullPage:true,animations:'disabled'});
- assert.deepEqual(errors,[]);assert.deepEqual(bad,[]);console.log('Static gallery and real WASM editor passed',await page.evaluate(()=>elyRendererMetrics));
+ const rendererMetrics=await page.evaluate(()=>elyRendererMetrics);
+ // The published chart pages use the same examples as the development server.
+ for(const width of [1440,390]) {
+  await page.setViewportSize({width,height:900});
+  await page.goto(origin+siteBase);
+  await page.getByRole('link',{name:'Open interactive chart gallery'}).click();
+  await page.locator('[data-chart="Line"][data-ready="true"]').waitFor();
+  assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+2),'chart gallery fits '+width);
+  await page.getByRole('link',{name:'1 million timestamps × 3 series'}).click();
+  await page.waitForFunction(()=>window.chartMetrics?.samples===1000000,{},{timeout:120000});
+  assert.equal(await page.evaluate(()=>window.chartMetrics.series),3);
+  assert(await page.locator('#chart .uplot').isVisible());
+  const span=await page.evaluate(()=>chart.plot.scales.x.max-chart.plot.scales.x.min);
+  await page.getByRole('button',{name:'Zoom in'}).click();
+  await page.waitForFunction(initial=>chart.plot.scales.x.max-chart.plot.scales.x.min<initial,span);
+  assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+2),'time series fits '+width);
+ }
+ await page.goto(origin+base+'charts/?chart=Scatter1M');
+ await page.locator('[data-scatter="Scatter1M"][data-ready="true"]').waitFor({timeout:120000});
+ assert.equal(await page.evaluate(()=>window.scatterMetrics.points),1000000);
+ assert(await page.locator('.ely-scatter-canvas').isVisible());
+ const scatterSpan=await page.evaluate(()=>scatterChart.plot.scales.x.max-scatterChart.plot.scales.x.min);
+ await page.getByRole('button',{name:'Zoom in'}).click();
+ await page.waitForFunction(initial=>scatterChart.plot.scales.x.max-scatterChart.plot.scales.x.min<initial,scatterSpan);
+ assert.deepEqual(errors,[]);assert.deepEqual(bad,[]);console.log('Static gallery, charts and real WASM editor passed',rendererMetrics);
 }finally{await browser?.close();await new Promise(r=>server.close(r));}
