@@ -6,16 +6,16 @@
 [data-slot='button'][data-size^='icon']:not(.button) { inline-size: var(--ely-control-height); block-size: var(--ely-control-height); min-height: 0; padding: 0; border-radius: var(--ely-control-radius); font-size: var(--ely-control-font-size); line-height: 1.25rem; }
 [data-slot='button'][data-size='sm']:not(.button) { min-height: 1.5rem; padding: .0625rem .5rem; font-size: .75rem; }
 [data-slot='button'][data-size='lg']:not(.button) { min-height: 2rem; padding: .3125rem 1rem; font-size: .875rem; }
-[data-slot='button'][data-size='xs']:not(.button) { min-height: 1.5rem; padding: 0 .375rem; font-size: .6875rem; line-height: 1.125rem; }
-[data-slot='button'][data-size='icon-xs']:not(.button) { inline-size: 1.5rem; block-size: 1.5rem; }
+[data-slot='button'][data-size='xs']:not(.button) { min-height: 1.25rem; padding: 0 .375rem; font-size: .6875rem; line-height: 1.125rem; }
+[data-slot='button'][data-size='icon-xs']:not(.button) { inline-size: 1.25rem; block-size: 1.25rem; }
 [data-slot='button'][data-size='icon-sm']:not(.button) { inline-size: 1.5rem; block-size: 1.5rem; }
 [data-slot='button'][data-size='icon-lg']:not(.button) { inline-size: 2rem; block-size: 2rem; }
 [data-slot='textarea'], [data-slot='select'][multiple], [data-slot='select'][size] { padding: .5rem var(--ely-control-padding); border-radius: var(--ely-control-radius); font-size: var(--ely-control-font-size); font-weight: 400; line-height: 1.25rem; }
 [data-slot='input'][type='file'] { padding-block: .0625rem; }
 [data-slot='input'][type='file']::file-selector-button { height: 1.5rem; margin-inline-end: .5rem; padding: 0; font: inherit; line-height: 1.25rem; }
-:where(:is(select[data-slot='select'], [data-ely-family] select):not([multiple]):not([size])) { -webkit-appearance: none; appearance: none; padding-inline-end: 2.25rem; background-image: linear-gradient(45deg, transparent calc(50% - .75px), currentColor calc(50% - .75px), currentColor calc(50% + .75px), transparent calc(50% + .75px)), linear-gradient(135deg, transparent calc(50% - .75px), currentColor calc(50% - .75px), currentColor calc(50% + .75px), transparent calc(50% + .75px)); background-position: right calc(var(--ely-control-padding) + 5px) center, right var(--ely-control-padding) center; background-size: 5px 5px; background-repeat: no-repeat; }
-:where(:is(select[data-slot='select'], [data-ely-family] select):not([multiple]):not([size]):dir(rtl)) { background-position: left var(--ely-control-padding) center, left calc(var(--ely-control-padding) + 5px) center; }
-@media (forced-colors: active) { :where(:is(select[data-slot='select'], [data-ely-family] select):not([multiple]):not([size])) { -webkit-appearance: auto; appearance: auto; background-image: none; } }
+:is(select[data-slot='select'], [data-ely-family] select):not([multiple]):not([size]):not([data-project-label-hue]) { -webkit-appearance: none; appearance: none; padding-inline-end: 2.25rem; background-image: linear-gradient(45deg, transparent calc(50% - .75px), currentColor calc(50% - .75px), currentColor calc(50% + .75px), transparent calc(50% + .75px)), linear-gradient(135deg, transparent calc(50% - .75px), currentColor calc(50% - .75px), currentColor calc(50% + .75px), transparent calc(50% + .75px)); background-position: right calc(var(--ely-control-padding) + 5px) center, right var(--ely-control-padding) center; background-size: 5px 5px; background-repeat: no-repeat; }
+:is(select[data-slot='select'], [data-ely-family] select):not([multiple]):not([size]):not([data-project-label-hue]):dir(rtl) { background-position: left var(--ely-control-padding) center, left calc(var(--ely-control-padding) + 5px) center; }
+@media (forced-colors: active) { :is(select[data-slot='select'], [data-ely-family] select):not([multiple]):not([size]):not([data-project-label-hue]) { -webkit-appearance: auto; appearance: auto; background-image: none; } }
 [data-ui-component]:not(dialog) { display: grid; gap: .5rem; align-content: start; min-inline-size: 0; }
 dialog[data-ui-component]:not([open]) { display: none; }
 [data-ui-component] label, .ely-control-label { font-size: var(--ely-control-font-size); font-weight: 500; line-height: 1.25rem; margin: 0; }
