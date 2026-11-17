@@ -234,7 +234,8 @@
 [data-ely-family='forms'].ely-account-help form,[data-ely-family='forms'].ely-account-help fieldset{min-width:0}
 [data-ely-family='forms'].ely-account-help fieldset{border:0;padding:0;margin:0;display:grid;gap:16px}
 [data-ely-family='forms'].ely-account-help .ely-api-field{gap:6px;margin:0}
-[data-ely-family='forms'].ely-account-help input:not([data-ui-pin-slot]):not([type=checkbox]):not([type=radio]):not([type=range]),[data-ely-family='forms'].ely-account-help select{min-height:28px;height:28px;padding:3px 10px;font-size:13px}
+[data-ely-family='forms'].ely-account-help input:not([data-ui-pin-slot]):not([type=checkbox]):not([type=radio]):not([type=range]){min-height:28px;height:28px;padding:3px 10px;font-size:13px}
+[data-ely-family='forms'].ely-account-help select{min-height:28px;height:28px;padding-block:3px;padding-inline-start:10px;font-size:13px}
 [data-ely-family='forms'].ely-account-help textarea{padding:8px 12px;font-size:13px}
 [data-ely-family='forms'].ely-account-help button{min-height:28px;font-size:13px;padding:3px 12px}
 [data-ely-family='forms'].ely-account-help h3,[data-ely-family='forms'].ely-account-help h4,[data-ely-family='forms'].ely-account-help p{margin:0}
@@ -445,7 +446,7 @@
 [data-ely-family='forms'] .ely-api-format-icon input{height:28px;padding:3px 10px 3px 34px;font-size:13px}
 [data-ely-family='forms'] .ely-api-phone{display:flex;min-width:0}
 [data-ely-family='forms'] .ely-api-phone input{height:28px;min-width:0;padding:3px 10px;font-size:13px}
-[data-ely-family='forms'] .ely-api-phone select{width:76px;flex:none;height:28px;min-height:28px;padding:2px 4px;font-size:12px;border:1px solid var(--color-line);border-radius:4px 0 0 4px}
+[data-ely-family='forms'] .ely-api-phone select{width:76px;flex:none;height:28px;min-height:28px;padding-block:2px;padding-inline-start:4px;font-size:12px;border:1px solid var(--color-line);border-radius:4px 0 0 4px}
 [data-ely-family='forms'] .ely-api-phone:has(select) input{border-radius:0 4px 4px 0}
 [data-ely-family='forms'] .ely-api-radio-group{display:grid;gap:8px;max-inline-size:none}
 [data-ely-family='forms'] .ely-api-radio-group.is-row{display:flex;gap:16px;flex-wrap:wrap}
