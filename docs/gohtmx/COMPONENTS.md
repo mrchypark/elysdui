@@ -80,8 +80,54 @@ controls follow native exclusion rules. Mixed-state initialization runs once per
 inserted checkbox, including HTMX replacements, without overwriting user changes
 on repeated swap notifications.
 
-
 `Attrs`는 코드에서 정한 `data-*`·`aria-*`·`hx-*` 속성이다. 속성 이름을 검증하고 값은 이스케이프한다. 이벤트 실행 속성과 임의의 HTML을 이 경로로 전달하지 않는다.
+
+### 기본 폼·UI 예제
+
+```gotemplate
+{{/* 레이블·설명·데이터 목록 */}}
+{{template "field-label" (dict "Label" "이메일" "Required" true)}}
+{{template "field-description" (dict "ID" "email-help" "Text" "알림을 받을 주소를 입력하세요.")}}
+{{template "input" (dict "ID" "email" "Name" "email" "Type" "email" "Placeholder" "you@example.com" "Required" true "AriaDescribedby" "email-help")}}
+{{template "datalist" (dict "ID" "role-suggestions" "Options" (list "admin" "editor" "viewer"))}}
+
+{{/* 여러 줄 입력 */}}
+{{template "textarea" (dict "ID" "bio" "Name" "bio" "Placeholder" "소개를 입력하세요." "Rows" 4)}}
+
+{{/* 네이티브 선택 */}}
+{{template "select" (dict
+  "ID" "role" "Name" "role" "Placeholder" "역할 선택" "Value" "editor"
+  "Options" (list
+    (dict "Value" "admin" "Label" "관리자")
+    (dict "Value" "editor" "Label" "편집자")
+    (dict "Value" "viewer" "Label" "열람자")))}}
+
+{{/* 라디오 그룹 */}}
+{{template "radio-group" (dict
+  "Name" "visibility" "AriaLabel" "공개 범위" "Value" "team"
+  "Options" (list
+    (dict "Value" "private" "Label" "비공개")
+    (dict "Value" "team" "Label" "팀 공개")
+    (dict "Value" "public" "Label" "전체 공개")))}}
+
+{{/* 체크박스·스위치 */}}
+<label>{{template "checkbox" (dict "ID" "agree" "Name" "agree" "Value" "yes" "Checked" true)}} 약관 동의</label>
+<label>{{template "switch" (dict "ID" "alerts" "Name" "alerts" "Checked" true "AriaLabel" "알림 받기")}} 알림</label>
+
+{{/* 슬라이더·진행률 (Value는 Go 포인터 *int 전달, 미지정 시 기본/불확정) */}}
+{{template "slider" (dict "ID" "volume" "Name" "volume" "AriaLabel" "음량" "Step" "5")}}
+{{template "progress" (dict "ID" "upload-progress" "Max" 100 "AriaLabel" "업로드 진행률")}}
+
+{{/* 버튼·배지·구분선·단축키 */}}
+{{template "button" (dict "Label" "저장" "Type" "submit" "Variant" "primary")}}
+{{template "button" (dict "Label" "문서 보기" "Href" "/docs" "Variant" "outline")}}
+{{template "badge" (dict "Text" "승인됨" "Variant" "secondary")}}
+{{template "separator" (dict "Orientation" "horizontal")}}
+{{template "kbd" (dict "Text" "Esc")}}
+{{template "kbd-group" (dict "Keys" (list "Ctrl" "Shift" "R"))}}
+```
+
+> **참고**: `slider`와 `progress`의 `Value`는 Go 템플릿에서 포인터(`*int`)로 전달해야 렌더링됩니다. `dict`만으로는 포인터를 만들 수 없으므로 Go 핸들러에서 `Value: &val` 형태로 넘기세요.
 
 ## 복합 폼
 
@@ -104,6 +150,43 @@ on repeated swap notifications.
 
 `Content`는 문자열이면 이스케이프한다. 앱이 안전하게 렌더링한 조각만 `template.HTML`로 전달한다. 사용자 입력을 직접 `template.HTML`로 바꾸지 않는다. HTMX 4의 `htmx:after:swap`에서 새 컴포넌트를 한 번 초기화한다.
 
+### 복합 폼 예제
+
+```gotemplate
+{{/* 지우기/비밀번호/PIN/태그/키-값 입력 */}}
+{{template "clearable-input" (dict "ID" "search-q" "Name" "q" "Label" "검색어" "Placeholder" "키워드 입력")}}
+{{template "password-input" (dict "ID" "pw" "Name" "password" "Label" "비밀번호" "Required" true)}}
+{{template "pin-input" (dict "ID" "otp" "Name" "otp" "Label" "인증 코드" "Items" (list 1 2 3 4 5 6))}}
+{{template "tag-input" (dict "ID" "tags" "Name" "tags" "Label" "태그" "Value" "go,htmx")}}
+{{template "key-value-input" (dict "ID" "headers" "Name" "headers" "Label" "헤더" "Items" (list (dict "Key" "Accept" "Value" "application/json")))}}
+
+{{/* 파일 드롭존·날짜·색상·단축키·서명 */}}
+{{template "file-dropzone" (dict "ID" "attachments" "Name" "files" "Label" "첨부 파일" "Accept" ".pdf,.png" "Multiple" true "DropZone" true)}}
+{{template "date-picker" (dict "ID" "due" "Name" "due" "Label" "마감일" "Value" "2026-12-01" "Min" "2026-01-01")}}
+{{template "color-picker" (dict "ID" "accent" "Name" "accent" "Label" "강조색" "Value" "#3772BB")}}
+{{template "hotkey-input" (dict "ID" "shortcut" "Name" "shortcut" "Label" "단축키" "Value" "Ctrl+K")}}
+{{template "signature-pad" (dict "ID" "sig" "Name" "signature" "Label" "서명")}}
+
+{{/* 콤보박스·다중 선택·선택 목록 */}}
+{{template "combobox" (dict
+  "ID" "city" "Name" "city" "Label" "도시"
+  "Options" (list (dict "Value" "seoul" "Label" "서울") (dict "Value" "busan" "Label" "부산")))}}
+{{template "multi-select" (dict
+  "ID" "scopes" "Name" "scopes" "Label" "권한"
+  "Options" (list (dict "Value" "read" "Label" "읽기" "Selected" true) (dict "Value" "write" "Label" "쓰기")))}}
+{{template "selectable-list" (dict
+  "ID" "items" "Name" "items" "Label" "항목" "Size" 4
+  "Options" (list (dict "Value" "a" "Label" "항목 A") (dict "Value" "b" "Label" "항목 B")))}}
+
+{{/* 대화상자·탭 */}}
+{{template "dialog" (dict "ID" "confirm-dlg" "Label" "삭제 확인" "Content" "선택한 항목을 삭제할까요?")}}
+{{template "tabs" (dict
+  "ID" "profile-tabs" "Value" "general"
+  "Items" (list
+    (dict "Value" "general" "Label" "일반" "Content" "기본 설정 내용")
+    (dict "Value" "security" "Label" "보안" "Content" "보안 설정 내용")))}}
+```
+
 ## 데이터·레이아웃·지도
 
 `card`, `stack`, `grid`, `code-block`, `avatar`, `alert`, `empty-state`, `accordion`, `breadcrumb`, `timeline`, `menu`, `table`, `data-table`, `chart`, `calendar`, `map-view`, `coordinate-display`을 호출자가 제공한 데이터로 사용한다.
@@ -113,6 +196,39 @@ on repeated swap notifications.
 - `calendar`: `ID`, `Name`, `Value` (`YYYY-MM-DD`), `Min`, `Max`, `Required`, `Disabled`. 월 전환·날짜 선택·방향키 이동과 네이티브 날짜 입력을 제공한다.
 - `menu`: `ID`, `Label`, `Items`의 `Value`·`Label`·`Href`·`Disabled`·`Attrs`. 네이티브 Popover, 방향키·Escape, `ui:select` 이벤트를 제공한다.
 - `map-view`: `ID`, `Label`, `Points`의 `Latitude`·`Longitude`·`Label`·`Value`, `Routes`의 `Points`, `Name`, `Value`, `Disabled`, `Mode`. Mode는 `markers`, `location`, `routes`, `heatmap`, `clusters`, `choropleth`, `world`이다. 국가별 색의 값은 국가 이름을 Label로 준다. `GeoJSON`은 호스트가 제공하는 FeatureCollection 문자열이다. 기본 국가 경계는 저장소에 포함한 Natural Earth 자료다.
+
+### 데이터·레이아웃·지도 예제
+
+```gotemplate
+{{/* 레이아웃·피드백 */}}
+{{template "card" (dict "ID" "summary-card" "Title" "요약" "Description" "이번 주 현황" "Content" "처리 완료 12건")}}
+{{template "stack" (dict "Horizontal" true "Content" "가로 배치 항목")}}
+{{template "grid" (dict "Content" "그리드 항목")}}
+{{template "code-block" (dict "Content" "go get github.com/mrchypark/elysdui@v0.3.1")}}
+{{template "avatar" (dict "Text" "CY" "Label" "박찬엽")}}
+{{template "alert" (dict "Title" "안내" "Content" "변경 사항이 저장되었습니다.")}}
+{{template "empty-state" (dict "Title" "항목 없음" "Description" "새 항목을 추가해 시작하세요.")}}
+
+{{/* 아코디언·브레드크럼·타임라인·메뉴 */}}
+{{template "accordion" (dict "ID" "faq" "Items" (list (dict "Label" "설치 방법" "Content" "go get으로 설치합니다." "Open" true)))}}
+{{template "breadcrumb" (dict "Label" "현재 위치" "Items" (list (dict "Label" "홈" "Href" "/") (dict "Label" "컴포넌트")))}}
+{{template "timeline" (dict "Items" (list (dict "Time" "10:00" "Label" "배포 시작" "Content" "v0.3.1 태그 생성")))}}
+{{template "menu" (dict "ID" "row-menu" "Label" "작업" "Items" (list (dict "Value" "edit" "Label" "편집") (dict "Value" "delete" "Label" "삭제")))}}
+
+{{/* 표·차트·달력·지도 */}}
+{{template "table" (dict
+  "Columns" (list (dict "Label" "이름") (dict "Label" "상태"))
+  "Rows" (list (dict "Cells" (list "grant-admin" "정상"))))}}
+{{template "data-table" (dict
+  "ID" "projects-table"
+  "Columns" (list (dict "Label" "이름") (dict "Label" "상태"))
+  "Rows" (list (dict "Cells" (list "grant-admin" "정상")))
+  "FilterOptions" (list (dict "Value" "정상" "Label" "정상"))))}}
+{{template "chart" (dict "Label" "주간 추이" "Type" "line" "Points" (list (dict "X" 20 "Y" 90 "Label" "월") (dict "X" 160 "Y" 40 "Label" "수") (dict "X" 300 "Y" 20 "Label" "금")))}}
+{{template "calendar" (dict "ID" "event-date" "Name" "event_date" "Value" "2026-11-17")}}
+{{template "coordinate-display" (dict "ID" "seoul-coord" "Value" "37.5665, 126.9780" "Label" "서울 시청")}}
+{{template "map-view" (dict "ID" "office-map" "Label" "사무실 위치" "Mode" "markers" "Points" (list (dict "Latitude" 37.5665 "Longitude" 126.9780 "Label" "서울" "Value" "HQ")))}}
+```
 
 ## 카탈로그와 검증 범위
 

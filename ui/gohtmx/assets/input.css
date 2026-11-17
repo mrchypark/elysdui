@@ -79,7 +79,6 @@
   .site-header__inner > .account, .site-header__inner > .theme-toggle { align-self: center; }
   .wordmark { display: inline-flex; align-items: baseline; gap: .55rem; font-size: 1.3rem; letter-spacing: -.04em; text-decoration: none; white-space: nowrap; }
   .wordmark img { align-self: center; width: 1.8rem; height: 1.8rem; }
-  .brand-mark { align-self: center; display: inline-block; width: 1.8rem; height: 1.8rem; flex: none; background: currentColor; mask: url('./elysdui-mark.svg') center/contain no-repeat; -webkit-mask: url('./elysdui-mark.svg') center/contain no-repeat; }
   .wordmark .brand-logo--dark { display: none; }
   .brand-name { color: #14213A; }
   .brand-on { color: inherit; }
@@ -215,7 +214,8 @@
 [data-slot='button']:disabled { opacity: .45; }
 .button[data-slot='button'] { height: auto; min-height: 3rem; inline-size: auto; border-radius: 999px; padding: .625rem 1.375rem; font-size: .9375rem; line-height: 1.625rem; }
 [data-slot='input'] { background: var(--surface); box-shadow: none; }
-[data-slot='textarea'], [data-slot='select'] { width: 100%; min-width: 0; border: 1px solid var(--border); background: var(--surface); color: var(--color-ink); box-shadow: none; }
+[data-slot='textarea'] { width: 100%; min-width: 0; border: 1px solid var(--border); background: var(--surface); color: var(--color-ink); box-shadow: none; }
+[data-slot='select'] { width: 100%; min-width: 0; border: 1px solid var(--border); background-color: var(--surface); color: var(--color-ink); box-shadow: none; }
 [data-slot='field-label'] { font-size: .9375rem; font-weight: 600; }
 [data-slot='field-label'] small { margin-left: .5rem; color: var(--color-muted); font-size: .75rem; font-weight: 400; }
 [data-slot='field-description'] { color: var(--color-muted); font-size: .875rem; line-height: 1.7; margin: .5rem 0 1.375rem; }
