@@ -247,6 +247,4 @@ const restart = event => {
 document.addEventListener('htmx:after:swap', restart);
 // Also restore a controller if a later listener cancelled a prepared swap.
 document.addEventListener('htmx:finally:swap', restart);
-new MutationObserver(mutations => {
-  if (mutations.some(m => m.removedNodes.length > 0)) prune();
-}).observe(document.documentElement, { childList: true, subtree: true });
+new MutationObserver(prune).observe(document.documentElement, { childList: true, subtree: true });
