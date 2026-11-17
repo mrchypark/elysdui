@@ -72,7 +72,7 @@
 }
 @layer components {
   .skip-link { position: fixed; left: 1rem; top: -4rem; z-index: 10; background: var(--color-accent); color: var(--on-accent); padding: .65rem .9rem; }
-  .skip-link:focus { top: 1rem; }
+  .skip-link:focus-visible { top: 1rem; }
   .shell { width: calc(100% - 8rem); margin: 0 auto; }
   .site-header { height: 4rem; border-bottom: 1px solid var(--color-line); }
   .site-header__inner { height: 100%; padding-block: .875rem; display: flex; gap: 2rem; align-items: center; justify-content: space-between; }

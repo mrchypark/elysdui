@@ -26,7 +26,7 @@ export function createScatterIndex(x, y, {leafSize = 64} = {}) {
     if (buckets.some(bucket => bucket.length === ids.length)) {
       const first = ids[0];
       if (ids.every(i => x[i] === x[first] && y[i] === y[first])) { node.identical = first; return at; }
-      const axis = right - left >= bottom - top ? 'x' : 'y', ordered = [...ids].sort((a, b) => axis === 'x' ? x[a] - x[b] || y[a] - y[b] : y[a] - y[b] || x[a] - x[b]), middle = ordered.length >>> 1;
+      const axis = right - left >= bottom - top ? 'x' : 'y', ordered = ids.toSorted((a, b) => axis === 'x' ? x[a] - x[b] || y[a] - y[b] : y[a] - y[b] || x[a] - x[b]), middle = ordered.length >>> 1;
       node.children = new Int32Array(4); node.children.fill(-1);
       for (const [slot, part] of [[0, ordered.slice(0, middle)], [1, ordered.slice(middle)]]) {
         let childLeft = Infinity, childTop = Infinity, childRight = -Infinity, childBottom = -Infinity;

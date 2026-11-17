@@ -4,7 +4,7 @@ import './ely-api-forms.js';
 export const hues = ['#5182c1','#009589','#aa732b','#b8636b','#8572bb','#539156','#b66946','#138db1'];
 export const zoomStops = [.1,.25,.5,.75,1,1.5,2,3,4,6,8];
 const clamp = (v,a,b) => Math.max(a,Math.min(b,v));
-export const zoomStep = (z,inward) => (inward?zoomStops:[...zoomStops].reverse()).find(v=>inward?v>z+.001:v<z-.001) ?? z;
+export const zoomStep = (z,inward) => (inward?zoomStops:zoomStops.toReversed()).find(v=>inward?v>z+.001:v<z-.001) ?? z;
 export const canvasPoint = (v,p) => ({x:p.x/v.zoom+v.x,y:p.y/v.zoom+v.y});
 export function zoomAbout(v,zoom,p) {const held=canvasPoint(v,p);zoom=clamp(zoom,.1,8);return {x:held.x-p.x/zoom,y:held.y-p.y/zoom,zoom};}
 export function union(frames) {if(!frames.length)return {x:0,y:0,w:1,h:1};const x=Math.min(...frames.map(f=>f.x)),y=Math.min(...frames.map(f=>f.y));return {x,y,w:Math.max(...frames.map(f=>f.x+f.w))-x,h:Math.max(...frames.map(f=>f.y+f.h))-y};}
@@ -21,7 +21,7 @@ export function mindLayout(topics){const root=topics.find(t=>!t.parent);if(!root
 export function mindStep(placed,id,key){const here=placed.find(t=>t.id===id);if(!here)return id;const peers=placed.filter(t=>t.parent===here.parent&&t.left===here.left),at=peers.indexOf(here),outward=(left)=>placed.find(t=>t.parent===id&&t.left===left)?.id;if(key==='ArrowUp')return peers[at-1]?.id??id;if(key==='ArrowDown')return peers[at+1]?.id??id;if(!here.parent)return outward(key==='ArrowLeft')??id;return (key==='ArrowLeft')===here.left?outward(here.left)??id:here.parent;}
 
 const tools = [['select','Select','v','mouse-pointer-2'],['hand','Hand','h','hand'],['rect','Rectangle','r','square'],['ellipse','Ellipse','o','circle'],['polygon','Polygon','y','hexagon'],['line','Line','l','slash'],['arrow','Arrow','a','move-up-right'],['pen','Pen','p','pen-tool'],['text','Text','t','type'],['brush','Brush','b','brush'],['note','Note','n','sticky-note'],['connector','Connector','c','spline']];
-const clone = value => JSON.parse(JSON.stringify(value));
+const clone = value => structuredClone(value);
 export function readScene(node){
   const type=node.dataset.csValue;
   if(type==='object')return Object.fromEntries([...node.children].filter(n=>n.tagName==='DT').map(n=>[n.textContent,readScene(n.nextElementSibling.firstElementChild)]));
@@ -112,7 +112,7 @@ export function mountCanvasScene(root){
   };
   const renderLayers=()=>{
     ui.replaceChildren();const layout=el('div',{'data-cs-panels':''}),layers=el('ul',{'data-cs-layers':'',role:'listbox','aria-label':'Layers','aria-multiselectable':'true'}),inspector=el('div',{'data-cs-inspector':''}),assets=el('div',{'data-cs-assets':''});layout.append(layers,inspector,assets);ui.append(layout);
-    for(const shape of [...state.shapes].reverse()){
+    for(const shape of state.shapes.toReversed()){
       const li=el('li',{'data-cs-layer':shape.id,draggable:!disabled,role:'option','aria-selected':state.selected.includes(shape.id),tabindex:disabled?-1:0}),visible=check('',!shape.hidden,on=>{shape.hidden=!on;record('Show or hide','show-layers',{ids:state.shapes.filter(s=>!s.hidden).map(s=>s.id)});});visible.querySelector('input').setAttribute('aria-label','Show '+shape.name);li.append(visible,el('span',{},shape.name));layers.append(li);
       on(li,'click',e=>{if(!disabled&&!e.target.closest('input,label'))pick(shape.id,e.shiftKey);});on(li,'keydown',e=>{if(disabled)return;if(e.key==='F2'){e.preventDefault();editText(shape.id,true);}if(e.key==='Enter'||e.key===' '){e.preventDefault();pick(shape.id,e.shiftKey);}});
       on(li,'dragstart',e=>{if(disabled)return;e.dataTransfer.setData('text/plain',shape.id);});on(li,'dragover',e=>{if(!disabled)e.preventDefault();});on(li,'drop',e=>{e.preventDefault();if(disabled)return;const id=e.dataTransfer.getData('text/plain'),from=state.shapes.find(s=>s.id===id);if(!from||from===shape)return;state.shapes=state.shapes.filter(s=>s!==from);state.shapes.splice(state.shapes.indexOf(shape)+1,0,from);record('Restack','restack-layers',{order:state.shapes.map(s=>s.id)});});

@@ -19,7 +19,7 @@ func renderSharedAttrsError(t *testing.T, attrs map[string]string) error {
 }
 
 func TestUISecurityRejectsExecutableAttributeNames(t *testing.T) {
-	for _, name := range []string{"hx-on", "data-hx-on", "data-hx-on:click", "onclick", `data-x" onclick="alert(1)`} {
+	for _, name := range []string{"hx-on", "data-hx-on", "data-hx-on:click", "hx-vars", "data-hx-vars", "onclick", `data-x" onclick="alert(1)`} {
 		if err := renderSharedAttrsError(t, map[string]string{name: "x"}); err == nil {
 			t.Errorf("accepted executable attribute name %q", name)
 		}

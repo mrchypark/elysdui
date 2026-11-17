@@ -173,7 +173,7 @@
           if (node.textContent.length > 262144) throw failure('Animation data exceeds limit');
           try { let data = JSON.parse(node.textContent); if (typeof data === 'string') data = JSON.parse(data); inertAnimation = data !== null && typeof data === 'object' && !Array.isArray(data); } catch {}
         }
-        if ((tag === 'script' && !inertAnimation) || ['object', 'embed', 'base'].includes(tag) ||
+        if ((tag === 'script' && !inertAnimation) || ['object', 'embed', 'base', 'style', 'animate', 'set', 'animatetransform', 'animatemotion'].includes(tag) ||
             (tag === 'meta' && hasAttr(node, 'http-equiv'))) {
           throw failure('SDUI response contains executable markup');
         }
@@ -186,8 +186,8 @@
           const rawValue = attr(node, attributeName);
           const value = rawValue.replace(/[\x00-\x20\x7f]/g, '');
           const hx = name.replace(/^data-/, '');
-          if (/^on/.test(name) || /^hx-on(?::|-|$)/.test(hx) || hx === 'hx-vars' ||
-              (hx === 'hx-vals' && /^(?:js|javascript):/i.test(value)) ||
+          if (/^on/.test(name) || /^hx-on(?::|-|$)/.test(hx) || hx === 'hx-vars' || hx === 'hx-config' ||
+              (['hx-get', 'hx-post', 'hx-put', 'hx-patch', 'hx-delete', 'hx-query', 'hx-action', 'hx-confirm', 'hx-vals', 'hx-headers'].includes(hx) && /^(?:js|javascript):/i.test(value)) ||
               (hx === 'hx-trigger' && rawValue.includes('[')) ||
               (['href', 'src', 'action', 'formaction', 'xlink:href'].includes(name) && /^(?:javascript|vbscript):/i.test(value))) {
             throw failure('SDUI response contains executable attributes');
@@ -306,6 +306,7 @@
       status = response.status;
       if (status === 409 && response.headers.get('X-SDUI-Reload') === 'required') {
         emit(screen, 'sdui:stale', {action, target: targetID, requestId: id, status, revision: response.headers.get('X-SDUI-Revision')});
+        return;
       }
       if (!response.ok && status !== 422) throw failure(`SDUI request failed (${status})`);
       const contentType = response.headers.get('Content-Type');
@@ -314,12 +315,16 @@
       if (!current()) return;
       const region = safeFragment(html, targetID);
       const focus = focusedControl(target);
+      const swapCtx = {sourceElement: source, target: region, swap: 'outerHTML'};
+      dispatch(target, new CustomEvent('htmx:before:swap', {
+        bubbles: true, detail: {ctx: swapCtx, tasks: [{target, swapSpec: 'outerHTML'}]},
+      }));
       // No await after the last sequence/identity check: a superseded response
       // must never replace a newer region, even if fetch ignores abort().
       Element.prototype.replaceWith.call(target, region);
       window.htmx?.process?.(region);
       dispatch(region, new CustomEvent('htmx:after:swap', {
-        bubbles: true, detail: {ctx: {sourceElement: source, target: region, swap: 'outerHTML'}},
+        bubbles: true, detail: {ctx: swapCtx},
       }));
       restoreFocus(region, focus);
       emit(region, status === 422 ? 'sdui:error' : 'sdui:success', {

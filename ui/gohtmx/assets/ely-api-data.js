@@ -278,7 +278,7 @@ register('data', root => {
       const direction = previous === 'ascending' ? 'descending' : previous === 'descending' ? 'none' : 'ascending';
       tableRoot.querySelectorAll('th[aria-sort]').forEach(cell => cell.setAttribute('aria-sort', 'none'));
       heading?.setAttribute('aria-sort', direction);
-      const rows = direction === 'none' ? originalRows : [...originalRows].sort((left, right) => (left.cells[column]?.textContent || '').localeCompare(right.cells[column]?.textContent || '', undefined, { numeric: true }) * (direction === 'ascending' ? 1 : -1));
+      const rows = direction === 'none' ? originalRows : originalRows.toSorted((left, right) => (left.cells[column]?.textContent || '').localeCompare(right.cells[column]?.textContent || '', undefined, { numeric: true }) * (direction === 'ascending' ? 1 : -1));
       body.append(...rows);
       reset();
     }));
@@ -374,7 +374,7 @@ register('data', root => {
       modified: (a, b) => ageInSeconds(b.cells[index]?.textContent) - ageInSeconds(a.cells[index]?.textContent),
     }[column];
     if (!compare) return;
-    const rows = direction === 'none' ? original : [...original].sort((a, b) => {
+    const rows = direction === 'none' ? original : original.toSorted((a, b) => {
       const foldersFirst = Number(b.hasAttribute('data-ely-directory-folder')) - Number(a.hasAttribute('data-ely-directory-folder'));
       return foldersFirst || compare(a, b) * (direction === 'ascending' ? 1 : -1);
     });

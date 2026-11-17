@@ -12,6 +12,7 @@ import (
 	"unicode"
 
 	"github.com/mrchypark/elysdui/sdui"
+	ui "github.com/mrchypark/elysdui/ui/gohtmx"
 )
 
 // RequestCompressionOptions controls native browser compression of text action
@@ -159,7 +160,9 @@ func (p *Plan) RenderAssets(w io.Writer) error {
 		return fmt.Errorf("sdui: rendering requires a compiled plan")
 	}
 	var output boundedBuffer
-	output.WriteString(`<link rel="stylesheet" href="/assets/app.css"><link rel="stylesheet" href="/assets/sdui.css">`)
+	if _, err := output.WriteString(`<link rel="stylesheet" href="/assets/app.css"><link rel="stylesheet" href="/assets/sdui.css">`); err != nil {
+		return err
+	}
 	if err := p.templates.ExecuteTemplate(&output, "ui-component-assets", nil); err != nil {
 		return err
 	}
@@ -175,14 +178,8 @@ func (p *Plan) RenderAssets(w io.Writer) error {
 		css["ely-api.css"] = true
 	}
 	for _, family := range p.families {
-		css["ely-api-"+family+".css"] = true
-		switch family {
-		case "workspace":
-			css["ely-api-forms.css"] = true
-		case "communication":
-			css["ely-api-calendar-parity.css"] = true
-		case "native":
-			css["ely-api-native-tooling.css"] = true
+		for _, sheet := range ui.FamilyStylesheets(family) {
+			css[sheet] = true
 		}
 	}
 	names := make([]string, 0, len(css))
@@ -191,12 +188,18 @@ func (p *Plan) RenderAssets(w io.Writer) error {
 	}
 	sort.Strings(names)
 	for _, name := range names {
-		fmt.Fprintf(&output, `<link rel="stylesheet" href="/assets/%s">`, name)
+		if _, err := fmt.Fprintf(&output, `<link rel="stylesheet" href="/assets/%s">`, name); err != nil {
+			return err
+		}
 	}
 	for _, family := range p.families {
-		fmt.Fprintf(&output, `<script type="module" src="/assets/ely-api-%s-entry.js"></script>`, family)
+		if _, err := fmt.Fprintf(&output, `<script type="module" src="/assets/ely-api-%s-entry.js"></script>`, family); err != nil {
+			return err
+		}
 	}
-	output.WriteString(`<script src="/assets/sdui.js" defer></script>`)
+	if _, err := output.WriteString(`<script src="/assets/sdui.js" defer></script>`); err != nil {
+		return err
+	}
 	_, err := w.Write(output.Bytes())
 	return err
 }
@@ -206,16 +209,19 @@ type eventMetadata struct {
 	Single *Event
 }
 
-func eventJSON(events []Event) *eventMetadata {
+func eventJSON(events []Event) (*eventMetadata, error) {
 	if len(events) == 0 {
-		return nil
+		return nil, nil
 	}
-	data, _ := json.Marshal(events)
+	data, err := json.Marshal(events)
+	if err != nil {
+		return nil, err
+	}
 	metadata := &eventMetadata{JSON: string(data)}
 	if len(events) == 1 {
 		metadata.Single = &events[0]
 	}
-	return metadata
+	return metadata, nil
 }
 
 // SemanticPlan returns the opaque, immutable semantic snapshot. The adapter's

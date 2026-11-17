@@ -13,7 +13,7 @@
     ['terracotta', {id:'terracotta', name:'Oxide Terracotta', light:{...light, 'color-accent':'#96523E', 'accent-hover':'#793F2F', 'accent-tint':'#F8EDE7', focus:'#96523E'}, dark:{...dark, 'color-accent':'#E7A38B', 'accent-hover':'#F1BAA7', 'accent-tint':'#3C2B26', focus:'#E7A38B'}}],
   ]);
   const builtins = new Set(palettes.keys());
-  const copy = value => JSON.parse(JSON.stringify(value));
+  const copy = value => structuredClone(value);
   const read = key => { try { return localStorage.getItem(key); } catch { return null; } };
   const save = (key, value) => { try { localStorage.setItem(key, value); } catch {} };
   const modeOf = value => { if (!['light','dark'].includes(value)) throw new Error('Mode must be light or dark.'); return value; };

@@ -61,8 +61,9 @@ func attrName(name string) (template.HTMLAttr, error) {
 		return "", fmt.Errorf("unsupported component attribute %q", name)
 	}
 	// hx-config can override request.action with executable JavaScript after
-	// the individual request attributes have been validated.
-	if htmx := htmxAttributeName(name); htmxEventAttributeName.MatchString(htmx) || htmx == "hx-config" {
+	// the individual request attributes have been validated. hx-vars evaluates
+	// its value as JavaScript expressions without a js: prefix.
+	if htmx := htmxAttributeName(name); htmxEventAttributeName.MatchString(htmx) || htmx == "hx-config" || htmx == "hx-vars" {
 		return "", fmt.Errorf("unsupported component attribute %q", name)
 	}
 	// Only the validated name bypasses escaping. Attribute values remain escaped.
