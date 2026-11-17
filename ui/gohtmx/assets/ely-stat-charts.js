@@ -28,7 +28,7 @@ export function histogramModel(values, count = 10) {
 
 export function spread(values) {
   if (!Array.isArray(values) || values.length < 2 || !values.every(finite)) throw new TypeError('Each group needs at least two finite numbers');
-  const sorted = [...values].sort((a, b) => a - b), quantile = share => { const at = share * (sorted.length - 1), low = Math.floor(at), high = Math.ceil(at); return sorted[low] + (sorted[high] - sorted[low]) * (at - low); };
+  const sorted = values.toSorted((a, b) => a - b), quantile = share => { const at = share * (sorted.length - 1), low = Math.floor(at), high = Math.ceil(at); return sorted[low] + (sorted[high] - sorted[low]) * (at - low); };
   const q1 = quantile(.25), median = quantile(.5), q3 = quantile(.75), reach = (q3 - q1) * 1.5;
   const inside = sorted.filter(value => value >= q1 - reach && value <= q3 + reach);
   return { low: inside[0], q1, median, q3, high: inside.at(-1), outliers: sorted.filter(value => value < inside[0] || value > inside.at(-1)) };

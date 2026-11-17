@@ -36,6 +36,24 @@ var componentFamilies = map[string]string{
 	"forms": "forms", "settings": "forms", "account": "forms", "onboarding": "forms", "maps": "forms",
 }
 
+// FamilyStylesheets returns the stylesheet asset filenames required by an
+// advanced component family.
+func FamilyStylesheets(family string) []string {
+	if family == "" {
+		return nil
+	}
+	files := []string{"ely-api-" + family + ".css"}
+	switch family {
+	case "workspace":
+		files = append(files, "ely-api-forms.css")
+	case "communication":
+		files = append(files, "ely-api-calendar-parity.css")
+	case "native":
+		files = append(files, "ely-api-native-tooling.css")
+	}
+	return files
+}
+
 type componentRegistry struct {
 	definitions []ComponentDefinition
 	qualified   map[string]ComponentDefinition

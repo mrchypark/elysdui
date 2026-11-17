@@ -83,7 +83,7 @@ export function recentGroups(files, now = new Date(), zone) {
   const key = value => { const d = day(value); return `${d.year}-${d.month}-${d.day}`; };
   const today = key(now), d = day(now), yesterday = new Date(Date.UTC(Number(d.year), Number(d.month) - 1, Number(d.day) - 1)).toISOString().slice(0, 10);
   const groups = [];
-  [...files].sort((a, b) => Date.parse(b.opened) - Date.parse(a.opened)).forEach(file => {
+  files.toSorted((a, b) => Date.parse(b.opened) - Date.parse(a.opened)).forEach(file => {
     const opened = new Date(file.opened); if (!Number.isFinite(opened.getTime())) return;
     const stamp = key(opened);
     let group = groups.find(group => group.key === stamp);

@@ -31,7 +31,7 @@ export function workspaceMatches(text, query, {caseSensitive = false, word = fal
 
 export function replaceWorkspaceMatches(text, matches, replacement, index = null) {
   const chosen = index === null ? matches : matches.slice(index, index + 1);
-  for (const [start, end] of [...chosen].reverse()) text = text.slice(0, start) + replacement + text.slice(end);
+  for (const [start, end] of chosen.toReversed()) text = text.slice(0, start) + replacement + text.slice(end);
   return text;
 }
 

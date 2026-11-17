@@ -13,7 +13,7 @@
 {{define "password-input"}}
 <div id="{{.ID}}" data-ui-component="password-input"{{range $k, $v := .Attrs}} {{attrName $k}}="{{attrValue $k $v}}"{{end}}>
   {{if .Label}}<label for="{{.ID}}-input">{{.Label}}</label>{{end}}
-  <div class="ely-control-row">{{template "input" (withProps . "ID" (printf "%s-input" .ID) "Type" "password" "Attrs" nil)}}{{template "button" (dict "Type" "button" "Label" "Show" "Variant" "ghost" "Size" "icon-sm" "Disabled" .Disabled "Attrs" (dict "data-ui-action" "password-toggle" "aria-label" "Show password"))}}</div>
+  <div class="ely-control-row">{{template "input" (withProps . "ID" (printf "%s-input" .ID) "Type" "password" "Attrs" nil)}}{{template "button" (dict "Type" "button" "Label" "Show" "Variant" "ghost" "Size" "icon-sm" "Disabled" .Disabled "Attrs" (dict "data-ui-action" "password-toggle" "aria-label" "Show password" "aria-pressed" "false"))}}</div>
 </div>
 {{end}}
 
@@ -101,7 +101,7 @@
 {{end}}
 
 {{define "dialog"}}
-<dialog id="{{.ID}}" data-ui-component="dialog"{{if .Label}} aria-label="{{.Label}}"{{end}}{{range $k, $v := .Attrs}} {{attrName $k}}="{{attrValue $k $v}}"{{end}}>{{.Content}}<form method="dialog">{{template "button" (dict "Type" "submit" "Label" "Close")}}</form></dialog>
+<dialog id="{{.ID}}" data-ui-component="dialog" closedby="any"{{if .Label}} aria-label="{{.Label}}"{{end}}{{range $k, $v := .Attrs}} {{attrName $k}}="{{attrValue $k $v}}"{{end}}>{{.Content}}<form method="dialog">{{template "button" (dict "Type" "submit" "Label" "Close")}}</form></dialog>
 {{end}}
 
 {{define "tabs"}}

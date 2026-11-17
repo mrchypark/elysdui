@@ -2,5 +2,5 @@
 .component-live { position: relative; display: grid; align-content: start; gap: 1rem; max-inline-size: 100%; background: var(--color-paper); padding: 1.5rem; height: 72vh; min-height: 520px; overflow: auto; overscroll-behavior: contain; }
 .native-preview { font-size: .8125rem; font-weight: 400; line-height: 1.25rem; }
 .component-live .component-description { font-size: .75rem; color: var(--color-muted); }
-@media(prefers-reduced-motion:reduce){ .native-preview *, .native-preview *::before, .native-preview *::after { animation:none!important; transition:none!important; scroll-behavior:auto!important; } }
+@media(prefers-reduced-motion:reduce){ *, *::before, *::after { animation-duration:0.01ms!important; animation-iteration-count:1!important; transition-duration:0.01ms!important; scroll-behavior:auto!important; } }
 .component-demo-response { display: grid; gap: .5rem; }

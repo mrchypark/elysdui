@@ -8,6 +8,7 @@ import (
 	"crypto/subtle"
 	"errors"
 	"fmt"
+	"html"
 	"io"
 	"mime"
 	"mime/multipart"
@@ -70,8 +71,10 @@ type Config struct {
 	IdempotencyTTL        time.Duration
 	MaxIdempotencyEntries int
 	MaxReplayBytes        int64
+	OnPanic               func(context.Context, any)
 }
 type replay struct {
+	key         string
 	fingerprint [32]byte
 	done        chan struct{}
 	body        []byte
@@ -82,6 +85,7 @@ type replay struct {
 type replayCache struct {
 	mu          sync.Mutex
 	replays     map[string]*replay
+	order       []*replay
 	replayBytes int64
 }
 
@@ -196,6 +200,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+	w.Header().Set("Cross-Origin-Resource-Policy", "same-origin")
 	if h.revision != "" {
 		w.Header().Set("X-SDUI-Revision", h.revision)
 	}
@@ -238,8 +244,14 @@ func (h *Handler) page(w http.ResponseWriter, r *http.Request, principal, csrf s
 			return
 		}
 	}
+	title := h.plan.ScreenID()
+	if title == "" {
+		title = "SDUI"
+	}
 	var b bytes.Buffer
-	b.WriteString("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>SDUI</title>")
+	b.WriteString("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>")
+	b.WriteString(html.EscapeString(title))
+	b.WriteString("</title>")
 	if err := h.plan.RenderAssets(&b); err != nil {
 		http.Error(w, "render failed", 500)
 		return
@@ -262,7 +274,7 @@ func (h *Handler) action(w http.ResponseWriter, r *http.Request, principal, csrf
 	r.ContentLength = int64(len(body))
 	r.Header.Set("Content-Length", strconv.Itoa(len(body)))
 	r.Header.Del("Content-Encoding") // downstream sees decoded bytes exactly once
-	if strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/form-data") {
+	if media, _, mediaErr := mime.ParseMediaType(r.Header.Get("Content-Type")); mediaErr == nil && media == "multipart/form-data" {
 		err = r.ParseMultipartForm(h.config.MaxBodyBytes)
 	} else {
 		err = r.ParseForm()
@@ -330,17 +342,17 @@ func (h *Handler) action(w http.ResponseWriter, r *http.Request, principal, csrf
 		http.Error(w, "invalid upload", 400)
 		return
 	}
-	cacheKey := fmt.Sprintf("%d:%s%d:%s%d:%s%s", len(principal), principal, len(name), name, len(target), target, key)
+	csrfSum := sha256.Sum256([]byte(csrf))
+	cacheKey := fmt.Sprintf("%d:%s%d:%s%d:%s%x:%s", len(principal), principal, len(name), name, len(target), target, csrfSum[:8], key)
 	h.mu.Lock()
 	now := time.Now()
-	for k, v := range h.replays {
-		select {
-		case <-v.done:
-			if now.After(v.expires) {
-				h.replayBytes -= v.reserved
-				delete(h.replays, k)
-			}
-		default:
+	for len(h.order) > 0 && now.After(h.order[0].expires) {
+		expired := h.order[0]
+		h.order[0] = nil
+		h.order = h.order[1:]
+		if current := h.replays[expired.key]; current == expired {
+			h.replayBytes -= expired.reserved
+			delete(h.replays, expired.key)
 		}
 	}
 	if existing := h.replays[cacheKey]; existing != nil {
@@ -361,7 +373,7 @@ func (h *Handler) action(w http.ResponseWriter, r *http.Request, principal, csrf
 		http.Error(w, "replay capacity reached; retry later", 503)
 		return
 	}
-	entry := &replay{fingerprint: fingerprint, done: make(chan struct{}), expires: now.Add(h.config.IdempotencyTTL), reserved: MaxRenderBytes}
+	entry := &replay{key: cacheKey, fingerprint: fingerprint, done: make(chan struct{}), expires: now.Add(h.config.IdempotencyTTL), reserved: MaxRenderBytes}
 	h.replays[cacheKey] = entry
 	h.replayBytes += entry.reserved
 	h.mu.Unlock()
@@ -369,20 +381,36 @@ func (h *Handler) action(w http.ResponseWriter, r *http.Request, principal, csrf
 	// wait forever. Panics become generic failures without exposing host internals.
 	status = 500
 	response := []byte("action failed\n")
+	var actionErr error
 	defer func() {
-		_ = recover()
+		if r := recover(); r != nil {
+			if h.config.OnPanic != nil {
+				h.config.OnPanic(req.HTTPRequest.Context(), r)
+			}
+		}
 		h.mu.Lock()
-		h.replayBytes += int64(len(response)) - entry.reserved
-		entry.reserved = int64(len(response))
-		entry.status = status
-		entry.body = append([]byte(nil), response...)
-		entry.expires = time.Now().Add(h.config.IdempotencyTTL)
+		if errors.Is(actionErr, context.Canceled) {
+			// Do not cache client-canceled action errors so retries can proceed.
+			h.replayBytes -= entry.reserved
+			entry.reserved = 0
+			entry.status = status
+			entry.body = append([]byte(nil), response...)
+			delete(h.replays, cacheKey)
+		} else {
+			h.replayBytes += int64(len(response)) - entry.reserved
+			entry.reserved = int64(len(response))
+			entry.status = status
+			entry.body = append([]byte(nil), response...)
+			entry.expires = time.Now().Add(h.config.IdempotencyTTL)
+			h.order = append(h.order, entry)
+		}
 		close(entry.done)
 		h.mu.Unlock()
 		h.writeHTML(w, r, status, response)
 	}()
 	result, err := action.Run(r.Context(), req)
 	if err != nil {
+		actionErr = err
 		return
 	}
 	if result.Status == 0 {
@@ -490,27 +518,40 @@ func (h *Handler) readBody(w http.ResponseWriter, r *http.Request) ([]byte, bool
 		}
 		limit = h.config.MaxCompressedBodyBytes
 	}
-	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, limit))
-	if err != nil {
-		return nil, compressed, 413, errors.New("request too large")
-	}
+	limitedBody := http.MaxBytesReader(w, r.Body, limit)
 	if !compressed {
+		raw, err := io.ReadAll(limitedBody)
+		if err != nil {
+			var maxErr *http.MaxBytesError
+			if errors.As(err, &maxErr) {
+				return nil, false, 413, errors.New("request too large")
+			}
+			return nil, false, 400, errors.New("invalid request body")
+		}
 		return raw, false, 0, nil
 	}
 	var reader io.Reader
 	switch coding {
 	case "br":
-		reader = brotli.NewReader(bytes.NewReader(raw))
+		reader = brotli.NewReader(limitedBody)
 	case "gzip":
-		decoder, err := gzip.NewReader(bytes.NewReader(raw))
+		decoder, err := gzip.NewReader(limitedBody)
 		if err != nil {
+			var maxErr *http.MaxBytesError
+			if errors.As(err, &maxErr) {
+				return nil, true, 413, errors.New("request too large")
+			}
 			return nil, true, 400, errors.New("invalid compressed request")
 		}
 		defer decoder.Close()
 		reader = decoder
 	case "zstd":
-		decoder, err := zstd.NewReader(bytes.NewReader(raw), zstd.WithDecoderConcurrency(1), zstd.WithDecoderLowmem(true), zstd.WithDecoderMaxMemory(uint64(h.config.MaxBodyBytes)+(8<<20)), zstd.WithDecoderMaxWindow(8<<20))
+		decoder, err := zstd.NewReader(limitedBody, zstd.WithDecoderConcurrency(1), zstd.WithDecoderLowmem(true), zstd.WithDecoderMaxMemory(uint64(h.config.MaxBodyBytes)+(8<<20)), zstd.WithDecoderMaxWindow(8<<20))
 		if err != nil {
+			var maxErr *http.MaxBytesError
+			if errors.As(err, &maxErr) {
+				return nil, true, 413, errors.New("request too large")
+			}
 			return nil, true, 400, errors.New("invalid compressed request")
 		}
 		defer decoder.Close()
@@ -521,6 +562,10 @@ func (h *Handler) readBody(w http.ResponseWriter, r *http.Request) ([]byte, bool
 		return nil, true, 413, errors.New("decoded request too large")
 	}
 	if err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			return nil, true, 413, errors.New("request too large")
+		}
 		return nil, true, 400, errors.New("invalid compressed request")
 	}
 	return decoded, true, 0, nil

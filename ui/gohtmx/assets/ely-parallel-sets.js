@@ -32,9 +32,9 @@ export function parallelSetsModel(dimensions, ribbons, {width = 720, height = 36
   const segments = [], ribbonSegments = paths.map(() => []);
   for (let dim = 0; dim + 1 < labels.length; dim++) {
     const fromOffset = categories[dim].map(() => 0), toOffset = categories[dim + 1].map(() => 0);
-    const orderedFrom = [...paths].sort((a, b) => indexes[dim].get(a.path[dim]).index - indexes[dim].get(b.path[dim]).index || indexes[dim + 1].get(a.path[dim + 1]).index - indexes[dim + 1].get(b.path[dim + 1]).index || a.index - b.index);
+    const orderedFrom = paths.toSorted((a, b) => indexes[dim].get(a.path[dim]).index - indexes[dim].get(b.path[dim]).index || indexes[dim + 1].get(a.path[dim + 1]).index - indexes[dim + 1].get(b.path[dim + 1]).index || a.index - b.index);
     const fromY = []; for (const ribbon of orderedFrom) { const category = indexes[dim].get(ribbon.path[dim]).index, bar = lookup[dim][category]; fromY[ribbon.index] = bar.y + fromOffset[category]; fromOffset[category] += ribbon.count / total * available; }
-    const orderedTo = [...paths].sort((a, b) => indexes[dim + 1].get(a.path[dim + 1]).index - indexes[dim + 1].get(b.path[dim + 1]).index || indexes[dim].get(a.path[dim]).index - indexes[dim].get(b.path[dim]).index || a.index - b.index);
+    const orderedTo = paths.toSorted((a, b) => indexes[dim + 1].get(a.path[dim + 1]).index - indexes[dim + 1].get(b.path[dim + 1]).index || indexes[dim].get(a.path[dim]).index - indexes[dim].get(b.path[dim]).index || a.index - b.index);
     const toY = []; for (const ribbon of orderedTo) { const category = indexes[dim + 1].get(ribbon.path[dim + 1]).index, bar = lookup[dim + 1][category]; toY[ribbon.index] = bar.y + toOffset[category]; toOffset[category] += ribbon.count / total * available; }
     for (const ribbon of paths) { const from = lookup[dim][indexes[dim].get(ribbon.path[dim]).index], to = lookup[dim + 1][indexes[dim + 1].get(ribbon.path[dim + 1]).index], thickness = ribbon.count / total * available, segment = {ribbon: ribbon.index, dim, x1: from.x + barWidth, y1: fromY[ribbon.index], x2: to.x, y2: toY[ribbon.index], thickness}; segments.push(segment); ribbonSegments[ribbon.index].push(segment); }
   }

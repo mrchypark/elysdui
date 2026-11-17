@@ -251,9 +251,15 @@ func (s *Store) WatchFile(ctx context.Context, path string, interval time.Durati
 		if haveLast && digest == last && lastError == "" {
 			continue
 		}
-		last, haveLast, lastError = digest, true, ""
 		current := s.Snapshot()
 		snapshot, err := s.Load(bytes.NewReader(data), current.Revision)
+		if errors.Is(err, ErrRevisionConflict) {
+			if onResult != nil {
+				onResult(snapshot, err)
+			}
+			continue
+		}
+		last, haveLast, lastError = digest, true, ""
 		if onResult != nil {
 			onResult(snapshot, err)
 		}
