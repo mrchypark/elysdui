@@ -9,10 +9,6 @@ const loadLottieLibrary = () => {
   if (lottieLibraryPromise) return lottieLibraryPromise;
   lottieLibraryPromise = new Promise((resolve, reject) => {
     let script = document.querySelector('script[src="/assets/lottie-light.min.js"]');
-    if (script?.dataset.elyFailed) {
-      reject(new Error('Lottie library is unavailable'));
-      return;
-    }
     const owned = !script;
     if (!script) {
       script = document.createElement('script');
@@ -25,7 +21,6 @@ const loadLottieLibrary = () => {
     };
     const failed = () => {
       finish();
-      script.dataset.elyFailed = 'true';
       if (owned) script.remove();
       reject(new Error('Lottie library is unavailable'));
     };
