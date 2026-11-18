@@ -657,7 +657,7 @@ fn catalogue_registry_covers_all_1361_contracts_and_2166_fixtures() {
     assert_eq!(registry.len(), 1361);
 
     let fixtures = load_catalogue_fixtures();
-    assert_eq!(fixtures.len(), 2166);
+    assert_eq!(fixtures.len(), 2177);
     let mut covered = BTreeSet::new();
     for (idx, f) in fixtures.iter().enumerate() {
         let screen = Screen {
@@ -1286,7 +1286,7 @@ fn run_2166_fixture_click_audit(
     });
 
     let fixtures = load_catalogue_fixtures();
-    assert_eq!(fixtures.len(), 2166);
+    assert_eq!(fixtures.len(), 2177);
     let (view, vcx) = cx.add_window_view(|_, _| CatalogueView::new());
     vcx.update(|window, _| {
         window.resize(gpui::size(gpui::px(width), gpui::px(height)));
