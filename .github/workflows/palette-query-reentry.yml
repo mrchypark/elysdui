@@ -2,11 +2,15 @@ name: CommandPalette reentry guard and causal reversal
 on:
   workflow_dispatch:
   push:
+    branches: [main]
     paths: ['ui/gohtmx/**', 'adapters/gohtmx/**', 'sdui/**', 'scripts/palette-query*.mjs', 'package*.json', '.github/workflows/palette-query-reentry.yml']
   pull_request:
     paths: ['ui/gohtmx/**', 'adapters/gohtmx/**', 'sdui/**', 'scripts/palette-query*.mjs', 'package*.json', '.github/workflows/palette-query-reentry.yml']
 env:
   PALETTE_QUERY_PRODUCTION_POLICY: audit-candidate
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 jobs:
   reentry:
     runs-on: ubuntu-24.04
