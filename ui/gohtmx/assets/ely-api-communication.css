@@ -368,3 +368,15 @@
 [data-ely-family='communication'] .ely-agent-tree summary progress{flex:0 0 4rem;min-width:4rem}
 [data-ely-family='communication'] .ely-agent-tree details:not([open])>ul{display:none}
 [data-ely-family='communication'] .ely-agent-tree summary button[aria-current=true]{background:var(--color-selected,var(--accent-tint,#e9f2eb))!important;color:var(--color-accent,#306b43);font-weight:600;box-shadow:inset 0 0 0 1px var(--color-accent,#306b43)}
+.ely-messaging-pins{display:grid;gap:.5rem;min-width:0;padding:.75rem 1rem;border:1px solid var(--color-line,#cfd6ce);border-radius:.5rem;background:var(--surface,#fff)}
+.ely-messaging-pins header{display:flex;align-items:center;gap:.5rem}
+.ely-messaging-pins header h2{margin:0;font-size:.875rem;font-weight:600;line-height:1.3}
+.ely-messaging-pins header output{font-size:.75rem;font-weight:600;padding:.1rem .45rem;border-radius:999px;background:var(--surface-muted,#f1f4f0);color:var(--color-muted,#5d675f)}
+.ely-messaging-pins ol{display:grid;gap:.25rem;padding:0;margin:0;list-style:none}
+.ely-messaging-pins li{display:flex;gap:.5rem;align-items:center;min-width:0;border-bottom:1px solid var(--color-line,#cfd6ce);padding:.45rem 0}
+.ely-messaging-pins li:last-child{border-bottom:0;padding-bottom:0}
+.ely-messaging-pins li>button:first-child{border:0!important;background:transparent!important;text-align:left;padding:.2rem 0!important;flex:1 1 auto;min-width:0;overflow-wrap:anywhere}
+.ely-messaging-pins li>button:first-child strong{display:block;font-weight:600}
+.ely-messaging-pins small{display:block;color:var(--color-muted,#5d675f);margin-top:.15rem;overflow-wrap:anywhere}
+.ely-messaging-pins li>[data-ely-unpin]{flex-shrink:0;min-height:2rem;padding:.25rem .75rem;font-size:.8rem}
+.ely-communication-avatar{overflow:hidden;white-space:nowrap;text-overflow:ellipsis;flex-shrink:0}
