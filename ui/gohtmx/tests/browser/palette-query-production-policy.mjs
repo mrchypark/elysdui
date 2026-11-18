@@ -27,11 +27,14 @@ export const paletteAuditCandidateProduction = [
   'ui/gohtmx/assets/ely-controls.js',
   'ui/gohtmx/ui.go',
   'ui/gohtmx/component.go',
+  'adapters/gohtmx/render.go',
+  'adapters/gohtmx/assets/sdui.js',
 ];
 // Loaded production assets that the audited candidate also changes. They are
 // compared against clean HEAD bytes for the same reason, so the asset loop
 // keeps the same source-owned boundary as the source loop.
 export const paletteAuditCandidateAssets = [
+  'ui/gohtmx/assets/app.css',
   'ui/gohtmx/assets/ely-api-interaction.css',
   'ui/gohtmx/assets/ely-api.css',
   'ui/gohtmx/assets/ely-api-native.css',

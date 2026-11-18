@@ -25,8 +25,8 @@ assert(!paletteReviewedProduction.includes('ui/gohtmx/assets/ely/icons/check.svg
 assert.deepEqual(paletteProductionPaths('audit-candidate'),[...paletteReviewedProduction,'ui/gohtmx/assets/ely-api.js','ui/gohtmx/assets/ely/icons/check.svg',...paletteAuditCandidateProduction,...paletteAuditCandidateAssets]);
 // The audited candidate allowance is exactly the three audited production
 // files, and it never widens strict or activation-repair.
-assert.deepEqual(paletteAuditCandidateProduction,['ui/gohtmx/assets/ely-controls.js','ui/gohtmx/ui.go','ui/gohtmx/component.go']);
-assert.deepEqual(paletteAuditCandidateAssets,['ui/gohtmx/assets/ely-api-interaction.css','ui/gohtmx/assets/ely-api.css','ui/gohtmx/assets/ely-api-native.css','ui/gohtmx/assets/ely-controls.css','ui/gohtmx/assets/ely-patterns.css','ui/gohtmx/assets/ely-patterns.js']);
+assert.deepEqual(paletteAuditCandidateProduction,['ui/gohtmx/assets/ely-controls.js','ui/gohtmx/ui.go','ui/gohtmx/component.go','adapters/gohtmx/render.go','adapters/gohtmx/assets/sdui.js']);
+assert.deepEqual(paletteAuditCandidateAssets,['ui/gohtmx/assets/app.css','ui/gohtmx/assets/ely-api-interaction.css','ui/gohtmx/assets/ely-api.css','ui/gohtmx/assets/ely-api-native.css','ui/gohtmx/assets/ely-controls.css','ui/gohtmx/assets/ely-patterns.css','ui/gohtmx/assets/ely-patterns.js']);
 for(const path of paletteAuditCandidateProduction){
   assert(!paletteReviewedProduction.includes(path),'audited file is not a reviewed file');
   assert(!paletteProductionPaths('strict').includes(path),'audited file is not strict-allowed');

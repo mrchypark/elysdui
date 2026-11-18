@@ -306,7 +306,6 @@
       status = response.status;
       if (status === 409 && response.headers.get('X-SDUI-Reload') === 'required') {
         emit(screen, 'sdui:stale', {action, target: targetID, requestId: id, status, revision: response.headers.get('X-SDUI-Revision')});
-        return;
       }
       if (!response.ok && status !== 422) throw failure(`SDUI request failed (${status})`);
       const contentType = response.headers.get('Content-Type');

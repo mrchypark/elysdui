@@ -2,6 +2,7 @@ name: CopyButton complete contract and causal controls
 on:
   workflow_dispatch:
   push:
+    branches: [main]
     paths:
       - 'ui/gohtmx/**'
       - 'adapters/gohtmx/**'
@@ -27,6 +28,9 @@ on:
       - 'package*.json'
 permissions:
   contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 jobs:
   copybutton-complete:
     runs-on: ubuntu-24.04

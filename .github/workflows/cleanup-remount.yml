@@ -1,6 +1,7 @@
 name: Cleanup remount lifecycle
 on:
   push:
+    branches: [main]
   pull_request:
   workflow_dispatch:
     inputs:
@@ -10,6 +11,9 @@ on:
         default: false
 permissions:
   contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 jobs:
   cleanup-remount:
     runs-on: ubuntu-24.04
