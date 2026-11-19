@@ -402,3 +402,19 @@
 :is(:root[data-theme=dark],.dark) [data-ely-family='communication'] .ely-project-workload [data-overload=true]{color:#eb8a84}
 
 :is(:root[data-theme=dark],.dark) [data-ely-family='communication'] .ely-agent-tree [data-agent-state=failed]>details>summary span{color:#f87171}
+
+/* Native messaging (#64): bubbleless editorial grouping, @mention pills/listbox, delete dialog, swipe-to-reply & island morphing */
+[data-ely-family='communication'] :is(.ely-messaging-message,.ely-chat-message).is-cont{border-inline-start:2px solid var(--color-line,#cfd6ce);padding-inline-start:calc(.75rem - 2px)}
+[data-ely-family='communication'] :is(.ely-messaging-message,.ely-chat-message).is-cont .ely-communication-avatar,[data-ely-family='communication'] :is(.ely-messaging-message,.ely-chat-message).is-cont>div>header,[data-ely-family='communication'] :is(.ely-messaging-message,.ely-chat-message).is-cont>article>header{display:none}
+[data-ely-family='communication'] .ely-mention-pill{display:inline-flex;align-items:center;min-block-size:1.35rem;padding:0 .4rem;margin:0 .1rem;border:0;border-radius:999px;background:var(--accent-tint,#e4f0e7);color:var(--color-accent,#306b43);font:inherit;font-weight:600;vertical-align:baseline}
+[data-ely-family='communication'] .ely-mention-listbox{display:grid;gap:.2rem;max-height:11rem;overflow:auto;padding:.35rem;border:1px solid var(--color-line,#cfd6ce);border-radius:.5rem;background:var(--surface,#fff);box-shadow:0 .35rem 1rem rgb(0 0 0/.12)}
+[data-ely-family='communication'] .ely-mention-option{display:flex;align-items:center;gap:.5rem;width:100%;padding:.35rem .5rem;border:0;border-radius:.35rem;background:transparent;color:inherit;text-align:left}
+[data-ely-family='communication'] .ely-mention-option[aria-selected=true]{background:var(--accent-tint,#e4f0e7)}
+[data-ely-family='communication'] .ely-mention-option small{margin-inline-start:auto;color:var(--color-muted,#5d675f)}
+[data-ely-family='communication'] .ely-messaging-delete-dialog{border:1px solid var(--color-line,#cfd6ce);border-radius:.75rem;padding:1rem;background:var(--surface,#fff);color:var(--color-ink,#181613);max-width:min(22rem,calc(100vw - 2rem))}
+[data-ely-family='communication'] .ely-messaging-delete-dialog footer{display:flex;flex-wrap:wrap;gap:.5rem;margin-top:.75rem}
+[data-ely-family='communication'] .ely-messaging-delete-dialog [data-tone=danger]{background:var(--error,#b42318);border-color:transparent;color:#fff}
+[data-ely-family='communication'] .ely-mention-popover{display:flex;align-items:center;gap:.5rem;padding:.45rem .65rem;border:1px solid var(--color-line,#cfd6ce);border-radius:.5rem;background:var(--surface,#fff);box-shadow:0 .35rem 1rem rgb(0 0 0/.12)}
+[data-ely-family='communication'] .ely-chat-composer form{transition:border-radius .22s cubic-bezier(.22,1,.36,1),box-shadow .22s ease}
+[data-ely-family='communication'] .ely-chat-composer form[data-has-quote=true]{border-radius:1.15rem;box-shadow:0 .45rem 1.25rem rgb(0 0 0/.08)}
+[data-ely-family='communication'] :is(.ely-messaging-message,.ely-chat-message)[data-swipe-ready=true]{background:var(--accent-tint,#f2f0ed)}
