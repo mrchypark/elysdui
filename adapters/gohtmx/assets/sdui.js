@@ -320,11 +320,18 @@
       }));
       // No await after the last sequence/identity check: a superseded response
       // must never replace a newer region, even if fetch ignores abort().
-      Element.prototype.replaceWith.call(target, region);
-      window.htmx?.process?.(region);
-      dispatch(region, new CustomEvent('htmx:after:swap', {
-        bubbles: true, detail: {ctx: swapCtx},
-      }));
+      try {
+        Element.prototype.replaceWith.call(target, region);
+        window.htmx?.process?.(region);
+        dispatch(region, new CustomEvent('htmx:after:swap', {
+          bubbles: true, detail: {ctx: swapCtx},
+        }));
+      } finally {
+        const finallyTarget = region?.isConnected ? region : (target?.isConnected ? target : document);
+        dispatch(finallyTarget, new CustomEvent('htmx:finally:swap', {
+          bubbles: true, detail: {ctx: swapCtx},
+        }));
+      }
       restoreFocus(region, focus);
       emit(region, status === 422 ? 'sdui:error' : 'sdui:success', {
         action, target: targetID, requestId: id, status, validation: status === 422, region,

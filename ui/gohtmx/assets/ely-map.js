@@ -259,7 +259,7 @@
     const initialZoom = clamp(number(root.dataset.mapInitialZoom, 1), 0, 19); let center = initialCenter.slice(), zoom = initialZoom, width, height, scale, offset, drag, popupTrigger, resize, cancelled = false;
     const clearGenerated = () => root.querySelectorAll('[data-map-generated]').forEach(node => node.remove());
     const restoreMarkers = () => markerPoints().forEach(marker => { marker.hidden = false; delete marker.dataset.cluster; delete marker._mapMembers; marker.querySelector('[data-map-count]')?.remove(); marker.setAttribute('aria-label', marker.dataset.mapLabel || marker.dataset.key || 'Location'); });
-    const cleanup = () => { if (mounts.get(root)?.cleanup !== cleanup) return; cancelled = true; controller.abort(); resize?.disconnect(); clearGenerated(); restoreMarkers(); popup.hidden = true; mounts.delete(root); delete root.dataset.mapReady; };
+    const cleanup = () => { if (mounts.get(root)?.cleanup !== cleanup) return; cancelled = true; controller.abort(); copies.get(root)?.abort(); copies.delete(root); root.querySelectorAll('[data-map-copyable]').forEach(c => { copies.get(c)?.abort(); copies.delete(c); }); resize?.disconnect(); clearGenerated(); restoreMarkers(); popup.hidden = true; mounts.delete(root); delete root.dataset.mapReady; };
     mounts.set(root, {cleanup}); clearGenerated(); root.dataset.mapReady = 'pending'; status.hidden = true; status.textContent = '';
     const listen = (target, type, handler, options = {}) => target?.addEventListener(type, handler, {...options, signal});
     root.style.maxWidth = `${Math.max(1, number(root.dataset.mapWidth, 720))}px`; canvas.style.height = `${Math.max(1, number(root.dataset.mapHeight, 360))}px`;
@@ -320,6 +320,6 @@
   const rootsIn = (scope, selector) => [...(scope?.matches?.(selector) ? [scope] : []), ...(scope || document).querySelectorAll(selector)];
   const start = (scope = document) => { rootsIn(scope, '[data-ui-component="map-view"]').forEach(init); rootsIn(scope, '[data-map-copyable]').forEach(initCopy); };
   globalThis.ElyMap = Object.freeze({registerTileProvider});
-  start(); document.addEventListener('htmx:after:swap', event => start(event.target));
+  start(); document.addEventListener('htmx:after:swap', () => start(document)); document.addEventListener('htmx:afterSwap', () => start(document));
   new MutationObserver(records => { records.forEach(record => { if (record.type === 'attributes') { mounts.get(record.target)?.refreshTiles(); return; } record.addedNodes.forEach(node => { if (node.nodeType === Node.ELEMENT_NODE) start(node); }); record.removedNodes.forEach(node => { if (node.nodeType !== Node.ELEMENT_NODE) return; const maps = rootsIn(node, '[data-ui-component="map-view"]'), copyRoots = rootsIn(node, '[data-map-copyable]'); queueMicrotask(() => { maps.forEach(root => { if (!root.isConnected) mounts.get(root)?.cleanup(); }); copyRoots.forEach(root => { if (!root.isConnected) { copies.get(root)?.abort(); copies.delete(root); } }); }); }); }); }).observe(document.documentElement, {childList: true, subtree: true, attributes: true, attributeFilter: ['data-map-tile-provider']});
 })();

@@ -132,5 +132,5 @@
       draw();
     });
   };
-  initialize(); document.addEventListener('htmx:after:swap', initialize);
+  initialize(); document.addEventListener('htmx:after:swap', initialize); document.addEventListener('htmx:afterSwap', initialize);
 })();
