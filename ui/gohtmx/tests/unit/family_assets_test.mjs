@@ -129,6 +129,22 @@ if (process.argv.includes('--runtime')) {
   newCleanup(); newCleanup();
   rebound.dispatchEvent(actionEvent());
   assert.equal(newCalls, 1, 'current cleanup is idempotent');
+  const legacyRoot = new ElementDouble('legacy-swapped', 'foundation');
+  roots.push(legacyRoot);
+  const xhrToken = {};
+  for (const callback of listeners.get('htmx:beforeSwap')) callback({detail: {target: legacyRoot, xhr: xhrToken, shouldSwap: false}});
+  for (const callback of listeners.get('htmx:beforeSwap')) callback({detail: {target: legacyRoot, xhr: xhrToken, shouldSwap: true}});
+  for (const callback of listeners.get('htmx:swapError')) callback({detail: {target: legacyRoot, xhr: xhrToken}});
+  assert.equal(legacyRoot.dataset.elyReady, 'true', 'HTMX 2.x swapError/afterSwap unlocks pendingSwaps and initializes roots');
+  const vetoEvent = {detail: {target: legacyRoot, xhr: {}}};
+  for (const callback of listeners.get('htmx:beforeSwap')) callback(vetoEvent);
+  vetoEvent.detail.shouldSwap = false;
+  await new Promise(resolve => queueMicrotask(resolve));
+  assert.equal(legacyRoot.dataset.elyReady, 'true', 'HTMX 2.x later-listener veto restores root without pendingSwaps deadlock');
+  const legacyRoot2 = new ElementDouble('legacy-swapped-2', 'foundation');
+  roots.push(legacyRoot2);
+  for (const callback of listeners.get('htmx:afterSwap')) callback({detail: {target: legacyRoot2}});
+  assert.equal(legacyRoot2.dataset.elyReady, 'true', 'HTMX 2.x htmx:afterSwap mounts new roots');
   console.log('Actual ESM caching, initial mount, HTMX lifecycle, action and cleanup checks passed');
 } else {
   const all = moduleGraph('ely-api-all.js');

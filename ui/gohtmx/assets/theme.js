@@ -89,6 +89,7 @@
   window.ElyTheme = Object.freeze({tokens:Object.freeze([...tokens]), list:()=>[...palettes.values()].map(({id,name})=>({id,name})), get, register, apply, preview, issues, current:()=>({id:root.dataset.palette,mode:root.dataset.theme})});
   document.addEventListener('DOMContentLoaded',sync);
   document.addEventListener('htmx:after:swap',sync);
+  document.addEventListener('htmx:afterSwap',sync);
   document.addEventListener('click',event => {
     if (event.target.closest('[data-theme-toggle]')) apply(root.dataset.palette,root.dataset.theme === 'dark' ? 'light' : 'dark');
   });

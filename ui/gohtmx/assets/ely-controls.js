@@ -439,5 +439,6 @@
   // document so sibling/OOB inserts are included; the WeakSet keeps this safe
   // for existing controls and repeated swaps.
   document.addEventListener('htmx:after:swap', () => init());
+  document.addEventListener('htmx:afterSwap', () => init());
   init();
 })();

@@ -272,9 +272,10 @@ export function mountTimeSeries(root, options) {
       const span = scale.max - scale.min;
       plot.setScale('x', {min: Math.max(domain[0], domain[1] - span), max: domain[1]});
     } else schedule();
-  }, destroy() { if (destroyed) return; destroyed = true; unlink(); unwatch(); if (frame) cancelAnimationFrame(frame); observer?.disconnect(); root.removeEventListener('htmx:beforeCleanupElement', cleanup); wrap.removeEventListener('wheel', zoom); wrap.removeEventListener('pointerdown', pointDown); wrap.removeEventListener('pointermove', pointMove); wrap.removeEventListener('pointerup', pointUp); wrap.removeEventListener('pointercancel', pointUp); plot.over.removeEventListener('pointerdown', selectDown); wrap.removeEventListener('pointerup', selectUp); wrap.removeEventListener('pointercancel', selectCancel); plot.destroy(); if (controls.parentNode === root) controls.remove(); if (wrap.parentNode === root) wrap.remove(); } };
+  }, destroy() { if (destroyed) return; destroyed = true; unlink(); unwatch(); if (frame) cancelAnimationFrame(frame); observer?.disconnect(); root.removeEventListener('htmx:beforeCleanupElement', cleanup); root.removeEventListener('htmx:before:cleanup', cleanup); wrap.removeEventListener('wheel', zoom); wrap.removeEventListener('pointerdown', pointDown); wrap.removeEventListener('pointermove', pointMove); wrap.removeEventListener('pointerup', pointUp); wrap.removeEventListener('pointercancel', pointUp); plot.over.removeEventListener('pointerdown', selectDown); wrap.removeEventListener('pointerup', selectUp); wrap.removeEventListener('pointercancel', selectCancel); plot.destroy(); if (controls.parentNode === root) controls.remove(); if (wrap.parentNode === root) wrap.remove(); } };
   const cleanup = event => { if (event.target === root) chart.destroy(); };
   root.addEventListener('htmx:beforeCleanupElement', cleanup);
+  root.addEventListener('htmx:before:cleanup', cleanup);
   unwatch = watchChart(root, wrap, chart.destroy);
   if (link) unlink = link.subscribe(chart, update => {
     if (destroyed) return;

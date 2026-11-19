@@ -197,22 +197,19 @@ export function mount(root, handlers = {}) {
   return cleanup;
 }
 
-document.addEventListener('DOMContentLoaded', () => start());
-document.addEventListener('htmx:before:swap', event => {
-  // Bundled HTMX exposes the actual main and OOB targets in tasks. The event
-  // target is the request source, which need not be the swapped element.
+const depth = element => {
+  let value = 0;
+  for (let parent = element.parentElement; parent; parent = parent.parentElement) value++;
+  return value;
+};
+const teardownTargets = (targets, context) => {
   const affected = new Set();
-  for (const task of event.detail?.tasks || []) {
-    const target = typeof task.target === 'string' ? document.querySelector(task.target) : task.target;
-    const style = typeof task.swapSpec === 'string' ? task.swapSpec.split(/\s+/)[0] : task.swapSpec?.style;
-    if (!(target instanceof Element) || !['innerHTML', 'outerHTML', 'outerSync', 'textContent', 'delete'].includes(style)) continue;
+  for (const target of targets) {
+    if (!(target instanceof Element)) continue;
     const owner = target.closest('[data-ely-family]');
     if (owner) affected.add(owner);
     target.querySelectorAll('[data-ely-family]').forEach(root => affected.add(root));
   }
-  // A swap can be delayed or await a view transition. Unrelated startup/swap
-  // notifications must not rebuild cached references until this swap completes.
-  const context = event?.detail?.ctx;
   if (context) {
     const roots = swapContexts.get(context) || new Set();
     affected.forEach(root => {
@@ -223,28 +220,73 @@ document.addEventListener('htmx:before:swap', event => {
     swapContexts.set(context, roots);
   }
   // Children first even when OOB tasks list a nested target before its parent.
-  const depth = element => {
-    let value = 0;
-    for (let parent = element.parentElement; parent; parent = parent.parentElement) value++;
-    return value;
-  };
   const ordered = [...affected].sort((a, b) => depth(b) - depth(a));
   ordered.forEach(stop);
-});
-const restart = event => {
-  const context = event?.detail?.ctx;
-  if (context) {
-    for (const root of swapContexts.get(context) || []) {
-      const pending = pendingSwaps.get(root);
-      pending?.delete(context);
-      if (!pending?.size) pendingSwaps.delete(root);
-    }
-    swapContexts.delete(context);
+};
+document.addEventListener('DOMContentLoaded', () => start());
+document.addEventListener('htmx:before:swap', event => {
+  // Bundled HTMX exposes the actual main and OOB targets in tasks. The event
+  // target is the request source, which need not be the swapped element.
+  const targets = [];
+  for (const task of event.detail?.tasks || []) {
+    const target = typeof task.target === 'string' ? document.querySelector(task.target) : task.target;
+    const style = typeof task.swapSpec === 'string' ? task.swapSpec.split(/\s+/)[0] : task.swapSpec?.style;
+    if (!(target instanceof Element) || !['innerHTML', 'outerHTML', 'outerSync', 'textContent', 'delete'].includes(style)) continue;
+    targets.push(target);
   }
+  // A swap can be delayed or await a view transition. Unrelated startup/swap
+  // notifications must not rebuild cached references until this swap completes.
+  teardownTargets(targets, event?.detail?.ctx);
+});
+const beforeLegacySwap = event => {
+  if (event.detail?.shouldSwap === false || event.defaultPrevented) return;
+  const target = event.detail?.target || event.target;
+  const context = event.detail?.xhr || target;
+  teardownTargets([target], context);
+  if (typeof queueMicrotask === 'function') {
+    queueMicrotask(() => {
+      if (event.detail?.shouldSwap === false || event.defaultPrevented) {
+        releaseContext(context);
+        prune();
+        start();
+      }
+    });
+  }
+};
+document.addEventListener('htmx:beforeSwap', beforeLegacySwap);
+document.addEventListener('htmx:oobBeforeSwap', beforeLegacySwap);
+const releaseContext = context => {
+  if (!context || !swapContexts.has(context)) return;
+  for (const root of swapContexts.get(context) || []) {
+    const pending = pendingSwaps.get(root);
+    pending?.delete(context);
+    if (!pending?.size) pendingSwaps.delete(root);
+  }
+  swapContexts.delete(context);
+};
+const restart = event => {
+  releaseContext(event?.detail?.ctx);
+  releaseContext(event?.detail?.xhr);
+  releaseContext(event?.detail?.target);
+  releaseContext(event?.target);
   prune();
   start();
 };
 document.addEventListener('htmx:after:swap', restart);
 // Also restore a controller if a later listener cancelled a prepared swap.
 document.addEventListener('htmx:finally:swap', restart);
-new MutationObserver(prune).observe(document.documentElement, { childList: true, subtree: true });
+document.addEventListener('htmx:afterSwap', restart);
+document.addEventListener('htmx:oobAfterSwap', restart);
+document.addEventListener('htmx:afterSettle', restart);
+document.addEventListener('htmx:swapError', restart);
+document.addEventListener('htmx:sendError', restart);
+document.addEventListener('htmx:afterRequest', restart);
+new MutationObserver((records = []) => {
+  prune();
+  if (!Array.isArray(records) || pendingSwaps.size > 0) return;
+  for (const record of records) {
+    for (const node of record.addedNodes || []) {
+      if (node instanceof Element) start(node);
+    }
+  }
+}).observe(document.documentElement, { childList: true, subtree: true });

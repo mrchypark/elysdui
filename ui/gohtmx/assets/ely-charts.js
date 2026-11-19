@@ -54,9 +54,10 @@ export function mountElyChart(root, {option, label, height = 320, onSelect, onVi
   observer?.observe(surface);
   const cleanup = event => { if (event.target === root) destroy(); };
   root.addEventListener('htmx:beforeCleanupElement', cleanup);
+  root.addEventListener('htmx:before:cleanup', cleanup);
   const unwatch = watchChart(root, shell, destroy);
   function destroy() {
-    if (destroyed) return; destroyed = true; unwatch(); observer?.disconnect(); root.removeEventListener('htmx:beforeCleanupElement', cleanup);
+    if (destroyed) return; destroyed = true; unwatch(); observer?.disconnect(); root.removeEventListener('htmx:beforeCleanupElement', cleanup); root.removeEventListener('htmx:before:cleanup', cleanup);
     instance.dispose(); if (root.contains(shell)) shell.remove();
   }
   return {chart: instance, destroy};
