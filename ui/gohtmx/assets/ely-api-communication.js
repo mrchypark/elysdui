@@ -419,6 +419,26 @@ register('communication',root=>{
   const onDragOver=event=>{if(root.dataset.elyComponent?.startsWith('project/'))return;if(event.target.closest('[data-lane-id]'))event.preventDefault();};
   const onDrop=event=>{if(root.dataset.elyComponent?.startsWith('project/'))return;const lane=event.target.closest('[data-lane-id]');if(!lane||!root.contains(lane))return;event.preventDefault();const taskId=event.dataTransfer?.getData('text/plain')||root.dataset.elyDragging;if(taskId)emit(root,'move-task',{taskId,laneId:lane.dataset.laneId,index:lane.querySelectorAll(':scope > [data-card-id]').length});delete root.dataset.elyDragging;};
   const approvals=[...root.querySelectorAll('dialog[id$="-approval"]')];approvals.forEach(dialog=>dialog.addEventListener('cancel',onCancel));
+  const onImageError=event=>{
+    const img=event.target;
+    if(!(img instanceof HTMLImageElement)||!root.contains(img))return;
+    img.hidden=true;
+    img.setAttribute('aria-hidden','true');
+    const tile=img.closest('.ely-messaging-tile');
+    if(tile&&!tile.querySelector('.ely-communication-avatar')){
+      const avatar=document.createElement('span');
+      avatar.className='ely-communication-avatar';
+      const name=(img.alt||tile.querySelector('p')?.textContent||'').trim();
+      avatar.dataset.avatarName=name;
+      avatar.textContent=name.slice(0,2).toUpperCase()||'?';
+      tile.insertBefore(avatar,tile.firstChild);
+    }
+    const pick=img.closest('[data-ely-media-pick]');
+    if(pick&&!pick.textContent.trim()){
+      pick.textContent=img.alt||pick.getAttribute('aria-label')||pick.value||'Media';
+    }
+  };
+  root.addEventListener('error',onImageError,{capture:true,signal:lifecycle.signal});
   root.addEventListener('ely:stream',onStream);root.addEventListener('click',onClick);root.addEventListener('dblclick',onDoubleClick);root.addEventListener('keydown',onKeyDown);root.addEventListener('pointerdown',onPointerDown);root.addEventListener('pointerup',onPointerUp);root.addEventListener('input',onInput);root.addEventListener('change',onChange);root.addEventListener('submit',onSubmit);root.addEventListener('dragstart',onDragStart);root.addEventListener('dragover',onDragOver);root.addEventListener('drop',onDrop);
   return()=>{lifecycle.abort();mathCleanups.forEach(cleanup=>cleanup());approvals.forEach(dialog=>dialog.removeEventListener('cancel',onCancel));root.removeEventListener('ely:stream',onStream);root.removeEventListener('click',onClick);root.removeEventListener('dblclick',onDoubleClick);root.removeEventListener('keydown',onKeyDown);root.removeEventListener('pointerdown',onPointerDown);root.removeEventListener('pointerup',onPointerUp);root.removeEventListener('input',onInput);root.removeEventListener('change',onChange);root.removeEventListener('submit',onSubmit);root.removeEventListener('dragstart',onDragStart);root.removeEventListener('dragover',onDragOver);root.removeEventListener('drop',onDrop);};
 });

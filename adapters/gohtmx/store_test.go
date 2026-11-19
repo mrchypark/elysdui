@@ -274,3 +274,75 @@ func TestStoreUninitializedAndBadConfig(t *testing.T) {
 		t.Fatal("unsafe config accepted")
 	}
 }
+
+func TestStoreFragmentAssetsAndRevisionTracking(t *testing.T) {
+	var nilStore *Store
+	if _, err := nilStore.Assets(); err == nil {
+		t.Fatal("nil store Assets")
+	}
+	if _, st, err := nilStore.RenderFragment(httptest.NewRequest(http.MethodGet, "/", nil)); st != http.StatusServiceUnavailable || err == nil {
+		t.Fatalf("nil store RenderFragment: %d %v", st, err)
+	}
+	w := httptest.NewRecorder()
+	nilStore.ServeFragment(w, httptest.NewRequest(http.MethodGet, "/", nil))
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("nil store ServeFragment: %d", w.Code)
+	}
+
+	r, err := DefaultRegistry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls := new(atomic.Int32)
+	cfg := storeConfig(calls)
+	cfg.FragmentOnHXRequest = true
+	s, err := NewStore(storeScreen("first-body"), r, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := s.Snapshot()
+	assets, err := s.Assets()
+	if err != nil || assets.Empty() {
+		t.Fatalf("Store.Assets: %+v %v", assets, err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/shell", nil)
+	frag, status, err := s.RenderFragment(req)
+	if err != nil || status != http.StatusOK || frag.Revision != first.Revision ||
+		!strings.Contains(string(frag.Body), `data-sdui-revision="`+first.Revision+`"`) ||
+		!strings.Contains(string(frag.Body), "first-body") {
+		t.Fatalf("Store.RenderFragment: status=%d err=%v frag=%+v", status, err, frag)
+	}
+
+	w = httptest.NewRecorder()
+	s.ServeFragment(w, req)
+	if w.Code != http.StatusOK || w.Header().Get("X-SDUI-Revision") != first.Revision ||
+		!strings.HasPrefix(w.Body.String(), `<div id="screen" data-sdui-screen="screen"`) ||
+		strings.Contains(w.Body.String(), "<!doctype") {
+		t.Fatalf("Store.ServeFragment: %d %v %s", w.Code, w.Header(), w.Body.String())
+	}
+
+	next, err := s.Activate(storeScreen("second-body"), first.Revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hxReq := httptest.NewRequest(http.MethodGet, "/shell", nil)
+	hxReq.Header.Set("HX-Request", "true")
+	w = httptest.NewRecorder()
+	s.ServeHTTP(w, hxReq)
+	if w.Code != http.StatusOK || w.Header().Get("X-SDUI-Revision") != next.Revision ||
+		!strings.Contains(w.Body.String(), "second-body") || strings.Contains(w.Body.String(), "<!doctype") {
+		t.Fatalf("Store.ServeHTTP HX fragment after Activate: %d %v %s", w.Code, w.Header(), w.Body.String())
+	}
+
+	rolled, err := s.Rollback(first.Revision, next.Revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w = httptest.NewRecorder()
+	s.ServeFragment(w, req)
+	if w.Code != http.StatusOK || w.Header().Get("X-SDUI-Revision") != rolled.Revision ||
+		!strings.Contains(w.Body.String(), "first-body") {
+		t.Fatalf("Store.ServeFragment after Rollback: %d %v %s", w.Code, w.Header(), w.Body.String())
+	}
+}

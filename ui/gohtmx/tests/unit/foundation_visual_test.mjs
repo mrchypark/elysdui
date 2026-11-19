@@ -53,5 +53,6 @@ const pairs=[...theme.matchAll(/--color-accent:\s*(#[\da-f]{6});/gi)].map(m=>m[1
 const inks=[...theme.matchAll(/--on-accent:\s*(#[\da-f]{6});/gi)].map(m=>m[1]);
 const luminance=hex=>hex.slice(1).match(/../g).map(x=>parseInt(x,16)/255).map(x=>x<=.04045?x/12.92:((x+.055)/1.055)**2.4).reduce((sum,x,i)=>sum+x*[.2126,.7152,.0722][i],0);
 assert(pairs.length>=2&&inks.length>=2);
+assert.doesNotMatch(foundationSource, /!Number\.isNaN\(date\)/, 'date formatting must check Number.isFinite(date.getTime()) instead of !Number.isNaN(date)');
 for(let i=0;i<2;i++){const a=luminance(pairs[i]),b=luminance(inks[i]);assert((Math.max(a,b)+.05)/(Math.min(a,b)+.05)>=7,'shell primary contrast');}
 console.log('foundation visual/clipboard and shell contrast contracts passed');

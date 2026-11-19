@@ -88,6 +88,8 @@ func (assetFiles) ReadDir(name string) ([]fs.DirEntry, error) {
 
 // BindAssets registers both the standalone UI assets and the SDUI browser bridge.
 // Call it once instead of ui.BindAssets when a host uses this adapter.
+// Hosts that already called ui.BindAssets may call BindBridgeAssets instead to
+// register only the SDUI bridge assets without conflicting ServeMux routes.
 func BindAssets(mux *http.ServeMux) error {
 	return BindAssetsWithOptions(mux, nil)
 }
@@ -97,6 +99,19 @@ func BindAssetsWithOptions(mux *http.ServeMux, options *ui.CompressionOptions) e
 	if err := ui.BindAssetsWithOptions(mux, options); err != nil {
 		return err
 	}
+	return BindBridgeAssetsWithOptions(mux, options)
+}
+
+// BindBridgeAssets registers only the SDUI browser bridge assets (/assets/sdui.css
+// and /assets/sdui.js). Use it alongside ui.BindAssets when a host serves both
+// standalone ui/gohtmx routes and SDUI screens on the same mux.
+func BindBridgeAssets(mux *http.ServeMux) error {
+	return BindBridgeAssetsWithOptions(mux, nil)
+}
+
+// BindBridgeAssetsWithOptions registers only the SDUI browser bridge assets using
+// the provided compression options.
+func BindBridgeAssetsWithOptions(mux *http.ServeMux, options *ui.CompressionOptions) error {
 	assets, err := fs.Sub(bridgeFiles, "assets")
 	if err != nil {
 		return err

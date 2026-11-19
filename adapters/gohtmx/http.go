@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"html"
+	"html/template"
 	"io"
 	"mime"
 	"mime/multipart"
@@ -72,6 +73,21 @@ type Config struct {
 	MaxIdempotencyEntries int
 	MaxReplayBytes        int64
 	OnPanic               func(context.Context, any)
+	// FragmentOnHXRequest configures ServeHTTP GET requests carrying
+	// HX-Request: true (and not HX-Boosted: true) to return only the
+	// [data-sdui-screen] fragment instead of a full HTML document.
+	FragmentOnHXRequest bool
+}
+
+// Fragment holds rendered [data-sdui-screen] markup and its required asset
+// bundle so custom layout shells can embed SDUI screens without slicing a full
+// HTML document.
+type Fragment struct {
+	ScreenID string
+	Title    string
+	Revision string
+	Body     template.HTML
+	Assets   AssetBundle
 }
 type replay struct {
 	key         string
@@ -188,16 +204,83 @@ func validEndpoint(path string) bool {
 	return path != "" && validateEndpoint(path) == nil
 }
 
-func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func isHTMXFragmentRequest(r *http.Request) bool {
+	return r != nil &&
+		strings.EqualFold(strings.TrimSpace(r.Header.Get("HX-Request")), "true") &&
+		!strings.EqualFold(strings.TrimSpace(r.Header.Get("HX-Boosted")), "true")
+}
+
+// Assets returns the structured asset bundle required by this handler's plan.
+func (h *Handler) Assets() (AssetBundle, error) {
+	if h == nil || h.plan == nil {
+		return AssetBundle{}, fmt.Errorf("sdui: screen unavailable")
+	}
+	return h.plan.Assets()
+}
+
+// RenderFragment authenticates the request, executes the screen loader, and
+// returns the rendered [data-sdui-screen] fragment alongside its AssetBundle and
+// HTTP status code (200 on success, or 4xx/5xx on failure).
+func (h *Handler) RenderFragment(r *http.Request) (Fragment, int, error) {
+	if h == nil || h.plan == nil || h.config.Authenticate == nil || h.config.Authorize == nil || h.config.CSRF == nil {
+		return Fragment{}, http.StatusServiceUnavailable, errors.New("screen unavailable")
+	}
+	if r == nil {
+		return Fragment{}, http.StatusBadRequest, errors.New("invalid page request")
+	}
+	principal, csrf, status, err := h.authenticateRequest(r)
+	if err != nil {
+		return Fragment{}, status, err
+	}
+	return h.renderFragment(r, principal, csrf)
+}
+
+// ServeFragment serves only the rendered [data-sdui-screen] markup for GET
+// requests with the handler's security, revision, and compression policies.
+func (h *Handler) ServeFragment(w http.ResponseWriter, r *http.Request) {
+	if h == nil || h.plan == nil || h.config.Authenticate == nil || h.config.Authorize == nil || h.config.CSRF == nil {
+		http.Error(w, "screen unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	if r == nil {
+		http.Error(w, "invalid page request", http.StatusBadRequest)
+		return
+	}
+	if !h.prepareResponse(w, r, false) {
+		return
+	}
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	principal, csrf, status, err := h.authenticateRequest(r)
+	if err != nil {
+		http.Error(w, err.Error(), status)
+		return
+	}
+	frag, status, err := h.renderFragment(r, principal, csrf)
+	if err != nil {
+		http.Error(w, err.Error(), status)
+		return
+	}
+	h.writeHTML(w, r, http.StatusOK, []byte(frag.Body))
+}
+
+func (h *Handler) prepareResponse(w http.ResponseWriter, r *http.Request, varyHX bool) bool {
 	w.Header().Set("Cache-Control", "no-store, no-transform")
-	w.Header().Add("Vary", "Cookie, Authorization, Accept-Encoding")
+	vary := "Cookie, Authorization, Accept-Encoding"
+	if varyHX {
+		vary = "Cookie, Authorization, Accept-Encoding, HX-Request, HX-Boosted"
+	}
+	w.Header().Add("Vary", vary)
 	available := []string{"identity"}
 	if !h.config.ResponseCompression.Disabled {
 		available = append(available, h.config.ResponseCompression.Codecs...)
 	}
 	if _, ok := httpencoding.NegotiateAvailable(strings.Join(r.Header.Values("Accept-Encoding"), ","), available...); !ok {
 		http.Error(w, "no acceptable content encoding", http.StatusNotAcceptable)
-		return
+		return false
 	}
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
@@ -205,23 +288,71 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if h.revision != "" {
 		w.Header().Set("X-SDUI-Revision", h.revision)
 	}
+	return true
+}
+
+func (h *Handler) authenticateRequest(r *http.Request) (principal, csrf string, status int, err error) {
+	principal, err = h.config.Authenticate(r)
+	if err != nil || principal == "" {
+		return "", "", http.StatusUnauthorized, errors.New("authentication required")
+	}
+	if err = h.config.Authorize(r.Context(), principal); err != nil {
+		return "", "", http.StatusForbidden, errors.New("forbidden")
+	}
+	csrf, err = h.config.CSRF(r)
+	if err != nil || csrf == "" {
+		return "", "", http.StatusForbidden, errors.New("CSRF unavailable")
+	}
+	return principal, csrf, 0, nil
+}
+
+func (h *Handler) renderFragment(r *http.Request, principal, csrf string) (Fragment, int, error) {
+	data := map[string]any{}
+	if load := h.config.Loaders[h.plan.Loader()]; load != nil {
+		var err error
+		data, err = load(r.Context(), Request{Principal: principal, Values: r.URL.Query(), HTTPRequest: r})
+		if err != nil {
+			return Fragment{}, http.StatusBadRequest, errors.New("invalid page request")
+		}
+	}
+	assets, err := h.plan.Assets()
+	if err != nil {
+		return Fragment{}, http.StatusInternalServerError, errors.New("render failed")
+	}
+	var body bytes.Buffer
+	if err := h.plan.Render(&body, RenderContext{Data: data, CSRF: csrf, Endpoint: h.config.Endpoint, Revision: h.revision, RequestCompression: h.config.RequestCompression}); err != nil {
+		return Fragment{}, http.StatusInternalServerError, errors.New("render failed")
+	}
+	screenID := h.plan.ScreenID()
+	title := screenID
+	if title == "" {
+		title = "SDUI"
+	}
+	return Fragment{
+		ScreenID: screenID,
+		Title:    title,
+		Revision: h.revision,
+		Body:     template.HTML(body.String()),
+		Assets:   assets,
+	}, http.StatusOK, nil
+}
+
+func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if h == nil || h.plan == nil || h.config.Authenticate == nil || h.config.Authorize == nil || h.config.CSRF == nil {
+		http.Error(w, "screen unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	if !h.prepareResponse(w, r, h.config.FragmentOnHXRequest) {
+		return
+	}
 	if r.Method != http.MethodGet && r.Method != http.MethodPost {
 		w.Header().Set("Allow", "GET, POST")
 		http.Error(w, "method not allowed", 405)
 		return
 	}
-	principal, err := h.config.Authenticate(r)
-	if err != nil || principal == "" {
-		http.Error(w, "authentication required", 401)
-		return
-	}
-	if err = h.config.Authorize(r.Context(), principal); err != nil {
-		http.Error(w, "forbidden", 403)
-		return
-	}
-	csrf, err := h.config.CSRF(r)
-	if err != nil || csrf == "" {
-		http.Error(w, "CSRF unavailable", 403)
+	principal, csrf, status, err := h.authenticateRequest(r)
+	if err != nil {
+		http.Error(w, err.Error(), status)
 		return
 	}
 	if r.Method == http.MethodGet {
@@ -235,32 +366,25 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.action(w, r, principal, csrf)
 }
 func (h *Handler) page(w http.ResponseWriter, r *http.Request, principal, csrf string) {
-	data := map[string]any{}
-	if load := h.config.Loaders[h.plan.Loader()]; load != nil {
-		var err error
-		data, err = load(r.Context(), Request{Principal: principal, Values: r.URL.Query(), HTTPRequest: r})
-		if err != nil {
-			http.Error(w, "invalid page request", 400)
-			return
-		}
+	frag, status, err := h.renderFragment(r, principal, csrf)
+	if err != nil {
+		http.Error(w, err.Error(), status)
+		return
 	}
-	title := h.plan.ScreenID()
-	if title == "" {
-		title = "SDUI"
+	if h.config.FragmentOnHXRequest && isHTMXFragmentRequest(r) {
+		h.writeHTML(w, r, http.StatusOK, []byte(frag.Body))
+		return
 	}
 	var b bytes.Buffer
 	b.WriteString("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>")
-	b.WriteString(html.EscapeString(title))
+	b.WriteString(html.EscapeString(frag.Title))
 	b.WriteString("</title>")
-	if err := h.plan.RenderAssets(&b); err != nil {
+	if err := frag.Assets.Render(&b); err != nil {
 		http.Error(w, "render failed", 500)
 		return
 	}
 	b.WriteString("</head><body>")
-	if err := h.plan.Render(&b, RenderContext{Data: data, CSRF: csrf, Endpoint: h.config.Endpoint, Revision: h.revision, RequestCompression: h.config.RequestCompression}); err != nil {
-		http.Error(w, "render failed", 500)
-		return
-	}
+	b.WriteString(string(frag.Body))
 	b.WriteString("</body></html>")
 	h.writeHTML(w, r, 200, b.Bytes())
 }

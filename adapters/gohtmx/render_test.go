@@ -5,6 +5,8 @@ import (
 	"errors"
 	"html/template"
 	"io"
+	"reflect"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -335,5 +337,176 @@ func TestDefaultRequestCompressionOptionsIndependent(t *testing.T) {
 	b := DefaultRequestCompressionOptions()
 	if b.Disabled || strings.Join(b.Codecs, ",") != "zstd,gzip" || b.MinBytes != 1024 || b.MinSavingsBytes != 64 || b.MinSavingsPercent != 5 {
 		t.Fatalf("bad defaults: %+v", b)
+	}
+}
+
+func TestAssetBundleConstructorsDeltaAndOrder(t *testing.T) {
+	base := BaseUIAssets()
+	if !reflect.DeepEqual(base.Stylesheets, []string{"/assets/app.css", "/assets/ely-controls.css", "/assets/ely-patterns.css"}) ||
+		!reflect.DeepEqual(base.Scripts, []string{"/assets/ely-controls.js", "/assets/ely-patterns.js"}) ||
+		len(base.Modules) != 0 {
+		t.Fatalf("unexpected BaseUIAssets: %+v", base)
+	}
+	bridge := BridgeAssets()
+	if !reflect.DeepEqual(bridge.Stylesheets, []string{"/assets/sdui.css"}) ||
+		!reflect.DeepEqual(bridge.Scripts, []string{"/assets/sdui.js"}) ||
+		len(bridge.Modules) != 0 {
+		t.Fatalf("unexpected BridgeAssets: %+v", bridge)
+	}
+	emptyFam, err := FamilyAssets()
+	if err != nil || !emptyFam.Empty() {
+		t.Fatalf("empty FamilyAssets: %+v %v", emptyFam, err)
+	}
+	for _, bad := range []string{"", "unknown", "forms/../evil"} {
+		if _, err := FamilyAssets(bad); err == nil {
+			t.Fatalf("accepted invalid family %q", bad)
+		}
+	}
+	fam, err := FamilyAssets("workspace", "forms", "workspace")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fam.Stylesheets) == 0 || fam.Stylesheets[0] != "/assets/ely-api.css" {
+		t.Fatalf("ely-api.css must precede family sheets: %v", fam.Stylesheets)
+	}
+	if !reflect.DeepEqual(fam.Modules, []string{"/assets/ely-api-forms-entry.js", "/assets/ely-api-workspace-entry.js"}) {
+		t.Fatalf("unexpected family modules: %v", fam.Modules)
+	}
+	if got := strings.Join(fam.Stylesheets, ","); strings.Count(got, "ely-api-forms.css") != 1 {
+		t.Fatalf("shared dependency stylesheet duplicated or missing: %v", fam.Stylesheets)
+	}
+
+	r := schemaRegistry(t)
+	if err := r.Register(Definition{Name: "map-view", Template: "map-view", Assets: []string{"map"}, Properties: map[string]Property{}}); err != nil {
+		t.Fatal(err)
+	}
+	screen := schemaScreen()
+	screen.Root.Children[0].Children = []Node{
+		{ID: "sw", Type: "switch", Props: map[string]any{"name": "updates", "label": "Updates"}},
+		{ID: "map", Type: "map-view"},
+	}
+	plan, err := Compile(screen, r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bundle, err := plan.Assets()
+	if err != nil {
+		t.Fatal(err)
+	}
+	delta := bundle.Without(base)
+	for _, excluded := range base.URLs() {
+		for _, url := range delta.URLs() {
+			if url == excluded {
+				t.Fatalf("delta retained base asset %s", excluded)
+			}
+		}
+	}
+	if !reflect.DeepEqual(delta.Stylesheets, []string{"/assets/sdui.css", "/assets/ely-map.css", "/assets/ely-api.css", "/assets/ely-api-forms.css"}) {
+		t.Fatalf("unexpected delta stylesheets: %v", delta.Stylesheets)
+	}
+	if !reflect.DeepEqual(delta.Scripts, []string{"/assets/ely-map.js", "/assets/sdui.js"}) {
+		t.Fatalf("unexpected delta scripts: %v", delta.Scripts)
+	}
+	if !reflect.DeepEqual(delta.Modules, []string{"/assets/ely-api-forms-entry.js"}) {
+		t.Fatalf("unexpected delta modules: %v", delta.Modules)
+	}
+	if excluded := bundle.Exclude("/assets/sdui.js"); strings.Contains(strings.Join(excluded.URLs(), ","), "/assets/sdui.js") {
+		t.Fatalf("Exclude did not remove sdui.js: %+v", excluded)
+	}
+	if len(bundle.Scripts) != 4 {
+		t.Fatalf("Without/Exclude mutated original bundle: %+v", bundle.Scripts)
+	}
+	merged := MergeAssets(base, delta, bridge)
+	gotURLs, wantURLs := append([]string(nil), merged.URLs()...), append([]string(nil), bundle.URLs()...)
+	sort.Strings(gotURLs)
+	sort.Strings(wantURLs)
+	if !reflect.DeepEqual(gotURLs, wantURLs) {
+		t.Fatalf("merged URLs mismatch:\ngot:  %v\nwant: %v", gotURLs, wantURLs)
+	}
+
+	var rendered bytes.Buffer
+	if err := plan.RenderAssets(&rendered); err != nil {
+		t.Fatal(err)
+	}
+	htmlOut, err := bundle.HTML()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rendered.String() != string(htmlOut) {
+		t.Fatalf("Plan.RenderAssets and Plan.Assets().HTML() diverged:\nrender: %s\nhtml:   %s", rendered.String(), htmlOut)
+	}
+	modIdx := strings.Index(rendered.String(), `/assets/ely-api-forms-entry.js`)
+	sduiIdx := strings.Index(rendered.String(), `/assets/sdui.js`)
+	if modIdx < 0 || sduiIdx < 0 || sduiIdx <= modIdx {
+		t.Fatalf("/assets/sdui.js must follow family modules in RenderAssets output: %s", rendered.String())
+	}
+	// Parity with ui-component-assets and ui-map-assets templates.
+	tpl, err := ui.NewTemplates()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var uiComp, uiMap bytes.Buffer
+	if err := tpl.ExecuteTemplate(&uiComp, "ui-component-assets", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := tpl.ExecuteTemplate(&uiMap, "ui-map-assets", nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, url := range []string{"/assets/ely-controls.css", "/assets/ely-patterns.css", "/assets/ely-controls.js", "/assets/ely-patterns.js"} {
+		if !strings.Contains(uiComp.String(), url) || !strings.Contains(string(htmlOut), url) {
+			t.Fatalf("missing ui-component-assets URL %s", url)
+		}
+	}
+	for _, url := range []string{"/assets/ely-map.css", "/assets/ely-map.js"} {
+		if !strings.Contains(uiMap.String(), url) || !strings.Contains(string(htmlOut), url) {
+			t.Fatalf("missing ui-map-assets URL %s", url)
+		}
+	}
+	var nilPlan *Plan
+	if _, err := nilPlan.Assets(); err == nil {
+		t.Fatal("nil plan returned assets")
+	}
+}
+
+func TestAssetBundleValidationIsAtomic(t *testing.T) {
+	for _, bad := range []string{
+		"",
+		"/assets/",
+		"/other/app.css",
+		"https://evil.example/assets/app.css",
+		"//evil.example/assets/app.css",
+		"/assets//app.css",
+		"/assets/app.css/",
+		"/assets/../secret.js",
+		"/assets/%2e%2e/secret.js",
+		"/assets/app.css?x=1",
+		"/assets/app.css#x",
+		`/assets/app"onerror="alert(1).js`,
+		"/assets/<script>.js",
+		"/assets/app\n.js",
+	} {
+		for _, bundle := range []AssetBundle{
+			{Stylesheets: []string{"/assets/app.css", bad}},
+			{Scripts: []string{"/assets/sdui.js", bad}},
+			{Modules: []string{"/assets/ely-api-forms-entry.js", bad}},
+		} {
+			var out bytes.Buffer
+			if err := bundle.Render(&out); err == nil || out.Len() != 0 {
+				t.Fatalf("invalid asset URL %q accepted or leaked output: %q", bad, out.String())
+			}
+			if _, err := bundle.HTML(); err == nil {
+				t.Fatalf("invalid asset URL %q accepted in HTML()", bad)
+			}
+		}
+	}
+	if err := (AssetBundle{Stylesheets: []string{"/assets/app.css"}}).Render(nil); err == nil {
+		t.Fatal("nil writer accepted")
+	}
+	if err := (AssetBundle{Stylesheets: []string{"/assets/app.css"}}).Render(brokenWriter{}); !errors.Is(err, io.ErrClosedPipe) {
+		t.Fatalf("writer error lost: %v", err)
+	}
+	var emptyOut bytes.Buffer
+	if err := (AssetBundle{}).Render(&emptyOut); err != nil || emptyOut.Len() != 0 {
+		t.Fatalf("empty bundle render: %v %q", err, emptyOut.String())
 	}
 }

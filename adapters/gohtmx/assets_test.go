@@ -65,3 +65,56 @@ func TestAggregateFilesystemConformance(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestBindBridgeAssetsCoexistsWithUIBindAssets(t *testing.T) {
+	if err := BindBridgeAssets(nil); err == nil {
+		t.Fatal("nil mux accepted")
+	}
+	if err := BindBridgeAssetsWithOptions(nil, nil); err == nil {
+		t.Fatal("nil mux accepted with options")
+	}
+	mux := http.NewServeMux()
+	if err := ui.BindAssets(mux); err != nil {
+		t.Fatal(err)
+	}
+	if err := BindBridgeAssets(mux); err != nil {
+		t.Fatalf("BindBridgeAssets after ui.BindAssets failed: %v", err)
+	}
+	for _, name := range []string{"assets/app.css", "assets/ely-controls.js", "assets/ely-map.css", "assets/sdui.css", "assets/sdui.js"} {
+		want, err := Files.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		request := httptest.NewRequest(http.MethodGet, "/"+name, nil)
+		request.Header.Set("Accept-Encoding", "gzip, identity;q=0")
+		response := httptest.NewRecorder()
+		mux.ServeHTTP(response, request)
+		if response.Code != http.StatusOK || response.Header().Get("Content-Encoding") != "gzip" {
+			t.Fatalf("%s: %d %v", name, response.Code, response.Header())
+		}
+		reader, err := gzip.NewReader(response.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := io.ReadAll(reader)
+		reader.Close()
+		if err != nil || !bytes.Equal(got, want) {
+			t.Fatalf("%s changed bytes: %v", name, err)
+		}
+	}
+
+	plainMux := http.NewServeMux()
+	if err := ui.BindAssets(plainMux); err != nil {
+		t.Fatal(err)
+	}
+	if err := BindBridgeAssetsWithOptions(plainMux, &ui.CompressionOptions{Disabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/assets/sdui.js", nil)
+	request.Header.Set("Accept-Encoding", "gzip, identity")
+	plainMux.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || response.Header().Get("Content-Encoding") != "" {
+		t.Fatalf("disabled bridge compression: %d %v", response.Code, response.Header())
+	}
+}

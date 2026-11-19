@@ -41,6 +41,7 @@ export const paletteAuditCandidateAssets = [
   'ui/gohtmx/assets/ely-controls.css',
   'ui/gohtmx/assets/ely-patterns.css',
   'ui/gohtmx/assets/ely-patterns.js',
+  'adapters/gohtmx/assets/sdui.css',
 ];
 // The runtime and core digests the audited candidate carries. They are the
 // clean HEAD bytes of the reviewed revision, so they describe the committed

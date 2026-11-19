@@ -151,57 +151,279 @@ func validateEndpoint(endpoint string) error {
 	return nil
 }
 
+var assetTemplates = template.Must(template.New("sdui-assets").Parse(
+	`{{define "stylesheet"}}<link rel="stylesheet" href="{{.}}">{{end}}` +
+		`{{define "script"}}<script src="{{.}}" defer></script>{{end}}` +
+		`{{define "module"}}<script type="module" src="{{.}}"></script>{{end}}`,
+))
+
+// AssetBundle holds deduplicated, host-served asset URLs separated by role so
+// custom layout shells can inspect, merge, or subtract already-loaded assets.
+type AssetBundle struct {
+	Stylesheets []string
+	Scripts     []string
+	Modules     []string
+}
+
+// BaseUIAssets returns the standalone UI baseline assets (/assets/app.css and
+// the ui-component-assets stylesheet/script set).
+func BaseUIAssets() AssetBundle {
+	return AssetBundle{
+		Stylesheets: []string{"/assets/app.css", "/assets/ely-controls.css", "/assets/ely-patterns.css"},
+		Scripts:     []string{"/assets/ely-controls.js", "/assets/ely-patterns.js"},
+	}
+}
+
+// BridgeAssets returns the SDUI browser bridge assets (/assets/sdui.css and /assets/sdui.js).
+func BridgeAssets() AssetBundle {
+	return AssetBundle{
+		Stylesheets: []string{"/assets/sdui.css"},
+		Scripts:     []string{"/assets/sdui.js"},
+	}
+}
+
+// FamilyAssets returns the shared advanced-component stylesheet, family-specific
+// stylesheets, and module entrypoints required by the named component families.
+func FamilyAssets(families ...string) (AssetBundle, error) {
+	if len(families) == 0 {
+		return AssetBundle{}, nil
+	}
+	seenFamilies := make(map[string]bool, len(families))
+	ordered := make([]string, 0, len(families))
+	for _, family := range families {
+		if !knownFamilies[family] {
+			return AssetBundle{}, fmt.Errorf("sdui: unknown asset family %q", family)
+		}
+		if seenFamilies[family] {
+			continue
+		}
+		seenFamilies[family] = true
+		ordered = append(ordered, family)
+	}
+	sort.Strings(ordered)
+	seenSheets := map[string]bool{}
+	var sheets []string
+	for _, family := range ordered {
+		for _, sheet := range ui.FamilyStylesheets(family) {
+			if !seenSheets[sheet] {
+				seenSheets[sheet] = true
+				sheets = append(sheets, sheet)
+			}
+		}
+	}
+	sort.Strings(sheets)
+	stylesheets := make([]string, 0, 1+len(sheets))
+	stylesheets = append(stylesheets, "/assets/ely-api.css")
+	for _, sheet := range sheets {
+		stylesheets = append(stylesheets, "/assets/"+sheet)
+	}
+	modules := make([]string, 0, len(ordered))
+	for _, family := range ordered {
+		modules = append(modules, "/assets/ely-api-"+family+"-entry.js")
+	}
+	return AssetBundle{Stylesheets: stylesheets, Modules: modules}, nil
+}
+
+// MergeAssets combines bundles in order, preserving first-seen URL order and
+// removing duplicates within each asset category.
+func MergeAssets(bundles ...AssetBundle) AssetBundle {
+	var stylesheets, scripts, modules []string
+	for _, bundle := range bundles {
+		stylesheets = append(stylesheets, bundle.Stylesheets...)
+		scripts = append(scripts, bundle.Scripts...)
+		modules = append(modules, bundle.Modules...)
+	}
+	return AssetBundle{
+		Stylesheets: dedupeStrings(stylesheets, nil),
+		Scripts:     dedupeStrings(scripts, nil),
+		Modules:     dedupeStrings(modules, nil),
+	}
+}
+
+// Empty reports whether the bundle contains any asset URLs.
+func (b AssetBundle) Empty() bool {
+	return len(b.Stylesheets) == 0 && len(b.Scripts) == 0 && len(b.Modules) == 0
+}
+
+// URLs returns all unique asset URLs across stylesheets, scripts, and modules.
+func (b AssetBundle) URLs() []string {
+	seen := make(map[string]bool, len(b.Stylesheets)+len(b.Scripts)+len(b.Modules))
+	var out []string
+	for _, list := range [][]string{b.Stylesheets, b.Scripts, b.Modules} {
+		for _, raw := range list {
+			if seen[raw] {
+				continue
+			}
+			seen[raw] = true
+			out = append(out, raw)
+		}
+	}
+	return out
+}
+
+// Exclude returns a deduplicated copy of the bundle without any of the given URLs.
+func (b AssetBundle) Exclude(urls ...string) AssetBundle {
+	var drop map[string]bool
+	if len(urls) > 0 {
+		drop = make(map[string]bool, len(urls))
+		for _, raw := range urls {
+			drop[raw] = true
+		}
+	}
+	return AssetBundle{
+		Stylesheets: dedupeStrings(b.Stylesheets, drop),
+		Scripts:     dedupeStrings(b.Scripts, drop),
+		Modules:     dedupeStrings(b.Modules, drop),
+	}
+}
+
+// Without returns a deduplicated copy of the bundle without any asset URLs present in other.
+func (b AssetBundle) Without(other AssetBundle) AssetBundle {
+	return b.Exclude(other.URLs()...)
+}
+
+// Render validates every URL as a local /assets/ path and atomically emits
+// <link> and <script> tags to w. Stylesheets are emitted first, followed by
+// classic component scripts, family module entrypoints, and finally /assets/sdui.js
+// (when present) so deferred bridge setup runs after component modules.
+func (b AssetBundle) Render(w io.Writer) error {
+	if w == nil {
+		return fmt.Errorf("sdui: rendering assets requires a writer")
+	}
+	var output boundedBuffer
+	seen := make(map[string]bool, len(b.Stylesheets)+len(b.Scripts)+len(b.Modules))
+	emitURL := func(kind, raw string) error {
+		if seen[raw] {
+			return nil
+		}
+		seen[raw] = true
+		return assetTemplates.ExecuteTemplate(&output, kind, raw)
+	}
+	for _, raw := range b.Stylesheets {
+		if err := validateAssetURL(raw); err != nil {
+			return err
+		}
+		if err := emitURL("stylesheet", raw); err != nil {
+			return err
+		}
+	}
+	hasSDUIScript := false
+	for _, raw := range b.Scripts {
+		if err := validateAssetURL(raw); err != nil {
+			return err
+		}
+		if raw == "/assets/sdui.js" {
+			hasSDUIScript = true
+			continue
+		}
+		if err := emitURL("script", raw); err != nil {
+			return err
+		}
+	}
+	for _, raw := range b.Modules {
+		if err := validateAssetURL(raw); err != nil {
+			return err
+		}
+		if err := emitURL("module", raw); err != nil {
+			return err
+		}
+	}
+	if hasSDUIScript {
+		if err := emitURL("script", "/assets/sdui.js"); err != nil {
+			return err
+		}
+	}
+	if output.Len() == 0 {
+		return nil
+	}
+	_, err := w.Write(output.Bytes())
+	return err
+}
+
+// HTML returns the rendered asset tags as trusted template.HTML for embedding in
+// a host Go template <head>.
+func (b AssetBundle) HTML() (template.HTML, error) {
+	var output bytes.Buffer
+	if err := b.Render(&output); err != nil {
+		return "", err
+	}
+	return template.HTML(output.String()), nil
+}
+
+func dedupeStrings(items []string, drop map[string]bool) []string {
+	if len(items) == 0 {
+		return nil
+	}
+	seen := make(map[string]bool, len(items))
+	var out []string
+	for _, item := range items {
+		if drop[item] || seen[item] {
+			continue
+		}
+		seen[item] = true
+		out = append(out, item)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func validateAssetURL(raw string) error {
+	if !strings.HasPrefix(raw, "/assets/") || len(raw) == len("/assets/") {
+		return fmt.Errorf("sdui: asset URL must be a non-empty /assets/ path")
+	}
+	if strings.Contains(raw, "//") || strings.ContainsAny(raw, "\\?#\"'<>") || strings.IndexFunc(raw, func(r rune) bool { return unicode.IsControl(r) || unicode.IsSpace(r) }) >= 0 {
+		return fmt.Errorf("sdui: invalid asset URL %q", raw)
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Host != "" || parsed.Scheme != "" || parsed.RawQuery != "" || parsed.Fragment != "" || parsed.Path != raw {
+		return fmt.Errorf("sdui: invalid asset URL %q", raw)
+	}
+	for _, seg := range strings.Split(strings.TrimPrefix(parsed.Path, "/assets/"), "/") {
+		if seg == "" || seg == "." || seg == ".." {
+			return fmt.Errorf("sdui: invalid asset URL path segment in %q", raw)
+		}
+	}
+	return nil
+}
+
+// Assets returns the structured, deduplicated asset bundle required by this plan.
+// Custom layout hosts can subtract already-loaded shell assets via Without or
+// Exclude before rendering the remaining delta tags into <head>.
+func (p *Plan) Assets() (AssetBundle, error) {
+	if p == nil || p.core == nil || p.templates == nil {
+		return AssetBundle{}, fmt.Errorf("sdui: rendering requires a compiled plan")
+	}
+	stylesheets := []string{"/assets/app.css", "/assets/sdui.css", "/assets/ely-controls.css", "/assets/ely-patterns.css"}
+	scripts := []string{"/assets/ely-controls.js", "/assets/ely-patterns.js"}
+	for _, asset := range p.assets {
+		if asset == "map" {
+			stylesheets = append(stylesheets, "/assets/ely-map.css")
+			scripts = append(scripts, "/assets/ely-map.js")
+		}
+	}
+	scripts = append(scripts, "/assets/sdui.js")
+	familyAssets, err := FamilyAssets(p.families...)
+	if err != nil {
+		return AssetBundle{}, err
+	}
+	return MergeAssets(
+		AssetBundle{Stylesheets: stylesheets, Scripts: scripts},
+		familyAssets,
+	), nil
+}
+
 // RenderAssets emits the fixed basic assets, the union of registered leaf
 // family assets and their CSS dependencies, and the event bridge. Schemas can
 // never select an asset URL. Optional Lottie code is loaded by its component
 // only when mounted, including after region swaps. Call once per page.
 func (p *Plan) RenderAssets(w io.Writer) error {
-	if p == nil || p.core == nil || p.templates == nil {
-		return fmt.Errorf("sdui: rendering requires a compiled plan")
-	}
-	var output boundedBuffer
-	if _, err := output.WriteString(`<link rel="stylesheet" href="/assets/app.css"><link rel="stylesheet" href="/assets/sdui.css">`); err != nil {
+	assets, err := p.Assets()
+	if err != nil {
 		return err
 	}
-	if err := p.templates.ExecuteTemplate(&output, "ui-component-assets", nil); err != nil {
-		return err
-	}
-	for _, asset := range p.assets {
-		if asset == "map" {
-			if err := p.templates.ExecuteTemplate(&output, "ui-map-assets", nil); err != nil {
-				return err
-			}
-		}
-	}
-	css := map[string]bool{}
-	if len(p.families) > 0 {
-		css["ely-api.css"] = true
-	}
-	for _, family := range p.families {
-		for _, sheet := range ui.FamilyStylesheets(family) {
-			css[sheet] = true
-		}
-	}
-	names := make([]string, 0, len(css))
-	for name := range css {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	for _, name := range names {
-		if _, err := fmt.Fprintf(&output, `<link rel="stylesheet" href="/assets/%s">`, name); err != nil {
-			return err
-		}
-	}
-	for _, family := range p.families {
-		if _, err := fmt.Fprintf(&output, `<script type="module" src="/assets/ely-api-%s-entry.js"></script>`, family); err != nil {
-			return err
-		}
-	}
-	if _, err := output.WriteString(`<script src="/assets/sdui.js" defer></script>`); err != nil {
-		return err
-	}
-	_, err := w.Write(output.Bytes())
-	return err
+	return assets.Render(w)
 }
 
 type eventMetadata struct {

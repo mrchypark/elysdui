@@ -103,6 +103,46 @@ func (s *Store) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	snap.handler.ServeHTTP(w, r)
 }
 
+// Assets returns the structured asset bundle of the active snapshot.
+func (s *Store) Assets() (AssetBundle, error) {
+	if s == nil {
+		return AssetBundle{}, fmt.Errorf("sdui: screen unavailable")
+	}
+	snap := s.active.Load()
+	if snap == nil || snap.handler == nil {
+		return AssetBundle{}, fmt.Errorf("sdui: screen unavailable")
+	}
+	return snap.handler.Assets()
+}
+
+// RenderFragment pins the active snapshot and returns its rendered
+// [data-sdui-screen] fragment alongside its AssetBundle and HTTP status code.
+func (s *Store) RenderFragment(r *http.Request) (Fragment, int, error) {
+	if s == nil {
+		return Fragment{}, http.StatusServiceUnavailable, errors.New("screen unavailable")
+	}
+	snap := s.active.Load()
+	if snap == nil || snap.handler == nil {
+		return Fragment{}, http.StatusServiceUnavailable, errors.New("screen unavailable")
+	}
+	return snap.handler.RenderFragment(r)
+}
+
+// ServeFragment pins the active snapshot and serves its [data-sdui-screen]
+// fragment for GET requests.
+func (s *Store) ServeFragment(w http.ResponseWriter, r *http.Request) {
+	if s == nil {
+		http.Error(w, "screen unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	snap := s.active.Load()
+	if snap == nil || snap.handler == nil {
+		http.Error(w, "screen unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	snap.handler.ServeFragment(w, r)
+}
+
 // Activate compiles and checks all loader/action contracts before taking the
 // short swap lock. expectedRevision is required; unchanged canonical configuration is a no-op. Concurrent/stale publishers
 // fail without replacing the valid active screen.
