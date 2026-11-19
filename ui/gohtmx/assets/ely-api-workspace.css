@@ -699,3 +699,7 @@
 
 [data-ely-family='workspace'] .ely-workspace__blame{overflow-x:auto;max-inline-size:100%}
 @media(max-width:48rem){[data-ely-family='workspace'] :is(.ely-workspace__comment-row,.ely-workspace__comment-head,.ely-workspace__thread-head){flex-wrap:wrap}}
+
+:is(:root[data-theme=dark],.dark) [data-ely-family='workspace'] .ely-workspace__peer{color:#5eead4}
+:is(:root[data-theme=dark],.dark) [data-ely-family='workspace'] .ely-workspace__presence small{color:#111}
+:is(:root[data-theme=dark],.dark) [data-ely-family='workspace'] :is([data-ws-file-progress],[data-ws-transfer-queue]) output{color:#f58482}

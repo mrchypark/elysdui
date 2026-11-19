@@ -113,7 +113,7 @@
 [data-ely-family='communication'] .ely-agent-trace-tracks>section{display:grid;grid-template-columns:96px minmax(0,1fr);align-items:center;gap:0}
 [data-ely-family='communication'] .ely-agent-trace h3{margin:0;font-size:12px;font-weight:400;color:var(--color-muted,#777)}
 [data-ely-family='communication'] .ely-agent-trace-track{position:relative;height:28px;overflow:hidden;background:var(--surface,#f1f1f1)}
-[data-ely-family='communication'] .ely-agent-trace-span{position:absolute;top:2px;bottom:2px;height:auto;min-height:0;min-width:0;margin:0;padding:0 4px;border:1px solid transparent;border-radius:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left;display:block;font:inherit;color:var(--color-ink,#181613);background:color-mix(in srgb,var(--trace-tint,#5182c1) 55%,transparent);box-shadow:none}
+[data-ely-family='communication'] .ely-agent-trace-span{position:absolute;top:2px;bottom:2px;height:auto;min-height:0;min-width:0;margin:0;padding:0 4px;border:1px solid transparent;border-radius:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left;display:block;font:inherit;color:var(--color-ink,#181613);background:color-mix(in srgb,var(--trace-tint,#5182c1) 24%,var(--surface));box-shadow:none}
 [data-ely-family='communication'] .ely-agent-trace-span[hidden]{display:none}
 [data-ely-family='communication'] .ely-agent-trace-span[aria-pressed=true]{background:var(--trace-tint,#5182c1);border-color:var(--color-ink,#181613)}
 [data-ely-family='communication'] .ely-agent-trace-span:focus-visible{outline:2px solid var(--color-accent,#306b43);outline-offset:-2px}
@@ -394,3 +394,11 @@
 @media(max-width:48rem){[data-ely-family='communication'] .ely-calendar-year>div{grid-template-columns:repeat(auto-fit,minmax(min(100%,11rem),1fr))}}
 
 @media(max-width:48rem){[data-ely-family='communication'] :is(.ely-chat-folders,.ely-messaging-members,.ely-mail-reader,.ely-mail-thread) :is(header,li,article,div){flex-wrap:wrap}[data-ely-family='communication'] .ely-project-database [data-project-database-view]{overflow-x:auto;max-inline-size:100%}}
+
+:is(:root[data-theme=dark],.dark) [data-ely-family='communication'] :is(.ely-agent-tool-error,[data-tool-state=failed] .ely-agent-tool-state,[data-agent-state=failed] .ely-agent-tree-dot,del){color:#f87171}
+:is(:root[data-theme=dark],.dark) [data-ely-family='communication'] :is([data-tool-state=done] .ely-agent-tool-state,ins){color:#4ade80}
+:is(:root[data-theme=dark],.dark) [data-ely-family='communication'] .ely-agent-tree [data-state=failed]>span:first-child{color:#f87171}
+:is(:root[data-theme=dark],.dark) [data-ely-family='communication'] .ely-project-pomodoro [data-pomodoro-dots] span{color:#a3a09c}
+:is(:root[data-theme=dark],.dark) [data-ely-family='communication'] .ely-project-workload [data-overload=true]{color:#eb8a84}
+
+:is(:root[data-theme=dark],.dark) [data-ely-family='communication'] .ely-agent-tree [data-agent-state=failed]>details>summary span{color:#f87171}

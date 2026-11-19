@@ -715,3 +715,5 @@
 [data-ely-family="interaction"] .ely-interaction__toast-launcher{flex-wrap:wrap}
 [data-ely-family="interaction"] .ely-interaction--feedback-source .ely-interaction__toast-stack{right:16px;left:auto;max-width:calc(100vw - 32px)}
 @media(max-width:48rem){[data-ely-family="interaction"] [role=tablist]{flex-wrap:wrap}[data-ely-family="interaction"] .ely-interaction__notification header{flex-wrap:wrap}}
+
+:is(:root[data-theme=dark],.dark) [data-ely-family="interaction"] .ely-interaction--feedback-source .is-success{--feedback-tone:#4ade80}
