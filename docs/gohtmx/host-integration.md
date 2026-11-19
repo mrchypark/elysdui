@@ -44,6 +44,7 @@ CSS 캐스케이드와 JS 라이프사이클이 깨지지 않도록 초기 HTML 
   {{template "ui-advanced-family-assets" "forms"}}
   */}}
   {{/* 지도를 사용할 때만 추가: {{template "ui-map-assets"}} */}}
+  {{/* 차트를 사용할 때만 해당 헬퍼 추가: {{template "ui-chart-assets"}}, {{template "ui-time-series-assets"}}, {{template "ui-scatter-assets"}}, {{template "ui-stat-chart-assets"}}, {{template "ui-density-chart-assets"}}, {{template "ui-relation-chart-assets"}}, {{template "ui-comparison-chart-assets"}}, {{template "ui-horizon-chart-assets"}}, {{template "ui-parallel-sets-assets"}}, {{template "ui-surface-chart-assets"}} */}}
   <script src="/assets/htmx.min.js" defer></script>
 </head>
 ```
