@@ -488,3 +488,5 @@
 /* Shared radio items are cards elsewhere; forms groups use plain labeled radios. */
 [data-ely-family='forms'] .ely-api-radio-group label[data-slot='radio-item']{padding:0;border:0;border-radius:0;background:transparent}
 [data-ely-family='forms'] .ely-api-radio-group label{white-space:normal;max-inline-size:100%}
+[data-ely-family='forms'] :is(.ely-api-quarter-fields,.ely-api-form-actions,.ely-api-static-swatches){flex-wrap:wrap}
+[data-ely-family='forms'] .ely-api-search{min-inline-size:0;max-inline-size:100%}

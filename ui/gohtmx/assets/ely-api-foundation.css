@@ -440,3 +440,11 @@
 [data-ely-family='foundation'] .ely-foundation__images .ely-foundation__icon{inline-size:24px;block-size:24px;color:var(--color-muted)}
 
 [data-ely-family='foundation'] .ely-foundation__clipboard output:empty{display:none}
+[data-ely-family='foundation'] :is(.ely-foundation__panes,.ely-foundation__inset-demo,.ely-foundation__section-items){flex-wrap:wrap}
+[data-ely-family='foundation'] :is(.ely-foundation__scroll,.ely-foundation__sticky,.ely-foundation__panel){max-inline-size:100%}
+@media(max-width:42rem){
+  [data-ely-family='foundation'] .ely-foundation__workspace{grid-template:auto 1fr auto/minmax(0,1fr)}
+  [data-ely-family='foundation'] .ely-foundation__icons{grid-template-columns:repeat(auto-fill,minmax(2rem,1fr));max-inline-size:100%}
+  [data-ely-family='foundation'] .ely-foundation__typewriter-run output{min-inline-size:0;max-inline-size:100%}
+  [data-ely-family='foundation'] :is(.ely-foundation__dock,.ely-foundation__sidebar,.ely-foundation__master){grid-template-columns:minmax(0,1fr)}
+}

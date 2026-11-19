@@ -694,3 +694,5 @@
 [data-ely-family='workspace'] [data-ws-trash] [data-ws-trash-confirm]{display:inline-grid;grid-template-columns:max-content;align-items:center;justify-items:center}
 [data-ely-family='workspace'] [data-ws-trash] [data-ws-trash-label],[data-ely-family='workspace'] [data-ws-trash] [data-ws-trash-confirm]::after{grid-area:1/1;font:inherit;letter-spacing:inherit;white-space:inherit}
 [data-ely-family='workspace'] [data-ws-trash] [data-ws-trash-confirm]::after{content:attr(data-ws-trash-confirm-label);visibility:hidden}
+[data-ely-family='workspace'] .ely-workspace__disassembly{overflow-x:auto;max-inline-size:100%}
+@media(max-width:42rem){[data-ely-family='workspace'] :is([data-ws-instruction],.ely-workspace__variables-layout,[data-ws-markdown-layout='split']){grid-template-columns:minmax(0,1fr)}}

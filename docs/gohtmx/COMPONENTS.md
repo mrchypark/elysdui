@@ -28,7 +28,7 @@ Go 화면에서는 같은 API를 `{{component (dict "Chapter" "documents" "Name"
 
 Extra `Attrs` accept validated `data-*`, `aria-*`, and `hx-*` names with escaped values. Executable htmx event attributes, `hx-config` (including `data-hx-config`), JavaScript-valued request attributes, and `hx-trigger` filter expressions are rejected with a rendering error. Use declarative request attributes and host-owned event listeners instead of executable attribute values.
 
-각 계열의 속성과 동작은 [기본 표시](advanced-foundation.md), [상호작용](advanced-interaction.md), [데이터](advanced-data.md), [작업 공간](advanced-workspace.md), [통신](advanced-communication.md), [미디어·환경](advanced-native.md), [폼·계정·설정](advanced-forms.md)에 있다.
+호스트 앱 통합 체크리스트·에셋 순서·데이터 포맷 규약은 [호스트 통합 가이드](host-integration.md)를 참고한다. 각 계열의 속성과 동작은 [기본 표시](advanced-foundation.md), [상호작용](advanced-interaction.md), [데이터](advanced-data.md), [작업 공간](advanced-workspace.md), [통신](advanced-communication.md), [미디어·환경](advanced-native.md), [폼·계정·설정](advanced-forms.md)에 있다.
 
 계열의 상태 변경은 대체로 `ely:action`으로 전달한다. 기본 표시 계열(foundation)은 상태 변경을 action이 `change`인 `ely:action`으로 보내고, 데이터·상호작용·폼·작업 공간·통신·미디어 계열과 네이티브 `input`·`textarea`·`select`의 값 변경은 `ely:change`로 보낸다. 기본 표시 계열도 `FocusScope`의 Escape처럼 `ely:change`를 직접 보내는 동작이 있다. `ely:action`은 `id`, `component`, `action`, `value`와 폼의 `formData`·`values`를 전달하며, 특정 동작은 좌표·파일·선택 경로 등 추가 데이터를 포함한다. 호스트는 `/assets/ely-api.js`의 `mount()`로 처리한다.
 

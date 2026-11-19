@@ -708,3 +708,6 @@
 [data-ely-family="interaction"] .ely-interaction__countdown output{font-size:1.3rem;font-weight:700;font-variant-numeric:tabular-nums}
 [data-ely-family="interaction"] .ely-interaction__countdown small{color:var(--color-muted,#687087)}
 [data-ely-family="interaction"] .ely-interaction--feedback-source:is([data-interaction-kind="Alert"],[data-interaction-kind="Callout"]){grid-template-columns:minmax(0,1fr)}
+[data-ely-family="interaction"] :is(.ely-interaction__button-group,.ely-interaction__toggle-group,.ely-interaction__segmented,.ely-interaction__pagination,.ely-interaction__menubar,.ely-interaction__wizard footer,.ely-interaction__status-line){flex-wrap:wrap}
+[data-ely-family="interaction"] .ely-interaction__tabs>[role="tablist"]{overflow-x:auto;max-inline-size:100%}
+@media(max-width:42rem){[data-ely-family="interaction"] .ely-interaction__skeleton-set{grid-template-columns:minmax(0,1fr)}}

@@ -141,3 +141,5 @@
 [data-ely-family="data"] .ely-data__multi figure{display:grid;gap:.25rem;margin:0}
 .ely-data__chart text{fill:currentColor}
 @media(max-width:36rem){.ely-data__dashboard{grid-template-columns:minmax(0,1fr);grid-auto-rows:auto}.ely-data__measures{grid-template-columns:minmax(0,1fr)}.ely-data__measures>.ely-data__gauge{width:7rem;max-width:100%;margin:0}}
+[data-ely-family="data"] :is(.ely-data__row-editor form,.ely-data__pivot-controls){flex-wrap:wrap}
+@media(max-width:42rem){[data-ely-family="data"] :is(.ely-data__measures,.ely-data__property-grid,.ely-data__book,.ely-data__book-sides,.ely-data__timeline-variants,.ely-data__description){grid-template-columns:minmax(0,1fr);gap:.75rem}}

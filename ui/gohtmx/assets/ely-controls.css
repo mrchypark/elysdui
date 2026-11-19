@@ -70,7 +70,7 @@ dialog[data-ui-component="dialog"], [data-ui-component] dialog { margin: auto; }
 [data-ui-combobox-input]{padding-inline-end:32px}
 [data-ui-component="combobox"]>[data-ui-combobox-list]{position:absolute;inset-inline:0;top:calc(100% + 4px);max-block-size:280px;z-index:40}
 
-[data-ui-component][data-ui-dropzone]{position:relative;display:flex;flex-direction:column;align-items:center;gap:8px;padding:32px 24px;border:1px dashed var(--border);border-radius:8px}
+[data-ui-component][data-ui-dropzone]{position:relative;display:flex;flex-direction:column;align-items:center;gap:8px;padding:32px 24px;border:1px dashed var(--border);border-radius:8px;min-inline-size:0;max-inline-size:100%;box-sizing:border-box}
 [data-ui-dropzone] .ui-dropzone-input{position:absolute;inline-size:1px;block-size:1px;opacity:0;overflow:hidden;padding:0;border:0;clip-path:inset(50%)}
 [data-ui-dropzone] [data-ui-file-browse][data-slot]{align-self:center;justify-self:center}
 .ui-dropzone-icon{inline-size:24px;block-size:24px;background:var(--color-muted);mask:url("/assets/ely/icons/upload.svg") center/contain no-repeat}
