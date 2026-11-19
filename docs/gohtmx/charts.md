@@ -6,9 +6,12 @@ These components use caller-supplied data and do not require SDUI. Run
 Call `gohtmx.BindAssets` on the host's mux. Assets are local; the general
 chart engine is loaded only by pages that import it.
 Go templates can include the matching stylesheet helper in the page shell:
-`ui-time-series-assets`, `ui-chart-assets`, `ui-stat-chart-assets`,
-`ui-density-chart-assets`, or `ui-relation-chart-assets`. Helpers do not mount
-charts or load the JavaScript engines; import the module needed by the host.
+`ui-time-series-assets`, `ui-scatter-assets`, `ui-chart-assets`,
+`ui-stat-chart-assets`, `ui-density-chart-assets`,
+`ui-relation-chart-assets`, `ui-comparison-chart-assets`,
+`ui-horizon-chart-assets`, `ui-parallel-sets-assets`, or
+`ui-surface-chart-assets`. Helpers do not mount charts or load the
+JavaScript engines; import the module needed by the host.
 
 ## Large time series
 
