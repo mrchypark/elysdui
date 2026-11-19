@@ -228,6 +228,21 @@ mutate its trusted template set or request data during rendering. `Plan.Render`,
 `RenderRegion` and `RenderAssets` also support custom page shells. Assets are
 currently mounted at `/assets/`; subpath hosts must provide matching routes.
 
+For custom layout shells that already render their own navigation chrome and
+base UI assets (`ui.BindAssets`), call `sdui.BindBridgeAssets(mux)` instead of
+`sdui.BindAssets(mux)` to register only `/assets/sdui.css` and `/assets/sdui.js`.
+Use `Plan.Assets()`, `Handler.Assets()`, or `Store.Assets()` alongside
+`BaseUIAssets()`, `BridgeAssets()`, `FamilyAssets(...)`, `MergeAssets(...)`,
+`Exclude(...)`, and `Without(...)` to inspect or emit deduplicated delta `<head>`
+tags (`HTML()` / `Render()`). Use `Handler.RenderFragment(r)` (or
+`Store.RenderFragment(r)`) to embed `[data-sdui-screen]` markup in a full-page
+shell without slicing HTML documents, and use `Handler.ServeFragment(w, r)`
+(or `Store.ServeFragment(w, r)`, or `Config{FragmentOnHXRequest: true}` on
+`ServeHTTP`) for HTMX partial swaps (`HX-Request: true` without
+`HX-Boosted: true`). Partial fragment responses omit `<head>` and loader tags,
+so the outer shell must preload the union of required SDUI bridge, map, and
+family assets in `<head>`.
+
 Authentication, screen authorization, per-action authorization and CSRF issuance
 are mandatory. The CSRF callback reads expected tokens from trusted session
 state, never submitted input; comparisons are constant time. Keep a page's token

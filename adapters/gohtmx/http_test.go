@@ -2,6 +2,7 @@ package gohtmx
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"errors"
 	"fmt"
@@ -955,4 +956,186 @@ func TestHandlerActionAuthorizationUsesParsedRequestBeforeReplay(t *testing.T) {
 	if runs.Load() != 1 || checks.Load() != 4 {
 		t.Fatalf("resource authorization/run counts: checks=%d runs=%d", checks.Load(), runs.Load())
 	}
+}
+
+func TestHandlerRenderFragmentAndAssets(t *testing.T) {
+	h := httpTestHandler(t, func(c *Config) {
+		c.Loaders["load"] = func(_ context.Context, r Request) (map[string]any, error) {
+			if r.Values.Get("fail") == "1" {
+				return nil, errors.New("private loader error")
+			}
+			return map[string]any{"result": r.Principal + ":" + r.Values.Get("tab")}, nil
+		}
+	})
+	assets, err := h.Assets()
+	if err != nil || assets.Empty() {
+		t.Fatalf("Handler.Assets: %+v %v", assets, err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/shell?tab=overview", nil)
+	req.Header.Set("X-Test-Principal", "alice")
+	frag, status, err := h.RenderFragment(req)
+	if err != nil || status != http.StatusOK {
+		t.Fatalf("RenderFragment failed: status=%d err=%v", status, err)
+	}
+	if frag.ScreenID != "test-screen" || frag.Title != "test-screen" || frag.Assets.Empty() {
+		t.Fatalf("unexpected fragment metadata: %+v", frag)
+	}
+	body := string(frag.Body)
+	if !strings.HasPrefix(body, `<div id="test-screen" data-sdui-screen="test-screen"`) ||
+		strings.Contains(body, "<!doctype") || strings.Contains(body, "<head") || strings.Contains(body, "<script") ||
+		!strings.Contains(body, "alice:overview") {
+		t.Fatalf("unexpected fragment body: %s", body)
+	}
+	delta := frag.Assets.Without(BaseUIAssets())
+	if !strings.Contains(strings.Join(delta.Stylesheets, ","), "/assets/sdui.css") ||
+		!strings.Contains(strings.Join(delta.Scripts, ","), "/assets/sdui.js") {
+		t.Fatalf("unexpected fragment delta assets: %+v", delta)
+	}
+
+	// Empty ScreenID falls back to "SDUI" title.
+	badLoaderReq := httptest.NewRequest(http.MethodGet, "/shell?fail=1", nil)
+	badLoaderReq.Header.Set("X-Test-Principal", "alice")
+	if _, st, err := h.RenderFragment(badLoaderReq); st != http.StatusBadRequest || err == nil || strings.Contains(err.Error(), "private") {
+		t.Fatalf("loader error leaked or bad status: status=%d err=%v", st, err)
+	}
+	unauthReq := httptest.NewRequest(http.MethodGet, "/shell", nil)
+	if _, st, err := h.RenderFragment(unauthReq); st != http.StatusUnauthorized || err == nil {
+		t.Fatalf("unauthenticated fragment: status=%d err=%v", st, err)
+	}
+	forbidAuth := httpTestHandler(t, func(c *Config) {
+		c.Authorize = func(context.Context, string) error { return errors.New("private forbidden") }
+	})
+	if _, st, err := forbidAuth.RenderFragment(req); st != http.StatusForbidden || err == nil || strings.Contains(err.Error(), "private") {
+		t.Fatalf("forbidden fragment: status=%d err=%v", st, err)
+	}
+	brokenRender := httpTestHandler(t, func(c *Config) {
+		c.Loaders["load"] = func(context.Context, Request) (map[string]any, error) {
+			return map[string]any{}, nil // missing required binding
+		}
+	})
+	if _, st, err := brokenRender.RenderFragment(req); st != http.StatusInternalServerError || err == nil {
+		t.Fatalf("render failure: status=%d err=%v", st, err)
+	}
+	if _, st, err := h.RenderFragment(nil); st != http.StatusBadRequest || err == nil {
+		t.Fatalf("nil request: status=%d err=%v", st, err)
+	}
+	var nilHandler *Handler
+	if _, err := nilHandler.Assets(); err == nil {
+		t.Fatal("nil handler Assets")
+	}
+	if _, st, err := nilHandler.RenderFragment(req); st != http.StatusServiceUnavailable || err == nil {
+		t.Fatalf("nil handler RenderFragment: status=%d err=%v", st, err)
+	}
+}
+
+func TestHandlerServeFragment(t *testing.T) {
+	h := httpTestHandler(t, func(c *Config) {
+		c.CompressResponses = true
+	})
+	req := httptest.NewRequest(http.MethodGet, "/fragment", nil)
+	req.Header.Set("X-Test-Principal", "alice")
+	req.Header.Set("Accept-Encoding", "gzip")
+	w := httpTestServeFragment(h, req)
+	if w.Code != http.StatusOK || w.Header().Get("Content-Encoding") != "gzip" ||
+		w.Header().Get("Cache-Control") != "no-store, no-transform" ||
+		w.Header().Get("X-Content-Type-Options") != "nosniff" ||
+		w.Header().Get("Vary") != "Cookie, Authorization, Accept-Encoding" {
+		t.Fatalf("ServeFragment headers/status: %d %v", w.Code, w.Header())
+	}
+	body := gunzipBytes(t, w.Body.Bytes())
+	if !strings.HasPrefix(body, `<div id="test-screen" data-sdui-screen="test-screen"`) ||
+		strings.Contains(body, "<!doctype") || strings.Contains(body, "<script") {
+		t.Fatalf("ServeFragment body: %s", body)
+	}
+
+	postReq := httptest.NewRequest(http.MethodPost, "/fragment", nil)
+	postReq.Header.Set("X-Test-Principal", "alice")
+	postW := httpTestServeFragment(h, postReq)
+	if postW.Code != http.StatusMethodNotAllowed || postW.Header().Get("Allow") != http.MethodGet {
+		t.Fatalf("ServeFragment POST: %d %v", postW.Code, postW.Header())
+	}
+
+	unacceptable := httptest.NewRequest(http.MethodGet, "/fragment", nil)
+	unacceptable.Header.Set("X-Test-Principal", "alice")
+	unacceptable.Header.Set("Accept-Encoding", "identity;q=0")
+	if w := httpTestServeFragment(h, unacceptable); w.Code != http.StatusNotAcceptable {
+		t.Fatalf("ServeFragment 406: %d", w.Code)
+	}
+
+	if w := httpTestServeFragment(h, httptest.NewRequest(http.MethodGet, "/fragment", nil)); w.Code != http.StatusUnauthorized {
+		t.Fatalf("ServeFragment 401: %d", w.Code)
+	}
+	var nilHandler *Handler
+	if w := httpTestServeFragment(nilHandler, req); w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("nil handler ServeFragment: %d", w.Code)
+	}
+}
+
+func TestHandlerFragmentOnHXRequest(t *testing.T) {
+	h := httpTestHandler(t, func(c *Config) {
+		c.FragmentOnHXRequest = true
+	})
+
+	// Plain GET returns full document and includes HX Vary tokens.
+	fullReq := httptest.NewRequest(http.MethodGet, "/page", nil)
+	fullReq.Header.Set("X-Test-Principal", "alice")
+	fullW := httpTestServe(h, fullReq)
+	if fullW.Code != http.StatusOK || !strings.HasPrefix(fullW.Body.String(), "<!doctype html>") ||
+		fullW.Header().Get("Vary") != "Cookie, Authorization, Accept-Encoding, HX-Request, HX-Boosted" {
+		t.Fatalf("plain GET under FragmentOnHXRequest: %d %v %s", fullW.Code, fullW.Header(), fullW.Body.String())
+	}
+
+	// HX-Request: true returns only [data-sdui-screen] fragment.
+	hxReq := httptest.NewRequest(http.MethodGet, "/page", nil)
+	hxReq.Header.Set("X-Test-Principal", "alice")
+	hxReq.Header.Set("HX-Request", "true")
+	hxW := httpTestServe(h, hxReq)
+	if hxW.Code != http.StatusOK || !strings.HasPrefix(hxW.Body.String(), `<div id="test-screen" data-sdui-screen="test-screen"`) ||
+		strings.Contains(hxW.Body.String(), "<!doctype") || strings.Contains(hxW.Body.String(), "<head") || strings.Contains(hxW.Body.String(), "<script") {
+		t.Fatalf("HX-Request GET under FragmentOnHXRequest: %d %s", hxW.Code, hxW.Body.String())
+	}
+
+	// HX-Boosted: true still gets full document.
+	boostedReq := httptest.NewRequest(http.MethodGet, "/page", nil)
+	boostedReq.Header.Set("X-Test-Principal", "alice")
+	boostedReq.Header.Set("HX-Request", "true")
+	boostedReq.Header.Set("HX-Boosted", "true")
+	boostedW := httpTestServe(h, boostedReq)
+	if boostedW.Code != http.StatusOK || !strings.HasPrefix(boostedW.Body.String(), "<!doctype html>") {
+		t.Fatalf("HX-Boosted GET under FragmentOnHXRequest: %d %s", boostedW.Code, boostedW.Body.String())
+	}
+
+	// POST actions continue working normally.
+	postW := httpTestServe(h, httpTestRequest(http.MethodPost, "/actions", "hx-frag-post", "alice", httpTestValues()))
+	if postW.Code != http.StatusOK || !strings.HasPrefix(postW.Body.String(), `<section id="result"`) {
+		t.Fatalf("POST action under FragmentOnHXRequest: %d %s", postW.Code, postW.Body.String())
+	}
+
+	// Default FragmentOnHXRequest=false preserves full-document response even on HX-Request: true.
+	defaultH := httpTestHandler(t, nil)
+	defaultHX := httpTestServe(defaultH, hxReq)
+	if defaultHX.Code != http.StatusOK || !strings.HasPrefix(defaultHX.Body.String(), "<!doctype html>") ||
+		defaultHX.Header().Get("Vary") != "Cookie, Authorization, Accept-Encoding" {
+		t.Fatalf("default handler changed HX-Request behavior: %d %v", defaultHX.Code, defaultHX.Header())
+	}
+}
+
+func gunzipBytes(t *testing.T, data []byte) string {
+	t.Helper()
+	reader, err := gzip.NewReader(bytes.NewReader(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.Close()
+	out, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(out)
+}
+
+func httpTestServeFragment(h *Handler, r *http.Request) *httptest.ResponseRecorder {
+	w := httptest.NewRecorder()
+	h.ServeFragment(w, r)
+	return w
 }

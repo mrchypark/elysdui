@@ -6,12 +6,13 @@
 
 ## 1. 통합 모드 선택
 
-호스트 앱은 아래 두 방식 중 하나를 선택합니다. **두 바인더(`ui.BindAssets`와 `gohtmx.BindAssets`)를 동시에 등록하지 마세요.**
+호스트 앱은 아래 방식 중 하나를 선택합니다. **`ui.BindAssets`와 `gohtmx.BindAssets`를 같은 `http.ServeMux`에 중복 등록하지 마세요.** 기존 `ui/gohtmx` 라우트에 SDUI 화면을 함께 붙일 때는 `ui.BindAssets(mux)` 뒤에 `gohtmx.BindBridgeAssets(mux)`를 호출해 SDUI 브리지 에셋(`/assets/sdui.css`, `/assets/sdui.js`)만 추가로 등록합니다.
 
 | 모드 | 대상 | 에셋 등록 | 렌더링 |
 | :--- | :--- | :--- | :--- |
 | **단독 Go/HTMX (`ui/gohtmx`)** | Go 템플릿에서 직접 컴포넌트 배치 | `ui.BindAssets(mux)` | `ui.RenderComponent` 또는 `{{component ...}}` |
-| **SDUI 어댑터 (`adapters/gohtmx`)** | JSON 스키마 기반 화면/리전 렌더링 | `gohtmx.BindAssets(mux)` | `plan.Render` + `plan.RenderAssets` + `plan.RenderRegion` |
+| **SDUI 전용 (`adapters/gohtmx`)** | JSON 스키마 기반 화면/리전 렌더링 | `gohtmx.BindAssets(mux)` | `plan.Render` + `plan.RenderAssets` + `plan.RenderRegion` |
+| **혼합·커스텀 셸 (`ui` + `adapters/gohtmx`)** | 자체 내비게이션 셸 안에 SDUI 화면 임베드 | `ui.BindAssets(mux)` + `gohtmx.BindBridgeAssets(mux)` | `handler.RenderFragment` + `handler.ServeFragment` (`FragmentOnHXRequest`) |
 
 ---
 
@@ -48,6 +49,20 @@ CSS 캐스케이드와 JS 라이프사이클이 깨지지 않도록 초기 HTML 
 ```
 
 > **주의**: `ely-api-communication.css` 등 계열 CSS는 `[data-ely-family="..."]` 선택자 또는 전용 클래스를 기준으로 스타일을 적용합니다. `<head>`에서 계열 에셋을 빼먹으면 버튼·헤더·리스트·아바타가 브라우저 기본 태그 스타일로 무너집니다.
+
+### C. 커스텀 레이아웃 셸 임베딩 (Fragment + Delta Assets)
+
+자체 사이드바(`&lt;aside&gt;`)와 메인 컨테이너(`&lt;main id="shell-content"&gt;`)를 가진 호스트 앱은 전체 HTML 문서를 문자열로 자를 필요 없이 `adapters/gohtmx`의 fragment/asset API를 사용합니다.
+
+1. **초기 셸 `<head>` 에셋 사전 로드 및 중복 제거**:
+   - `plan.Assets()`, `handler.Assets()`, `store.Assets()`는 화면에 필요한 `AssetBundle`(`Stylesheets`, `Scripts`, `Modules`)을 반환합니다.
+   - 셸이 이미 기본 UI 에셋(`gohtmx.BaseUIAssets()`)을 로드했다면 `Without` / `Exclude`로 이미 포함된 에셋을 빼고, 여러 SDUI 화면의 합집합을 `gohtmx.MergeAssets(...)`로 합친 뒤 `.HTML()`로 `<head>`에 한 번만 출력하세요. (개별 계열만 직접 추가할 때는 `gohtmx.FamilyAssets(...)`, 브리지 에셋만 필요할 때는 `gohtmx.BridgeAssets()`를 사용합니다.)
+2. **전체 페이지 로드 vs HTMX 부분 스왑**:
+   - **전체 페이지 요청**: `handler.RenderFragment(r)`(또는 `store.RenderFragment(r)`)를 호출하면 인증·인가·CSRF·로더 실행 후 `[data-sdui-screen]` 루트 마크업(`frag.Body`)과 `frag.Assets`를 돌려줍니다.
+   - **HTMX 부분 스왑 (`HX-Request: true`)**: 라우트 핸들러에서 `handler.ServeFragment(w, r)`(또는 `store.ServeFragment(w, r)`)를 호출하거나, `gohtmx.Config{FragmentOnHXRequest: true}`를 설정해 `ServeHTTP`가 `HX-Request: true` (`HX-Boosted: true` 제외) 요청에 `[data-sdui-screen]` 조각만 반환하도록 합니다.
+   - **셸 사전 로드 계약**: HTMX 부분 응답은 `<head>`나 `<script>`를 중복 삽입하지 않고 `[data-sdui-screen]` 마크업만 반환합니다. 따라서 내비게이션으로 나중에 스왑될 수 있는 모든 SDUI 화면의 계열·지도·브리지 에셋 합집합은 초기 셸 `<head>`에 미리 로드되어 있어야 합니다.
+3. **커스텀 라이트/다크 테마 토큰 규약 (`ely-map.css` 포함)**:
+   - 지도(`maps/MapView`, `maps/LocationPicker` 등)와 컴포넌트 CSS는 `app.css`와 동일한 라이트 기본값 및 `--surface` / `--color-paper` + `--color-ink` / `--ink` 동일 극성 쌍을 사용합니다. 커스텀 테마 호스트에서 `--surface`만 재정의하는 경우에도 `--color-ink`(또는 `--ink`)를 배경 극성에 맞게 함께 정의하세요.
 
 ---
 
@@ -110,9 +125,9 @@ CSS 캐스케이드와 JS 라이프사이클이 깨지지 않도록 초기 HTML 
 
 ## 7. 배포 전 체크리스트 & 디자인 검증
 
-- [ ] `ui.BindAssets(mux)` **또는** `gohtmx.BindAssets(mux)` 중 하나만 등록했는가?
-- [ ] 초기 `<head>`에 `app.css`, `ui-component-assets`, 필요한 모든 계열(HTMX 스왑 포함)의 `ui-advanced-family-assets`(또는 `plan.RenderAssets`)가 포함되었는가?
-- [ ] HTMX partial 응답에 `<link>`/`<script>` 에셋 헬퍼가 중복 포함되지 않았는가?
+- [ ] `gohtmx.BindAssets(mux)` **또는** `ui.BindAssets(mux)`(+ SDUI 병용 시 `gohtmx.BindBridgeAssets(mux)`)로 중복 없이 에셋을 등록했는가?
+- [ ] 초기 `<head>`에 `app.css`, `ui-component-assets`, 필요한 모든 계열·지도·브리지 에셋(HTMX 스왑으로 들어올 SDUI 화면 포함)의 합집합(`plan.RenderAssets` 또는 `MergeAssets(...).Without(...)`)이 중복 없이 포함되었는가?
+- [ ] 커스텀 셸 임베딩 시 HTML 문서를 수동 절단하지 않고 `RenderFragment` / `ServeFragment`(`FragmentOnHXRequest`)를 사용하며, HTMX partial 응답에 `<link>`/`<script>` 에셋 헬퍼가 중복 포함되지 않았는가?
 - [ ] 모든 고급 컴포넌트가 `[data-ely-family]` 래퍼 안에 있고, SDUI 화면이 `[data-sdui-screen]` 안에 있는가?
 - [ ] 모든 `ID`가 `[A-Za-z][A-Za-z0-9_-]{0,127}` 규칙을 지키고 페이지 내에서 유일한가?
 - [ ] UI 텍스트에 raw DB ID/UUID나 포맷되지 않은 ISO 타임스탬프가 노출되지 않는가?

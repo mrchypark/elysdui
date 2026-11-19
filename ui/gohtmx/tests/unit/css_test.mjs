@@ -34,6 +34,26 @@ assert(agentTreeProgressRule?.[1].includes('flex:0 0 4rem') && agentTreeProgress
 assert(agentTreeSelectedRule?.[1].includes('background:') && agentTreeSelectedRule[1].includes('box-shadow:'), 'SubAgentTree current selection must be visibly distinguishable');
 assert(communicationCSS.includes("[data-ely-family='communication'] .ely-agent-tree details:not([open])>ul{display:none}"), 'SubAgentTree must hide child lists when native details closes, despite the shared ul grid rule');
 
+const mapCSS = readFileSync('ui/gohtmx/assets/ely-map.css', 'utf8');
+for (const legacy of ['#1f1f1f', '#ededed', '#383838', '#999']) {
+  assert(!mapCSS.includes(legacy), `ely-map.css must not retain dark-only/low-contrast fallback ${legacy}`);
+}
+for (const required of [
+  '--map-bg-fallback:#ffffff',
+  '--map-fg-fallback:#181613',
+  '--map-bg:var(--surface,var(--color-paper,var(--map-bg-fallback)))',
+  '--map-fg:var(--color-ink,var(--ink,var(--map-fg-fallback)))',
+  '--map-muted:var(--color-muted,var(--muted-foreground,',
+  '--map-border:var(--color-line,var(--line,',
+  '@supports (color:light-dark(white,black))',
+  ":is([data-theme='dark'],.dark) .ely-map",
+  '#605d5a',
+  '@media (forced-colors:active)',
+]) {
+  assert(mapCSS.includes(required), `ely-map.css missing expected token/theme rule: ${required}`);
+}
+assert(!mapCSS.includes('var(--muted,'), 'ely-map.css must not fall back --map-muted to --muted (which ely-api.css defines as --surface)');
+
 
 for (const directory of ['ui/gohtmx/assets', 'internal/gallery/assets']) {
   for (const file of readdirSync(directory).filter(name => name.endsWith('.css'))) {
