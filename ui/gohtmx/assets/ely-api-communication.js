@@ -438,6 +438,190 @@ register('communication',root=>{
       pick.textContent=img.alt||pick.getAttribute('aria-label')||pick.value||'Media';
     }
   };
+  const mountNativeMessaging=(root,lifecycle)=>{
+    const opts={signal:lifecycle.signal};
+    // 1. Auto speaker grouping (is-cont) for consecutive same-sender messages
+    root.querySelectorAll('.ely-messaging-transcript,.ely-chat-message-list').forEach(container=>{
+      let prevSender='';
+      for(const node of container.children){
+        if(node.matches('.ely-communication-date,.ely-messaging-unread')){prevSender='';continue;}
+        if(!node.matches('.ely-messaging-message,.ely-chat-message'))continue;
+        const sender=node.dataset.senderId||'';
+        if(sender&&sender===prevSender){
+          node.classList.add('is-cont',node.classList.contains('ely-chat-message')?'ely-chat-message--grouped':'ely-messaging-message--grouped');
+        }else{
+          prevSender=sender;
+        }
+      }
+    });
+    // 2. Inline @mention pills (strip @ inside pill button)
+    root.querySelectorAll('[data-ely-message-body]').forEach(body=>{
+      const walker=document.createTreeWalker(body,NodeFilter.SHOW_TEXT);
+      const texts=[];
+      let cur;while((cur=walker.nextNode())){if(cur.parentElement&&!cur.parentElement.closest('button,a,.ely-mention-pill'))texts.push(cur);}
+      for(const t of texts){
+        const val=t.nodeValue||'';
+        const re=/(^|\s)@([A-Za-z0-9_.-]{1,64})/g;
+        let last=0,m,frag=null;
+        while((m=re.exec(val))){
+          if(!frag)frag=document.createDocumentFragment();
+          const before=val.slice(last,m.index)+m[1];
+          if(before)frag.append(document.createTextNode(before));
+          const pill=document.createElement('button');
+          pill.type='button';pill.className='ely-mention-pill';
+          pill.dataset.elyMention=m[2];pill.dataset.elyAction='open-profile';pill.value=m[2];
+          pill.disabled=root.dataset.elyDisabled==='true';
+          pill.textContent=m[2];
+          frag.append(pill);
+          last=re.lastIndex;
+        }
+        if(frag){
+          if(last<val.length)frag.append(document.createTextNode(val.slice(last)));
+          t.replaceWith(frag);
+        }
+      }
+    });
+    // 3. @mention autocomplete above Composer + mention click/profile popover + 2-tier delete dialog
+    const openMentionList=(ta,list,query)=>{
+      const q=query.toLowerCase();
+      const options=[...list.querySelectorAll('[data-ely-mention-option]')];
+      let visible=0;
+      for(const opt of options){
+        const match=!q||(opt.dataset.elyMentionOption||'').toLowerCase().includes(q)||(opt.textContent||'').toLowerCase().includes(q);
+        opt.hidden=!match;
+        opt.setAttribute('aria-selected',String(match&&visible===0));
+        if(match)visible++;
+      }
+      list.hidden=visible===0;
+    };
+    const insertMention=(ta,handle)=>{
+      const pos=ta.selectionStart??ta.value.length;
+      const before=ta.value.slice(0,pos),after=ta.value.slice(pos);
+      const replaced=before.replace(/(^|\s)@([^\s@]*)$/,`$1@${handle} `);
+      ta.value=replaced+after;
+      ta.focus();
+      const list=ta.closest('form')?.querySelector('[data-ely-mention-list]');
+      if(list)list.hidden=true;
+      changed(root,ta.name||'message',ta.value,{type:'textarea',mention:handle});
+    };
+    root.addEventListener('input',event=>{
+      if(root.dataset.elyDisabled==='true')return;
+      const ta=event.target;
+      if(!ta?.matches?.('.ely-chat-composer textarea[name="message"]'))return;
+      const list=ta.closest('form')?.querySelector('[data-ely-mention-list]');
+      if(!list)return;
+      const pos=ta.selectionStart??ta.value.length;
+      const m=ta.value.slice(0,pos).match(/(?:^|\s)@([^\s@]*)$/);
+      if(m)openMentionList(ta,list,m[1]);else list.hidden=true;
+    },opts);
+    root.addEventListener('keydown',event=>{
+      if(root.dataset.elyDisabled==='true')return;
+      const ta=event.target;
+      if(!ta?.matches?.('.ely-chat-composer textarea[name="message"]'))return;
+      const list=ta.closest('form')?.querySelector('[data-ely-mention-list]');
+      if(!list||list.hidden)return;
+      const visible=[...list.querySelectorAll('[data-ely-mention-option]:not([hidden])')];
+      if(!visible.length)return;
+      const idx=visible.findIndex(o=>o.getAttribute('aria-selected')==='true');
+      if(event.key==='ArrowDown'||event.key==='ArrowUp'){
+        event.preventDefault();event.stopImmediatePropagation();
+        const next=visible[(idx+(event.key==='ArrowDown'?1:-1)+visible.length)%visible.length];
+        visible.forEach(o=>o.setAttribute('aria-selected',String(o===next)));
+      }else if(event.key==='Enter'||event.key==='Tab'){
+        const picked=visible[Math.max(0,idx)];
+        if(picked){event.preventDefault();event.stopImmediatePropagation();insertMention(ta,picked.dataset.elyMentionOption||picked.value);}
+      }else if(event.key==='Escape'){
+        event.preventDefault();event.stopImmediatePropagation();list.hidden=true;
+      }
+    },opts);
+    root.addEventListener('click',event=>{
+      if(root.dataset.elyDisabled==='true')return;
+      const opt=event.target.closest('[data-ely-mention-option]');
+      if(opt&&!opt.disabled&&root.contains(opt)){const ta=opt.closest('form')?.querySelector('textarea[name="message"]');if(ta)insertMention(ta,opt.dataset.elyMentionOption||opt.value);return;}
+      const pill=event.target.closest('[data-ely-mention]');
+      if(pill&&!pill.disabled&&root.contains(pill)){
+        const handle=pill.dataset.elyMention||pill.value;
+        emit(root,'mention-click',{value:handle,mention:handle,messageId:pill.closest('[data-message-id]')?.dataset.messageId||''});
+        const pop=root.querySelector('[data-ely-profile-popover]');
+        if(pop){const nameEl=pop.querySelector('[data-ely-popover-name]');if(nameEl)nameEl.textContent=handle;pop.hidden=false;}
+        return;
+      }
+      if(event.target.closest('[data-ely-popover-close]')){const pop=root.querySelector('[data-ely-profile-popover]');if(pop)pop.hidden=true;return;}
+      const delOpen=event.target.closest('[data-ely-delete-open]');
+      if(delOpen&&!delOpen.disabled&&root.contains(delOpen)){
+        const dialog=delOpen.closest('.ely-messaging-transcript')?.querySelector('[data-ely-delete-dialog]')||root.querySelector('[data-ely-delete-dialog]');
+        if(dialog){dialog.dataset.targetMessageId=delOpen.dataset.elyDeleteOpen||delOpen.value||'';if(typeof dialog.showModal==='function'){try{dialog.showModal();}catch{dialog.setAttribute('open','');}}else{dialog.setAttribute('open','');}}
+        return;
+      }
+      const delChoice=event.target.closest('[data-ely-delete-choice]');
+      if(delChoice&&root.contains(delChoice)){
+        const dialog=delChoice.closest('[data-ely-delete-dialog]');
+        const messageId=dialog?.dataset.targetMessageId||'',scope=delChoice.dataset.elyDeleteChoice||'me';
+        if(dialog){if(typeof dialog.close==='function'){try{dialog.close();}catch{dialog.removeAttribute('open');}}else{dialog.removeAttribute('open');}}
+        emit(root,'delete-message',{value:messageId,messageId,scope});
+        changed(root,'delete-message',messageId,{scope});
+        return;
+      }
+      if(event.target.closest('[data-ely-delete-cancel]')){
+        const dialog=event.target.closest('[data-ely-delete-dialog]');
+        if(dialog){if(typeof dialog.close==='function'){try{dialog.close();}catch{dialog.removeAttribute('open');}}else{dialog.removeAttribute('open');}}
+        return;
+      }
+      if(event.target.closest('[data-ely-quote-clear]')){
+        const form=event.target.closest('form'),quote=form?.querySelector('[data-ely-reply-quote]');
+        if(quote)quote.hidden=true;
+        const replyInput=form?.querySelector('[data-ely-reply-to]');if(replyInput)replyInput.value='';
+        if(form)delete form.dataset.hasQuote;
+        changed(root,'quote','',{removed:true});
+        return;
+      }
+    },opts);
+    // 4. Swipe-to-reply + Floating Island Morphing
+    let swipe=null;
+    root.addEventListener('pointerdown',event=>{
+      if(root.dataset.elyDisabled==='true'||event.button!==0||event.target.closest('button,a,input,textarea,select'))return;
+      const row=event.target.closest('.ely-messaging-message,.ely-chat-message');
+      if(!row||!root.contains(row))return;
+      swipe={row,startX:event.clientX,startY:event.clientY,locked:false,shift:0};
+    },opts);
+    root.addEventListener('pointermove',event=>{
+      if(!swipe)return;
+      const dx=event.clientX-swipe.startX,dy=event.clientY-swipe.startY;
+      if(!swipe.locked&&Math.abs(dy)>10&&Math.abs(dy)>Math.abs(dx)){swipe.row.style.transform='';delete swipe.row.dataset.swipeReady;swipe=null;return;}
+      if(dx>8){
+        swipe.locked=true;
+        swipe.shift=Math.min(72,dx);
+        swipe.row.style.transform=`translateX(${swipe.shift}px)`;
+        swipe.row.dataset.swipeReady=String(swipe.shift>=48);
+      }
+    },opts);
+    const finishSwipe=commit=>{
+      if(!swipe)return;
+      const {row,shift}=swipe;swipe=null;
+      row.style.transform='';delete row.dataset.swipeReady;
+      if(!commit||shift<48)return;
+      const messageId=row.dataset.messageId||'';
+      const author=row.querySelector('header strong')?.textContent||row.dataset.senderId||'';
+      const content=row.querySelector('[data-ely-message-body],p')?.textContent||'';
+      emit(root,'reply-swipe',{value:messageId,messageId,author,content});
+      const composer=root.querySelector('.ely-chat-composer form')||document.querySelector('.ely-chat-composer form');
+      if(composer){
+        const quote=composer.querySelector('[data-ely-reply-quote]');
+        if(quote){
+          const qa=quote.querySelector('[data-ely-quote-author]'),qt=quote.querySelector('[data-ely-quote-text]'),ri=quote.querySelector('[data-ely-reply-to]');
+          if(qa)qa.textContent=author;
+          if(qt)qt.textContent=content;
+          if(ri)ri.value=messageId;
+          quote.hidden=false;
+          composer.dataset.hasQuote='true';
+        }
+        composer.querySelector('textarea[name="message"]')?.focus();
+      }
+    };
+    root.addEventListener('pointerup',()=>finishSwipe(true),opts);
+    root.addEventListener('pointercancel',()=>finishSwipe(false),opts);
+  };
+  mountNativeMessaging(root,lifecycle);
   root.addEventListener('error',onImageError,{capture:true,signal:lifecycle.signal});
   root.addEventListener('ely:stream',onStream);root.addEventListener('click',onClick);root.addEventListener('dblclick',onDoubleClick);root.addEventListener('keydown',onKeyDown);root.addEventListener('pointerdown',onPointerDown);root.addEventListener('pointerup',onPointerUp);root.addEventListener('input',onInput);root.addEventListener('change',onChange);root.addEventListener('submit',onSubmit);root.addEventListener('dragstart',onDragStart);root.addEventListener('dragover',onDragOver);root.addEventListener('drop',onDrop);
   return()=>{lifecycle.abort();mathCleanups.forEach(cleanup=>cleanup());approvals.forEach(dialog=>dialog.removeEventListener('cancel',onCancel));root.removeEventListener('ely:stream',onStream);root.removeEventListener('click',onClick);root.removeEventListener('dblclick',onDoubleClick);root.removeEventListener('keydown',onKeyDown);root.removeEventListener('pointerdown',onPointerDown);root.removeEventListener('pointerup',onPointerUp);root.removeEventListener('input',onInput);root.removeEventListener('change',onChange);root.removeEventListener('submit',onSubmit);root.removeEventListener('dragstart',onDragStart);root.removeEventListener('dragover',onDragOver);root.removeEventListener('drop',onDrop);};
