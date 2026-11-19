@@ -323,6 +323,39 @@ func (w assetResponseWriter) WriteHeader(status int) {
 
 func (w assetResponseWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 
+func translateLabel(data any, prop, key, fallback string) string {
+	switch m := data.(type) {
+	case map[string]any:
+		if prop != "" {
+			if v, ok := m[prop].(string); ok && v != "" {
+				return v
+			}
+		}
+		if key != "" {
+			for _, bag := range []string{"Labels", "I18n"} {
+				switch lm := m[bag].(type) {
+				case map[string]string:
+					if v := lm[key]; v != "" {
+						return v
+					}
+				case map[string]any:
+					if v, ok := lm[key].(string); ok && v != "" {
+						return v
+					}
+				}
+			}
+		}
+	case map[string]string:
+		if prop != "" && m[prop] != "" {
+			return m[prop]
+		}
+		if key != "" && m[key] != "" {
+			return m[key]
+		}
+	}
+	return fallback
+}
+
 func Funcs() template.FuncMap {
 	return template.FuncMap{
 		"qrSVG": qrSVG, "barcodeSVG": barcodeSVG, "markdownHTML": markdownHTML,
@@ -369,6 +402,7 @@ func Funcs() template.FuncMap {
 		},
 		"list":              func(v ...any) []any { return v },
 		"add":               func(a, b int) int { return a + b },
+		"tr":                translateLabel,
 		"join":              joinStrings,
 		"menuHasItems":      menuHasItems,
 		"menuContextConfig": menuContextConfig,
