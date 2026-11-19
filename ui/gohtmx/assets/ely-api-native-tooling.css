@@ -28,3 +28,4 @@
 [data-ely-family='native'] :is(.ely-tooling-tokens,.ely-tooling-token-group,.ely-tooling-token){max-inline-size:100%;box-sizing:border-box}
 [data-ely-family='native'] .ely-tooling-token i{max-inline-size:100%;box-sizing:border-box}
 [data-ely-family='native'] .ely-tooling-tokens{overflow-x:auto}
+[data-ely-family='native'] .ely-tooling-token output{display:block;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}

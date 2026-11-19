@@ -490,7 +490,7 @@
 [data-ely-family='native'] .ely-native-upload footer{display:flex;align-items:center;gap:8px}
 [data-ely-family='native'] .ely-native-upload footer>span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted-foreground,#777)}
 [data-ely-family='native'] [data-native-upload-empty]{display:grid;text-align:center;gap:8px;padding:32px 12px;border:1px dashed var(--border,#aaa)}
-[data-ely-family='native'] [data-native-upload-file]{position:absolute;width:1px;height:1px;clip-path:inset(50%);overflow:hidden}
+[data-ely-family='native'] [data-native-upload-file]{position:absolute;width:1px;height:1px;padding:0;border:0;clip-path:inset(50%);overflow:hidden}
 [data-ely-family='native'] .ely-native-annotator{width:min(100%,560px);display:grid;gap:12px}
 [data-ely-family='native'] .ely-native-annotator .ely-native-canvas-wrap{width:100%;aspect-ratio:1.5}
 [data-ely-family='native'] .ely-native-annotator .ely-native-canvas-wrap>img{height:100%;object-fit:cover}

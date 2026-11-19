@@ -703,3 +703,5 @@
 :is(:root[data-theme=dark],.dark) [data-ely-family='workspace'] .ely-workspace__peer{color:#5eead4}
 :is(:root[data-theme=dark],.dark) [data-ely-family='workspace'] .ely-workspace__presence small{color:#111}
 :is(:root[data-theme=dark],.dark) [data-ely-family='workspace'] :is([data-ws-file-progress],[data-ws-transfer-queue]) output{color:#f58482}
+
+[data-ely-family='workspace'] [data-ws-file-menu] :is(p,span,strong,small,button){overflow-wrap:anywhere;white-space:normal}
