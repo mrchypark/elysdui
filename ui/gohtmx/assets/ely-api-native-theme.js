@@ -202,7 +202,7 @@ export function initNativeTheme(root, change, emit) {
     importer.querySelectorAll('[data-native-syntax-choice]').forEach(choice=>{
       if(!choice.dataset.nativeSyntaxTokens)return;
       try {const theme=readTheme(choice.dataset.nativeSyntaxTokens);
-        choice.closest('label').querySelectorAll('[data-native-code-token]').forEach(token=>token.style.color=theme.syntax[token.dataset.nativeCodeToken]||'');
+        const pre=choice.closest('label').querySelector('pre');if(pre){pre.dataset.nativeSyntaxMode=theme.mode||'';pre.style.backgroundColor=theme.mode==='light'?'#f8fafc':'#18181b';pre.style.color=theme.mode==='light'?'#181613':'#f3f1f0';}choice.closest('label').querySelectorAll('[data-native-code-token]').forEach(token=>token.style.color=theme.syntax[token.dataset.nativeCodeToken]||'');
       }catch(cause){error.textContent=cause.message;}
     });
     if(field.value.trim())validate();

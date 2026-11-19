@@ -811,3 +811,17 @@
 @media(max-width:42rem){[data-ely-family='native'] :is(.ely-native-converter,.ely-native-player){grid-template-columns:minmax(0,1fr)}}
 
 @media(max-width:48rem){[data-ely-family='native'] .ely-native-column-shell{grid-template-columns:minmax(0,1fr)}[data-ely-family='native'] .ely-native-clock li{grid-template-columns:minmax(0,1fr) auto}[data-ely-family='native'] :is(.ely-native-playlist,.ely-native-model-status) :is(li,article,header,div){flex-wrap:wrap}}
+
+[data-ely-family='native'] .ely-native-window-controls[data-platform='mac'][data-active='true'] button{color:#171717}
+:is(:root[data-theme=dark],.dark) [data-ely-family='native'] [data-native-code-token=keyword]{color:#bba3e8}
+:is(:root[data-theme=dark],.dark) [data-ely-family='native'] [data-native-code-token=string]{color:#8ac596}
+:is(:root[data-theme=dark],.dark) [data-ely-family='native'] [data-native-code-token=number]{color:#eaab78}
+:is(:root[data-theme=dark],.dark) [data-ely-family='native'] [data-native-code-token=comment]{color:#acaaa8}
+:is(:root[data-theme=dark],.dark) [data-ely-family='native'] [data-native-code-token=function]{color:#85b6e9}
+:is(:root[data-theme=dark],.dark) [data-ely-family='native'] [data-native-code-token=type_name]{color:#84c9c8}
+:is(:root[data-theme=dark],.dark) [data-ely-family='native'] :is([data-native-code-token=punctuation],[data-native-code-token=operator]){color:#afadab}
+
+[data-ely-family='native'] .ely-native-window-controls[data-platform='mac'][data-active='true'] button :is(i,span){color:#171717}
+[data-ely-family='native'] .ely-native-platform:not([data-platform='Windows']):not([data-platform='Linux']) .ely-native-platform-buttons i{color:#171717}
+
+:is(:root[data-theme=dark],.dark) [data-ely-family='native'] pre[data-native-syntax-mode='light'] [data-native-code-token]{color:#181613}

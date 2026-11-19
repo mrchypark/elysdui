@@ -492,3 +492,8 @@
 [data-ely-family='forms'] .ely-api-search{min-inline-size:0;max-inline-size:100%}
 
 @media(max-width:48rem){[data-ely-family='forms'] .ely-account-billing{overflow-x:auto;max-inline-size:100%}}
+
+[data-ely-family='forms'] [data-suite-swatch]{color:#171717}
+[data-ely-family='forms'].ely-account-help .ely-api-profile-presence{color:#111}
+:is(:root[data-theme=dark],.dark) [data-ely-family='forms'] .ely-suite-tag[data-suite-invoice=Failed]{color:#f5928c}
+[data-ely-family='forms'] [data-ely-color-preview],[data-ely-family='forms'] button[data-ely-swatch]{color:#fff}
