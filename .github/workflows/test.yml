@@ -45,8 +45,8 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx playwright install --with-deps chromium
-      - run: npm run test:browser
       - run: npm run test:messaging
+      - run: npm run test:browser
       - run: npm run test:visual-regressions
         env:
           RUN_ACTION_CAMERA_BROWSER: '1'
