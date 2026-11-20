@@ -26,8 +26,7 @@ func TestNativeMessagingContracts(t *testing.T) {
 				"CanReply":               true,
 				"ReplyLabel":             "Reply to message",
 				"ProfileURL":             "/api/profiles",
-				"TypingURL":              "/api/typing",
-				"TypingExpiry":           2500,
+				"ComposerID":             "chat-prompt",
 				"DeleteForMeURL":         "/api/messages/{id}/for-me",
 				"DeleteForEveryoneURL":   "/api/messages/{id}/for-everyone",
 				"Messages": []map[string]any{
@@ -41,6 +40,7 @@ func TestNativeMessagingContracts(t *testing.T) {
 		}
 		html := out.String()
 		for _, want := range []string{
+			`id="chat-msg-test-transcript"`,
 			`data-sender-id="u1"`,
 			`is-cont`,
 			`data-ely-message-body`,
@@ -58,11 +58,12 @@ func TestNativeMessagingContracts(t *testing.T) {
 			`data-ely-profile-account`,
 			`data-ely-profile-joined`,
 			`data-ely-profile-mention`,
-			`data-ely-typing-url="/api/typing"`,
-			`data-ely-typing-expiry="2500"`,
+			`data-ely-composer-target="chat-prompt"`,
+			`data-ely-delete-status role="status"`,
 			`나에게만 삭제`,
 			`모두에게 삭제`,
-			`data-ely-profile-popover`,
+			`id="chat-msg-test-mention-popover"`,
+			`aria-labelledby="chat-msg-test-mention-popover-title"`,
 		} {
 			if !strings.Contains(html, want) {
 				t.Errorf("expected %q in rendered ChatMessage HTML:\n%s", want, html)
@@ -95,10 +96,16 @@ func TestNativeMessagingContracts(t *testing.T) {
 		}
 		html := out.String()
 		for _, want := range []string{
+			`id="prompt-mentions"`,
 			`data-has-quote="true"`,
 			`data-ely-mention-src="/api/mentions"`,
-			`data-ely-mention-list`,
+			`id="prompt-mentions-mentions"`,
+			`id="prompt-mentions-mentions-option-0"`,
 			`data-ely-mention-option="김대리"`,
+			`role="combobox"`,
+			`aria-autocomplete="list"`,
+			`aria-controls="prompt-mentions-mentions"`,
+			`aria-expanded="false"`,
 			`data-ely-typing-url="/api/typing"`,
 			`data-ely-typing-expiry="2500"`,
 			`data-ely-floating="true"`,
@@ -129,11 +136,50 @@ func TestNativeMessagingContracts(t *testing.T) {
 		html := out.String()
 		for _, want := range []string{
 			`data-ely-mention-src="/api/mentions"`,
-			`data-ely-mention-list`,
+			`id="prompt-dynamic-mentions-mentions"`,
 		} {
 			if !strings.Contains(html, want) {
 				t.Errorf("expected %q in rendered PromptInput HTML:\n%s", want, html)
 			}
+		}
+	})
+
+	t.Run("PromptInput renders a semantic single-line combobox", func(t *testing.T) {
+		var out bytes.Buffer
+		err := RenderComponent(tpl, &out, Component{
+			Chapter: "chat",
+			Name:    "PromptInput",
+			ID:      "prompt-single",
+			Props: map[string]any{
+				"SingleLine":   true,
+				"Name":         "body",
+				"Value":        "Hello",
+				"Required":     true,
+				"Participants": []map[string]any{{"Handle": "lee"}},
+			},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		html := out.String()
+		for _, want := range []string{
+			`<input`,
+			`type="text"`,
+			`id="prompt-single-message"`,
+			`name="body"`,
+			`value="Hello"`,
+			`required`,
+			`data-ely-prompt-editor="true"`,
+			`role="combobox"`,
+			`aria-controls="prompt-single-mentions"`,
+			`aria-expanded="false"`,
+		} {
+			if !strings.Contains(html, want) {
+				t.Errorf("expected %q in rendered PromptInput HTML:\n%s", want, html)
+			}
+		}
+		if strings.Contains(html, "<textarea") {
+			t.Fatalf("SingleLine must render an input instead of a textarea:\n%s", html)
 		}
 	})
 }

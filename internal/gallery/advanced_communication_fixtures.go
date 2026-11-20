@@ -114,6 +114,7 @@ func advancedCommunicationCases() []AdvancedCase {
 			props["Items"] = []map[string]any{{"Value": "contrast", "Label": "How does it affect contrast?"}, {"Value": "shade", "Label": "What is a shade?"}, {"Value": "dark", "Label": "Why use less lift in dark themes?"}, {"Value": "example", "Label": "Show an example."}}
 		case "PromptInput":
 			props["Label"], props["Value"], props["Placeholder"], props["Rows"] = "Message", "Compare these two lifts in dark mode", "Ask anything, / for commands, @ for context", 5
+			props["TypingURL"], props["TypingExpiry"] = "/api/typing", 3000
 			props["Attachments"] = []map[string]any{{"Value": "olive", "Name": "atrium-olive.jpg", "Content": "184 KB"}, {"Value": "notes", "Name": "lift-notes.pdf", "Content": "482 KB"}}
 			props["Context"], props["Commands"] = []map[string]any{{"Value": "project:northwind", "Label": "Northwind brief"}}, []map[string]any{{"Value": "/summarize", "Label": "/summarize"}, {"Value": "/rewrite", "Label": "/rewrite"}}
 			props["Model"], props["Models"], props["Temperature"] = "large", []map[string]any{{"Value": "large", "Label": "Ely Large"}, {"Value": "small", "Label": "Ely Small"}}, "0.7"
@@ -328,6 +329,7 @@ func advancedCommunicationCases() []AdvancedCase {
 			}
 		case "ChatMessage":
 			props["DateLabel"], props["TypingLabel"] = "Today", "Dev Rao is typing…"
+			props["ComposerID"] = "audit-chat-prompt"
 			props["Reaction"], props["Count"] = "👍", 3
 			props["Reactions"] = []map[string]any{{"Value": "👍", "Count": 3}, {"Value": "🌿", "Count": 1, "Selected": true}}
 			props["Messages"] = []map[string]any{
