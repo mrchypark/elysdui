@@ -698,7 +698,78 @@ register('communication',root=>{
     root.addEventListener('pointerup',event=>finishSwipe(true,event.pointerId),opts);root.addEventListener('pointercancel',event=>finishSwipe(false,event.pointerId),opts);root.addEventListener('lostpointercapture',event=>finishSwipe(false,event.pointerId),opts);
     const updateKeyboardOffset=()=>{if(viewport)root.style.setProperty('--ely-keyboard-offset',`${Math.max(0,win.innerHeight-viewport.height-(viewport.offsetTop||0))}px`);positionProfile();};
     updateKeyboardOffset();win.addEventListener('resize',positionProfile,opts);win.addEventListener('scroll',positionProfile,{...opts,passive:true});viewport?.addEventListener('resize',updateKeyboardOffset,opts);viewport?.addEventListener('scroll',updateKeyboardOffset,opts);
-    const cleanup=()=>{stopTyping();observer.disconnect();resizeObserver?.disconnect();for(const entry of mentionEntries)entry.controller?.abort();profileController?.abort();root.style.removeProperty('--ely-keyboard-offset');};
+    const streamCleanups=[];
+    const scopeAuthor=(node,viewerId)=>{
+      if(!viewerId||!(node instanceof win.Element))return;
+      const messages=node.matches('.ely-messaging-message,.ely-chat-message')?[node]:[...node.querySelectorAll('.ely-messaging-message,.ely-chat-message')];
+      for(const msg of messages){
+        if((msg.dataset.senderId||'')===viewerId)msg.classList.add('is-self');
+        else{msg.classList.remove('is-self');msg.querySelectorAll('[data-ely-delete-open]').forEach(btn=>btn.remove());}
+      }
+    };
+    const knownMentionSender=(sender)=>{
+      if(!sender)return true;
+      for(const entry of mentionEntries){
+        const options=[...entry.list.querySelectorAll('[data-ely-mention-option]')];
+        if(options.some(opt=>(opt.dataset.elyMentionOption||opt.value||'')===sender))return true;
+      }
+      return mentionEntries.length===0;
+    };
+    const resolveTypingTarget=(owner)=>{
+      const raw=owner.dataset.elyTypingTarget||root.dataset.elyTypingTarget||'';
+      if(!raw)return root.querySelector('[data-ely-typing-indicator]');
+      if(raw.startsWith('#'))return root.ownerDocument.getElementById(raw.slice(1));
+      try{return root.querySelector(raw)||root.ownerDocument.getElementById(raw)||root.ownerDocument.querySelector(raw);}catch{return root.ownerDocument.getElementById(raw);}
+    };
+    const streamOwners=[...(root.hasAttribute('data-ely-stream-url')?[root]:[]),...root.querySelectorAll('[data-ely-stream-url]')];
+    for(const owner of streamOwners){
+      const url=sameOrigin(owner.dataset.elyStreamUrl||'');if(!url||typeof win.EventSource!=='function')continue;
+      const transcript=owner.matches('.ely-messaging-transcript,.ely-chat-message-list')?owner:owner.querySelector('.ely-messaging-transcript,.ely-chat-message-list')||owner;
+      const viewerId=owner.dataset.elyViewerId||root.dataset.elyViewerId||'';
+      const eventName=owner.dataset.elyStreamEvent||'chat_event';
+      const typingEvent=owner.dataset.elyTypingEvent||'typing';
+      const typingMs=Math.max(200,Number(owner.dataset.elyTypingTimeout||root.dataset.elyTypingTimeout)||3000);
+      let typingTimer=null;
+      const source=new win.EventSource(url.toString());
+      const onChatEvent=event=>{
+        const tpl=root.ownerDocument.createElement('template');
+        tpl.innerHTML=String(event.data||'');
+        const nodes=[...tpl.content.children];
+        let appended=false;
+        for(const node of nodes){
+          const oob=node.getAttribute('hx-swap-oob')||'';
+          if(oob){
+            const [style,targetSel='']=oob.split(':',2);
+            const target=targetSel?(targetSel.startsWith('#')?root.ownerDocument.getElementById(targetSel.slice(1)):transcript.querySelector(targetSel)):(node.id?root.ownerDocument.getElementById(node.id):null);
+            if(style==='delete'){target?.remove();continue;}
+            if(target){scopeAuthor(node,viewerId);target.replaceWith(node);decorateMessages(node);continue;}
+          }
+          if(node.id&&transcript.querySelector(`#${win.CSS?.escape?win.CSS.escape(node.id):node.id}`))continue;
+          scopeAuthor(node,viewerId);
+          transcript.append(node);
+          decorateMessages(node);
+          appended=true;
+          const msg=node.matches('.ely-messaging-message,.ely-chat-message')?node:node.querySelector('.ely-messaging-message,.ely-chat-message');
+          const sender=msg?.dataset?.senderId||msg?.dataset?.senderName||'';
+          if(sender&&!knownMentionSender(sender))root.dispatchEvent(new win.CustomEvent('ely:mention-refresh',{bubbles:true,detail:{senderId:sender}}));
+        }
+        if(appended||nodes.length)groupMessages(transcript);
+      };
+      const onTypingEvent=event=>{
+        const target=resolveTypingTarget(owner);if(!target)return;
+        clearTimeout(typingTimer);typingTimer=null;
+        const raw=String(event.data||'').trim();
+        if(!raw){target.textContent='';target.hidden=true;return;}
+        if(raw.startsWith('<')){const tpl=root.ownerDocument.createElement('template');tpl.innerHTML=raw;target.replaceChildren(tpl.content);}
+        else target.textContent=raw;
+        target.hidden=false;
+        typingTimer=setTimeout(()=>{target.textContent='';target.hidden=true;typingTimer=null;},typingMs);
+      };
+      source.addEventListener(eventName,onChatEvent);
+      source.addEventListener(typingEvent,onTypingEvent);
+      streamCleanups.push(()=>{clearTimeout(typingTimer);source.removeEventListener(eventName,onChatEvent);source.removeEventListener(typingEvent,onTypingEvent);source.close();});
+    }
+    const cleanup=()=>{stopTyping();observer.disconnect();resizeObserver?.disconnect();for(const entry of mentionEntries)entry.controller?.abort();profileController?.abort();streamCleanups.forEach(fn=>fn());root.style.removeProperty('--ely-keyboard-offset');};
     lifecycle.signal.addEventListener('abort',cleanup,{once:true});
     return cleanup;
   };
