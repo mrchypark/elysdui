@@ -25,8 +25,11 @@
 @media(prefers-reduced-motion:no-preference){[data-ely-family] :is(dialog,[popover]){transform:scale(.96) translateY(4px)}}
 [data-ely-family] :is(dialog[open],[popover]:is(:popover-open,.\:popover-open)){opacity:1;@starting-style{opacity:0}}
 @media(prefers-reduced-motion:no-preference){[data-ely-family] :is(dialog[open],[popover]:is(:popover-open,.\:popover-open)){transform:scale(1) translateY(0);@starting-style{transform:scale(.96) translateY(4px)}}}
+[data-ely-family] dialog[open][data-ely-closing]{opacity:0}
+@media(prefers-reduced-motion:no-preference){[data-ely-family] dialog[open][data-ely-closing]{transform:scale(.96) translateY(4px)}}
 [data-ely-family] dialog::backdrop{background-color:rgb(24 22 19 / 0);transition-property:background-color,display,overlay;transition-duration:.24s;transition-timing-function:ease-out;transition-behavior:allow-discrete}
 [data-ely-family] dialog[open]::backdrop{background-color:rgb(24 22 19 / .38);@starting-style{background-color:rgb(24 22 19 / 0)}}
+[data-ely-family] dialog[open][data-ely-closing]::backdrop{background-color:rgb(24 22 19 / 0)}
 @media(prefers-reduced-motion:reduce){[data-ely-family] :is(dialog,[popover]),[data-ely-family] dialog::backdrop{transition-duration:.1s}}
 
 [data-ely-family] :where(button:not([data-slot]),[role=button],[role=tab],summary){min-block-size:max(24px,var(--ely-control-height,24px))}
