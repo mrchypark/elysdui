@@ -441,4 +441,78 @@
   document.addEventListener('htmx:after:swap', () => init());
   document.addEventListener('htmx:afterSwap', () => init());
   init();
+
+  if (!globalThis.__elyDialogTriggers) {
+    globalThis.__elyDialogTriggers = true;
+    const elyDialogOpeners = new WeakMap();
+    const closingDialogs = new WeakMap();
+    const supportsDiscreteTopLayer = () =>
+      typeof CSS !== 'undefined' &&
+      typeof CSS.supports === 'function' &&
+      CSS.supports('overlay', 'auto') &&
+      CSS.supports('transition-behavior', 'allow-discrete');
+    const isControlDisabled = (element) =>
+      !element ||
+      element.disabled ||
+      element.getAttribute('aria-disabled') === 'true' ||
+      Boolean(element.closest?.('[data-ely-disabled="true"], fieldset:disabled'));
+    const clearClosing = (dialog) => {
+      const state = closingDialogs.get(dialog);
+      if (state) { clearTimeout(state.timer); closingDialogs.delete(dialog); }
+      dialog?.removeAttribute?.('data-ely-closing');
+    };
+    const openModalDialog = (dialog, opener) => {
+      if (!dialog || typeof dialog.showModal !== 'function') return;
+      clearClosing(dialog);
+      if (opener) elyDialogOpeners.set(dialog, opener);
+      if (!dialog.open) dialog.showModal();
+      dialog.querySelector('[autofocus], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), button:not(:disabled)')?.focus?.();
+    };
+    const closeModalDialog = (dialog) => {
+      if (!dialog || !dialog.open || typeof dialog.close !== 'function') return;
+      if (supportsDiscreteTopLayer()) { clearClosing(dialog); dialog.close(); return; }
+      if (closingDialogs.has(dialog)) return;
+      dialog.setAttribute('data-ely-closing', '');
+      const animations = typeof dialog.getAnimations === 'function' ? dialog.getAnimations({ subtree: true }) : [];
+      if (!animations.length) { clearClosing(dialog); if (dialog.open) dialog.close(); return; }
+      const token = Symbol('ely-dialog-close');
+      const finish = () => {
+        if (closingDialogs.get(dialog)?.token !== token) return;
+        clearClosing(dialog);
+        if (dialog.open) dialog.close();
+      };
+      const timer = setTimeout(finish, 350);
+      closingDialogs.set(dialog, { token, timer });
+      Promise.allSettled(animations.map((animation) => animation.finished)).then(finish);
+    };
+    document.addEventListener('click', (event) => {
+      const target = event.target instanceof Element ? event.target : null;
+      if (!target) return;
+      const opener = target.closest('[data-ely-dialog-open]');
+      if (opener && !isControlDisabled(opener)) {
+        const id = opener.getAttribute('data-ely-dialog-open');
+        const dialog = id ? document.getElementById(id) : null;
+        if (dialog?.tagName === 'DIALOG') openModalDialog(dialog, opener);
+        return;
+      }
+      const closer = target.closest('[data-ely-dialog-close]');
+      if (closer && !isControlDisabled(closer)) {
+        const id = closer.getAttribute('data-ely-dialog-close');
+        const dialog = id ? document.getElementById(id) : closer.closest('dialog');
+        if (dialog?.tagName === 'DIALOG') closeModalDialog(dialog);
+      }
+    });
+    document.addEventListener('cancel', (event) => {
+      const dialog = event.target;
+      if (!(dialog instanceof Element) || dialog.tagName !== 'DIALOG' || !dialog.open) return;
+      if (!supportsDiscreteTopLayer()) { event.preventDefault(); closeModalDialog(dialog); }
+    }, true);
+    document.addEventListener('close', (event) => {
+      const dialog = event.target;
+      if (!(dialog instanceof Element) || dialog.tagName !== 'DIALOG') return;
+      clearClosing(dialog);
+      const opener = elyDialogOpeners.get(dialog);
+      if (opener?.isConnected && !isControlDisabled(opener)) opener.focus?.();
+    }, true);
+  }
 })();
