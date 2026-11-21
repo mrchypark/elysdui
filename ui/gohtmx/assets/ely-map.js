@@ -307,6 +307,34 @@
     listen(markers, 'click', event => { const marker = event.target.closest('[data-map-point]'); if (!marker || marker.hidden || disabled()) return; if (marker._mapMembers) fitCluster(marker); else showPopup(marker); });
     listen(q('[data-map-close]'), 'click', () => { if (!disabled()) closePopup(); });
     listen(q('[data-map-zoom="in"]'), 'click', () => zoomTo(zoom + 1)); listen(q('[data-map-zoom="out"]'), 'click', () => zoomTo(zoom - 1)); listen(q('[data-map-zoom="reset"]'), 'click', () => { if (!disabled()) { center = initialCenter.slice(); zoom = initialZoom; apply(true); } });
+    const locateButton = q('[data-map-locate]');
+    listen(locateButton, 'click', () => {
+      if (disabled() || locateButton.disabled) return;
+      const geo = navigator?.geolocation;
+      if (!geo || typeof geo.getCurrentPosition !== 'function') {
+        status.hidden = false;
+        status.textContent = locateButton.dataset.mapLocateUnsupported || 'Geolocation is not supported in this browser.';
+        return;
+      }
+      locateButton.disabled = true;
+      geo.getCurrentPosition(
+        pos => {
+          locateButton.disabled = false;
+          if (cancelled || !root.isConnected || disabled()) return;
+          status.hidden = true;
+          status.textContent = '';
+          center = [clamp(pos.coords.latitude, -MAX_LAT, MAX_LAT), wrap((pos.coords.longitude + 180) / 360) * 360 - 180];
+          zoom = Math.max(zoom, 13);
+          apply(true);
+        },
+        () => {
+          locateButton.disabled = false;
+          if (cancelled || !root.isConnected) return;
+          status.hidden = false;
+          status.textContent = locateButton.dataset.mapLocateDenied || 'Unable to retrieve current location.';
+        },
+      );
+    });
     const stopDrag = () => { drag = null; canvas.classList.remove('is-dragging'); };
     listen(canvas, 'pointerdown', event => { if (disabled() || event.button !== 0 || event.target.closest('button,[data-map-popup],[data-map-legend]')) return; drag = [event.clientX, event.clientY, center.slice()]; if (event.isTrusted) canvas.setPointerCapture?.(event.pointerId); canvas.focus(); canvas.classList.add('is-dragging'); });
     listen(canvas, 'pointermove', event => { if (!drag || disabled()) return; center = panCenter(drag[2], zoom, event.clientX - drag[0], event.clientY - drag[1], height); apply(true); }); listen(canvas, 'pointerup', stopDrag); listen(canvas, 'pointercancel', stopDrag); listen(canvas, 'lostpointercapture', stopDrag);

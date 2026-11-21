@@ -239,6 +239,17 @@ document.addEventListener('htmx:before:swap', event => {
   teardownTargets(targets, event?.detail?.ctx);
 });
 const beforeLegacySwap = event => {
+  const swapStatus = event.detail?.xhr?.status ?? 0;
+  const swapTarget = event.detail?.target || event.target;
+  const requestElt = event.detail?.requestConfig?.elt || event.detail?.elt;
+  if (
+    swapStatus >= 400 &&
+    (swapTarget?.closest?.('[data-ely-swap-errors="true"]') ||
+      requestElt?.closest?.('[data-ely-swap-errors="true"]'))
+  ) {
+    event.detail.shouldSwap = true;
+    if ('isError' in event.detail) event.detail.isError = false;
+  }
   if (event.detail?.shouldSwap === false || event.defaultPrevented) return;
   const target = event.detail?.target || event.target;
   const context = event.detail?.xhr || target;
@@ -283,7 +294,13 @@ document.addEventListener('htmx:sendError', restart);
 document.addEventListener('htmx:afterRequest', restart);
 new MutationObserver((records = []) => {
   prune();
-  if (!Array.isArray(records) || pendingSwaps.size > 0) return;
+  if (!Array.isArray(records)) return;
+  for (const record of records) {
+    for (const node of record.addedNodes || []) {
+      if (node instanceof Element) globalThis.__elyObserveLiveNode?.(record.target, node);
+    }
+  }
+  if (pendingSwaps.size > 0) return;
   for (const record of records) {
     for (const node of record.addedNodes || []) {
       if (node instanceof Element) start(node);
@@ -360,6 +377,7 @@ if (!globalThis.__elyDialogTriggers) {
     closingDialogs.set(dialog, { token, timer });
     Promise.allSettled(animations.map(animation => animation.finished)).then(finish);
   };
+  globalThis.__elyCloseDialog = closeModalDialog;
   document.addEventListener('click', event => {
     const target = event.target instanceof Element ? event.target : null;
     if (!target) return;
@@ -402,4 +420,241 @@ if (!globalThis.__elyDialogTriggers) {
     },
     true,
   );
+}
+
+if (!globalThis.__elyAsyncForms) {
+  globalThis.__elyAsyncForms = true;
+  const sameOriginUrl = value => {
+    try {
+      const url = new URL(value || '', globalThis.location?.href || 'http://localhost');
+      return !globalThis.location?.origin || url.origin === globalThis.location.origin ? url : null;
+    } catch {
+      return null;
+    }
+  };
+  const setStatus = (scope, message) => {
+    const out = scope?.querySelector?.('[data-ely-status]') || scope?.closest?.('[data-ely-family]')?.querySelector?.('[data-ely-status]');
+    if (!out) return;
+    out.textContent = message || '';
+    if ('hidden' in out) out.hidden = !message;
+  };
+  const resolveProgress = source => {
+    const sel = source?.closest?.('[data-ely-upload-progress]')?.getAttribute?.('data-ely-upload-progress');
+    if (!sel) return null;
+    return sel.startsWith('#') ? document.getElementById(sel.slice(1)) : document.querySelector?.(sel) || null;
+  };
+  const updateProgress = (bar, loaded, total) => {
+    if (!bar) return;
+    bar.hidden = false;
+    if (total > 0) {
+      bar.max = total;
+      bar.value = loaded;
+    } else {
+      bar.removeAttribute?.('value');
+    }
+  };
+  const hideProgress = bar => {
+    if (!bar) return;
+    bar.hidden = true;
+    bar.value = 0;
+  };
+  const validateMaxBytes = scope => {
+    const inputs = scope?.matches?.('input[type="file"]') ? [scope] : [...(scope?.querySelectorAll?.('input[type="file"]') || [])];
+    for (const input of inputs) {
+      const ownerForm = input.form || input.closest?.('form');
+      const rawLimit =
+        input.getAttribute('data-ely-max-bytes') ||
+        scope?.getAttribute?.('data-ely-max-bytes') ||
+        ownerForm?.getAttribute?.('data-ely-max-bytes');
+      const maxBytes = Number(rawLimit);
+      if (!Number.isFinite(maxBytes) || maxBytes <= 0) continue;
+      for (const file of input.files || []) {
+        if (file.size === 0 || file.size > maxBytes) {
+          const msg =
+            input.getAttribute('data-ely-max-bytes-error') ||
+            scope?.getAttribute?.('data-ely-max-bytes-error') ||
+            ownerForm?.getAttribute?.('data-ely-max-bytes-error') ||
+            (file.size === 0 ? 'Selected file is empty.' : 'File exceeds maximum allowed size.');
+          setStatus(ownerForm || scope, msg);
+          return false;
+        }
+      }
+    }
+    return true;
+  };
+  const completeAsyncSuccess = form => {
+    setStatus(form, '');
+    form.querySelectorAll?.('[data-ely-clear-on-submit]').forEach(el => {
+      if ('value' in el) el.value = '';
+    });
+    const quote = form.querySelector?.('[data-ely-reply-quote]');
+    if (quote) quote.hidden = true;
+    const replyTo = form.querySelector?.('[data-ely-reply-to]');
+    if (replyTo) replyTo.value = '';
+    if (form.dataset) delete form.dataset.hasQuote;
+    const dialog = form.closest?.('dialog');
+    if (dialog?.open) {
+      if (typeof globalThis.__elyCloseDialog === 'function') globalThis.__elyCloseDialog(dialog);
+      else dialog.close?.();
+    }
+    const pop = form.closest?.('[popover]');
+    if (pop && typeof pop.hidePopover === 'function') {
+      try { pop.hidePopover(); } catch {}
+    }
+  };
+  document.addEventListener('change', event => {
+    const input = event.target;
+    if (!(input instanceof Element) || !input.matches?.('input[type="file"][data-ely-auto-submit]')) return;
+    const form = input.form || input.closest?.('form');
+    if (!form) return;
+    if (!validateMaxBytes(input)) {
+      input.value = '';
+      return;
+    }
+    if (!input.files?.length) return;
+    if (typeof form.requestSubmit === 'function') form.requestSubmit();
+    else form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    input.value = '';
+  });
+  document.addEventListener('submit', async event => {
+    const form = event.target;
+    if (!(form instanceof Element) || !form.hasAttribute?.('data-ely-async-form')) return;
+    if (!validateMaxBytes(form)) {
+      event.preventDefault();
+      return;
+    }
+    event.preventDefault();
+    const action = form.getAttribute('action') || form.getAttribute('hx-post') || globalThis.location?.href || '';
+    const url = sameOriginUrl(action);
+    if (!url) return;
+    const method = (form.getAttribute('method') || 'POST').toUpperCase();
+    const body = new FormData(form);
+    const bar = resolveProgress(form);
+    const errorText = form.getAttribute('data-ely-error-message') || 'Request failed.';
+    if (bar && typeof globalThis.XMLHttpRequest === 'function') {
+      const xhr = new globalThis.XMLHttpRequest();
+      xhr.open(method, url.toString());
+      xhr.upload?.addEventListener?.('progress', e => {
+        if (e.lengthComputable) updateProgress(bar, e.loaded, e.total);
+      });
+      xhr.addEventListener('load', () => {
+        hideProgress(bar);
+        if (xhr.status >= 200 && xhr.status < 300) completeAsyncSuccess(form);
+        else setStatus(form, errorText);
+      });
+      xhr.addEventListener('error', () => {
+        hideProgress(bar);
+        setStatus(form, errorText);
+      });
+      xhr.send(body);
+      return;
+    }
+    try {
+      const response = await fetch(url.toString(), { method, body });
+      if (response.ok) completeAsyncSuccess(form);
+      else setStatus(form, errorText);
+    } catch {
+      setStatus(form, errorText);
+    }
+  });
+  document.addEventListener('htmx:xhr:progress', event => {
+    const bar = resolveProgress(event.detail?.elt || event.target);
+    if (bar && event.detail?.lengthComputable) updateProgress(bar, event.detail.loaded, event.detail.total);
+  });
+  const finishHtmxProgress = event => {
+    hideProgress(resolveProgress(event.detail?.elt || event.target));
+  };
+  document.addEventListener('htmx:afterRequest', finishHtmxProgress);
+  document.addEventListener('htmx:after:request', finishHtmxProgress);
+}
+
+if (!globalThis.__elyLiveNotifier) {
+  globalThis.__elyLiveNotifier = true;
+  let unreadCount = 0;
+  let baseTitle = null;
+  let audioCtx = null;
+  const unlockAudio = () => {
+    const Ctor = globalThis.AudioContext || globalThis.webkitAudioContext;
+    if (!Ctor) return;
+    if (!audioCtx) {
+      try { audioCtx = new Ctor(); } catch { return; }
+    }
+    if (audioCtx.state === 'suspended') audioCtx.resume?.().catch?.(() => {});
+  };
+  const playChime = () => {
+    if (!audioCtx) unlockAudio();
+    if (!audioCtx || audioCtx.state !== 'running') return;
+    try {
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(660, audioCtx.currentTime);
+      gain.gain.setValueAtTime(0.04, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.14);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.15);
+    } catch {}
+  };
+  const syncToggle = button => {
+    if (!button) return;
+    const supported = 'Notification' in globalThis;
+    if (!supported) {
+      button.disabled = true;
+      button.setAttribute('aria-pressed', 'false');
+      return;
+    }
+    const granted = globalThis.Notification.permission === 'granted';
+    button.setAttribute('aria-pressed', String(granted));
+    const onLabel = button.getAttribute('data-ely-notify-on-label');
+    const offLabel = button.getAttribute('data-ely-notify-off-label');
+    if (granted && onLabel) button.textContent = onLabel;
+    else if (!granted && offLabel) button.textContent = offLabel;
+  };
+  const syncAllToggles = () => {
+    document.querySelectorAll?.('[data-ely-notify-toggle]')?.forEach?.(syncToggle);
+  };
+  const resetUnread = () => {
+    if (unreadCount === 0) return;
+    unreadCount = 0;
+    if (baseTitle !== null) document.title = baseTitle;
+  };
+  document.addEventListener('pointerdown', unlockAudio, { once: true, capture: true });
+  document.addEventListener('keydown', unlockAudio, { once: true, capture: true });
+  document.addEventListener('focus', resetUnread);
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) resetUnread();
+  });
+  document.addEventListener('click', async event => {
+    const toggle = event.target instanceof Element ? event.target.closest?.('[data-ely-notify-toggle]') : null;
+    if (!toggle || toggle.disabled || !('Notification' in globalThis)) return;
+    unlockAudio();
+    if (globalThis.Notification.permission === 'default') {
+      try { await globalThis.Notification.requestPermission(); } catch {}
+    }
+    syncAllToggles();
+  });
+  const notifyForNode = (feed, node) => {
+    if (!(node instanceof Element) || node.getAttribute('data-ely-notify') !== 'true') return;
+    const isBackground = Boolean(document.hidden) || (typeof document.hasFocus === 'function' && !document.hasFocus());
+    if (!isBackground) return;
+    if (baseTitle === null) baseTitle = document.title || '';
+    unreadCount += 1;
+    document.title = `(${unreadCount}) ${baseTitle}`;
+    if ('Notification' in globalThis && globalThis.Notification.permission === 'granted') {
+      const title = node.getAttribute('data-ely-notify-title') || feed.getAttribute('data-ely-notify-title') || baseTitle || 'New update';
+      const body = node.getAttribute('data-ely-notify-body') || node.textContent?.trim().slice(0, 120) || '';
+      try { new globalThis.Notification(title, { body }); } catch {}
+    }
+    if (feed.getAttribute('data-ely-notify-sound') === 'true' || node.getAttribute('data-ely-notify-sound') === 'true') playChime();
+  };
+  globalThis.__elyObserveLiveNode = (target, node) => {
+    if (node.matches?.('[data-ely-notify-toggle]')) syncToggle(node);
+    node.querySelectorAll?.('[data-ely-notify-toggle]')?.forEach?.(syncToggle);
+    const feed = node.parentElement?.closest?.('[data-ely-notify-feed]') || target?.closest?.('[data-ely-notify-feed]');
+    if (feed) notifyForNode(feed, node);
+  };
+  document.addEventListener('DOMContentLoaded', syncAllToggles);
+  syncAllToggles();
 }
