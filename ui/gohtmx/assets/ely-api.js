@@ -318,9 +318,21 @@ if (!globalThis.__elyDialogTriggers) {
     clearClosing(dialog);
     if (opener) dialogOpeners.set(dialog, opener);
     if (!dialog.open) dialog.showModal();
-    dialog
-      .querySelector('[autofocus], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), button:not(:disabled)')
-      ?.focus?.();
+    (
+      dialog.querySelector('[autofocus]:not(:disabled)') ||
+      dialog.querySelector('input:not([type="hidden"]):not(:disabled), select:not(:disabled), textarea:not(:disabled), button:not(:disabled)')
+    )?.focus?.();
+  };
+  const animationTimeoutMs = animations => {
+    let maxMs = 0;
+    for (const animation of animations) {
+      const timing = animation.effect?.getComputedTiming?.();
+      if (!timing) continue;
+      const delay = Number(timing.delay) || 0;
+      const duration = Number(timing.activeDuration);
+      if (Number.isFinite(duration)) maxMs = Math.max(maxMs, delay + duration);
+    }
+    return Math.min(Math.max(maxMs + 50, 350), 2000);
   };
   const closeModalDialog = dialog => {
     if (!dialog || !dialog.open || typeof dialog.close !== 'function') return;
@@ -344,7 +356,7 @@ if (!globalThis.__elyDialogTriggers) {
       clearClosing(dialog);
       if (dialog.open) dialog.close();
     };
-    const timer = setTimeout(finish, 350);
+    const timer = setTimeout(finish, animationTimeoutMs(animations));
     closingDialogs.set(dialog, { token, timer });
     Promise.allSettled(animations.map(animation => animation.finished)).then(finish);
   };
@@ -353,6 +365,7 @@ if (!globalThis.__elyDialogTriggers) {
     if (!target) return;
     const opener = target.closest('[data-ely-dialog-open]');
     if (opener && !isControlDisabled(opener)) {
+      if (opener.tagName === 'A') event.preventDefault();
       const id = opener.getAttribute('data-ely-dialog-open');
       const dialog = id ? document.getElementById(id) : null;
       if (dialog?.tagName === 'DIALOG') openModalDialog(dialog, opener);
@@ -360,6 +373,7 @@ if (!globalThis.__elyDialogTriggers) {
     }
     const closer = target.closest('[data-ely-dialog-close]');
     if (closer && !isControlDisabled(closer)) {
+      if (closer.tagName === 'A') event.preventDefault();
       const id = closer.getAttribute('data-ely-dialog-close');
       const dialog = id ? document.getElementById(id) : closer.closest('dialog');
       if (dialog?.tagName === 'DIALOG') closeModalDialog(dialog);
