@@ -86,11 +86,16 @@ class FakeElement {
 
 function matchesSelector(el, sel) {
   if (sel === 'dialog') return el.tagName === 'DIALOG';
-  if (sel === '[autofocus]') return el.hasAttribute('autofocus');
+  if (sel === '[autofocus]' || sel === '[autofocus]:not(:disabled)') {
+    return el.hasAttribute('autofocus') && !el.disabled;
+  }
   if (sel === '[data-ely-dialog-open]') return el.hasAttribute('data-ely-dialog-open');
   if (sel === '[data-ely-dialog-close]') return el.hasAttribute('data-ely-dialog-close');
   if (sel === '[data-ely-disabled="true"]') return el.getAttribute('data-ely-disabled') === 'true';
   if (sel === 'fieldset:disabled') return el.tagName === 'FIELDSET' && el.disabled;
+  if (sel === 'input:not([type="hidden"]):not(:disabled)') {
+    return el.tagName === 'INPUT' && el.getAttribute('type') !== 'hidden' && !el.disabled;
+  }
   const tagNotDisabled = sel.match(/^(input|select|textarea|button):not\(:disabled\)$/);
   if (tagNotDisabled) return el.tagName === tagNotDisabled[1].toUpperCase() && !el.disabled;
   return false;
@@ -128,17 +133,27 @@ await import('../../assets/ely-api.js');
 
 const opener = new FakeElement('button', 'open-btn', { 'data-ely-dialog-open': 'task-dialog' });
 const dialog = new FakeElement('dialog', 'task-dialog');
-const input = new FakeElement('input', 'task-title');
+const hiddenInput = new FakeElement('input', 'task-id', { type: 'hidden' });
 const closeBtn = new FakeElement('button', 'close-btn', { 'data-ely-dialog-close': '' });
+const input = new FakeElement('input', 'task-title', { autofocus: '' });
 const externalCloseBtn = new FakeElement('button', 'ext-close-btn', { 'data-ely-dialog-close': 'task-dialog' });
-dialog.append(input, closeBtn);
+dialog.append(hiddenInput, closeBtn, input);
 byId.set('task-dialog', dialog);
 
-// 1. Open dialog and focus first enabled input
+// 1. Open dialog, skip hidden input and earlier button, and focus [autofocus]
 docListeners.emit('click', { target: opener });
 assert.equal(dialog.open, true);
 assert.equal(dialog.showModalCount, 1);
+assert.equal(hiddenInput.focusCount, 0);
+assert.equal(closeBtn.focusCount, 0);
 assert.equal(input.focusCount, 1);
+
+// 1b. Anchor opener prevents default navigation
+const anchorOpener = new FakeElement('a', 'open-link', { 'data-ely-dialog-open': 'task-dialog', href: '#task-dialog' });
+let anchorPrevented = false;
+docListeners.emit('click', { target: anchorOpener, preventDefault() { anchorPrevented = true; } });
+assert.equal(anchorPrevented, true);
+docListeners.emit('click', { target: opener });
 
 // 2. Fallback exit animation wait via getAnimations + data-ely-closing
 let resolveAnim;
