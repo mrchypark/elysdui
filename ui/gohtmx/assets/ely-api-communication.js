@@ -402,7 +402,7 @@ register('communication',root=>{
     if(element.matches('[data-ely-calendar-nav]'))return;
     if(element.matches('[data-ely-attachment]'))emit(root,'open-attachment',detail(root,element));
   };
-  const onKeyDown=event=>{const prompt=event.target.closest('textarea[data-ely-prompt-editor]');if(prompt&&event.key==='Enter'&&!event.shiftKey&&!event.isComposing){event.preventDefault();prompt.form?.requestSubmit();return;}if(event.key==='Escape'){const selector=event.target.closest('[data-ely-model-selector]');if(selector){const menu=selector.querySelector('[data-ely-model-menu]'),panel=selector.querySelector('[data-ely-model-panel]');if(panel&&!panel.hidden){event.preventDefault();panel.hidden=true;menu?.setAttribute('aria-expanded','false');menu?.focus();return;}const disclosure=event.target.closest('details[open]');if(disclosure){event.preventDefault();disclosure.open=false;disclosure.querySelector('summary')?.focus();return;}}const trigger=root.querySelector('[data-ely-sources][aria-expanded="true"]');if(!trigger)return;const panel=root.querySelector(`#${CSS.escape(trigger.dataset.elySources)}`);if(panel){panel.hidden=true;trigger.setAttribute('aria-expanded','false');trigger.focus();}return;}const calendarDay=event.target.closest('[data-ely-calendar-day]');if(calendarDay&&root.contains(calendarDay)){const days=[...root.querySelectorAll('[data-ely-calendar-day]')],index=days.indexOf(calendarDay);if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(event.key)){event.preventDefault();days[index+({ArrowLeft:-1,ArrowRight:1,ArrowUp:-7,ArrowDown:7}[event.key])]?.focus();return;}if(['PageUp','PageDown'].includes(event.key)){event.preventDefault();const direction=event.key==='PageUp'?'previous':'next';changed(root,'calendar-navigation',direction);emit(root,'calendar-navigation',{direction,view:'month'});return;}}const roving=event.target.closest('[data-ely-roving-list] [data-ely-select]');if(roving&&['ArrowUp','ArrowDown'].includes(event.key)){const choices=[...(root.dataset.elyComponent?.startsWith('messaging/')?roving.closest('[data-ely-roving-list]'):root).querySelectorAll('[data-ely-select]:not(:disabled)')],next=choices[choices.indexOf(roving)+(event.key==='ArrowUp'?-1:1)];if(next){event.preventDefault();next.focus();next.click();}return;}if(root.dataset.elyComponent?.startsWith('project/')||!event.altKey||!['ArrowLeft','ArrowRight'].includes(event.key))return;const card=event.target.closest('[data-card-id]'),lane=card?.closest('[data-lane-id]');if(!card||!lane||!root.contains(card))return;const lanes=[...root.querySelectorAll('[data-lane-id]')],next=lanes[lanes.indexOf(lane)+(event.key==='ArrowLeft'?-1:1)];if(!next)return;event.preventDefault();emit(root,'move-task',{taskId:card.dataset.cardId,laneId:next.dataset.laneId,index:next.querySelectorAll(':scope > [data-card-id]').length});};
+  const onKeyDown=event=>{const prompt=event.target.closest('textarea[data-ely-prompt-editor]');if(prompt&&event.key==='Enter'&&!event.shiftKey&&!event.isComposing&&event.keyCode!==229){event.preventDefault();prompt.form?.requestSubmit();return;}if(event.isComposing||event.keyCode===229)return;if(event.key==='Escape'){const selector=event.target.closest('[data-ely-model-selector]');if(selector){const menu=selector.querySelector('[data-ely-model-menu]'),panel=selector.querySelector('[data-ely-model-panel]');if(panel&&!panel.hidden){event.preventDefault();panel.hidden=true;menu?.setAttribute('aria-expanded','false');menu?.focus();return;}const disclosure=event.target.closest('details[open]');if(disclosure){event.preventDefault();disclosure.open=false;disclosure.querySelector('summary')?.focus();return;}}const trigger=root.querySelector('[data-ely-sources][aria-expanded="true"]');if(!trigger)return;const panel=root.querySelector(`#${CSS.escape(trigger.dataset.elySources)}`);if(panel){panel.hidden=true;trigger.setAttribute('aria-expanded','false');trigger.focus();}return;}const calendarDay=event.target.closest('[data-ely-calendar-day]');if(calendarDay&&root.contains(calendarDay)){const days=[...root.querySelectorAll('[data-ely-calendar-day]')],index=days.indexOf(calendarDay);if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(event.key)){event.preventDefault();days[index+({ArrowLeft:-1,ArrowRight:1,ArrowUp:-7,ArrowDown:7}[event.key])]?.focus();return;}if(['PageUp','PageDown'].includes(event.key)){event.preventDefault();const direction=event.key==='PageUp'?'previous':'next';changed(root,'calendar-navigation',direction);emit(root,'calendar-navigation',{direction,view:'month'});return;}}const roving=event.target.closest('[data-ely-roving-list] [data-ely-select]');if(roving&&['ArrowUp','ArrowDown'].includes(event.key)){const choices=[...(root.dataset.elyComponent?.startsWith('messaging/')?roving.closest('[data-ely-roving-list]'):root).querySelectorAll('[data-ely-select]:not(:disabled)')],next=choices[choices.indexOf(roving)+(event.key==='ArrowUp'?-1:1)];if(next){event.preventDefault();next.focus();next.click();}return;}if(root.dataset.elyComponent?.startsWith('project/')||!event.altKey||!['ArrowLeft','ArrowRight'].includes(event.key))return;const card=event.target.closest('[data-card-id]'),lane=card?.closest('[data-lane-id]');if(!card||!lane||!root.contains(card))return;const lanes=[...root.querySelectorAll('[data-lane-id]')],next=lanes[lanes.indexOf(lane)+(event.key==='ArrowLeft'?-1:1)];if(!next)return;event.preventDefault();emit(root,'move-task',{taskId:card.dataset.cardId,laneId:next.dataset.laneId,index:next.querySelectorAll(':scope > [data-card-id]').length});};
   const onDoubleClick=event=>{const agenda=event.target.closest('[data-calendar-agenda]');if(agenda&&!agenda.disabled&&root.contains(agenda)){emit(root,'open-event',{value:agenda.value});return;}const member=event.target.closest('[data-ely-member]');if(member&&!member.disabled&&root.contains(member)){emit(root,'message-member',{value:member.value});return;}const day=event.target.closest('[data-ely-calendar-day]');if(day&&!day.disabled&&root.contains(day)&&root.querySelector('[data-ely-calendar]')?.dataset.elyCalendar!=='mini')emit(root,'open-day',{value:day.value,date:day.value});};
   const onPointerDown=event=>{const slot=event.target.closest('[data-ely-calendar-time-slot]');if(!slot||!root.contains(slot))return;const calendarEvent=event.target.closest('[data-ely-calendar-event]');if(calendarEvent&&event.clientY<calendarEvent.getBoundingClientRect().bottom-8)return;calendarPointer={slot,calendarEvent,startY:event.clientY,time:calendarPointerTime(slot,event.clientY)};};
   const onPointerUp=event=>{
@@ -439,190 +439,271 @@ register('communication',root=>{
     }
   };
   const mountNativeMessaging=(root,lifecycle)=>{
-    const opts={signal:lifecycle.signal};
-    // 1. Auto speaker grouping (is-cont) for consecutive same-sender messages
-    root.querySelectorAll('.ely-messaging-transcript,.ely-chat-message-list').forEach(container=>{
-      let prevSender='';
+    const opts={signal:lifecycle.signal},win=root.ownerDocument.defaultView,viewport=win.visualViewport;
+    const sameOrigin=value=>{if(!value)return null;try{const url=new URL(value,win.location.href);return url.origin===win.location.origin?url:null;}catch{return null;}};
+    const usableField=field=>field instanceof win.HTMLTextAreaElement||(field instanceof win.HTMLInputElement&&!['button','submit','reset','checkbox','radio','file','hidden','range','color'].includes(field.type));
+    const composerField=(scope=root)=>scope.matches?.('textarea,input')&&usableField(scope)?scope:[...scope.querySelectorAll('[data-ely-prompt-editor],textarea,input')].find(usableField);
+    const composerFor=scope=>{
+      const targeting=scope?.closest?.('[data-ely-composer-target]')||root.querySelector('[data-ely-composer-target]'),targetID=targeting?.dataset.elyComposerTarget||'';
+      if(targetID){const target=win.document.getElementById(targetID),composer=target?.matches?.('.ely-chat-composer')?target:target?.querySelector?.('.ely-chat-composer'),form=target?.matches?.('form')?target:composer?.matches?.('form')?composer:composer?.querySelector?.('form')||target?.querySelector?.('form[data-ely-submit]');return form||null;}
+      const local=root.querySelector('.ely-chat-composer form');if(local)return local;
+      const composers=[...win.document.querySelectorAll('.ely-chat-composer form')],transcripts=[...win.document.querySelectorAll('.ely-messaging-transcript,.ely-chat-message-list')];return composers.length===1&&transcripts.length===1?composers[0]:null;
+    };
+    const groupMessages=container=>{
+      let previous='';
       for(const node of container.children){
-        if(node.matches('.ely-communication-date,.ely-messaging-unread')){prevSender='';continue;}
+        if(node.matches('.ely-communication-date,.ely-messaging-unread')){previous='';continue;}
         if(!node.matches('.ely-messaging-message,.ely-chat-message'))continue;
-        const sender=node.dataset.senderId||'';
-        if(sender&&sender===prevSender){
-          node.classList.add('is-cont',node.classList.contains('ely-chat-message')?'ely-chat-message--grouped':'ely-messaging-message--grouped');
-        }else{
-          prevSender=sender;
-        }
+        const sender=node.dataset.senderId||node.dataset.senderName||node.querySelector('header strong')?.textContent||'';
+        const grouped=!!sender&&sender===previous;
+        node.classList.toggle('is-cont',grouped);
+        node.classList.toggle('ely-chat-message--grouped',grouped&&node.classList.contains('ely-chat-message'));
+        node.classList.toggle('ely-messaging-message--grouped',grouped&&node.classList.contains('ely-messaging-message'));
+        previous=sender;
       }
-    });
-    // 2. Inline @mention pills (strip @ inside pill button)
-    root.querySelectorAll('[data-ely-message-body]').forEach(body=>{
-      const walker=document.createTreeWalker(body,NodeFilter.SHOW_TEXT);
-      const texts=[];
-      let cur;while((cur=walker.nextNode())){if(cur.parentElement&&!cur.parentElement.closest('button,a,.ely-mention-pill'))texts.push(cur);}
-      for(const t of texts){
-        const val=t.nodeValue||'';
-        const re=/(^|\s)@([A-Za-z0-9_.-]{1,64})/g;
-        let last=0,m,frag=null;
-        while((m=re.exec(val))){
-          if(!frag)frag=document.createDocumentFragment();
-          const before=val.slice(last,m.index)+m[1];
-          if(before)frag.append(document.createTextNode(before));
-          const pill=document.createElement('button');
-          pill.type='button';pill.className='ely-mention-pill';
-          pill.dataset.elyMention=m[2];pill.dataset.elyAction='open-profile';pill.value=m[2];
-          pill.disabled=root.dataset.elyDisabled==='true';
-          pill.textContent=m[2];
-          frag.append(pill);
-          last=re.lastIndex;
-        }
-        if(frag){
-          if(last<val.length)frag.append(document.createTextNode(val.slice(last)));
-          t.replaceWith(frag);
-        }
-      }
-    });
-    // 3. @mention autocomplete above Composer + mention click/profile popover + 2-tier delete dialog
-    const openMentionList=(ta,list,query)=>{
-      const q=query.toLowerCase();
-      const options=[...list.querySelectorAll('[data-ely-mention-option]')];
-      let visible=0;
-      for(const opt of options){
-        const match=!q||(opt.dataset.elyMentionOption||'').toLowerCase().includes(q)||(opt.textContent||'').toLowerCase().includes(q);
-        opt.hidden=!match;
-        opt.setAttribute('aria-selected',String(match&&visible===0));
-        if(match)visible++;
-      }
-      list.hidden=visible===0;
     };
-    const insertMention=(ta,handle)=>{
-      const pos=ta.selectionStart??ta.value.length;
-      const before=ta.value.slice(0,pos),after=ta.value.slice(pos);
-      const replaced=before.replace(/(^|\s)@([^\s@]*)$/,`$1@${handle} `);
-      ta.value=replaced+after;
-      ta.focus();
-      const list=ta.closest('form')?.querySelector('[data-ely-mention-list]');
-      if(list)list.hidden=true;
-      changed(root,ta.name||'message',ta.value,{type:'textarea',mention:handle});
+    const containers=()=>[...root.querySelectorAll('.ely-messaging-transcript,.ely-chat-message-list')];
+    containers().forEach(groupMessages);
+    const decorateMentionBody=body=>{
+      if(body.dataset.elyMentionsDecorated==='true'||body.dataset.elyMentionsMutating==='true')return;
+      body.dataset.elyMentionsMutating='true';
+      const walker=root.ownerDocument.createTreeWalker(body,NodeFilter.SHOW_TEXT),texts=[];
+      let current;while((current=walker.nextNode()))if(current.parentElement&&!current.parentElement.closest('button,a,.ely-mention-pill'))texts.push(current);
+      for(const text of texts){
+        const value=text.nodeValue||'',re=/(^|\s)@([\p{L}\p{M}\p{N}_.-]{1,64})/gu;let last=0,match,fragment=null;
+        while((match=re.exec(value))){
+          if(!fragment)fragment=root.ownerDocument.createDocumentFragment();
+          const before=value.slice(last,match.index)+match[1];if(before)fragment.append(root.ownerDocument.createTextNode(before));
+          const pill=root.ownerDocument.createElement('button');pill.type='button';pill.className='ely-mention-pill';pill.dataset.elyMention=match[2];pill.value=match[2];pill.disabled=root.dataset.elyDisabled==='true';pill.setAttribute('aria-haspopup','dialog');pill.setAttribute('aria-expanded','false');pill.textContent=match[2];fragment.append(pill);last=re.lastIndex;
+        }
+        if(fragment){if(last<value.length)fragment.append(root.ownerDocument.createTextNode(value.slice(last)));text.replaceWith(fragment);}
+      }
+      body.dataset.elyMentionsDecorated='true';
+      setTimeout(()=>delete body.dataset.elyMentionsMutating,0);
     };
+    const decorateMessages=(scope=root)=>[...scope.querySelectorAll('[data-ely-message-body]')].forEach(decorateMentionBody);
+    decorateMessages();
+    const mentionField=list=>[...(list.closest('form')||root).querySelectorAll('[data-ely-prompt-editor],textarea,input')].find(usableField);
+    let mentionListSequence=0;
+    const ensureMentionIDs=list=>{
+      list.id||=`${root.id||'ely'}-mentions-${++mentionListSequence}`;
+      [...list.querySelectorAll('[data-ely-mention-option]')].forEach((option,index)=>{option.id||=`${list.id}-option-${index}`;});
+    };
+    const dismissMentionList=list=>{
+      if(!list)return;list.hidden=true;const field=mentionField(list);if(field){field.setAttribute('aria-expanded','false');field.removeAttribute('aria-activedescendant');}
+    };
+    const activateMention=(list,option)=>{
+      const options=[...list.querySelectorAll('[data-ely-mention-option]')];options.forEach(item=>item.setAttribute('aria-selected',String(item===option)));const field=mentionField(list);if(field){if(option)field.setAttribute('aria-activedescendant',option.id);else field.removeAttribute('aria-activedescendant');}
+      if(option){const listBox=list.getBoundingClientRect(),optionBox=option.getBoundingClientRect();if(optionBox.top<listBox.top)list.scrollTop-=listBox.top-optionBox.top;else if(optionBox.bottom>listBox.bottom)list.scrollTop+=optionBox.bottom-listBox.bottom;}
+    };
+    const openMentionList=(list,query)=>{
+      ensureMentionIDs(list);const q=query.toLocaleLowerCase(),visible=[];
+      for(const option of list.querySelectorAll('[data-ely-mention-option]')){
+        const match=!q||(option.dataset.elyMentionOption||'').toLocaleLowerCase().includes(q)||(option.textContent||'').toLocaleLowerCase().includes(q);
+        option.hidden=!match;if(match&&!option.disabled)visible.push(option);
+      }
+      list.hidden=visible.length===0;const field=mentionField(list);if(field)field.setAttribute('aria-expanded',String(visible.length>0));activateMention(list,visible[0]);
+    };
+    const insertMention=(field,handle)=>{
+      if(!field)return false;
+      const pos=field.selectionStart??field.value.length,before=field.value.slice(0,pos),after=field.value.slice(pos),trigger=/(^|\s)@([^\s@]*)$/u;
+      const prefix=trigger.test(before)?before.replace(trigger,(_match,space)=>`${space}@${handle} `):before+`@${handle} `;
+      field.value=prefix+after;field.focus();field.setSelectionRange(prefix.length,prefix.length);
+      dismissMentionList(field.closest('form')?.querySelector('[data-ely-mention-list]'));
+      changed(root,field.name||'message',field.value,{type:field.tagName.toLowerCase(),mention:handle});return true;
+    };
+    const mentionEntries=[];
+    const mentionPayload=value=>Array.isArray(value)?value:Array.isArray(value?.participants)?value.participants:Array.isArray(value?.mentions)?value.mentions:Array.isArray(value?.items)?value.items:null;
+    const renderMentions=(list,participants)=>{
+      const fragment=root.ownerDocument.createDocumentFragment();
+      for(const participant of participants){
+        if(!participant||typeof participant!=='object')continue;
+        const handle=String(participant.handle??participant.Handle??participant.value??participant.Value??participant.label??participant.Label??'').trim();if(!handle)continue;
+        const button=root.ownerDocument.createElement('button'),avatar=root.ownerDocument.createElement('span'),label=root.ownerDocument.createElement('strong'),role=root.ownerDocument.createElement('small');
+        button.id=`${list.id}-option-${fragment.childNodes.length}`;button.type='button';button.setAttribute('role','option');button.className='ely-mention-option';button.dataset.elyMentionOption=handle;button.value=handle;button.setAttribute('aria-selected','false');button.disabled=root.dataset.elyDisabled==='true'||participant.disabled===true||participant.Disabled===true;
+        avatar.className='ely-communication-avatar';avatar.setAttribute('aria-hidden','true');avatar.textContent=String(participant.avatar??participant.Avatar??handle.slice(0,1));label.textContent=String(participant.label??participant.Label??participant.name??participant.Name??handle);role.textContent=String(participant.role??participant.Role??'');
+        button.append(avatar,label);if(role.textContent)button.append(role);fragment.append(button);
+      }
+      list.replaceChildren(fragment);dismissMentionList(list);
+    };
+    const refreshMention=async entry=>{
+      entry.controller?.abort();entry.controller=null;
+      const raw=entry.owner.dataset.elyMentionSrc||'';
+      if(!raw)return;
+      const url=sameOrigin(raw);if(!url)return;
+      const controller=new AbortController(),revision=entry.revision+1;entry.controller=controller;entry.revision=revision;
+      try{const response=await fetch(url,{headers:{Accept:'application/json'},signal:controller.signal});if(!response.ok)return;const participants=mentionPayload(await response.json());if(participants&&entry.revision===revision)renderMentions(entry.list,participants);}catch(error){if(error.name!=='AbortError')return;}finally{if(entry.controller===controller)entry.controller=null;}
+    };
+    for(const list of root.querySelectorAll('[data-ely-mention-list]')){ensureMentionIDs(list);const owner=list.closest('[data-ely-mention-src]')||list.closest('[data-ely-prompt-editor]')||root;mentionEntries.push({owner,list,controller:null,revision:0});}
+    mentionEntries.forEach(entry=>refreshMention(entry));
+    let profileTrigger=null,profileComposer=null,profileRevision=0,profileController=null;
+    const positionProfile=()=>{
+      const pop=root.querySelector('[data-ely-profile-popover]'),trigger=profileTrigger;if(!pop||pop.hidden||!trigger?.isConnected)return;
+      const margin=8,anchor=trigger.getBoundingClientRect(),viewLeft=(viewport?.offsetLeft||0)+margin,viewTop=(viewport?.offsetTop||0)+margin,viewRight=(viewport?.offsetLeft||0)+(viewport?.width||win.innerWidth)-margin,viewBottom=(viewport?.offsetTop||0)+(viewport?.height||win.innerHeight)-margin;
+      pop.style.boxSizing='border-box';pop.style.minWidth='0';pop.style.maxWidth=`${Math.max(0,viewRight-viewLeft)}px`;pop.style.left='0px';pop.style.top='0px';pop.style.maxHeight=`${Math.max(0,viewBottom-viewTop)}px`;const box=pop.getBoundingClientRect();
+      let top=anchor.bottom+8;if(top+box.height>viewBottom)top=anchor.top-box.height-8;top=Math.max(viewTop,Math.min(top,viewBottom-box.height));
+      const left=Math.max(viewLeft,Math.min(anchor.left,viewRight-box.width));
+      pop.style.left=`${left}px`;pop.style.top=`${top}px`;
+    };
+    const closeProfile=(restore=false)=>{const pop=root.querySelector('[data-ely-profile-popover]');if(!pop)return;pop.hidden=true;profileTrigger?.setAttribute('aria-expanded','false');profileController?.abort();profileController=null;profileRevision++;if(restore&&profileTrigger?.isConnected)profileTrigger.focus();profileTrigger=null;profileComposer=null;};
+    const openProfile=pill=>{
+      const pop=root.querySelector('[data-ely-profile-popover]');if(!pop)return;const handle=pill.dataset.elyMention||pill.value;profileTrigger?.setAttribute('aria-expanded','false');profileTrigger=pill;profileComposer=composerFor(pill);profileRevision++;profileController?.abort();profileController=null;
+      for(const selector of ['[data-ely-popover-name]','[data-ely-profile-role]','[data-ely-profile-account]','[data-ely-profile-joined]','[data-ely-profile-state]']){const element=pop.querySelector(selector);if(element)element.textContent=selector==='[data-ely-popover-name]'?handle:'';}
+      const mention=pop.querySelector('[data-ely-profile-mention]');if(mention){mention.value=handle;mention.dataset.handle=handle;}
+      pop.hidden=false;pill.setAttribute('aria-controls',pop.id);pill.setAttribute('aria-expanded','true');positionProfile();win.requestAnimationFrame(positionProfile);
+      pop.querySelector('[data-ely-popover-close]')?.focus();
+      const url=sameOrigin(root.dataset.elyProfileUrl||root.querySelector('[data-ely-profile-url]')?.dataset.elyProfileUrl);if(!url)return;
+      url.searchParams.set('handle',handle);const controller=new AbortController(),revision=profileRevision;profileController=controller;
+      fetch(url,{headers:{Accept:'application/json'},signal:controller.signal}).then(response=>{if(!response.ok)throw new Error('Profile request failed');return response.json();}).then(profile=>{
+        if(!profile||revision!==profileRevision||pop.hidden)return;
+        const fields={'[data-ely-popover-name]':profile.handle??profile.Handle??handle,'[data-ely-profile-role]':profile.role??profile.Role??'','[data-ely-profile-account]':profile.accountType??profile.account_type??profile.AccountType??'','[data-ely-profile-joined]':profile.joined??profile.joinedAt??profile.joined_at??profile.Joined??''};
+        for(const [selector,value] of Object.entries(fields)){const element=pop.querySelector(selector);if(element)element.textContent=String(value||'');}
+        positionProfile();
+        const mention=pop.querySelector('[data-ely-profile-mention]');if(mention)mention.dataset.handle=String(profile.handle??profile.Handle??handle);
+      }).catch(error=>{if(error.name!=='AbortError'&&revision===profileRevision)pop.querySelector('[data-ely-profile-state]')?.replaceChildren(root.ownerDocument.createTextNode('Profile unavailable.'));}).finally(()=>{if(profileController===controller)profileController=null;});
+    };
+    let stickToBottom=true;
+    const messageLog=()=>root.querySelector('.ely-messaging-transcript,.ely-chat-message-list');
+    const nearBottom=()=>{const log=messageLog();return !log||log.scrollHeight-log.scrollTop-log.clientHeight<=32;};
+    let lastScrollTop=messageLog()?.scrollTop||0,lastScrollHeight=messageLog()?.scrollHeight||0;
+    stickToBottom=nearBottom();
+    const followBottom=force=>{if(!force&&!stickToBottom)return;const log=messageLog();if(log){log.scrollTop=log.scrollHeight;if(force)stickToBottom=true;}};
+    const settle=(force=false)=>{const run=win.requestAnimationFrame||(callback=>setTimeout(callback,0));run(()=>run(()=>followBottom(force)));};
+    const onMessageScroll=()=>{const log=messageLog();if(!log)return;const moved=log.scrollTop!==lastScrollTop,grew=log.scrollHeight>lastScrollHeight;if(!(grew&&!moved))stickToBottom=nearBottom();lastScrollTop=log.scrollTop;lastScrollHeight=log.scrollHeight;};
+    root.addEventListener('scroll',event=>{if(event.target===messageLog())onMessageScroll();positionProfile();},{...opts,capture:true});
+    root.addEventListener('load',event=>{if(stickToBottom&&event.target instanceof win.HTMLImageElement&&root.contains(event.target))settle();},{...opts,capture:true});
+    const resizeObserver=typeof win.ResizeObserver==='function'?new win.ResizeObserver(()=>{if(stickToBottom)settle();}):null;
+    const observeContainers=()=>containers().forEach(container=>resizeObserver?.observe(container));containers().forEach(container=>resizeObserver?.observe(container));
+    const observer=new win.MutationObserver(records=>{
+      const shouldFollow=stickToBottom;
+      let transcriptChanged=false;
+      for(const record of records){
+        const inTranscript=record.target instanceof win.Element?!!record.target.closest('.ely-messaging-transcript,.ely-chat-message-list'):!!record.target.parentElement?.closest('.ely-messaging-transcript,.ely-chat-message-list');
+        if(record.type==='characterData'){
+          const body=record.target.parentElement?.closest('[data-ely-message-body]');
+          if(body){delete body.dataset.elyMentionsDecorated;decorateMentionBody(body);}
+          if(inTranscript)transcriptChanged=true;
+          continue;
+        }
+        const body=record.target.closest?.('[data-ely-message-body]');
+        if(body){
+          if(body.dataset.elyMentionsMutating!=='true'){delete body.dataset.elyMentionsDecorated;decorateMentionBody(body);if(inTranscript)transcriptChanged=true;}
+          continue;
+        }
+        let addedInScope=false;
+        for(const node of record.addedNodes){
+          if(!(node instanceof win.Element))continue;
+          if(node.matches('[data-ely-message-body]')){delete node.dataset.elyMentionsDecorated;decorateMentionBody(node);addedInScope=true;}
+          else if(node.matches('.ely-messaging-message,.ely-chat-message,.ely-messaging-transcript,.ely-chat-message-list')||node.querySelector('.ely-messaging-message,.ely-chat-message,[data-ely-message-body]')){decorateMessages(node);addedInScope=true;}
+        }
+        if(inTranscript&&(addedInScope||record.removedNodes.length>0))transcriptChanged=true;
+      }
+      if(!transcriptChanged)return;
+      containers().forEach(groupMessages);
+      observeContainers();if(shouldFollow)settle(true);
+    });
+    observer.observe(root,{childList:true,subtree:true,characterData:true});
+    let typingActive=false,typingDebounce=0,typingExpiry=0,typingQueue=Promise.resolve();
+    const typingURL=field=>sameOrigin(field.closest('[data-ely-typing-url]')?.dataset.elyTypingUrl||root.dataset.elyTypingUrl);
+    const sendTyping=(url,active)=>{
+      const request=()=>{const signal=typeof win.AbortSignal?.timeout==='function'?win.AbortSignal.timeout(5000):undefined;return fetch(url,{method:'POST',credentials:'same-origin',keepalive:true,headers:{'Content-Type':'application/json',Accept:'application/json'},body:JSON.stringify({typing:active}),signal}).catch(()=>{});};
+      typingQueue=typingQueue.then(request,request);return typingQueue;
+    };
+    let typingField=null;
+    const stopTyping=()=>{clearTimeout(typingDebounce);clearTimeout(typingExpiry);typingDebounce=typingExpiry=0;if(!typingActive)return;typingActive=false;const field=typingField?.isConnected?typingField:composerField(),url=field&&typingURL(field);if(url)sendTyping(url,false);};
+    const touchTyping=field=>{
+      const url=typingURL(field);if(!url)return;typingField=field;clearTimeout(typingDebounce);clearTimeout(typingExpiry);
+      if(!typingActive)typingDebounce=setTimeout(()=>{if(!url)return;typingActive=true;sendTyping(url,true);typingExpiry=setTimeout(stopTyping,Math.max(100,Number(field.closest('[data-ely-typing-url]')?.dataset.elyTypingExpiry||root.dataset.elyTypingExpiry||3000)));},Math.max(0,Number(field.closest('[data-ely-typing-url]')?.dataset.elyTypingDelay||root.dataset.elyTypingDelay||250)));
+      else typingExpiry=setTimeout(stopTyping,Math.max(100,Number(field.closest('[data-ely-typing-url]')?.dataset.elyTypingExpiry||root.dataset.elyTypingExpiry||3000)));
+    };
+    let swipe=null;
+    const messageFor=element=>element.closest('.ely-messaging-message,.ely-chat-message')||[...root.querySelectorAll('[data-message-id]')].find(row=>row.dataset.messageId===element.dataset.elyReplyOpen);
+    const authorFor=row=>{
+      if(row.dataset.senderName)return row.dataset.senderName;const own=row.querySelector('header strong')?.textContent;if(own)return own;
+      for(let previous=row.previousElementSibling;previous;previous=previous.previousElementSibling){if(!previous.matches('.ely-messaging-message,.ely-chat-message'))continue;if(!previous.classList.contains('is-cont')){const name=previous.dataset.senderName||previous.querySelector('header strong')?.textContent;if(name)return name;}}
+      return row.dataset.senderId||'';
+    };
+    const applyReply=(row,source)=>{
+      if(!row)return;const messageId=row.dataset.messageId||'',author=authorFor(row),content=row.querySelector('[data-ely-message-body],p')?.textContent||'',composer=composerFor(row);
+      emit(root,source==='swipe'?'reply-swipe':'reply',{value:messageId,messageId,author,content,source});
+      if(!composer)return;const quote=composer.querySelector('[data-ely-reply-quote]');if(quote){const qa=quote.querySelector('[data-ely-quote-author]'),qt=quote.querySelector('[data-ely-quote-text]'),ri=quote.querySelector('[data-ely-reply-to]');if(qa)qa.textContent=author;if(qt)qt.textContent=content;if(ri)ri.value=messageId;quote.hidden=false;composer.dataset.hasQuote='true';}composerField(composer)?.focus();
+    };
+    let deleteSequence=0,pendingDelete=null;
+    const setIdle=state=>{if(!state||pendingDelete?.requestId!==state.requestId)return;pendingDelete=null;delete state.dialog.dataset.elyDeletePending;state.dialog.querySelectorAll('button[aria-disabled="true"]').forEach(button=>button.removeAttribute('aria-disabled'));};
+    const closeDialog=dialog=>{if(!dialog||pendingDelete?.dialog===dialog)return;delete dialog.dataset.elyDeletePending;dialog.querySelectorAll('button[aria-disabled="true"]').forEach(button=>button.removeAttribute('aria-disabled'));if(typeof dialog.close==='function'){try{dialog.close();return;}catch{/* Fall back to the open attribute below. */}}dialog.removeAttribute('open');};
+    const deleteTemplate=(dialog,scope)=>{const button=dialog?.querySelector(`[data-ely-delete-choice="${CSS.escape(scope)}"]`);return button?.dataset.elyDeleteUrl||'';};
+    const prepareDelete=(dialog,messageId)=>{for(const scope of ['me','everyone']){const button=dialog.querySelector(`[data-ely-delete-choice="${CSS.escape(scope)}"]`),source=deleteTemplate(dialog,scope);if(!button||!source)continue;const template=source.replace(/%7Bid%7D/gi,'{id}'),resolved=sameOrigin(template.split('{id}').join(encodeURIComponent(messageId)));if(!resolved){delete button.dataset.elyDeleteResolved;continue;}button.dataset.elyDeleteResolved=resolved.href;}};
+    const requestState=event=>{const ctx=event.detail?.ctx,source=ctx?.sourceElement||event.detail?.elt;if(ctx&&!ctx.elyDeleteRequest&&pendingDelete?.button===source)ctx.elyDeleteRequest=pendingDelete.requestId;return ctx?.elyDeleteRequest===pendingDelete?.requestId?pendingDelete:null;};
+    const failDelete=(state,text)=>{if(!state)return;setIdle(state);const status=state.dialog.querySelector('[data-ely-delete-status]');if(status)status.textContent=text||'Delete request failed.';};
+    const settleDelete=event=>{
+      const state=requestState(event);if(!state)return;const ctx=event.detail?.ctx,status=Number(ctx?.response?.status??ctx?.status);
+      if(event.type.endsWith('send:error')){failDelete(state,'Delete request failed.');return;}
+      if(event.type.endsWith('after:request')){
+        if(status>=400){event.preventDefault();failDelete(state,ctx?.text||`Delete failed (${status}).`);return;}
+        const output=state.dialog.querySelector('[data-ely-delete-status]');if(output)output.textContent='';
+        if(status===204){state.target.remove();setIdle(state);closeDialog(state.dialog);return;}
+      }
+      if(event.type.endsWith('finally:request'))queueMicrotask(()=>{if(pendingDelete?.requestId!==state.requestId)return;if(!Number.isFinite(status)||status>=400)return;setIdle(state);closeDialog(state.dialog);});
+    };
+    for(const name of ['htmx:before:request','htmx:after:request','htmx:finally:request','htmx:send:error'])win.document.addEventListener(name,settleDelete,opts);
+    for(const dialog of root.querySelectorAll('[data-ely-delete-dialog]'))dialog.addEventListener('cancel',event=>{if(pendingDelete?.dialog===dialog)event.preventDefault();},opts);
+    const deleteChoiceClick=event=>{
+      const button=event.target.closest('[data-ely-delete-choice]');if(!button||button.disabled||!root.contains(button)||root.dataset.elyDisabled==='true')return;event.preventDefault();event.stopImmediatePropagation();const dialog=button.closest('[data-ely-delete-dialog]');if(dialog?.dataset.elyDeletePending==='true')return;
+      const messageId=dialog?.dataset.targetMessageId||'',scope=button.dataset.elyDeleteChoice||'me',url=button.dataset.elyDeleteResolved,swap=button.dataset.elyDeleteSwap||'outerHTML',owner=dialog?.closest('.ely-messaging-transcript,.ely-chat-message-list'),target=owner?.querySelector(`[data-message-id="${CSS.escape(messageId)}"]`)||root.querySelector(`[data-message-id="${CSS.escape(messageId)}"]`);
+      emit(root,'delete-message',{value:messageId,messageId,scope});changed(root,'delete-message',messageId,{scope});
+      if(url&&typeof win.htmx?.ajax==='function'){
+        if(!target){closeDialog(dialog);return;}
+        const requestId=String(++deleteSequence),request={requestId,dialog,button,target,messageId};button.dataset.elyDeleteRequest=requestId;pendingDelete=request;
+        dialog.dataset.elyDeletePending='true';dialog.querySelectorAll('button').forEach(item=>item.setAttribute('aria-disabled','true'));const status=dialog.querySelector('[data-ely-delete-status]');if(status)status.textContent='';
+        Promise.resolve(win.htmx.ajax('DELETE',url,{target,swap,source:button,values:{message_id:messageId}})).catch(()=>failDelete(request,'Delete request failed.'));
+        return;
+      }
+      closeDialog(dialog);
+    };
+    root.addEventListener('click',deleteChoiceClick,{...opts,capture:true});
+    const queueMentions=event=>{const participants=mentionPayload(event.detail);for(const entry of mentionEntries){entry.controller?.abort();entry.controller=null;entry.revision++;if(participants)renderMentions(entry.list,participants);else refreshMention(entry);}};
+    root.addEventListener('ely:mentions',queueMentions,opts);root.addEventListener('ely:mention-refresh',queueMentions,opts);
+    root.addEventListener('submit',event=>{if(event.target?.closest?.('[data-ely-prompt-editor],.ely-chat-composer'))stopTyping();},opts);
     root.addEventListener('input',event=>{
-      if(root.dataset.elyDisabled==='true')return;
-      const ta=event.target;
-      if(!ta?.matches?.('.ely-chat-composer textarea[name="message"]'))return;
-      const list=ta.closest('form')?.querySelector('[data-ely-mention-list]');
-      if(!list)return;
-      const pos=ta.selectionStart??ta.value.length;
-      const m=ta.value.slice(0,pos).match(/(?:^|\s)@([^\s@]*)$/);
-      if(m)openMentionList(ta,list,m[1]);else list.hidden=true;
+      if(root.dataset.elyDisabled==='true')return;const field=event.target;
+      if(usableField(field)&&(field.matches('[data-ely-prompt-editor]')||field.closest('[data-ely-prompt-editor],.ely-chat-composer'))){
+        touchTyping(field);const list=field.closest('form')?.querySelector('[data-ely-mention-list]');if(list){const pos=field.selectionStart??field.value.length,match=field.value.slice(0,pos).match(/(?:^|\s)@([^\s@]*)$/u);if(match)openMentionList(list,match[1]);else dismissMentionList(list);}
+      }
     },opts);
     root.addEventListener('keydown',event=>{
-      if(root.dataset.elyDisabled==='true')return;
-      const ta=event.target;
-      if(!ta?.matches?.('.ely-chat-composer textarea[name="message"]'))return;
-      const list=ta.closest('form')?.querySelector('[data-ely-mention-list]');
-      if(!list||list.hidden)return;
-      const visible=[...list.querySelectorAll('[data-ely-mention-option]:not([hidden])')];
-      if(!visible.length)return;
-      const idx=visible.findIndex(o=>o.getAttribute('aria-selected')==='true');
-      if(event.key==='ArrowDown'||event.key==='ArrowUp'){
-        event.preventDefault();event.stopImmediatePropagation();
-        const next=visible[(idx+(event.key==='ArrowDown'?1:-1)+visible.length)%visible.length];
-        visible.forEach(o=>o.setAttribute('aria-selected',String(o===next)));
-      }else if(event.key==='Enter'||event.key==='Tab'){
-        const picked=visible[Math.max(0,idx)];
-        if(picked){event.preventDefault();event.stopImmediatePropagation();insertMention(ta,picked.dataset.elyMentionOption||picked.value);}
-      }else if(event.key==='Escape'){
-        event.preventDefault();event.stopImmediatePropagation();list.hidden=true;
-      }
+      if(root.dataset.elyDisabled==='true')return;const field=event.target;
+      if(event.isComposing||event.keyCode===229)return;
+      const popover=root.querySelector('[data-ely-profile-popover]');if(event.key==='Escape'&&popover&&!popover.hidden){event.preventDefault();event.stopImmediatePropagation();closeProfile(true);return;}
+      if(!usableField(field)||!(field.matches('[data-ely-prompt-editor]')||field.closest('[data-ely-prompt-editor],.ely-chat-composer')))return;
+      const list=field.closest('form')?.querySelector('[data-ely-mention-list]');if(!list||list.hidden)return;const visible=[...list.querySelectorAll('[data-ely-mention-option]:not([hidden]):not(:disabled)')];if(!visible.length)return;const index=visible.findIndex(option=>option.getAttribute('aria-selected')==='true');
+      if(event.key==='ArrowDown'||event.key==='ArrowUp'){event.preventDefault();event.stopImmediatePropagation();const next=visible[(index+(event.key==='ArrowDown'?1:-1)+visible.length)%visible.length];activateMention(list,next);}
+      else if(event.key==='Enter'){const picked=visible[Math.max(0,index)];if(picked){event.preventDefault();event.stopImmediatePropagation();insertMention(field,picked.dataset.elyMentionOption||picked.value);}}
+      else if(event.key==='Tab'){dismissMentionList(list);}
+      else if(event.key==='Escape'){event.preventDefault();event.stopImmediatePropagation();dismissMentionList(list);}
     },opts);
     root.addEventListener('click',event=>{
       if(root.dataset.elyDisabled==='true')return;
-      const opt=event.target.closest('[data-ely-mention-option]');
-      if(opt&&!opt.disabled&&root.contains(opt)){const ta=opt.closest('form')?.querySelector('textarea[name="message"]');if(ta)insertMention(ta,opt.dataset.elyMentionOption||opt.value);return;}
-      const pill=event.target.closest('[data-ely-mention]');
-      if(pill&&!pill.disabled&&root.contains(pill)){
-        const handle=pill.dataset.elyMention||pill.value;
-        emit(root,'mention-click',{value:handle,mention:handle,messageId:pill.closest('[data-message-id]')?.dataset.messageId||''});
-        const pop=root.querySelector('[data-ely-profile-popover]');
-        if(pop){const nameEl=pop.querySelector('[data-ely-popover-name]');if(nameEl)nameEl.textContent=handle;pop.hidden=false;}
-        return;
-      }
-      if(event.target.closest('[data-ely-popover-close]')){const pop=root.querySelector('[data-ely-profile-popover]');if(pop)pop.hidden=true;return;}
-      const delOpen=event.target.closest('[data-ely-delete-open]');
-      if(delOpen&&!delOpen.disabled&&root.contains(delOpen)){
-        const dialog=delOpen.closest('.ely-messaging-transcript')?.querySelector('[data-ely-delete-dialog]')||root.querySelector('[data-ely-delete-dialog]');
-        if(dialog){dialog.dataset.targetMessageId=delOpen.dataset.elyDeleteOpen||delOpen.value||'';if(typeof dialog.showModal==='function'){try{dialog.showModal();}catch{dialog.setAttribute('open','');}}else{dialog.setAttribute('open','');}}
-        return;
-      }
-      const delChoice=event.target.closest('[data-ely-delete-choice]');
-      if(delChoice&&root.contains(delChoice)){
-        const dialog=delChoice.closest('[data-ely-delete-dialog]');
-        const messageId=dialog?.dataset.targetMessageId||'',scope=delChoice.dataset.elyDeleteChoice||'me';
-        if(dialog){if(typeof dialog.close==='function'){try{dialog.close();}catch{dialog.removeAttribute('open');}}else{dialog.removeAttribute('open');}}
-        emit(root,'delete-message',{value:messageId,messageId,scope});
-        changed(root,'delete-message',messageId,{scope});
-        return;
-      }
-      if(event.target.closest('[data-ely-delete-cancel]')){
-        const dialog=event.target.closest('[data-ely-delete-dialog]');
-        if(dialog){if(typeof dialog.close==='function'){try{dialog.close();}catch{dialog.removeAttribute('open');}}else{dialog.removeAttribute('open');}}
-        return;
-      }
-      if(event.target.closest('[data-ely-quote-clear]')){
-        const form=event.target.closest('form'),quote=form?.querySelector('[data-ely-reply-quote]');
-        if(quote)quote.hidden=true;
-        const replyInput=form?.querySelector('[data-ely-reply-to]');if(replyInput)replyInput.value='';
-        if(form)delete form.dataset.hasQuote;
-        changed(root,'quote','',{removed:true});
-        return;
-      }
+      const option=event.target.closest('[data-ely-mention-option]');if(option&&!option.disabled&&root.contains(option)){insertMention(composerField(option.closest('form')||root),option.dataset.elyMentionOption||option.value);return;}
+      const pill=event.target.closest('[data-ely-mention]');if(pill&&!pill.disabled&&root.contains(pill)){const handle=pill.dataset.elyMention||pill.value;emit(root,'mention-click',{value:handle,mention:handle,messageId:pill.closest('[data-message-id]')?.dataset.messageId||''});openProfile(pill);return;}
+      const profileMention=event.target.closest('[data-ely-profile-mention]');if(profileMention){const handle=profileMention.dataset.handle||profileMention.value||root.querySelector('[data-ely-popover-name]')?.textContent||'',field=composerField(profileComposer||composerFor()||root);if(insertMention(field,handle)){closeProfile(false);field.focus();emit(root,'mention',{value:handle,mention:handle});}return;}
+      if(event.target.closest('[data-ely-popover-close]')){closeProfile(true);return;}
+      const reply=event.target.closest('[data-ely-reply-open]');if(reply&&!reply.disabled&&root.contains(reply)){applyReply(messageFor(reply),'button');return;}
+      const deleteOpen=event.target.closest('[data-ely-delete-open]');if(deleteOpen&&!deleteOpen.disabled&&root.contains(deleteOpen)){const dialog=deleteOpen.closest('.ely-messaging-transcript')?.querySelector('[data-ely-delete-dialog]')||root.querySelector('[data-ely-delete-dialog]');if(dialog){const messageId=deleteOpen.dataset.elyDeleteOpen||deleteOpen.value||'',status=dialog.querySelector('[data-ely-delete-status]');if(status)status.textContent='';dialog.dataset.targetMessageId=messageId;prepareDelete(dialog,messageId);if(typeof dialog.showModal==='function'){try{dialog.showModal();}catch{dialog.setAttribute('open','');}}else dialog.setAttribute('open','');}return;}
+      if(event.target.closest('[data-ely-delete-cancel]')){const dialog=event.target.closest('[data-ely-delete-dialog]');if(!dialog?.dataset.elyDeletePending)closeDialog(dialog);return;}
+      if(event.target.closest('[data-ely-quote-clear]')){const form=event.target.closest('form'),quote=form?.querySelector('[data-ely-reply-quote]');if(quote)quote.hidden=true;const replyInput=form?.querySelector('[data-ely-reply-to]');if(replyInput)replyInput.value='';if(form)delete form.dataset.hasQuote;changed(root,'quote','',{removed:true});return;}
     },opts);
-    // 4. Swipe-to-reply + Floating Island Morphing
-    let swipe=null;
-    root.addEventListener('pointerdown',event=>{
-      if(root.dataset.elyDisabled==='true'||event.button!==0||event.target.closest('button,a,input,textarea,select'))return;
-      const row=event.target.closest('.ely-messaging-message,.ely-chat-message');
-      if(!row||!root.contains(row))return;
-      swipe={row,startX:event.clientX,startY:event.clientY,locked:false,shift:0};
-    },opts);
-    root.addEventListener('pointermove',event=>{
-      if(!swipe)return;
-      const dx=event.clientX-swipe.startX,dy=event.clientY-swipe.startY;
-      if(!swipe.locked&&Math.abs(dy)>10&&Math.abs(dy)>Math.abs(dx)){swipe.row.style.transform='';delete swipe.row.dataset.swipeReady;swipe=null;return;}
-      if(dx>8){
-        swipe.locked=true;
-        swipe.shift=Math.min(72,dx);
-        swipe.row.style.transform=`translateX(${swipe.shift}px)`;
-        swipe.row.dataset.swipeReady=String(swipe.shift>=48);
-      }
-    },opts);
-    const finishSwipe=commit=>{
-      if(!swipe)return;
-      const {row,shift}=swipe;swipe=null;
-      row.style.transform='';delete row.dataset.swipeReady;
-      if(!commit||shift<48)return;
-      const messageId=row.dataset.messageId||'';
-      const author=row.querySelector('header strong')?.textContent||row.dataset.senderId||'';
-      const content=row.querySelector('[data-ely-message-body],p')?.textContent||'';
-      emit(root,'reply-swipe',{value:messageId,messageId,author,content});
-      const composer=root.querySelector('.ely-chat-composer form')||document.querySelector('.ely-chat-composer form');
-      if(composer){
-        const quote=composer.querySelector('[data-ely-reply-quote]');
-        if(quote){
-          const qa=quote.querySelector('[data-ely-quote-author]'),qt=quote.querySelector('[data-ely-quote-text]'),ri=quote.querySelector('[data-ely-reply-to]');
-          if(qa)qa.textContent=author;
-          if(qt)qt.textContent=content;
-          if(ri)ri.value=messageId;
-          quote.hidden=false;
-          composer.dataset.hasQuote='true';
-        }
-        composer.querySelector('textarea[name="message"]')?.focus();
-      }
-    };
-    root.addEventListener('pointerup',()=>finishSwipe(true),opts);
-    root.addEventListener('pointercancel',()=>finishSwipe(false),opts);
+    root.addEventListener('pointerdown',event=>{if(root.dataset.elyDisabled==='true'||event.button!==0||event.target.closest('button,a,input,textarea,select'))return;const row=event.target.closest('.ely-messaging-message,.ely-chat-message');if(!row||!root.contains(row))return;swipe={row,pointerId:event.pointerId,startX:event.clientX,startY:event.clientY,locked:false,shift:0};try{row.setPointerCapture(event.pointerId);}catch{}},opts);
+    root.addEventListener('pointermove',event=>{if(!swipe||event.pointerId!==swipe.pointerId)return;const dx=event.clientX-swipe.startX,dy=event.clientY-swipe.startY;if(!swipe.locked&&Math.abs(dy)>10&&Math.abs(dy)>Math.abs(dx)){const {row}=swipe;swipe=null;row.style.transform='';delete row.dataset.swipeReady;return;}if(dx>8){swipe.locked=true;swipe.shift=Math.min(72,dx);swipe.row.style.transform=`translateX(${swipe.shift}px)`;swipe.row.dataset.swipeReady=String(swipe.shift>=48);}},opts);
+    const finishSwipe=(commit,pointerId)=>{if(!swipe||(pointerId!==undefined&&pointerId!==swipe.pointerId))return;const {row,shift}=swipe;swipe=null;row.style.transform='';delete row.dataset.swipeReady;if(row.hasPointerCapture?.(pointerId))row.releasePointerCapture(pointerId);if(commit&&shift>=48)applyReply(row,'swipe');};
+    root.addEventListener('pointerup',event=>finishSwipe(true,event.pointerId),opts);root.addEventListener('pointercancel',event=>finishSwipe(false,event.pointerId),opts);root.addEventListener('lostpointercapture',event=>finishSwipe(false,event.pointerId),opts);
+    const updateKeyboardOffset=()=>{if(viewport)root.style.setProperty('--ely-keyboard-offset',`${Math.max(0,win.innerHeight-viewport.height-(viewport.offsetTop||0))}px`);positionProfile();};
+    updateKeyboardOffset();win.addEventListener('resize',positionProfile,opts);win.addEventListener('scroll',positionProfile,{...opts,passive:true});viewport?.addEventListener('resize',updateKeyboardOffset,opts);viewport?.addEventListener('scroll',updateKeyboardOffset,opts);
+    const cleanup=()=>{stopTyping();observer.disconnect();resizeObserver?.disconnect();for(const entry of mentionEntries)entry.controller?.abort();profileController?.abort();root.style.removeProperty('--ely-keyboard-offset');};
+    lifecycle.signal.addEventListener('abort',cleanup,{once:true});
+    return cleanup;
   };
-  mountNativeMessaging(root,lifecycle);
+  const nativeMessagingCleanup=mountNativeMessaging(root,lifecycle);
   root.addEventListener('error',onImageError,{capture:true,signal:lifecycle.signal});
   root.addEventListener('ely:stream',onStream);root.addEventListener('click',onClick);root.addEventListener('dblclick',onDoubleClick);root.addEventListener('keydown',onKeyDown);root.addEventListener('pointerdown',onPointerDown);root.addEventListener('pointerup',onPointerUp);root.addEventListener('input',onInput);root.addEventListener('change',onChange);root.addEventListener('submit',onSubmit);root.addEventListener('dragstart',onDragStart);root.addEventListener('dragover',onDragOver);root.addEventListener('drop',onDrop);
-  return()=>{lifecycle.abort();mathCleanups.forEach(cleanup=>cleanup());approvals.forEach(dialog=>dialog.removeEventListener('cancel',onCancel));root.removeEventListener('ely:stream',onStream);root.removeEventListener('click',onClick);root.removeEventListener('dblclick',onDoubleClick);root.removeEventListener('keydown',onKeyDown);root.removeEventListener('pointerdown',onPointerDown);root.removeEventListener('pointerup',onPointerUp);root.removeEventListener('input',onInput);root.removeEventListener('change',onChange);root.removeEventListener('submit',onSubmit);root.removeEventListener('dragstart',onDragStart);root.removeEventListener('dragover',onDragOver);root.removeEventListener('drop',onDrop);};
+  return()=>{nativeMessagingCleanup();lifecycle.abort();mathCleanups.forEach(cleanup=>cleanup());approvals.forEach(dialog=>dialog.removeEventListener('cancel',onCancel));root.removeEventListener('ely:stream',onStream);root.removeEventListener('click',onClick);root.removeEventListener('dblclick',onDoubleClick);root.removeEventListener('keydown',onKeyDown);root.removeEventListener('pointerdown',onPointerDown);root.removeEventListener('pointerup',onPointerUp);root.removeEventListener('input',onInput);root.removeEventListener('change',onChange);root.removeEventListener('submit',onSubmit);root.removeEventListener('dragstart',onDragStart);root.removeEventListener('dragover',onDragOver);root.removeEventListener('drop',onDrop);};
 });

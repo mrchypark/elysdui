@@ -32,6 +32,47 @@ func TestCatalogueDefinitionsRegister(t *testing.T) {
 		}
 	}
 }
+
+func TestMessagingCatalogueTypingAndComposerContracts(t *testing.T) {
+	contracts, err := sdui.CatalogueContracts()
+	if err != nil {
+		t.Fatal(err)
+	}
+	byName := map[string]sdui.CatalogueContract{}
+	for _, contract := range contracts {
+		byName[contract.Name] = contract
+	}
+	prompt := byName["chat/PromptInput"].Properties
+	if prompt["typingExpiry"].Type != sdui.Integer || prompt["singleLine"].Type != sdui.Boolean {
+		t.Fatalf("PromptInput contract types = expiry:%+v singleLine:%+v", prompt["typingExpiry"], prompt["singleLine"])
+	}
+	chat := byName["messaging/ChatMessage"].Properties
+	if chat["composerID"].Type != sdui.String {
+		t.Fatalf("ChatMessage ComposerID = %+v", chat["composerID"])
+	}
+	if _, exists := chat["typingExpiry"]; exists {
+		t.Fatal("ChatMessage must not expose inert TypingExpiry")
+	}
+	if _, exists := chat["typingURL"]; exists {
+		t.Fatal("ChatMessage must not expose inert TypingURL")
+	}
+	for _, contract := range []string{"basic/input", "basic/textarea"} {
+		for _, key := range []string{"ariaAutocomplete", "ariaControls", "ariaExpanded"} {
+			if _, exists := byName[contract].Properties[key]; exists {
+				t.Fatalf("%s must not expose PromptInput-only property %s", contract, key)
+			}
+		}
+	}
+	for _, fixture := range catalogueFixtures(t) {
+		if fixture.Name == "chat/PromptInput" {
+			if value, ok := fixture.Props["typingExpiry"].(json.Number); !ok || value.String() != "3000" {
+				t.Fatalf("PromptInput reviewed TypingExpiry = %#v", fixture.Props["typingExpiry"])
+			}
+			return
+		}
+	}
+	t.Fatal("missing chat/PromptInput fixture")
+}
 func TestCatalogueGeneratedFilesCurrent(t *testing.T) {
 	manifest, fixtures, err := sduicatalogue.Encode()
 	if err != nil {
