@@ -576,24 +576,30 @@ register('communication',root=>{
     const observeContainers=()=>containers().forEach(container=>resizeObserver?.observe(container));containers().forEach(container=>resizeObserver?.observe(container));
     const observer=new win.MutationObserver(records=>{
       const shouldFollow=stickToBottom;
-      containers().forEach(groupMessages);
+      let transcriptChanged=false;
       for(const record of records){
+        const inTranscript=record.target instanceof win.Element?!!record.target.closest('.ely-messaging-transcript,.ely-chat-message-list'):!!record.target.parentElement?.closest('.ely-messaging-transcript,.ely-chat-message-list');
         if(record.type==='characterData'){
           const body=record.target.parentElement?.closest('[data-ely-message-body]');
           if(body){delete body.dataset.elyMentionsDecorated;decorateMentionBody(body);}
+          if(inTranscript)transcriptChanged=true;
           continue;
         }
         const body=record.target.closest?.('[data-ely-message-body]');
         if(body){
-          if(body.dataset.elyMentionsMutating!=='true'){delete body.dataset.elyMentionsDecorated;decorateMentionBody(body);}
+          if(body.dataset.elyMentionsMutating!=='true'){delete body.dataset.elyMentionsDecorated;decorateMentionBody(body);if(inTranscript)transcriptChanged=true;}
           continue;
         }
+        let addedInScope=false;
         for(const node of record.addedNodes){
           if(!(node instanceof win.Element))continue;
-          if(node.matches('[data-ely-message-body]')){delete node.dataset.elyMentionsDecorated;decorateMentionBody(node);}
-          else decorateMessages(node);
+          if(node.matches('[data-ely-message-body]')){delete node.dataset.elyMentionsDecorated;decorateMentionBody(node);addedInScope=true;}
+          else if(node.matches('.ely-messaging-message,.ely-chat-message,.ely-messaging-transcript,.ely-chat-message-list')||node.querySelector('.ely-messaging-message,.ely-chat-message,[data-ely-message-body]')){decorateMessages(node);addedInScope=true;}
         }
+        if(inTranscript&&(addedInScope||record.removedNodes.length>0))transcriptChanged=true;
       }
+      if(!transcriptChanged)return;
+      containers().forEach(groupMessages);
       observeContainers();if(shouldFollow)settle(true);
     });
     observer.observe(root,{childList:true,subtree:true,characterData:true});
@@ -618,7 +624,7 @@ register('communication',root=>{
       return row.dataset.senderId||'';
     };
     const applyReply=(row,source)=>{
-      if(!row)return;const messageId=row.dataset.messageId||'',author=authorFor(row),content=row.querySelector('[data-ely-message-body],p')?.textContent||'',composer=composerFor();
+      if(!row)return;const messageId=row.dataset.messageId||'',author=authorFor(row),content=row.querySelector('[data-ely-message-body],p')?.textContent||'',composer=composerFor(row);
       emit(root,source==='swipe'?'reply-swipe':'reply',{value:messageId,messageId,author,content,source});
       if(!composer)return;const quote=composer.querySelector('[data-ely-reply-quote]');if(quote){const qa=quote.querySelector('[data-ely-quote-author]'),qt=quote.querySelector('[data-ely-quote-text]'),ri=quote.querySelector('[data-ely-reply-to]');if(qa)qa.textContent=author;if(qt)qt.textContent=content;if(ri)ri.value=messageId;quote.hidden=false;composer.dataset.hasQuote='true';}composerField(composer)?.focus();
     };
@@ -631,22 +637,22 @@ register('communication',root=>{
     const failDelete=(state,text)=>{if(!state)return;setIdle(state);const status=state.dialog.querySelector('[data-ely-delete-status]');if(status)status.textContent=text||'Delete request failed.';};
     const settleDelete=event=>{
       const state=requestState(event);if(!state)return;const ctx=event.detail?.ctx,status=Number(ctx?.response?.status??ctx?.status);
-      if(event.type.endsWith('send:error')||event.type==='htmx:sendError'){failDelete(state,'Delete request failed.');return;}
-      if(event.type.endsWith('after:request')||event.type==='htmx:afterRequest'){
+      if(event.type.endsWith('send:error')){failDelete(state,'Delete request failed.');return;}
+      if(event.type.endsWith('after:request')){
         if(status>=400){event.preventDefault();failDelete(state,ctx?.text||`Delete failed (${status}).`);return;}
         const output=state.dialog.querySelector('[data-ely-delete-status]');if(output)output.textContent='';
         if(status===204){state.target.remove();setIdle(state);closeDialog(state.dialog);return;}
       }
-      if(event.type.endsWith('finally:request')||event.type==='htmx:finallyRequest')queueMicrotask(()=>{if(pendingDelete?.requestId!==state.requestId)return;if(!Number.isFinite(status)||status>=400)return;setIdle(state);closeDialog(state.dialog);});
+      if(event.type.endsWith('finally:request'))queueMicrotask(()=>{if(pendingDelete?.requestId!==state.requestId)return;if(!Number.isFinite(status)||status>=400)return;setIdle(state);closeDialog(state.dialog);});
     };
-    for(const name of ['htmx:before:request','htmx:after:request','htmx:finally:request','htmx:send:error','htmx:beforeRequest','htmx:afterRequest','htmx:finallyRequest','htmx:sendError'])win.document.addEventListener(name,settleDelete,opts);
+    for(const name of ['htmx:before:request','htmx:after:request','htmx:finally:request','htmx:send:error'])win.document.addEventListener(name,settleDelete,opts);
     for(const dialog of root.querySelectorAll('[data-ely-delete-dialog]'))dialog.addEventListener('cancel',event=>{if(pendingDelete?.dialog===dialog)event.preventDefault();},opts);
     const deleteChoiceClick=event=>{
       const button=event.target.closest('[data-ely-delete-choice]');if(!button||button.disabled||!root.contains(button)||root.dataset.elyDisabled==='true')return;event.preventDefault();event.stopImmediatePropagation();const dialog=button.closest('[data-ely-delete-dialog]');if(dialog?.dataset.elyDeletePending==='true')return;
       const messageId=dialog?.dataset.targetMessageId||'',scope=button.dataset.elyDeleteChoice||'me',url=button.dataset.elyDeleteResolved,swap=button.dataset.elyDeleteSwap||'outerHTML',owner=dialog?.closest('.ely-messaging-transcript,.ely-chat-message-list'),target=owner?.querySelector(`[data-message-id="${CSS.escape(messageId)}"]`)||root.querySelector(`[data-message-id="${CSS.escape(messageId)}"]`);
       emit(root,'delete-message',{value:messageId,messageId,scope});changed(root,'delete-message',messageId,{scope});
       if(url&&typeof win.htmx?.ajax==='function'){
-        if(!target)return;
+        if(!target){closeDialog(dialog);return;}
         const requestId=String(++deleteSequence),request={requestId,dialog,button,target,messageId};button.dataset.elyDeleteRequest=requestId;pendingDelete=request;
         dialog.dataset.elyDeletePending='true';dialog.querySelectorAll('button').forEach(item=>item.setAttribute('aria-disabled','true'));const status=dialog.querySelector('[data-ely-delete-status]');if(status)status.textContent='';
         Promise.resolve(win.htmx.ajax('DELETE',url,{target,swap,source:button,values:{message_id:messageId}})).catch(()=>failDelete(request,'Delete request failed.'));
@@ -657,6 +663,7 @@ register('communication',root=>{
     root.addEventListener('click',deleteChoiceClick,{...opts,capture:true});
     const queueMentions=event=>{const participants=mentionPayload(event.detail);for(const entry of mentionEntries){entry.controller?.abort();entry.controller=null;entry.revision++;if(participants)renderMentions(entry.list,participants);else refreshMention(entry);}};
     root.addEventListener('ely:mentions',queueMentions,opts);root.addEventListener('ely:mention-refresh',queueMentions,opts);
+    root.addEventListener('submit',event=>{if(event.target?.closest?.('[data-ely-prompt-editor],.ely-chat-composer'))stopTyping();},opts);
     root.addEventListener('input',event=>{
       if(root.dataset.elyDisabled==='true')return;const field=event.target;
       if(usableField(field)&&(field.matches('[data-ely-prompt-editor]')||field.closest('[data-ely-prompt-editor],.ely-chat-composer'))){
