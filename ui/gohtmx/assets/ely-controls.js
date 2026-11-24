@@ -78,6 +78,11 @@
     const above = Math.max(80, rect.top - margin);
     const flipTop = below < 180 && above > below;
     list.dataset.placement = flipTop ? 'top' : 'bottom';
+    if (flipTop && typeof input.offsetTop === 'number' && list.parentElement) {
+      list.style.bottom = `${Math.max(0, list.parentElement.clientHeight - input.offsetTop) + 4}px`;
+    } else {
+      list.style.removeProperty('bottom');
+    }
     list.style.maxBlockSize = `${Math.min(280, flipTop ? above : below)}px`;
   };
   const openCombo = component => {

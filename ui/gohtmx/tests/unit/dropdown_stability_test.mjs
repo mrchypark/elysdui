@@ -84,6 +84,7 @@ try {
 
   // 3. Combobox near bottom edge flips upward
   await page.click('#combo1-input');
+  assert.equal(await page.isVisible('#combo1-listbox'), true);
   assert.equal(await page.getAttribute('#combo1-listbox', 'data-placement'), 'top');
   const [inputRect, listRect] = await page.evaluate(() => [
     document.getElementById('combo1-input').getBoundingClientRect().toJSON(),
