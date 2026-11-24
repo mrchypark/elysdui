@@ -88,6 +88,9 @@
 [data-ely-family="interaction"] .ely-interaction__chevron{align-items:center;color:var(--color-muted,currentColor);display:inline-flex;flex:none;font-size:0;height:1rem;justify-content:center;line-height:0;width:1rem}
 [data-ely-family="interaction"] .ely-interaction__chevron::before{background:currentColor;content:"";height:100%;mask:url("/assets/ely/icons/chevron-down.svg") center/contain no-repeat;transition:transform .15s ease;width:100%}
 [data-ely-family="interaction"] [aria-expanded="true"]>.ely-interaction__chevron::before{transform:rotate(180deg)}
+[data-ely-family="interaction"] .ely-interaction__split:not([data-interaction-host="overflow"])>button[data-interaction-menu]:not(:has(.ely-interaction__chevron)){font-size:0;gap:0;padding-inline:.5rem}
+[data-ely-family="interaction"] .ely-interaction__split:not([data-interaction-host="overflow"])>button[data-interaction-menu]:not(:has(.ely-interaction__chevron))::after{background:var(--color-muted,currentColor);content:"";height:1rem;mask:url("/assets/ely/icons/chevron-down.svg") center/contain no-repeat;transition:transform .15s ease;width:1rem}
+[data-ely-family="interaction"] .ely-interaction__split:not([data-interaction-host="overflow"])>button[data-interaction-menu][aria-expanded="true"]:not(:has(.ely-interaction__chevron))::after{transform:rotate(180deg)}
 [data-ely-family="interaction"] .ely-interaction__nav{display:grid;gap:.3rem;max-width:18rem}
 [data-ely-family="interaction"] .ely-interaction__nav a{border-radius:.35rem;color:inherit;padding:.35rem;text-decoration:none}
 [data-ely-family="interaction"] .ely-interaction__nav a[aria-current="page"]{background:var(--accent-tint)}
