@@ -134,6 +134,7 @@ async function inspectOpenDialog(page, theme, size, view) {
     record(`${theme}/${size}.nonzero-classic-gutter`, expected.innerWidth - expected.viewport.width >= 14, expected.layoutDiagnostics);
     const shifted = await dialog.evaluate(node => {
       const before = node.getAttribute('style');
+      node.style.transition = 'none';
       node.style.transform = 'translateX(8px)';
       const r = node.getBoundingClientRect();
       if (before === null) node.removeAttribute('style'); else node.setAttribute('style', before);
@@ -193,6 +194,7 @@ try {
     await sheetRoot.locator('[data-interaction-dialog]').first().click();
     const sheet = sheetRoot.locator('dialog.is-sheet');
     await sheet.waitFor({state: 'visible'});
+    await sheet.evaluate(node => Promise.all(node.getAnimations().map(a => a.finished)));
     const sheetBox = await sheet.evaluate((node,layout) => { const r = node.getBoundingClientRect(); return {x:r.x,y:r.y,width:r.width,height:r.height,bottom:r.bottom,viewport:{width:layout.width,height:layout.height},layoutDiagnostics:layout}; },await page.evaluate(measureViewport));
     record(`${theme}/sheet-remains-bottom-centered`, Math.abs(sheetBox.bottom - sheetBox.viewport.height) <= 1.5 && horizontalCenterError(sheetBox) <= 1.5, sheetBox);
     await sheet.locator('[data-interaction-close]').last().click();
