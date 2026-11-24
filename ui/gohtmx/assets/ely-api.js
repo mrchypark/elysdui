@@ -650,9 +650,11 @@ if (!globalThis.__elyLiveNotifier) {
     if (feed.getAttribute('data-ely-notify-sound') === 'true' || node.getAttribute('data-ely-notify-sound') === 'true') playChime();
   };
   globalThis.__elyObserveLiveNode = (target, node) => {
-    if (node.matches?.('[data-ely-notify-toggle]')) syncToggle(node);
-    node.querySelectorAll?.('[data-ely-notify-toggle]')?.forEach?.(syncToggle);
-    const feed = node.parentElement?.closest?.('[data-ely-notify-feed]') || target?.closest?.('[data-ely-notify-feed]');
+    const match = (el, sel) => el instanceof Element ? Element.prototype.matches.call(el, sel) : false;
+    const closestEl = (el, sel) => el instanceof Element ? Element.prototype.closest.call(el, sel) : null;
+    if (match(node, '[data-ely-notify-toggle]')) syncToggle(node);
+    if (node instanceof Element) Element.prototype.querySelectorAll.call(node, '[data-ely-notify-toggle]').forEach(syncToggle);
+    const feed = closestEl(node.parentElement, '[data-ely-notify-feed]') || closestEl(target, '[data-ely-notify-feed]');
     if (feed) notifyForNode(feed, node);
   };
   globalThis.__elySyncNotifyToggles = syncAllToggles;
