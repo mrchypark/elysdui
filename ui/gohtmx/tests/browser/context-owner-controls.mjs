@@ -35,7 +35,7 @@ export const contextOwnerControls = {
  },
  'context-request-cleanup': {
   from: 'cleanupContextRequests();', to: '/* Negative control: owner request cleanup omitted. */',
-  check: 'C10.replacement-and-reinsertion', oracle: 'C10.reinsertion-needs-normal-startup',
+  check: 'C11.pending-cancelled-oob', oracle: 'C11.pending-request-inert',
  },
  'context-request-identity': {
   from: 'if (!owner || !matchesIdentity(owner))', to: 'if (!owner)',

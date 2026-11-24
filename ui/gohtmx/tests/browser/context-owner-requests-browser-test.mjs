@@ -173,11 +173,13 @@ try {
   const url = '/fragment?' + new URLSearchParams({surface: currentSurface, id, mode, number, x: String(x), y: String(y)});
   await root(slot).evaluate((node, args) => htmx.ajax('GET', args.url, {source: '#swap-source', target: node, select: args.style === 'outerHTML' ? '[data-ely-family]' : '[data-ely-family] > *', ...(args.style ? {swap: args.style} : {})}), {url, style});
   await page.waitForFunction(sel => document.querySelector(sel)?.dataset.elyReady === 'true', selector(slot));
+  await page.evaluate(() => Promise.all([...document.querySelectorAll('[data-ely-family]')].flatMap(node => node.getAnimations().map(a => a.finished))));
  };
  const ready = async () => {
   await page.goto(`http://127.0.0.1:${server.address().port}/?surface=${currentSurface}`);
   await page.waitForFunction(() => [...document.querySelectorAll('[data-ely-family]')].length === 10 && [...document.querySelectorAll('[data-ely-family]')].every(node => ['true','error'].includes(node.dataset.elyReady)));
   await page.evaluate(()=>document.fonts.ready);
+  await page.evaluate(() => Promise.all([...document.querySelectorAll('[data-ely-family]')].flatMap(node => node.getAnimations().map(a => a.finished))));
   oracle('fixture.production-fonts-settled',await page.evaluate(()=>document.fonts.status),'loaded');
   oracle('fixture.production-roots-ready', await page.locator('[data-ely-family]').evaluateAll(nodes => nodes.every(node => node.dataset.elyReady === 'true')), true);
   oracle('fixture.real-catalogue-screen-count', await page.locator('[data-sdui-screen]').count(), currentSurface === 'catalogue' ? 10 : 0);
@@ -381,10 +383,11 @@ try {
   await page.evaluate(()=>Promise.resolve());stale=await staleProbe();oracle('C10.detached-after-prune-request-inert',stale.after,stale.before);
   await root().evaluate(node=>{node.remove();document.querySelector('[data-fixture-slot="manual"]').append(replacedOwner);});
   await page.evaluate(()=>Promise.resolve());
-  await request('103');oracle('C10.reinsertion-needs-normal-startup',await hidden(panel()),true);
-  await root().evaluate(node=>ownerMount(node,{onAction(detail){ownerLog.hosts.push({value:detail.value,rebound:true});}}));
   await request('101');oracle('C10.same-node-keeps-watermark',await hidden(panel()),true);
-  await request('103');oracle('C10.explicit-start-and-request-open',await hidden(panel()),false);
+  await request('103');oracle('C10.reinsertion-needs-normal-startup',await hidden(panel()),false);
+  await dismiss();
+  await root().evaluate(node=>ownerMount(node,{onAction(detail){ownerLog.hosts.push({value:detail.value,rebound:true});}}));
+  await request('104');oracle('C10.explicit-start-and-request-open',await hidden(panel()),false);
   await row('open').focus();await page.keyboard.press('Enter');
   oracle('C10.only-fresh-host-binding-runs',await page.evaluate(()=>ownerLog.hosts),[{value:'open',rebound:true}]);
  };
