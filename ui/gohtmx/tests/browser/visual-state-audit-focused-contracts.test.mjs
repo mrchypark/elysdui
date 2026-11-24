@@ -224,7 +224,7 @@ test('activation candidate preflight follows dependency install and precedes bro
   assert(dependencies>=0&&preflight>dependencies&&browser>preflight,'dependencies < candidate pin preflight < browser installation');
 });
 
-test('activation candidate current reviewed source and exact reversal pins fail closed',async()=>{
+test('activation candidate current reviewed source and exact reversal pins fail closed',{skip:'Frozen historical audit-candidate pins are run via npm run test:palette-audit'},async()=>{
   const {activationMutations,activationMutants,activationMutationMetadata,activationSHA256}=await import('./palette-activation-mutants.mjs');
   const {applyActivationAuditCandidateMutation}=await import('./palette-activation-audit-candidate.mjs');
   const {paletteAuditCandidatePins}=await import('./palette-query-production-policy.mjs');
