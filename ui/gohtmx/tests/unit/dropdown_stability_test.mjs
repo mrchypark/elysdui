@@ -29,7 +29,7 @@ try {
         <div style="display:flex;justify-content:flex-end">
           <section id="drop-root" data-ely-family="interaction" data-ely-kind="DropdownMenu" data-ely-component="menus/DropdownMenu">
             <div class="ely-interaction__split" data-interaction-host="dropdown">
-              <button type="button" aria-haspopup="menu" aria-controls="drop1-menu" aria-expanded="false" data-interaction-menu="drop1-menu">Actions ⌄</button>
+              <button type="button" aria-haspopup="menu" aria-controls="drop1-menu" aria-expanded="false" data-interaction-menu="drop1-menu">Actions <span class="ely-interaction__chevron" aria-hidden="true">⌄</span></button>
               <div id="drop1-menu" role="menu" tabindex="-1" aria-label="Actions" hidden>
                 <div class="ely-interaction__menu-row"><button type="button" role="menuitem" data-ely-action="edit"><span data-interaction-menu-label>Very Long Action Label Here</span></button></div>
               </div>
