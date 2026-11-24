@@ -582,7 +582,7 @@ test('basic menu positioning browser: native opening precedes focus and follows 
       try{
         const instance=id=>`<div class="ui-menu" data-ui-component="menu" id="${id}"><button type="button" popovertarget="${id}-popup" data-ui-menu-trigger aria-expanded="false" aria-controls="${id}-popup">Caller menu</button><div class="ui-menu-panel" id="${id}-popup" popover role="menu" aria-label="Caller menu"><a role="menuitem" href="#caller-first">Caller first link</a><button role="menuitem" disabled>Disabled</button><a role="menuitem" href="#caller-last">Caller last link</a></div></div>`;
         const scoped='[data-ui-component="menu"]>.ui-menu-panel';
-        const css=old?sources['ely-patterns.css'].split('\n').filter(line=>!line.startsWith(scoped)).join('\n'):sources['ely-patterns.css'];
+        const css=old?sources['ely-patterns.css'].split('\n').filter(line=>!line.startsWith(scoped)&&!line.startsWith(`@supports (position-area: block-end){${scoped}`)).join('\n'):sources['ely-patterns.css'];
         const js=old?sources['ely-patterns.js'].replace("if (event.newState === 'open') positionMenu(popup, trigger);","if (event.newState === 'open') void 0;"):sources['ely-patterns.js'];
         if(old){assert.notEqual(css,sources['ely-patterns.css']);assert.notEqual(js,sources['ely-patterns.js']);}
         await page.setContent(`<!doctype html><html data-theme="${theme}"><head><style>${sources['app.css']}\n${css}\nbody{margin:0}.scrollhost{height:700px;overflow:auto;margin-top:32px}.spacer{height:160px}.menus{margin-left:32px}.tail{height:1600px}</style></head><body><div class="scrollhost"><div class="spacer"></div><div class="menus">${instance('main')}${instance('twin')}</div><div class="tail"></div></div></body></html>`);
@@ -617,6 +617,7 @@ test('basic menu positioning browser: native opening precedes focus and follows 
         check(await geometry());assert(await page.evaluate(()=>document.activeElement===menuActive));
         await page.setViewportSize({width:width===390?360:1000,height:900});check(await geometry());assert(await page.evaluate(()=>document.activeElement===menuActive));
         await root.evaluate(node=>{Object.assign(node.style,{position:'fixed',right:'8px',bottom:'8px'});window.dispatchEvent(new Event('resize'));});
+        await page.evaluate(()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r))));
         const edge=await geometry();check(edge);assert(edge.panel.bottom<=edge.trigger.top-5,'Bottom edge flips above');assert(await page.evaluate(()=>document.activeElement===menuActive));await capture('edge');
         await page.keyboard.press('Escape');await page.waitForFunction(()=>!document.getElementById('main-popup').matches(':popover-open'));
         await trigger.click();await page.waitForFunction(()=>document.getElementById('main-popup').matches(':popover-open'));await page.mouse.click(4,4);

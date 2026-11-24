@@ -9,4 +9,4 @@
 [data-ui-component="menu"]>[data-ui-menu-trigger]::after{content:"";flex:none;inline-size:1rem;block-size:1rem;background:var(--color-muted,currentColor);mask:url("/assets/ely/icons/chevron-down.svg") center/contain no-repeat;transition:transform .15s ease}
 [data-ui-component="menu"]>[data-ui-menu-trigger][aria-expanded="true"]::after{transform:rotate(180deg)}
 [data-ui-component="menu"]>.ui-menu-panel{position:fixed;inset:auto;margin:0;box-sizing:border-box;flex-direction:column;min-width:min(13rem,calc(100vw - 16px));max-inline-size:calc(100vw - 16px);max-block-size:calc(100dvh - 16px);overflow:auto}
-@supports (position-area: block-end){[data-ui-component="menu"]>.ui-menu-panel{inset:auto;margin:0;position-area:block-end span-inline-end;position-try-fallbacks:flip-block,flip-inline,flip-block flip-inline}}
+@supports (position-area: block-end){[data-ui-component="menu"]>.ui-menu-panel{inset:auto;margin:6px 0;position-area:block-end span-inline-end;position-try-fallbacks:flip-block,flip-inline,flip-block flip-inline}}

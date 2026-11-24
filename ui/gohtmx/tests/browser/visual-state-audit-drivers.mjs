@@ -1803,7 +1803,7 @@ export function assertTrashLayout(observed){
 
 export const threewaySourcePins={
   'internal/gallery/advanced_workspace_fixtures.go':'c80d3265b34db38b95bdf67816e54b9e794dae140754c7efbefd5d8567dc9a8f',
-  'ui/gohtmx/templates/ely-api-workspace.html':'f66a0245d2287fb20a12355a7989b4af8151cc9497707a84667baebd78cf698b',
+  'ui/gohtmx/templates/ely-api-workspace.html':'5093f102f59401ffa05d00ee211307a1f00ed6241950b503a66f811b172c4e9f',
   'ui/gohtmx/assets/ely-api-workspace.js':'5c38659eb2af5a3ee65bc1bc452f6c687ab1092b001758959af07ce50272f455',
 };
 export function assertThreewayState(state,{id,stage,twin}){
