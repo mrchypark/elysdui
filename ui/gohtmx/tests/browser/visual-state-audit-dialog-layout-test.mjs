@@ -96,6 +96,7 @@ if (process.env.DIALOG_GEOMETRY_SELF_CHECK === '1') {
 
 async function inspectOpenDialog(page, theme, size, view) {
   const dialog = page.locator('[data-ely-component="overlays/Dialog"] dialog').first();
+  await dialog.evaluate(node => Promise.all(node.getAnimations().map(a => a.finished)));
   const expected = await dialog.evaluate((node, layout) => {
     const r = node.getBoundingClientRect();
     return {
