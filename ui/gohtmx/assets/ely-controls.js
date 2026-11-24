@@ -68,10 +68,23 @@
     const hidden = hiddenValue(component);
     if (input && hidden) input.setCustomValidity(input.required && !hidden.value ? 'Select an option.' : '');
   };
+  const placeComboList = (input, list) => {
+    if (typeof input.getBoundingClientRect !== 'function') return;
+    const rect = input.getBoundingClientRect();
+    const vh = typeof window !== 'undefined' ? (window.innerHeight || 0) : 0;
+    if (!vh || !rect.height) return;
+    const margin = 12;
+    const below = Math.max(80, vh - rect.bottom - margin);
+    const above = Math.max(80, rect.top - margin);
+    const flipTop = below < 180 && above > below;
+    list.dataset.placement = flipTop ? 'top' : 'bottom';
+    list.style.maxBlockSize = `${Math.min(280, flipTop ? above : below)}px`;
+  };
   const openCombo = component => {
     const input=component.querySelector('[data-ui-combobox-input]'),list=component.querySelector('[data-ui-combobox-list]');
     if(!input||input.disabled||input.readOnly||!list||!list.hidden)return false;
     component.querySelectorAll('[data-ui-option]').forEach(option=>option.hidden=false);
+    placeComboList(input, list);
     list.hidden=false;input.setAttribute('aria-expanded','true');
     setComboActive(component,visibleOptions(component).find(option=>option.getAttribute('aria-selected')==='true')||visibleOptions(component)[0]);
     return true;

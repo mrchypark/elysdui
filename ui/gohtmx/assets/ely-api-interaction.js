@@ -153,6 +153,8 @@ const menu = (root, id, open, restoreFocus = false) => {
   trigger.setAttribute('aria-expanded', String(open));
   if (open && (panel.hasAttribute('data-interaction-popover') || panel.closest('.ely-interaction--menus') && !panel.parentElement.matches('.ely-interaction__menu-row') && !panel.matches('.ely-interaction__pie'))) {
     (panel.hasAttribute('data-interaction-popover') ? placeOverlay : placeMenu)(panel, (context || trigger).getBoundingClientRect());
+  } else if (open && panel.matches('[role="menu"]') && !panel.parentElement.matches('.ely-interaction__menu-row') && !panel.matches('.ely-interaction__pie')) {
+    placeMenu(panel, (context || trigger).getBoundingClientRect());
   }
   if (!open) panel.querySelectorAll('[data-interaction-menu]').forEach(child => { if (child.closest('[data-ely-family]') === root) menu(root, child.dataset.interactionMenu, false); });
   if (open && panel.parentElement.matches('.ely-interaction__menu-row')) {
@@ -1758,7 +1760,7 @@ register('interaction', (root, registerCleanup, ownerContext) => {
     lottieCleanups.push(() => { events.forEach(type => field.removeEventListener(type, update)); toolbar.removeEventListener('pointerdown', retain); toolbar.removeEventListener('focusin', update); toolbar.removeEventListener('focusout', update); field.removeEventListener('keydown', escape); document.removeEventListener('selectionchange', update); window.removeEventListener('resize', update); window.removeEventListener('scroll', update, true); });
   });
   const repositionOverlays = () => {
-    root.querySelectorAll('.ely-interaction--menus [role="menu"]:not([hidden])').forEach(panel => {
+    root.querySelectorAll('[role="menu"]:not([hidden])').forEach(panel => {
       if (panel.parentElement.matches('.ely-interaction__menu-row') || panel.matches('.ely-interaction__pie') || panel.style.position === 'fixed') return;
       const trigger = root.querySelector(`[data-interaction-menu="${CSS.escape(panel.id)}"]`);
       if (trigger) placeMenu(panel, (trigger.closest('[data-interaction-context]') || trigger).getBoundingClientRect());
@@ -2037,7 +2039,7 @@ register('interaction', (root, registerCleanup, ownerContext) => {
       const trigger = root.querySelector(`[data-interaction-menu="${CSS.escape(panel.id)}"]`);
       if (!panel.contains(event.target) && !trigger?.contains(event.target)) menu(root, panel.id, false, true);
     });
-    root.querySelectorAll('.ely-interaction--menus [role="menu"]:not([hidden])').forEach(panel => {
+    root.querySelectorAll('[role="menu"]:not([hidden])').forEach(panel => {
       if (panel.parentElement.matches('.ely-interaction__menu-row')) return;
       if (panel.closest?.('[data-ely-family]') && panel.closest('[data-ely-family]') !== root) return;
       const trigger = root.querySelector(`[data-interaction-menu="${CSS.escape(panel.id)}"]`);

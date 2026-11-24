@@ -43,7 +43,8 @@ dialog[data-ui-component]:not([open]) { display: none; }
 [data-ui-file-names] { color: var(--color-muted, #6f6b66); }
 [data-ui-file-names]:empty { display: none; }
 [data-ui-signature] { inline-size: min(100%, 32rem); block-size: 12rem; border: 1px solid var(--border, #8c8781); border-radius: .4rem; background: var(--surface, #fff); touch-action: none; }
-[data-ui-combobox-list] { z-index: 1; max-block-size: 14rem; overflow: auto; margin: 0; padding: .25rem; border: 1px solid var(--border, #8c8781); border-radius: .4rem; background: var(--surface, #fff); list-style: none; }
+[data-ui-combobox-list] { box-sizing: border-box; z-index: 40; max-block-size: 14rem; overflow: auto; margin: 0; padding: .25rem; border: 1px solid var(--border, #8c8781); border-radius: .4rem; background: var(--surface, #fff); list-style: none; }
+[data-ui-combobox-list][hidden] { display: none; }
 [data-ui-option], [data-ui-multi-option], [data-ui-selectable-option], [data-ui-tab] { cursor: pointer; padding: .5rem .75rem; }
 [data-ui-option][aria-selected="true"], [data-ui-multi-option]:has(input:checked), [data-ui-selectable-option][aria-selected="true"], [data-ui-tab][aria-selected="true"] { background: var(--accent-tint, #eef2ff); color: var(--color-ink); }
 [data-ui-multi-option] { display: inline-flex; gap: .5rem; align-items: center; border: 1px solid var(--border, #8c8781); border-radius: var(--ely-control-radius); min-height: var(--ely-control-height); padding: .1875rem var(--ely-control-padding); }
@@ -66,9 +67,10 @@ dialog[data-ui-component="dialog"], [data-ui-component] dialog { margin: auto; }
 [data-ui-combobox-list] [data-ui-option]>small{font-size:11px;color:var(--color-muted);flex:none}
 
 [data-ui-component="combobox"]{position:relative}
-[data-ui-component="combobox"]::after{content:"";position:absolute;inset-inline-end:8px;bottom:6px;inline-size:16px;block-size:16px;pointer-events:none;background:var(--color-muted);mask:url("/assets/ely/icons/chevrons-up-down.svg") center/contain no-repeat}
+[data-ui-component="combobox"]::after{content:"";position:absolute;inset-inline-end:8px;bottom:calc(var(--ely-control-height,2.25rem) / 2 - 8px);inline-size:16px;block-size:16px;pointer-events:none;background:var(--color-muted);mask:url("/assets/ely/icons/chevrons-up-down.svg") center/contain no-repeat}
 [data-ui-combobox-input]{padding-inline-end:32px}
 [data-ui-component="combobox"]>[data-ui-combobox-list]{position:absolute;inset-inline:0;top:calc(100% + 4px);max-block-size:280px;z-index:40}
+[data-ui-component="combobox"]>[data-ui-combobox-list][data-placement="top"]{top:auto;bottom:calc(100% + 4px)}
 
 [data-ui-component][data-ui-dropzone]{position:relative;display:flex;flex-direction:column;align-items:center;gap:8px;padding:32px 24px;border:1px dashed var(--border);border-radius:8px;min-inline-size:0;max-inline-size:100%;box-sizing:border-box}
 [data-ui-dropzone] .ui-dropzone-input{position:absolute;inline-size:1px;block-size:1px;opacity:0;overflow:hidden;padding:0;border:0;clip-path:inset(50%)}
