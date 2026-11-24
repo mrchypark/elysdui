@@ -151,10 +151,8 @@ const menu = (root, id, open, restoreFocus = false) => {
   }
   panel.hidden = !open;
   trigger.setAttribute('aria-expanded', String(open));
-  if (open && (panel.hasAttribute('data-interaction-popover') || panel.closest('.ely-interaction--menus') && !panel.parentElement.matches('.ely-interaction__menu-row') && !panel.matches('.ely-interaction__pie'))) {
+  if (open && (panel.hasAttribute('data-interaction-popover') || (panel.closest('.ely-interaction--menus') || panel.matches('[role="menu"]')) && !panel.parentElement.matches('.ely-interaction__menu-row') && !panel.matches('.ely-interaction__pie'))) {
     (panel.hasAttribute('data-interaction-popover') ? placeOverlay : placeMenu)(panel, (context || trigger).getBoundingClientRect());
-  } else if (open && panel.matches('[role="menu"]') && !panel.parentElement.matches('.ely-interaction__menu-row') && !panel.matches('.ely-interaction__pie')) {
-    placeMenu(panel, (context || trigger).getBoundingClientRect());
   }
   if (!open) panel.querySelectorAll('[data-interaction-menu]').forEach(child => { if (child.closest('[data-ely-family]') === root) menu(root, child.dataset.interactionMenu, false); });
   if (open && panel.parentElement.matches('.ely-interaction__menu-row')) {
