@@ -77,7 +77,7 @@ function start(scope = document) {
     // Re-scan the requested scope after all overlapping old disposers finish.
     // Other roots remain synchronous; host binding in mount() is immediate.
     if (deferStart(root, scope)) return;
-    if (mounted.has(root) || [...pendingSwaps.keys()].some(owner => overlaps(owner, root))) return;
+    if (!root.isConnected || mounted.has(root) || [...pendingSwaps.keys()].some(owner => overlaps(owner, root))) return;
     const initialize = families.get(root.dataset.elyFamily);
     if (!initialize) return;
     const cleanups = [];
