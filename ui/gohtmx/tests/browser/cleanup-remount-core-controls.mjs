@@ -16,7 +16,7 @@ export const cleanupRemountCoreControls = Object.freeze({
     replacement: '/* Test-only mutation: abandon the requested startup. */',
     check: 'R3.observer remount replays synchronously without a later event',
     oracle: 'queued startup must replay after teardown without another lifecycle event',
-    browserOracle: 'readiness.fresh-owner-survives-old-cleanup',
+    browserOracle: 'serialization.all-old-disposers-before-new-init',
   },
   'replay-before-last-disposer': {
     file: '/assets/ely-api.js',

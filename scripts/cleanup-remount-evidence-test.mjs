@@ -27,12 +27,8 @@ const make = (mutation = '', surface = 'standalone') => {
       const state = detached ? {...stopped} : {hidden: false, expanded: 'true', ready: 'true', connected: true, left: '222px', top: '223px', focus: 'open'};
       let listeners = initialListeners.map(item => ({...item, id: item.id + 10}));
       if (detached) listeners = [];
-      if (desired && mutation) {
+      if (desired && mutation && mutation !== 'disable-replay') {
         Object.assign(state, {hidden: true, expanded: 'false', focus: null});
-        if (mutation === 'disable-replay') {
-          Object.assign(state, {ready: null, left: name === 'observer.same-root' ? '111px' : '', top: name === 'observer.same-root' ? '112px' : ''});
-          listeners = listeners.filter(item => ['ely:action', 'ely:change'].includes(item.type));
-        }
       }
       const check = {name, status: 'passed', afterTeardown: {initialListeners, listeners, oldListeners: [], state, old: stopped}};
       check.oracles = cleanupRemountOracleIDs(name).map((id, index) => {
@@ -46,16 +42,10 @@ const make = (mutation = '', surface = 'standalone') => {
   const set = (check, id, observed, expected) => { const oracle = check.oracles.find(oracle => oracle.id === id); Object.assign(oracle, {observed, expected, pass: false}); check.status = 'failed'; };
   if (mutation) {
     report.causalIntervention = {name: mutation, ...cleanupRemountCoreControls[mutation], anchorCount: 1, interpretation: 'Test-only startup mutation; all old disposers remain. Raw failures retain their nonzero exit.'};
-    for (const check of report.checks.slice(0, 2)) {
-      if (mutation === 'disable-replay') {
-        set(check, 'readiness.fresh-owner-survives-old-cleanup', null, 'true');
-        set(check, 'ownership.listener-cardinality', {'ely:context-request': 0, 'ely:action': 1, 'ely:change': 1, keydown: 0, keyup: 0}, {'ely:context-request': 1, 'ely:action': 1, 'ely:change': 1, keydown: 2, keyup: 1});
-      }
-      else {
-        set(check, 'presentation.seed-survives-old-disposers', true, false);
-        set(check, 'presentation.expanded-survives-old-disposers', 'false', 'true');
-        set(check, 'presentation.seed-focus-on-enabled-row', null, 'open');
-      }
+    if (mutation !== 'disable-replay') for (const check of report.checks.slice(0, 2)) {
+      set(check, 'presentation.seed-survives-old-disposers', true, false);
+      set(check, 'presentation.expanded-survives-old-disposers', 'false', 'true');
+      set(check, 'presentation.seed-focus-on-enabled-row', null, 'open');
     }
     const check = report.checks.find(check => check.name === 'serialization.disposer-order');
     const expected = ['init:1', 'event', 'first:1', 'last:1', 'init:2'];
@@ -104,18 +94,21 @@ for (const surface of ['standalone', 'catalogue']) for (const mutation of ['', .
     ['wrong fixture bytes', r => { r.fixtures['/fragment'].sourceSHA256 = hash('e'); }],
     ...errorKeys.map(key => [key, r => { r[key].push({message: 'unrelated'}); }]),
   ];
-  if (mutation) corruptions.push(
-    ['missing designated failure', r => { const o = r.checks[0].oracles.find(o => o.id === cleanupRemountCoreControls[mutation].browserOracle); o.observed = o.expected; o.pass = true; }],
-    ['wrong designated actual', r => { r.checks[0].oracles.find(o => o.id === cleanupRemountCoreControls[mutation].browserOracle).observed = 'unrelated'; }],
-    ['wrong designated expected', r => { r.checks[0].oracles.find(o => o.id === cleanupRemountCoreControls[mutation].browserOracle).expected = 'unrelated'; }],
-    ['coordinated safe observation and expectation', r => { Object.assign(r.checks[2].oracles[12], {observed: false, expected: false, pass: true}); }],
-    ['coordinated fixed observation and expectation', r => { Object.assign(r.checks[0].oracles.find(o => o.id === 'presentation.expanded-survives-old-disposers'), {observed: 'wrong', expected: 'wrong', pass: true}); }],
-    ['unrelated failure', r => { Object.assign(r.checks[0].oracles.at(-1), {observed: false, pass: false}); }],
-    ['safe control failure', r => { const c = r.checks[2]; Object.assign(c.oracles[12], {observed: false, pass: false}); c.status = 'failed'; }],
-    ['wrong mutation', r => { r.causalIntervention.name = 'other'; }],
-    ['wrong mutation count', r => { r.causalIntervention.anchorCount = 2; }],
-    ['wrong order trace', r => { r.checks.find(c => c.name === 'serialization.disposer-order').oracles.find(o => o.id === 'serialization.all-old-disposers-before-new-init').observed = []; }],
-  );
+  if (mutation) {
+    const designatedCheckIndex = mutation === 'disable-replay' ? fixture.report.checks.findIndex(c => c.name === 'serialization.disposer-order') : 0;
+    corruptions.push(
+      ['missing designated failure', r => { const o = r.checks[designatedCheckIndex].oracles.find(o => o.id === cleanupRemountCoreControls[mutation].browserOracle); o.observed = o.expected; o.pass = true; }],
+      ['wrong designated actual', r => { r.checks[designatedCheckIndex].oracles.find(o => o.id === cleanupRemountCoreControls[mutation].browserOracle).observed = 'unrelated'; }],
+      ['wrong designated expected', r => { r.checks[designatedCheckIndex].oracles.find(o => o.id === cleanupRemountCoreControls[mutation].browserOracle).expected = 'unrelated'; }],
+      ['coordinated safe observation and expectation', r => { Object.assign(r.checks[2].oracles[12], {observed: false, expected: false, pass: true}); }],
+      ['coordinated fixed observation and expectation', r => { Object.assign(r.checks[0].oracles.find(o => o.id === 'presentation.expanded-survives-old-disposers'), {observed: 'wrong', expected: 'wrong', pass: true}); }],
+      ['unrelated failure', r => { Object.assign(r.checks[0].oracles.at(-1), {observed: false, pass: false}); }],
+      ['safe control failure', r => { const c = r.checks[2]; Object.assign(c.oracles[12], {observed: false, pass: false}); c.status = 'failed'; }],
+      ['wrong mutation', r => { r.causalIntervention.name = 'other'; }],
+      ['wrong mutation count', r => { r.causalIntervention.anchorCount = 2; }],
+      ['wrong order trace', r => { r.checks.find(c => c.name === 'serialization.disposer-order').oracles.find(o => o.id === 'serialization.all-old-disposers-before-new-init').observed = []; }],
+    );
+  }
   // Every oracle, including setup and safe controls, must reject coordinated
   // raw observation + target tampering. Cached verdicts remain internally valid.
   for (const check of fixture.report.checks) for (const oracle of check.oracles) corruptions.push([

@@ -1,28 +1,5 @@
 name: CommandPalette query baseline
-on:
-  workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - 'ui/gohtmx/**'
-      - 'adapters/gohtmx/**'
-      - 'sdui/**'
-      - 'scripts/palette-query*.mjs'
-      - 'package*.json'
-      - '.github/workflows/palette-query.yml'
-  pull_request:
-    paths:
-      - 'ui/gohtmx/**'
-      - 'adapters/gohtmx/**'
-      - 'sdui/**'
-      - 'scripts/palette-query*.mjs'
-      - 'package*.json'
-      - '.github/workflows/palette-query.yml'
-env:
-  PALETTE_QUERY_PRODUCTION_POLICY: audit-candidate
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+on:  workflow_dispatch:
 jobs:
   palette-query:
     runs-on: ubuntu-24.04

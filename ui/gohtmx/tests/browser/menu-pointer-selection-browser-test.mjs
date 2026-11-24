@@ -290,6 +290,7 @@ for (const style of ['innerHTML', 'outerHTML']) add(`lifecycle.${style}`, async 
   const requestStart = report.requests.length, targetID = await root().getAttribute('id');
   await root().evaluate(async (node, {style, surface}) => htmx.ajax('GET', '/fragment?' + new URLSearchParams({surface, alias: 'Menu'}), {source: '#swap-source', target: node, select: style === 'innerHTML' ? '[data-ely-family] > *' : '[data-ely-family]', ...(style === 'outerHTML' ? {swap: style} : {})}), {style, surface: currentSurface});
   await page.waitForFunction(() => document.querySelector('[data-fixture-slot="primary"] [data-ely-family]')?.dataset.elyReady === 'true');
+  await page.evaluate(() => Promise.all([...document.querySelectorAll('[data-ely-family]')].flatMap(node => node.getAnimations().map(animation => animation.finished))));
   current.controlPrefixStart = current.oracles.length;
   expect('lifecycle.cleanup-once', await page.evaluate(() => retainedPointer.cleanups), 1);
   expect('lifecycle.root-identity', await page.evaluate(() => retainedPointer.root === document.querySelector('[data-fixture-slot="primary"] [data-ely-family]')), style === 'innerHTML');
@@ -440,6 +441,7 @@ try {
     await page.goto(`http://127.0.0.1:${server.address().port}/?` + new URLSearchParams({surface: currentSurface, alias}));
     await page.waitForFunction(() => document.querySelectorAll('[data-ely-family]').length === 8 && [...document.querySelectorAll('[data-ely-family]')].every(node => ['true', 'error'].includes(node.dataset.elyReady)));
     await page.evaluate(() => document.fonts.ready);
+    await page.evaluate(() => Promise.all([...document.querySelectorAll('[data-ely-family]')].flatMap(node => node.getAnimations().map(animation => animation.finished))));
     await Promise.all(responseTasks);
     must('fixture.browser-received-exact-runtime', report.browserResponses.some(proof => proof.surface === currentSurface && proof.check === current.name && proof.path === '/assets/ely-api-interaction.js' && proof.status === 200 && proof.receivedSHA256 === report.assets['/assets/ely-api-interaction.js'].servedSHA256), true);
     must('fixture.no-transport-byte-mismatch', report.transportErrors, []);

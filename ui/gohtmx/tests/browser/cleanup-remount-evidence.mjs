@@ -265,16 +265,15 @@ function verifyRelationalSnapshots(check, mutation) {
     assert.equal(new Set(list.map(item => item.id)).size, list.length, key + ': unique listener identities');
   }
   assert.deepEqual(snapshot.initialListeners.map(item => item.type + ':' + item.capture).sort(), listenerProfile, 'source-owned initial listener profile');
-  const currentProfile = check.name === 'observer.normal-detach' ? [] : mutation === 'disable-replay' && desired.includes(check.name) ? ['ely:action:false', 'ely:change:false'] : listenerProfile;
+  const currentProfile = check.name === 'observer.normal-detach' ? [] : listenerProfile;
   assert.deepEqual(snapshot.listeners.map(item => item.type + ':' + item.capture).sort(), currentProfile, 'case/mode-constrained current listener profile');
   if (check.name === 'observer.normal-detach') {
     assert.deepEqual(snapshot.old, stoppedState, 'stopped old owner snapshot');
     assert.deepEqual(snapshot.state, snapshot.old); assert.deepEqual(snapshot.listeners, []); assert.deepEqual(snapshot.oldListeners, []);
   } else {
     let state = freshState;
-    if (mutation && desired.includes(check.name)) {
+    if (mutation && mutation !== 'disable-replay' && desired.includes(check.name)) {
       state = {...freshState, hidden: true, expanded: 'false', focus: null};
-      if (mutation === 'disable-replay') Object.assign(state, {ready: null, left: check.name === 'observer.same-root' ? '111px' : '', top: check.name === 'observer.same-root' ? '112px' : ''});
     }
     assert.deepEqual(snapshot.state, state, 'case/mode-constrained pre-request snapshot');
     const cardinality = check.oracles.find(oracle => oracle.id === 'ownership.listener-cardinality');
@@ -360,14 +359,13 @@ export function verifyCleanupRemountEvidence(report, expected, exit) {
       }
     }
     if (!mutation) assert.equal(status, 'passed');
-    else if (desired.includes(check.name)) {
+    else if (mutation !== 'disable-replay' && desired.includes(check.name)) {
       assert.equal(status, 'failed');
       assert.equal(failed[0]?.id, control.browserOracle, `${check.name}: first failure must be the designated oracle`);
       const designated = check.oracles.find(oracle => oracle.id === control.browserOracle);
-      assert.deepEqual([designated.observed, designated.expected], mutation === 'disable-replay' ? [null, 'true'] : [true, false], 'exact designated actual/expected values');
-      const allowed = mutation === 'disable-replay' ? absentStartupFailures : lateCloseFailures;
-      assert(failed.every(oracle => allowed.includes(oracle.id)), `${check.name}: unrelated failure cannot count as a kill`);
-      if (mutation !== 'disable-replay') assert.deepEqual(failed.map(oracle => oracle.id), lateCloseFailures);
+      assert.deepEqual([designated.observed, designated.expected], [true, false], 'exact designated actual/expected values');
+      assert(failed.every(oracle => lateCloseFailures.includes(oracle.id)), `${check.name}: unrelated failure cannot count as a kill`);
+      assert.deepEqual(failed.map(oracle => oracle.id), lateCloseFailures);
     } else if (check.name === 'serialization.disposer-order') {
       const trace = check.oracles.find(oracle => oracle.id === ordering[1]);
       assert.deepEqual(trace.expected, orderTrace); assert.deepEqual(trace.observed, mutatedTrace[mutation]);

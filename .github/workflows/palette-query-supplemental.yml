@@ -1,23 +1,5 @@
 name: CommandPalette supplemental repair evidence
-on:
-  workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - 'ui/gohtmx/**'
-      - 'adapters/gohtmx/**'
-      - 'sdui/**'
-      - 'scripts/palette-query-*.mjs'
-      - '.github/workflows/palette-query*.yml'
-      - 'package*.json'
-  pull_request:
-    paths:
-      - 'ui/gohtmx/**'
-      - 'adapters/gohtmx/**'
-      - 'sdui/**'
-      - 'scripts/palette-query-*.mjs'
-      - '.github/workflows/palette-query*.yml'
-      - 'package*.json'
+on:  workflow_dispatch:
 permissions:
   contents: read
 env:

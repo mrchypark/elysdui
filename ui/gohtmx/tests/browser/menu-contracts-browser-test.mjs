@@ -176,7 +176,7 @@ try {
       await row('menu-a','recent').hover();report.hoverClickAfterHover=await page.evaluate(()=>menuHoverSnapshot());assert.equal(await row('menu-a','recent').getAttribute('aria-expanded'),'true');
       await row('menu-a','recent').click();assert.equal(await row('menu-a','recent').getAttribute('aria-expanded'),'true','clicking a hover-open submenu keeps it open');await focused('#menu-a [value="nested-comfortable"]');
     } finally {report.hoverClickDiagnostics=await page.evaluate(()=>stopMenuHoverDiagnostics());}
-    await row('menu-a','recent').focus();await page.keyboard.press('ArrowDown');await focused('#menu-a [value="last"]');assert.equal(await row('menu-a','recent').getAttribute('aria-expanded'),'false');
+    await row('menu-a','recent').focus();await page.keyboard.press('ArrowDown');await focused('#menu-a [value="last"]');await page.waitForFunction(()=>document.querySelector('#menu-a [value="recent"]')?.getAttribute('aria-expanded')==='false');assert.equal(await row('menu-a','recent').getAttribute('aria-expanded'),'false');
     await page.keyboard.press('Escape');
   });
   await check('checkbox-menu.submenu-is-a-trigger-not-an-inherited-check',async()=>{

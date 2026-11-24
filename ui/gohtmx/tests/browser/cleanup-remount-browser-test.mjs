@@ -402,7 +402,7 @@ try {
     const proof = {path, status: response.status, expectedSHA256: asset.servedSHA256, receivedSHA256: sha(body)};
     report.httpAssetProof.push(proof); assert.equal(proof.status, 200); assert.equal(proof.receivedSHA256, proof.expectedSHA256);
   }
-  report.stage = 'browser-launch'; browser = await chromium.launch({headless: true}); report.browserVersion = browser.version();
+  report.stage = 'browser-launch'; browser = await chromium.launch({headless: true, executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined}); report.browserVersion = browser.version();
   page = await browser.newPage({viewport: {width: 1440, height: 1100}}); page.setDefaultTimeout(10000);
   page.on('pageerror', error => report.pageErrors.push({check: current?.name, message: error.message, stack: error.stack}));
   page.on('console', message => { if (message.type() === 'error') report.consoleErrors.push({check: current?.name, message: message.text()}); });

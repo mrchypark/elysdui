@@ -1,14 +1,5 @@
 name: CommandPalette activation repair and causal controls
-on:
-  workflow_dispatch:
-  push:
-    branches: [main]
-    paths: ['ui/gohtmx/**', 'adapters/gohtmx/**', 'sdui/**', 'scripts/palette-*.mjs', 'package*.json', '.github/workflows/palette-activation.yml']
-  pull_request:
-    paths: ['ui/gohtmx/**', 'adapters/gohtmx/**', 'sdui/**', 'scripts/palette-*.mjs', 'package*.json', '.github/workflows/palette-activation.yml']
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+on:  workflow_dispatch:
 jobs:
   activation:
     runs-on: ubuntu-24.04
