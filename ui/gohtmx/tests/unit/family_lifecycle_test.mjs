@@ -13,7 +13,9 @@ class Element {
   matches() { return true; }
   closest() { return this; }
   contains(node) { return node === this || this.descendants.some(child => child.contains(node)); }
-  querySelectorAll() { return this.descendants; }
+  querySelectorAll(selector) { return selector === '[data-ely-notify-toggle]' ? [] : this.descendants; }
+  setAttribute() {}
+  getAttribute() { return null; }
   addEventListener(type, fn) { if (!this.listeners.has(type)) this.listeners.set(type, new Set()); this.listeners.get(type).add(fn); }
   removeEventListener(type, fn) { this.listeners.get(type)?.delete(fn); }
   dispatchEvent(event) { event.target ||= this; for (const fn of [...this.listeners.get(event.type) || []]) fn(event); if (event.bubbles) this.parent?.dispatchEvent(event); return true; }

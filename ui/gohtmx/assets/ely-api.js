@@ -223,7 +223,7 @@ const teardownTargets = (targets, context) => {
   const ordered = [...affected].sort((a, b) => depth(b) - depth(a));
   ordered.forEach(stop);
 };
-document.addEventListener('DOMContentLoaded', () => start());
+document.addEventListener('DOMContentLoaded', () => { start(); globalThis.__elySyncNotifyToggles?.(); });
 document.addEventListener('htmx:before:swap', event => {
   // Bundled HTMX exposes the actual main and OOB targets in tasks. The event
   // target is the request source, which need not be the swapped element.
@@ -598,7 +598,7 @@ if (!globalThis.__elyLiveNotifier) {
     } catch {}
   };
   const syncToggle = button => {
-    if (!button) return;
+    if (!button || typeof button.setAttribute !== 'function') return;
     const supported = 'Notification' in globalThis;
     if (!supported) {
       button.disabled = true;
@@ -655,6 +655,6 @@ if (!globalThis.__elyLiveNotifier) {
     const feed = node.parentElement?.closest?.('[data-ely-notify-feed]') || target?.closest?.('[data-ely-notify-feed]');
     if (feed) notifyForNode(feed, node);
   };
-  document.addEventListener('DOMContentLoaded', syncAllToggles);
+  globalThis.__elySyncNotifyToggles = syncAllToggles;
   syncAllToggles();
 }

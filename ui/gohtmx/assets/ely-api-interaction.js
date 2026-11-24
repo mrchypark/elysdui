@@ -1760,7 +1760,7 @@ register('interaction', (root, registerCleanup, ownerContext) => {
     lottieCleanups.push(() => { events.forEach(type => field.removeEventListener(type, update)); toolbar.removeEventListener('pointerdown', retain); toolbar.removeEventListener('focusin', update); toolbar.removeEventListener('focusout', update); field.removeEventListener('keydown', escape); document.removeEventListener('selectionchange', update); window.removeEventListener('resize', update); window.removeEventListener('scroll', update, true); });
   });
   const repositionOverlays = () => {
-    root.querySelectorAll('[role="menu"]:not([hidden])').forEach(panel => {
+    new Set([...root.querySelectorAll('.ely-interaction--menus [role="menu"]:not([hidden])'), ...root.querySelectorAll('.ely-interaction__split > [role="menu"]:not([hidden])')]).forEach(panel => {
       if (panel.parentElement.matches('.ely-interaction__menu-row') || panel.matches('.ely-interaction__pie') || panel.style.position === 'fixed') return;
       const trigger = root.querySelector(`[data-interaction-menu="${CSS.escape(panel.id)}"]`);
       if (trigger) placeMenu(panel, (trigger.closest('[data-interaction-context]') || trigger).getBoundingClientRect());
@@ -2039,7 +2039,7 @@ register('interaction', (root, registerCleanup, ownerContext) => {
       const trigger = root.querySelector(`[data-interaction-menu="${CSS.escape(panel.id)}"]`);
       if (!panel.contains(event.target) && !trigger?.contains(event.target)) menu(root, panel.id, false, true);
     });
-    root.querySelectorAll('[role="menu"]:not([hidden])').forEach(panel => {
+    new Set([...root.querySelectorAll('.ely-interaction--menus [role="menu"]:not([hidden])'), ...root.querySelectorAll('.ely-interaction__split > [role="menu"]:not([hidden])')]).forEach(panel => {
       if (panel.parentElement.matches('.ely-interaction__menu-row')) return;
       if (panel.closest?.('[data-ely-family]') && panel.closest('[data-ely-family]') !== root) return;
       const trigger = root.querySelector(`[data-interaction-menu="${CSS.escape(panel.id)}"]`);
