@@ -1,5 +1,5 @@
 name: CommandPalette query baseline
-on:  workflow_dispatch:
+on: workflow_dispatch
 jobs:
   palette-query:
     runs-on: ubuntu-24.04

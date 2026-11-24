@@ -1,5 +1,5 @@
 name: CommandPalette activation repair and causal controls
-on:  workflow_dispatch:
+on: workflow_dispatch
 jobs:
   activation:
     runs-on: ubuntu-24.04

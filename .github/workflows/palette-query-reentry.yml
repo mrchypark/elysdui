@@ -1,5 +1,5 @@
 name: CommandPalette reentry guard and causal reversal
-on:  workflow_dispatch:
+on: workflow_dispatch
 jobs:
   reentry:
     runs-on: ubuntu-24.04

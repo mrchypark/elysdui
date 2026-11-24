@@ -1,5 +1,5 @@
 name: CommandPalette supplemental repair evidence
-on:  workflow_dispatch:
+on: workflow_dispatch
 permissions:
   contents: read
 env:
