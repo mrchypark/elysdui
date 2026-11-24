@@ -30,7 +30,7 @@ dialog[data-ui-component]:not([open]) { display: none; }
 [data-ui-component='password-input'] { --ely-input-icon: url('/assets/ely/icons/eye.svg'); }
 [data-ui-component='password-input']:has(input[type='text']) { --ely-input-icon: url('/assets/ely/icons/eye-off.svg'); }
 .ely-control-row[data-ui-key-value] { flex: 1 1 100%; inline-size: 100%; }
-[data-ui-component] button:not([data-slot]), [data-ui-component] [role="option"] { border: 1px solid var(--border, #8c8781); border-radius: .4rem; background: var(--surface, #fff); color: inherit; cursor: pointer; padding: .55rem .75rem; }
+[data-ui-component] button:not([data-slot]):not([role="menuitem"]):not([role="option"]) { border: 1px solid var(--border, #8c8781); border-radius: .4rem; background: var(--surface, #fff); color: inherit; cursor: pointer; padding: .55rem .75rem; }
 [data-ui-component] button:disabled, [data-ui-component] :disabled { cursor: not-allowed; opacity: .55; }
 :is([data-ui-component], [data-ely-family]) [data-slot="input"][data-ui-pin-slot] { inline-size: 2.5rem; height: 2.5rem; block-size: 2.5rem; min-height: 2.5rem; min-block-size: 2.5rem; padding: 0; flex: 0 0 2.5rem; border: 1px solid var(--border, #8c8781); border-radius: var(--ely-control-radius); font-size: 1.25rem; font-weight: 500; line-height: 1.5rem; text-align: center; }
 [data-ui-tags] { gap: .25rem; }
@@ -43,10 +43,11 @@ dialog[data-ui-component]:not([open]) { display: none; }
 [data-ui-file-names] { color: var(--color-muted, #6f6b66); }
 [data-ui-file-names]:empty { display: none; }
 [data-ui-signature] { inline-size: min(100%, 32rem); block-size: 12rem; border: 1px solid var(--border, #8c8781); border-radius: .4rem; background: var(--surface, #fff); touch-action: none; }
-[data-ui-combobox-list] { box-sizing: border-box; z-index: 40; max-block-size: 14rem; overflow: auto; margin: 0; padding: .25rem; border: 1px solid var(--border, #8c8781); border-radius: .4rem; background: var(--surface, #fff); list-style: none; }
+[data-ui-combobox-list] { box-sizing: border-box; z-index: 40; display: grid; gap: 2px; max-block-size: 14rem; overflow: auto; margin: 0; padding: .25rem; border: 1px solid var(--color-line, var(--border, #d4d4d8)); border-radius: .5rem; background: var(--surface, #fff); box-shadow: 0 8px 24px rgb(0 0 0 / .10), 0 2px 6px rgb(0 0 0 / .06); list-style: none; }
 [data-ui-combobox-list][hidden] { display: none; }
-[data-ui-option], [data-ui-multi-option], [data-ui-selectable-option], [data-ui-tab] { cursor: pointer; padding: .5rem .75rem; }
-[data-ui-option][aria-selected="true"], [data-ui-multi-option]:has(input:checked), [data-ui-selectable-option][aria-selected="true"], [data-ui-tab][aria-selected="true"] { background: var(--accent-tint, #eef2ff); color: var(--color-ink); }
+[data-ui-option], [data-ui-multi-option], [data-ui-selectable-option], [data-ui-tab] { cursor: pointer; padding: .25rem .5rem; border: 0; border-radius: .375rem; min-height: 2rem; font-size: var(--ely-control-font-size, .8125rem); }
+[data-ui-option]:not([aria-disabled="true"]):is(:hover, [data-ui-active="true"]), [data-ui-option][aria-selected="true"], [data-ui-multi-option]:has(input:checked), [data-ui-selectable-option][aria-selected="true"], [data-ui-tab][aria-selected="true"] { background: var(--accent-tint, color-mix(in srgb, currentColor 6%, transparent)); color: var(--color-ink); }
+[data-ui-option][aria-selected="true"] { font-weight: 500; }
 [data-ui-multi-option] { display: inline-flex; gap: .5rem; align-items: center; border: 1px solid var(--border, #8c8781); border-radius: var(--ely-control-radius); min-height: var(--ely-control-height); padding: .1875rem var(--ely-control-padding); }
 [data-ui-component] [role="tabpanel"] { border: 1px solid var(--border, #8c8781); border-radius: .4rem; padding: 1rem; }
 dialog[data-ui-component="dialog"], [data-ui-component] dialog { margin: auto; }
