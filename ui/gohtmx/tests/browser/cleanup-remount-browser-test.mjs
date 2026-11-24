@@ -294,7 +294,7 @@ async function serializationCase() {
       registerCleanup(() => serializationTrace.push('last:' + generation));
     });
     probe.addEventListener('ely:cleanup', () => {
-      serializationTrace.push('event'); document.body.append(probe); remountAPI.mount(probe);
+      serializationTrace.push('event'); queueMicrotask(() => { window.serializationBeforeObserverTrace = [...serializationTrace]; }); document.body.append(probe); remountAPI.mount(probe);
     }, {once: true});
     probe.remove();
     window.serializationInlineStarts = serializationStarts;
@@ -302,6 +302,7 @@ async function serializationCase() {
   await settle();
   expect('serialization.native-observer-is-not-inline', await page.evaluate(() => serializationInlineStarts), 1);
   expect('serialization.all-old-disposers-before-new-init', await page.evaluate(() => serializationTrace), ['init:1', 'event', 'first:1', 'last:1', 'init:2']);
+  expect('serialization.replay-before-later-observer', await page.evaluate(() => serializationBeforeObserverTrace), ['init:1', 'event', 'first:1', 'last:1', 'init:2']);
   expect('serialization.fresh-ready', await page.evaluate(() => serializationProbe.dataset.elyReady || null), 'true');
   await page.evaluate(() => serializationProbe.remove()); await settle();
   expect('serialization.final-controller-disposed-once', await page.evaluate(() => serializationTrace.filter(item => item === 'last:2').length), 1);

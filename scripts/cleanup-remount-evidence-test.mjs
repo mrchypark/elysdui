@@ -50,8 +50,8 @@ const make = (mutation = '', surface = 'standalone') => {
     const check = report.checks.find(check => check.name === 'serialization.disposer-order');
     const expected = ['init:1', 'event', 'first:1', 'last:1', 'init:2'];
     const actual = mutation === 'disable-deferral' ? ['init:1', 'event', 'init:2', 'first:1', 'last:1'] : mutation === 'disable-replay' ? ['init:1', 'event', 'first:1', 'last:1'] : ['init:1', 'event', 'first:1', 'init:2', 'last:1'];
-    set(check, 'serialization.all-old-disposers-before-new-init', actual, expected);
-    if (mutation === 'disable-replay') { set(check, 'serialization.fresh-ready', null, 'true'); set(check, 'serialization.final-controller-disposed-once', 0, 1); }
+    if (mutation !== 'disable-replay') set(check, 'serialization.all-old-disposers-before-new-init', actual, expected);
+    set(check, 'serialization.replay-before-later-observer', actual, expected);
   }
   return {report, expected: structuredClone({mutation, surface: report.surface, revision: report.revision, tree: report.tree, assets, sourceFiles, fixtures, runToken: report.runToken, positiveChecks: mutation ? make('', surface).report.checks : undefined}), exit: mutation ? 1 : 0};
 };
@@ -106,7 +106,7 @@ for (const surface of ['standalone', 'catalogue']) for (const mutation of ['', .
       ['safe control failure', r => { const c = r.checks[2]; Object.assign(c.oracles[12], {observed: false, pass: false}); c.status = 'failed'; }],
       ['wrong mutation', r => { r.causalIntervention.name = 'other'; }],
       ['wrong mutation count', r => { r.causalIntervention.anchorCount = 2; }],
-      ['wrong order trace', r => { r.checks.find(c => c.name === 'serialization.disposer-order').oracles.find(o => o.id === 'serialization.all-old-disposers-before-new-init').observed = []; }],
+      ['wrong order trace', r => { r.checks.find(c => c.name === 'serialization.disposer-order').oracles.find(o => o.id === (mutation === 'disable-replay' ? 'serialization.replay-before-later-observer' : 'serialization.all-old-disposers-before-new-init')).observed = []; }],
     );
   }
   // Every oracle, including setup and safe controls, must reject coordinated

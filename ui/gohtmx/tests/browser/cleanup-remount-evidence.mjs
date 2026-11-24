@@ -30,7 +30,7 @@ const presentation = ['identity.physical-root', 'identity.textual-owner-unchange
 const fresh = ['ownership.listener-cardinality', 'ownership.old-listener-identities-gone', 'seed.duplicate-does-not-restart-or-reposition', 'seed.dismissed-duplicate-stays-closed', 'fresh.changed-number-opens', 'fresh.changed-number-focus-first-enabled', 'input.owner-request-provenance', 'fresh.native-navigation-skips-disabled', 'fresh.keydown-no-business-callback', 'fresh.keyup-fresh-callback-once-after-dismissal', 'fresh.one-action-event', 'fresh.check-committed', 'input.native-keyboard-provenance', 'fresh.escape-returns-caller-focus', 'fresh.escape-closes', 'fresh.cleanup-once', 'fresh.listeners-removed-after-final-detach', 'fresh.readiness-cleared-after-final-detach'];
 const htmx = ['htmx.actual-context-and-retained-target', 'htmx.pending-context-present', 'htmx.cleanup-mount-does-not-initialize-seed', 'htmx.cleanup-mount-keeps-only-old-request-listener', 'htmx.stopped-after-core-before-mutation', 'htmx.old-owner-cleanup-once', 'htmx.retained-physical-root', 'htmx.cancel-or-replace-descendants', 'htmx.finally-resumes-same-context'];
 const afterHTMX = ['readiness.fresh-owner-after-real-htmx', 'presentation.seed-open-after-real-htmx', 'presentation.seed-point-after-real-htmx', 'presentation.seed-focus-after-real-htmx', 'htmx.real-network-request'];
-const ordering = ['serialization.native-observer-is-not-inline', 'serialization.all-old-disposers-before-new-init', 'serialization.fresh-ready', 'serialization.final-controller-disposed-once', 'serialization.final-ready-cleared'];
+const ordering = ['serialization.native-observer-is-not-inline', 'serialization.all-old-disposers-before-new-init', 'serialization.replay-before-later-observer', 'serialization.fresh-ready', 'serialization.final-controller-disposed-once', 'serialization.final-ready-cleared'];
 export function cleanupRemountOracleIDs(name) {
   assert(cleanupRemountCases.includes(name));
   let body;
@@ -188,6 +188,13 @@ export const cleanupRemountFixedExpected = {
   },
   "serialization.native-observer-is-not-inline": 1,
   "serialization.all-old-disposers-before-new-init": [
+    "init:1",
+    "event",
+    "first:1",
+    "last:1",
+    "init:2"
+  ],
+  "serialization.replay-before-later-observer": [
     "init:1",
     "event",
     "first:1",
@@ -367,9 +374,9 @@ export function verifyCleanupRemountEvidence(report, expected, exit) {
       assert(failed.every(oracle => lateCloseFailures.includes(oracle.id)), `${check.name}: unrelated failure cannot count as a kill`);
       assert.deepEqual(failed.map(oracle => oracle.id), lateCloseFailures);
     } else if (check.name === 'serialization.disposer-order') {
-      const trace = check.oracles.find(oracle => oracle.id === ordering[1]);
+      const trace = check.oracles.find(oracle => oracle.id === (mutation === 'disable-replay' ? ordering[2] : ordering[1]));
       assert.deepEqual(trace.expected, orderTrace); assert.deepEqual(trace.observed, mutatedTrace[mutation]);
-      assert.deepEqual(failed.map(oracle => oracle.id), mutation === 'disable-replay' ? ordering.slice(1, 4) : [ordering[1]], 'exact ordering-probe failure set');
+      assert.deepEqual(failed.map(oracle => oracle.id), mutation === 'disable-replay' ? [ordering[2]] : [ordering[1], ordering[2]], 'exact ordering-probe failure set');
     } else assert.equal(status, 'passed', `${check.name}: unrelated safe control must pass`);
   }
   const status = report.checks.every(check => check.status === 'passed') ? 'passed' : 'failed';
