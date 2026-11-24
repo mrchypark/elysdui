@@ -4,12 +4,10 @@
     const top = below + box.height > viewport.height - margin ? above : below;
     return {left: Math.max(margin, Math.min(anchor.left, viewport.width - box.width - margin)), top: Math.max(margin, Math.min(top, viewport.height - box.height - margin))};
   };
-  const supportsAnchorArea = () => typeof CSS !== 'undefined' && typeof CSS.supports === 'function' && CSS.supports('position-area: block-end');
   const positionMenu = (popup, trigger) => {
     const viewport = {width: document.documentElement.clientWidth, height: document.documentElement.clientHeight};
     popup.style.maxWidth = `${Math.max(0, viewport.width - 16)}px`;
     popup.style.maxHeight = `${Math.max(0, viewport.height - 16)}px`;
-    if (supportsAnchorArea()) { popup.style.removeProperty('left'); popup.style.removeProperty('top'); return; }
     const saved = popup.matches(':popover-open') ? [] : ['display', 'visibility'].map(name => [name, popup.style.getPropertyValue(name), popup.style.getPropertyPriority(name)]);
     try {
       // Measure closed popovers in this same synchronous beforetoggle task, before native focus/paint.

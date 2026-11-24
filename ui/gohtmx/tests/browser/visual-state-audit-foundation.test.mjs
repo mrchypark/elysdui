@@ -14,7 +14,7 @@ test('TextArea shared root bounds its grid track without discarding caller width
   };
   bounded(css);
   for(const replacement of ['',selector+'{grid-template-columns:1fr}',selector+'{grid-template-columns:auto}',selector+'{grid-template-columns:420px}'])assert.throws(()=>bounded(css.replace(selector+'{grid-template-columns:minmax(0,1fr)}',replacement)));
-  assert.match(css,/\.is-width-420\{inline-size:26\.25rem;max-inline-size:100%\}/,'Keep preferred420px width on wide hosts, capped to the containing track');
+  assert.match(css,/\.is-width-420\{inline-size:(?:min\(100%,26\.25rem\)|26\.25rem);max-inline-size:100%\}/,'Keep preferred420px width on wide hosts, capped to the containing track');
   assert.match(css,/\.is-width-420 \.ely-api-field\{max-inline-size:26\.25rem\}/);
   assert.match(template,/eq \.Kind "TextArea"[\s\S]*?if \.Width[\s\S]*?else if \.MaxWidth[\s\S]*?"data-ely-autoresize" "true"/,'Actual caller Width/MaxWidth and native autoresize remain unchanged');
   assert.match(wrapper,/data-ely-kind="{{\.Kind}}"/,'Rule follows resolved shared Kind, not the gallery fixture name');
