@@ -165,6 +165,7 @@ try{
     if(process.env.WORKSPACE_CLASSIC_SCROLLBAR==='1')await page.evaluate(()=>{const sheet=new CSSStyleSheet();sheet.replaceSync('::-webkit-scrollbar{width:15px;height:15px}');document.adoptedStyleSheets=[...document.adoptedStyleSheets,sheet];});
     const theme=await page.evaluate(mode=>{window.ElyTheme.apply('ely',mode);return window.ElyTheme.current();},colorScheme);assert.deepEqual(theme,{id:'ely',mode:colorScheme});
     await page.evaluate(()=>document.fonts.ready);
+    await page.evaluate(()=>Promise.all([...document.querySelectorAll('[data-ely-family]')].flatMap(n=>n.getAnimations().map(a=>a.finished))));
     await page.locator('img').evaluateAll(nodes=>Promise.all(nodes.map(async node=>{node.loading='eager';try{await node.decode();}catch{}})));
     report.invalidDateInputs.push(...await page.locator('input[type=date],input[type=datetime-local]').evaluateAll(nodes=>nodes.filter(n=>n.getAttribute('value')&&!n.value).map(n=>({component:n.closest('[data-audit-name]')?.dataset.auditName,name:n.name,raw:n.getAttribute('value'),type:n.type}))));
     for(const [kind,names] of Object.entries(groups))for(const name of names){
@@ -263,7 +264,7 @@ try{
     report.infoPageCSP=[];
     for(const family of ['native','interaction']){
       const infoResponse=await page.goto(`${base}/components/audit?family=${family}&aliases=1`,{waitUntil:'networkidle'}),csp=infoResponse.headers()['content-security-policy'];report.infoPageCSP.push({family,url:infoResponse.url(),csp});assert(csp?.includes("style-src 'self'")&&!csp.includes("'unsafe-inline'"),'Info caller tests must retain strict gallery CSP');
-      await page.evaluate(mode=>window.ElyTheme.apply('ely',mode),colorScheme);await page.evaluate(()=>document.fonts.ready);
+      await page.evaluate(mode=>window.ElyTheme.apply('ely',mode),colorScheme);await page.evaluate(()=>document.fonts.ready);await page.evaluate(()=>Promise.all([...document.querySelectorAll('[data-ely-family]')].flatMap(n=>n.getAnimations().map(a=>a.finished))));
       const items=family==='native'?nativeInfo:feedbackInfo;
       // Escape test labels so the CSS utility scanner does not emit styles.
       for(const scenario of family==='native'?['default','scheme\x2donly\x2ddark','layered-nested','inline-low','old-alias-negative']:['default-feedback']){
@@ -309,6 +310,7 @@ try{
             return {before,after:roots.map(tokens),rootLayer,negative,support,branches,branchSamples,schemes:roots.map(root=>getComputedStyle(root).colorScheme),modeAncestors:roots.map(root=>{const result=[];for(let node=root;node;node=node.parentElement)if(node.hasAttribute('data-theme')||node.classList.contains('dark'))result.push({tag:node.tagName,theme:node.getAttribute('data-theme'),dark:node.classList.contains('dark')});return result;})};
           },{items,scenario,mode:colorScheme,callerURL});
           if(scenario==='layered-nested'){let timer;try{receipt.callerStylesheet=await Promise.race([callerFinished,new Promise((_,reject)=>timer=setTimeout(()=>reject(Error('Caller-test stylesheet requestfinished timed out')),5000))]);}finally{clearTimeout(timer);}assert.equal(receipt.callerStylesheet.finished,true);assert.equal(receipt.callerStylesheet.status,200);assert.equal(receipt.callerStylesheet.contentType,'text/css');assert.equal(receipt.callerStylesheet.sha256,digest(callerCSS));assert.equal(receipt.callerStylesheet.bytes,callerCSS.length);assert.equal(report.infoCallerStylesheet.requests.length,1);}
+          await page.evaluate(()=>Promise.all([...document.querySelectorAll('[data-ely-family]')].flatMap(n=>n.getAnimations().map(a=>a.finished))));
           receipt.measurements=await page.evaluate(({items,scenario})=>{
             const canvas=document.createElement('canvas');canvas.width=canvas.height=1;const ctx=canvas.getContext('2d',{willReadFrequently:true});if(!ctx)throw Error('Unsupported color measurement: no Canvas2D');
             const sample=raw=>{if(!CSS.supports('color',raw))throw Error(`Unsupported computed color ${raw}`);ctx.clearRect(0,0,1,1);ctx.fillStyle=raw;ctx.fillRect(0,0,1,1);return [...ctx.getImageData(0,0,1,1).data];};

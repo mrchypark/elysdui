@@ -205,6 +205,7 @@
   right:4px;
 }
 [data-ely-family='communication'] .ely-calendar-grid details[data-calendar-overflow] > summary {
+  min-block-size:0;
   white-space:nowrap;
   overflow:hidden;
   text-overflow:ellipsis;
