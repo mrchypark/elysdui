@@ -51,7 +51,6 @@ dialog[data-ui-component]:not([open]) { display: none; }
 [data-ui-option][aria-selected="true"] { font-weight: 500; }
 [data-ui-multi-option] { display: inline-flex; gap: .5rem; align-items: center; border: 1px solid var(--border, #8c8781); border-radius: var(--ely-control-radius); min-height: var(--ely-control-height); padding: .1875rem var(--ely-control-padding); }
 [data-ui-component] [role="tabpanel"] { border: 1px solid var(--border, #8c8781); border-radius: .4rem; padding: 1rem; }
-dialog[data-ui-component="dialog"], [data-ui-component] dialog { margin: auto; }
 
 [data-ui-component="signature-pad"]{inline-size:min(420px,100%);max-inline-size:100%;min-inline-size:0;display:grid;gap:8px}
 .ui-signature-surface{position:relative;line-height:0;min-inline-size:0}
@@ -84,3 +83,4 @@ dialog[data-ui-component="dialog"], [data-ui-component] dialog { margin: auto; }
 [data-ui-dropzone]:has(input:user-invalid){border-color:var(--error)}
 @media (pointer: coarse) { [data-slot='button']:not(.button) { min-inline-size: 2.75rem; min-block-size: 2.75rem; } }
 }
+dialog[data-ui-component="dialog"], [data-ui-component] dialog { margin: auto; }
