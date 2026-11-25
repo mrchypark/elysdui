@@ -1,3 +1,4 @@
+@layer ely.controls {
 :root { --ely-control-height: 1.75rem; --ely-control-padding: .75rem; --ely-control-radius: .375rem; --ely-control-font-size: .8125rem; }
 [data-slot='input'][type='range'], :is([data-ui-component], [data-ely-family]) input[type='range'] { accent-color: var(--color-accent); }
 /* Shared Ely sizing applies equally to standalone and composite controls. */
@@ -44,7 +45,7 @@ dialog[data-ui-component]:not([open]) { display: none; }
 [data-ui-file-names]:empty { display: none; }
 [data-ui-signature] { inline-size: min(100%, 32rem); block-size: 12rem; border: 1px solid var(--border, #8c8781); border-radius: .4rem; background: var(--surface, #fff); touch-action: none; }
 [data-ui-combobox-list] { box-sizing: border-box; z-index: 40; display: grid; gap: 2px; max-block-size: 14rem; overflow: auto; margin: 0; padding: .25rem; border: 1px solid var(--color-line, var(--border, #d4d4d8)); border-radius: .5rem; background: var(--surface, #fff); box-shadow: 0 8px 24px rgb(0 0 0 / .10), 0 2px 6px rgb(0 0 0 / .06); list-style: none; }
-[data-ui-combobox-list][hidden] { display: none; }
+[data-ui-combobox-list][hidden] { display: none !important; }
 [data-ui-option], [data-ui-multi-option], [data-ui-selectable-option], [data-ui-tab] { cursor: pointer; padding: .25rem .5rem; border: 0; border-radius: .375rem; min-height: 2rem; font-size: var(--ely-control-font-size, .8125rem); }
 [data-ui-option]:not([aria-disabled="true"]):is(:hover, [data-ui-active="true"]), [data-ui-option][aria-selected="true"], [data-ui-multi-option]:has(input:checked), [data-ui-selectable-option][aria-selected="true"], [data-ui-tab][aria-selected="true"] { background: var(--accent-tint, color-mix(in srgb, currentColor 6%, transparent)); color: var(--color-ink); }
 [data-ui-option][aria-selected="true"] { font-weight: 500; }
@@ -82,3 +83,4 @@ dialog[data-ui-component="dialog"], [data-ui-component] dialog { margin: auto; }
 [data-ui-file-error]:empty,[data-ui-file-names]:empty{display:none}
 [data-ui-dropzone]:has(input:user-invalid){border-color:var(--error)}
 @media (pointer: coarse) { [data-slot='button']:not(.button) { min-inline-size: 2.75rem; min-block-size: 2.75rem; } }
+}

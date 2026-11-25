@@ -188,7 +188,8 @@ func Inspect(markup, surface string, fragment bool, identities []Identity) error
 		return fmt.Errorf("script count %d", len(scripts))
 	}
 	for index, src := range expectedScripts {
-		if attr(scripts[index], "src") != src || strings.TrimSpace(textContent(scripts[index])) != "" {
+		actualSrc, _, _ := strings.Cut(attr(scripts[index], "src"), "?")
+		if actualSrc != src || strings.TrimSpace(textContent(scripts[index])) != "" {
 			return fmt.Errorf("script order or inline behavior at %s", src)
 		}
 		if src == "/fixture-observer.js" && attr(scripts[index], "type") != "" {
@@ -200,7 +201,8 @@ func Inspect(markup, surface string, fragment bool, identities []Identity) error
 	}
 	for _, href := range []string{"/assets/app.css", "/assets/ely-api.css", "/assets/ely-api-interaction.css", "/assets/ely-controls.css", "/assets/ely-patterns.css"} {
 		if len(find(doc, func(n *html.Node) bool {
-			return n.Data == "link" && attr(n, "href") == href && attr(n, "rel") == "stylesheet"
+			actualHref, _, _ := strings.Cut(attr(n, "href"), "?")
+			return n.Data == "link" && actualHref == href && attr(n, "rel") == "stylesheet"
 		})) != 1 {
 			return fmt.Errorf("stylesheet %s", href)
 		}

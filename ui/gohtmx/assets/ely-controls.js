@@ -208,6 +208,7 @@
       validate(); component.querySelector('[data-ui-signature-clear]').focus();
     });
     const resizeObserver = new ResizeObserver(() => {
+      if (!canvas.isConnected) { disconnectObserver(); return; }
       const bounds = canvas.getBoundingClientRect();
       const ratio = window.devicePixelRatio || 1;
       const width = Math.max(1, Math.round(bounds.width * ratio));
@@ -220,8 +221,16 @@
       context.setTransform(ratio, 0, 0, ratio, 0, 0);
       context.drawImage(copy, 0, 0, copy.width, copy.height, 0, 0, bounds.width, bounds.height);
     });
+    const disconnectObserver = () => {
+      resizeObserver.disconnect();
+      document.removeEventListener('htmx:beforeCleanupElement', onBeforeCleanup);
+    };
+    const onBeforeCleanup = (event) => {
+      if (event.target?.contains?.(canvas)) disconnectObserver();
+    };
     resizeObserver.observe(canvas);
-    component.closest("[data-ely-family]")?.addEventListener("ely:cleanup", () => resizeObserver.disconnect(), {once:true});
+    component.closest("[data-ely-family]")?.addEventListener("ely:cleanup", disconnectObserver, {once:true});
+    document.addEventListener('htmx:beforeCleanupElement', onBeforeCleanup);
     let drawing = false;
     const point = (event) => { const box = canvas.getBoundingClientRect(); return [event.clientX - box.left, event.clientY - box.top]; };
     canvas.addEventListener('pointerdown', (event) => {

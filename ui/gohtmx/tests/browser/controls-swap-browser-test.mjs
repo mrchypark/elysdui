@@ -2,12 +2,14 @@ import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import {createServer} from 'node:http';
 import {chromium} from 'playwright';
+import {disableMotion} from './test-motion.mjs';
 
 // Serve only the regression fixture and production assets it executes.
 const files = new Map([
   ['/tests/controls_swap_browser.html', 'text/html; charset=utf-8'],
   ['/tests/controls_swap_response.html', 'text/html; charset=utf-8'],
   ['/assets/htmx.min.js', 'text/javascript; charset=utf-8'],
+  ['/assets/ely-controls.css', 'text/css; charset=utf-8'],
   ['/assets/ely-controls.js', 'text/javascript; charset=utf-8'],
   ['/assets/ely-api.js', 'text/javascript; charset=utf-8'],
   ['/assets/sdui.js', 'text/javascript; charset=utf-8'],
@@ -39,6 +41,7 @@ try {
   const errors = [];
   page.on('pageerror', error => errors.push(String(error)));
   await page.goto(`http://127.0.0.1:${server.address().port}/tests/controls_swap_browser.html`);
+  await disableMotion(page);
   await page.waitForFunction(() => window.__controlsSwapResult, null, {timeout: 15000});
   const result = await page.evaluate(() => window.__controlsSwapResult);
   const report = await page.locator('#results').innerText();
@@ -111,6 +114,41 @@ try {
   assert.equal(await page.locator('#commit-events [data-ui-signature-value]').inputValue(), '', 'Clear resets the named hidden value');
   assert.deepEqual(await page.evaluate(() => window.__signatureClearClicks), [{trusted: true}], 'SignaturePad Clear is activated by a trusted click');
   assert(await page.evaluate(() => window.__rawCommitChanges.some(change => !change.name)), 'native editor change still bubbles for custom consumers');
+  // Verify CSS @layer isolation: unlayered host CSS can customize surface/border
+  // without breaking framework-level select appearance: none or chevron rendering
+  // across desktop and mobile viewports.
+  await page.evaluate(() => {
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = '/assets/ely-controls.css';
+    document.head.append(link);
+    const hostStyle = document.createElement('style');
+    hostStyle.textContent = `
+      select.host-select { background: rgb(255, 255, 255); appearance: menulist; -webkit-appearance: menulist; border-radius: 12px; }
+      @media (max-width: 640px) { select.host-select { background: rgb(250, 248, 245); } }
+    `;
+    document.head.append(hostStyle);
+    const sel = document.createElement('select');
+    sel.setAttribute('data-slot', 'select');
+    sel.className = 'host-select';
+    sel.innerHTML = '<option value="a">A</option><option value="b">B</option>';
+    document.body.append(sel);
+  });
+  await page.waitForFunction(() => {
+    const sel = document.querySelector('select.host-select');
+    return sel && getComputedStyle(sel).appearance === 'none';
+  }, null, {timeout: 5000});
+  for (const viewport of [{width: 1280, height: 800, bg: 'rgb(255, 255, 255)'}, {width: 375, height: 812, bg: 'rgb(250, 248, 245)'}]) {
+    await page.setViewportSize({width: viewport.width, height: viewport.height});
+    const style = await page.evaluate(() => {
+      const cs = getComputedStyle(document.querySelector('select.host-select'));
+      return {appearance: cs.appearance, backgroundImage: cs.backgroundImage, backgroundColor: cs.backgroundColor, borderRadius: cs.borderRadius};
+    });
+    assert.equal(style.appearance, 'none', `select appearance must stay none at ${viewport.width}px`);
+    assert.notEqual(style.backgroundImage, 'none', `select chevron backgroundImage must survive host background shorthand at ${viewport.width}px`);
+    assert.equal(style.backgroundColor, viewport.bg, `unlayered host background-color must still override @layer ely.controls at ${viewport.width}px`);
+    assert.equal(style.borderRadius, '12px', `unlayered host border-radius must override @layer ely.controls at ${viewport.width}px`);
+  }
   assert.deepEqual(errors, [], 'Composite browser editing must not throw');
   console.log('Native keyboard/blur and browser ClipboardEvent composite commit regression passed');
   console.log(report);

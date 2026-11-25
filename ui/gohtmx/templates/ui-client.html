@@ -6,12 +6,12 @@
 <template data-ui-control-template="button">{{template "button" (dict)}}</template>
 {{end}}
 {{define "ui-map-assets"}}
-<link rel="stylesheet" href="/assets/ely-map.css">
-<script src="/assets/ely-map.js" defer></script>
+<link rel="stylesheet" href="{{assetURL "ely-map.css"}}">
+<script src="{{assetURL "ely-map.js"}}" defer></script>
 {{end}}
 {{define "ui-component-assets"}}
-<link rel="stylesheet" href="/assets/ely-controls.css">
-<link rel="stylesheet" href="/assets/ely-patterns.css">
-<script src="/assets/ely-controls.js" defer></script>
-<script src="/assets/ely-patterns.js" defer></script>
+<link rel="stylesheet" href="{{assetURL "ely-controls.css"}}">
+<link rel="stylesheet" href="{{assetURL "ely-patterns.css"}}">
+<script src="{{assetURL "ely-controls.js"}}" defer></script>
+<script src="{{assetURL "ely-patterns.js"}}" defer></script>
 {{end}}

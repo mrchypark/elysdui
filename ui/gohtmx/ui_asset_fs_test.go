@@ -3,6 +3,7 @@ package ui
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"testing/fstest"
 )
@@ -65,5 +66,34 @@ func TestBindAssetFSDoesNotCaptureWildcards(t *testing.T) {
 				t.Fatalf("unregistered path %s: status=%d body=%q", path, response.Code, response.Body.String())
 			}
 		})
+	}
+}
+
+func TestAssetURLAndImmutableCacheHeaders(t *testing.T) {
+	url := AssetURL("ely-controls.css")
+	if !strings.HasPrefix(url, "/assets/ely-controls.css?v=") || len(url) <= len("/assets/ely-controls.css?v=") {
+		t.Fatalf("expected hashed AssetURL, got %q", url)
+	}
+	mux := http.NewServeMux()
+	if err := BindAssets(mux); err != nil {
+		t.Fatal(err)
+	}
+	matched := httptest.NewRecorder()
+	mux.ServeHTTP(matched, httptest.NewRequest(http.MethodGet, url, nil))
+	if matched.Code != http.StatusOK {
+		t.Fatalf("GET %s: status=%d", url, matched.Code)
+	}
+	if got := matched.Header().Get("Cache-Control"); got != "public, max-age=31536000, immutable" {
+		t.Fatalf("matched versioned asset Cache-Control = %q", got)
+	}
+	for _, unversioned := range []string{"/assets/ely-controls.css", "/assets/ely-controls.css?v=stale"} {
+		resp := httptest.NewRecorder()
+		mux.ServeHTTP(resp, httptest.NewRequest(http.MethodGet, unversioned, nil))
+		if resp.Code != http.StatusOK {
+			t.Fatalf("GET %s: status=%d", unversioned, resp.Code)
+		}
+		if got := resp.Header().Get("Cache-Control"); got != "public, no-cache" {
+			t.Fatalf("GET %s Cache-Control = %q", unversioned, got)
+		}
 	}
 }

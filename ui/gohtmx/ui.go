@@ -156,6 +156,39 @@ func DefaultDynamicCompressionOptions() CompressionOptions {
 
 // Shared immutable assets are prepared once, even when several muxes bind them.
 var preparedAssets = sync.OnceValues(prepareAssets)
+var preparedAssetHashes = sync.OnceValues(computeAssetHashes)
+
+func computeAssetHashes() (map[string]string, error) {
+	assets, err := fs.Sub(Files, "assets")
+	if err != nil {
+		return nil, err
+	}
+	hashes := make(map[string]string)
+	err = fs.WalkDir(assets, ".", func(name string, entry fs.DirEntry, err error) error {
+		if err != nil || entry.IsDir() {
+			return err
+		}
+		data, err := fs.ReadFile(assets, name)
+		if err != nil {
+			return err
+		}
+		hashes[name] = fmt.Sprintf("%x", sha256.Sum256(data))[:12]
+		return nil
+	})
+	return hashes, err
+}
+
+// AssetURL returns the /assets/ URL for an embedded UI asset, appending a
+// content hash query parameter (?v=...) when available for cache busting.
+func AssetURL(name string) string {
+	clean := strings.TrimPrefix(strings.TrimPrefix(name, "/"), "assets/")
+	if hashes, err := preparedAssetHashes(); err == nil {
+		if hash, ok := hashes[clean]; ok && hash != "" {
+			return "/assets/" + clean + "?v=" + hash
+		}
+	}
+	return "/assets/" + clean
+}
 
 // BindAssets registers shared asset paths without taking over application assets.
 // Public text assets negotiate zstd, Brotli or gzip; dynamic pages are untouched.
@@ -250,6 +283,7 @@ func prepareAssetFS(assets fs.FS, options CompressionOptions) (map[string]http.H
 		if err != nil {
 			return err
 		}
+		rawHash := fmt.Sprintf("%x", sha256.Sum256(data))[:12]
 		contentType := mime.TypeByExtension(path.Ext(name))
 		if contentType == "" {
 			contentType = http.DetectContentType(data)
@@ -281,7 +315,11 @@ func prepareAssetFS(assets fs.FS, options CompressionOptions) (map[string]http.H
 				return
 			}
 			variant := variants[coding]
-			w.Header().Set("Cache-Control", "public, no-cache")
+			if v := r.URL.Query().Get("v"); v != "" && v == rawHash {
+				w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+			} else {
+				w.Header().Set("Cache-Control", "public, no-cache")
+			}
 			w.Header().Set("ETag", variant.etag)
 			w.Header().Set("Content-Type", contentType)
 			w.Header().Del("Content-Encoding")
@@ -408,6 +446,7 @@ func Funcs() template.FuncMap {
 		"menuContextConfig": menuContextConfig,
 		"attrName":          attrName,
 		"attrValue":         attrValue,
+		"assetURL":          AssetURL,
 		"contains":          strings.Contains,
 		"hasPrefix":         strings.HasPrefix,
 		"deref": func(v any) any {
