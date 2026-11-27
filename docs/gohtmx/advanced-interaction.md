@@ -28,7 +28,7 @@ no assistive-technology, IME, modifier-key or native-platform verification claim
 The independently recorded close-before-action and empty-result Enter-submit
 mismatches remain open; this focus repair does not redefine either contract.
 
-For host search, bind `onChange` through `ui.mount` and use the query field's `name` and `value`. The host owns fetching and rendering new `Items`. Replace the component root through an htmx swap, then bind the new root with `ui.mount`; the htmx lifecycle initializes its interaction behavior. Preserve `Value` in the new props if the query should remain. An `ely:result` callback does not automatically insert palette rows or reopen the dialog. Host-ranked results should already match the query because local SearchPalette filtering still applies. No remote search endpoint is built into this component.
+For remote/HTMX search in `navigation/CommandPalette` or `navigation/SearchPalette`, set `SearchURL` (or `HxGet`), optional `SearchTrigger` (default `"input changed delay:150ms, search"`), `SearchTarget`, `EmptyText`, or `RemoteSearch: true` (which adds `data-interaction-remote-search` and skips client-side filtering so server-ranked rows and `<mark>` highlights are preserved). Render result fragments with `{{template "ely-api-palette-items" .}}` (passing `"OwnedAction" true` for `CommandPalette`); after `htmx:afterSwap` / `htmx:after:swap`, the runtime re-initializes icons, updates empty-state visibility, preserves or selects the first enabled option, and syncs `aria-activedescendant` for `CommandPalette`. Items support `Href` (rendering `<a href="..." role="option">`), `Kind` (badge), `Meta` (secondary line), and `LabelMarked` / `ContentMarked` (escaped via `safeMarkHTML`, which preserves only balanced `<mark>...</mark>` tags). Custom host compositions using `data-interaction-palette`, `data-interaction-filter`, `data-interaction-remote-search`, `data-interaction-palette-results`, and `data-interaction-palette-option` follow the same behavior contract.
 
 Render an interaction component with `ui.Component{Chapter, Name, ID, Props}`. `ID` is required, starts with a letter, and is the instance boundary for behavior and events. `Name` accepts a catalogue alias; the renderer receives its primary story as `Kind` and the requested alias as `Variant` and `ComponentName`.
 
@@ -108,10 +108,10 @@ session; DOM/ARIA tests alone do not establish screen-reader announcements.
 | navigation/BackForwardNavigation | `BackLabel`, `ForwardLabel`, `Items[].Selected` | `back`, `forward`; local current place |
 | navigation/Anchor | `Items[].Value`, `Items[].Content`, `Items[].Selected` | local section scroll |
 | navigation/JumpTo | `Name`, `Value`, `Max`, `Required` | `jump`; local line and optional column validation |
-| navigation/CommandPalette | `Name`, `Value`, `Items[].Group`, `Items[].Shortcut` | item `Action` or `run` |
+| navigation/CommandPalette | `Name`, `Value`, `SearchURL`/`HxGet`, `RemoteSearch`, `EmptyText`, `Items[].Group`, `Items[].Shortcut`, `Items[].Href`, `Items[].Kind`, `Items[].Meta`, `Items[].LabelMarked`/`ContentMarked` | item `Action` or `run` (or browser link navigation for `Href`) |
 | navigation/QuickOpen | `Name`, `Value`, `Placeholder`, `Required`, `Items[].Recent` | item `Action` or `open`; recent files show before a query |
 | navigation/QuickSwitcher | `Items[].Content`, `Items[].Selected` | item `Action` or `switch` |
-| navigation/SearchPalette | `Name`, `Value`, `Placeholder`, `Items[].Group` | item `Action` or `open` |
+| navigation/SearchPalette | `Name`, `Value`, `Placeholder`, `SearchURL`/`HxGet`, `RemoteSearch`, `EmptyText`, `Items[].Group`, `Items[].Href`, `Items[].Kind`, `Items[].Meta`, `Items[].LabelMarked`/`ContentMarked` | item `Action` or `open` (or browser link navigation for `Href`) |
 | menus/Menu | `Items` | item `Action` or `select` |
 | menus/CheckboxMenuItem | `Items[].Selected`, `Radio`, `Group` | `ely:change` with value/checked; item action |
 | menus/DropdownMenu | `Host` (`dropdown`, `split`, `overflow`), `Items` | `Action`, item `Action` or `select`; omitted Host preserves the split host |
