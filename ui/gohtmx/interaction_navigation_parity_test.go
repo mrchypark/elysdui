@@ -128,3 +128,72 @@ func TestCommandPaletteOwnedOptionIdentifiers(t *testing.T) {
 		})
 	}
 }
+
+func TestSearchPaletteRemoteHTMXAndSafeHighlights(t *testing.T) {
+	tpl, err := NewTemplates()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body bytes.Buffer
+	err = RenderComponent(tpl, &body, Component{
+		Chapter: "navigation",
+		Name:    "SearchPalette",
+		ID:      "omni",
+		Props: map[string]any{
+			"Label":     "Search",
+			"SearchURL": "/omni/search",
+			"EmptyText": "No matches.",
+			"Items": []map[string]any{
+				{
+					"Value":         "doc-1",
+					"Href":          "/docs/1",
+					"Kind":          "Doc",
+					"Meta":          "Workspace / Engineering",
+					"LabelMarked":   "Deploy <mark>Guide</mark> <script>alert(1)</script>",
+					"ContentMarked": "Use <mark onclick='evil()'>care</mark> and <mark>unclosed",
+					"Selected":      true,
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := body.String()
+	for _, want := range []string{
+		`data-interaction-remote-search`,
+		`hx-get="/omni/search"`,
+		`hx-trigger="input changed delay:150ms, search"`,
+		`hx-target="#omni-search-palette-results"`,
+		`hx-swap="innerHTML"`,
+		`id="omni-search-palette-results"`,
+		`<a href="/docs/1" role="option"`,
+		`Deploy <mark>Guide</mark> &lt;script&gt;alert(1)&lt;/script&gt;`,
+		`Use &lt;mark onclick=&#39;evil()&#39;&gt;care&lt;/mark&gt; and &lt;mark&gt;unclosed`,
+		`class="ely-interaction__palette-kind">Doc</span>`,
+		`class="ely-interaction__palette-meta">Workspace / Engineering</span>`,
+		`No matches.`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("SearchPalette output missing %q\n%s", want, out)
+		}
+	}
+	for _, forbidden := range []string{`<script>`, `<mark onclick`} {
+		if strings.Contains(out, forbidden) {
+			t.Fatalf("SearchPalette output leaked unsafe markup %q", forbidden)
+		}
+	}
+
+	var frag bytes.Buffer
+	if err := tpl.ExecuteTemplate(&frag, "ely-api-palette-items", map[string]any{
+		"ID": "omni",
+		"Items": []map[string]any{
+			{"Value": "item-1", "Href": "/items/1", "LabelMarked": "<mark>Omni</mark> result", "Kind": "Task", "Meta": "Projects"},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(frag.String(), `<a href="/items/1" role="option"`) || !strings.Contains(frag.String(), `<mark>Omni</mark> result`) {
+		t.Fatalf("ely-api-palette-items fragment unexpected: %s", frag.String())
+	}
+}

@@ -743,12 +743,13 @@ register('communication',root=>{
             const [style,targetSel='']=oob.split(':',2);
             const target=targetSel?(targetSel.startsWith('#')?root.ownerDocument.getElementById(targetSel.slice(1)):transcript.querySelector(targetSel)):(node.id?root.ownerDocument.getElementById(node.id):null);
             if(style==='delete'){target?.remove();continue;}
-            if(target){scopeAuthor(node,viewerId);target.replaceWith(node);decorateMessages(node);continue;}
+            if(target){scopeAuthor(node,viewerId);target.replaceWith(node);decorateMessages(node);win.htmx?.process?.(node);continue;}
           }
           if(node.id&&transcript.querySelector(`#${win.CSS?.escape?win.CSS.escape(node.id):node.id}`))continue;
           scopeAuthor(node,viewerId);
           transcript.append(node);
           decorateMessages(node);
+          win.htmx?.process?.(node);
           appended=true;
           const msg=node.matches('.ely-messaging-message,.ely-chat-message')?node:node.querySelector('.ely-messaging-message,.ely-chat-message');
           const sender=msg?.dataset?.senderId||msg?.dataset?.senderName||'';

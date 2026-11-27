@@ -204,6 +204,7 @@ const doc = {
   addEventListener() {},
   removeEventListener() {},
 };
+const processedNodes = [];
 const win = {
   document: doc,
   location: { href: 'https://example.com/chat', origin: 'https://example.com' },
@@ -215,6 +216,7 @@ const win = {
   MutationObserver: class { observe() {} disconnect() {} },
   CSS: { escape: s => s },
   CustomEvent: class { constructor(type, init) { this.type = type; this.detail = init?.detail; } },
+  htmx: { process(node) { processedNodes.push(node.id); } },
   addEventListener() {},
 };
 doc.defaultView = win;
@@ -269,6 +271,7 @@ assert.deepEqual(mentionRefreshes, [{ senderId: 'user-2' }]);
 es.emit('chat_event', '<div id="m2" class="ely-messaging-message" data-sender-id="user-2" hx-swap-oob="outerHTML:#m2">edited</div>');
 assert.equal(transcript.children.length, 2);
 assert.equal(transcript.children[1].textContent, 'edited');
+assert.deepEqual(processedNodes, ['m1', 'm2', 'm2']);
 
 // 5. Typing indicator updates and auto-clears
 es.emit('typing', 'Bob is typing...');

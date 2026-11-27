@@ -447,6 +447,7 @@ func Funcs() template.FuncMap {
 		"attrName":          attrName,
 		"attrValue":         attrValue,
 		"assetURL":          AssetURL,
+		"safeMarkHTML":      safeMarkHTML,
 		"contains":          strings.Contains,
 		"hasPrefix":         strings.HasPrefix,
 		"deref": func(v any) any {
@@ -460,6 +461,44 @@ func Funcs() template.FuncMap {
 			return v
 		},
 	}
+}
+
+// safeMarkHTML escapes all HTML in value and restores only balanced
+// <mark>...</mark> tags for server-side search highlighting.
+func safeMarkHTML(value any) template.HTML {
+	escaped := template.HTMLEscapeString(attrValueText(value))
+	const openEsc = "&lt;mark&gt;"
+	const closeEsc = "&lt;/mark&gt;"
+	var out strings.Builder
+	out.Grow(len(escaped))
+	pos := 0
+	for pos < len(escaped) {
+		start := strings.Index(escaped[pos:], openEsc)
+		if start < 0 {
+			out.WriteString(escaped[pos:])
+			break
+		}
+		start += pos
+		afterOpen := start + len(openEsc)
+		end := strings.Index(escaped[afterOpen:], closeEsc)
+		if end < 0 {
+			out.WriteString(escaped[pos:])
+			break
+		}
+		end += afterOpen
+		// Avoid nesting <mark> inside <mark> if another <mark> appears before </mark>.
+		if nested := strings.Index(escaped[afterOpen:end], openEsc); nested >= 0 {
+			out.WriteString(escaped[pos : afterOpen+nested])
+			pos = afterOpen + nested
+			continue
+		}
+		out.WriteString(escaped[pos:start])
+		out.WriteString("<mark>")
+		out.WriteString(escaped[afterOpen:end])
+		out.WriteString("</mark>")
+		pos = end + len(closeEsc)
+	}
+	return template.HTML(out.String())
 }
 
 // joinStrings accepts native Go string slices and JSON-decoded string arrays.

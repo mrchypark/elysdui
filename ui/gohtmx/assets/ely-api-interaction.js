@@ -888,12 +888,29 @@ register('interaction', (root, registerCleanup, ownerContext) => {
       for (let node = label.nextElementSibling; node && !node.matches('.ely-interaction__palette-label'); node = node.nextElementSibling) rows.push(node);
       label.hidden = rows.length > 0 && rows.every(row => row.hidden);
     });
-    const first = [...(palette?.querySelectorAll('[data-interaction-palette-option]') || [])].find(option => !option.closest('li').hidden && !option.disabled);
+    const first = [...(palette?.querySelectorAll('[data-interaction-palette-option]') || [])].find(option => !option.closest('li').hidden && !option.disabled && option.getAttribute?.('aria-disabled') !== 'true');
     options.forEach(option => option.setAttribute('aria-selected', String(option === first)));
     const empty = palette?.querySelector('[data-interaction-palette-empty]');
     if (empty) empty.hidden = Boolean(first);
     syncCommandPalette(palette, first, true);
     return first;
+  };
+  const syncPaletteResults = palette => {
+    if (!palette) return null;
+    palette.querySelectorAll('[data-interaction-icon]').forEach(icon => {
+      if (/^[a-z0-9-]+$/.test(icon.dataset.interactionIcon || '')) {
+        icon.classList.add('is-icon');
+        icon.style.setProperty('--ely-interaction-icon', `url("/assets/ely/icons/${icon.dataset.interactionIcon}.svg")`);
+      }
+    });
+    const options = [...palette.querySelectorAll('[data-interaction-palette-option]')];
+    const enabled = options.filter(option => !option.closest('li')?.hidden && !option.disabled && option.getAttribute?.('aria-disabled') !== 'true');
+    const active = enabled.find(option => option.getAttribute?.('aria-selected') === 'true') || enabled[0] || null;
+    options.forEach(option => option.setAttribute('aria-selected', String(option === active)));
+    const empty = palette.querySelector('[data-interaction-palette-empty]');
+    if (empty) empty.hidden = enabled.length > 0;
+    syncCommandPalette(palette, active, true);
+    return active;
   };
   // CommandPalette retains native query editing while a separate active option
   // represents navigation. IDs belong to the rendered rows, not sorted positions
@@ -1361,7 +1378,9 @@ register('interaction', (root, registerCleanup, ownerContext) => {
       change(root, {name: field.name || 'filter', value: field.value});
       return;
     }
-    filterPalette(palette, query);
+    if (!field.hasAttribute('data-interaction-remote-search') && !field.hasAttribute('hx-get') && !palette.hasAttribute('data-interaction-remote-search')) {
+      filterPalette(palette, query);
+    }
     change(root, {name: field.name || 'filter', value: field.value});
   };
   const submit = event => {
@@ -1547,7 +1566,7 @@ register('interaction', (root, registerCleanup, ownerContext) => {
       if (root.dataset.elyKind === 'CommandPalette' && event.key === 'Enter' &&
           !event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey && !event.isComposing && event.keyCode !== 229 &&
           confirmationDialog?.open && confirmationDialog.querySelector('[data-interaction-filter]') === event.target) event.preventDefault();
-      const options = [...palette.querySelectorAll('[data-interaction-palette-option]:not(:disabled):not([hidden])')].filter(option => !option.closest('li').hidden);
+      const options = [...palette.querySelectorAll('[data-interaction-palette-option]:not(:disabled):not([hidden]):not([aria-disabled="true"])')].filter(option => !option.closest('li')?.hidden);
       if (!options.length) return;
       const selected = options.findIndex(option => option.getAttribute('aria-selected') === 'true');
       if (event.key === 'Enter') { event.preventDefault(); (document.activeElement?.closest('[data-interaction-palette-option]') || options[Math.max(selected, 0)])?.click(); return; }
@@ -1980,6 +1999,13 @@ register('interaction', (root, registerCleanup, ownerContext) => {
   const revealLazy = list => { const bounds=list.getBoundingClientRect(); let count=0; list.querySelectorAll('[data-interaction-lazy-row]:not([data-interaction-lazy-loaded])').forEach(row=>{ const box=row.getBoundingClientRect(); if(box.bottom<=bounds.top || box.top>=bounds.bottom)return; row.setAttribute('data-interaction-lazy-loaded',''); row.querySelector('.ely-interaction__skeleton')?.setAttribute('hidden',''); row.querySelector('p').hidden=false; count++; }); if(count)change(root,{name:'lazy',value:'loaded',count}); };
   const scroll = event => { const list=closest(root,event.target,'[data-interaction-lazy]'); if(list)revealLazy(list); };
   root.querySelectorAll('[data-interaction-lazy]').forEach(list=>{ revealLazy(list); if(typeof ResizeObserver==='function'){const observer=new ResizeObserver(()=>revealLazy(list));observer.observe(list);lottieCleanups.push(()=>observer.disconnect());} });
+  const onPaletteSwap = event => {
+    const target = event?.detail?.target || event?.detail?.ctx?.target || event?.target;
+    const results = target instanceof Element ? (target.matches('[data-interaction-palette-results]') ? target : target.closest('[data-interaction-palette-results]')) : null;
+    const palette = results ? closest(root, results, '[data-interaction-palette]') : null;
+    if (palette) syncPaletteResults(palette);
+  };
+  root.addEventListener('htmx:afterSwap', onPaletteSwap); root.addEventListener('htmx:after:swap', onPaletteSwap);
   root.addEventListener('click', click); root.addEventListener('scroll', scroll, true); root.addEventListener('input', input); root.addEventListener('submit', submit); root.addEventListener('keydown', keydown); root.addEventListener('ely:result', result); root.addEventListener('ely:error', error); root.addEventListener('contextmenu', contextmenu); root.addEventListener('pointerover', pointerover); root.addEventListener('pointermove', menuPointerMove);
   root.addEventListener('dragend', dragend); root.addEventListener('dragstart', dragstart); root.addEventListener('dragover', dragover); root.addEventListener('drop', drop);
   const keyup = event => {
@@ -2061,7 +2087,7 @@ register('interaction', (root, registerCleanup, ownerContext) => {
   document.addEventListener('pointerdown', outside);
   const contextRequests = bindContextRequests(root, () => { menuPointerReturn = contextPointerFocus = undefined; menuConfirmKey = menuConfirmTarget = menuSearchConfirm = undefined; });
   const cleanupContextRequests = contextRequests.cleanup;
-  const cleanup = () => { paletteNavigationActive = false; close(); cleanupContextRequests(); clearReorderPreview(); menuSearchConfirm = undefined; timers.forEach(clearTimeout); lottieCleanups.forEach(cleanup => cleanup()); root.removeEventListener('click', click); root.removeEventListener('scroll', scroll, true); root.removeEventListener('input', input); root.removeEventListener('keydown', keydown); root.removeEventListener('ely:result', result); root.removeEventListener('ely:error', error); root.removeEventListener('contextmenu', contextmenu); root.removeEventListener('pointerover', pointerover); root.removeEventListener('pointermove', menuPointerMove); root.removeEventListener('dragend', dragend); root.removeEventListener('dragstart', dragstart); root.removeEventListener('dragover', dragover); root.removeEventListener('drop', drop); root.removeEventListener('pointerdown', lightboxPointerDownHandler); root.removeEventListener('pointerup', lightboxPointerUpHandler); root.removeEventListener('pointerdown', holdStart); root.removeEventListener('pointerup', holdEnd); root.removeEventListener('pointercancel', holdEnd); root.removeEventListener('keyup', keyup); document.removeEventListener('pointerdown', outside); };
+  const cleanup = () => { paletteNavigationActive = false; close(); cleanupContextRequests(); clearReorderPreview(); menuSearchConfirm = undefined; timers.forEach(clearTimeout); lottieCleanups.forEach(cleanup => cleanup()); root.removeEventListener('click', click); root.removeEventListener('scroll', scroll, true); root.removeEventListener('input', input); root.removeEventListener('keydown', keydown); root.removeEventListener('ely:result', result); root.removeEventListener('ely:error', error); root.removeEventListener('contextmenu', contextmenu); root.removeEventListener('pointerover', pointerover); root.removeEventListener('pointermove', menuPointerMove); root.removeEventListener('dragend', dragend); root.removeEventListener('dragstart', dragstart); root.removeEventListener('dragover', dragover); root.removeEventListener('drop', drop); root.removeEventListener('pointerdown', lightboxPointerDownHandler); root.removeEventListener('pointerup', lightboxPointerUpHandler); root.removeEventListener('pointerdown', holdStart); root.removeEventListener('pointerup', holdEnd); root.removeEventListener('pointercancel', holdEnd); root.removeEventListener('keyup', keyup); if (typeof onPaletteSwap === 'function') { root.removeEventListener?.('htmx:afterSwap', onPaletteSwap); root.removeEventListener?.('htmx:after:swap', onPaletteSwap); } document.removeEventListener('pointerdown', outside); };
   registerCleanup?.(cleanup);
   contextRequests.openSeed();
   return cleanup;
