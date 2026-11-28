@@ -213,7 +213,7 @@ try {
   assert.equal(await page.locator('html').getAttribute('lang'), 'en');
   assert.equal(await page.locator('h1').innerText(), 'Find your palette.');
   assert.equal(await page.locator('[data-theme-hex]').count(), 19, 'all color roles have editable controls');
-  assert.equal(await page.locator('[data-theme-check]').innerText(), 'All 28 light and dark contrast checks passed');
+  assert.equal(await page.locator('[data-theme-check]').innerText(), 'All 30 light and dark contrast checks passed');
   await page.getByLabel('Theme name', {exact: true}).fill('');
   assert.equal(await page.locator('[data-theme-check]').innerText(), 'A theme requires id, name, light, and dark.');
   assert(await page.getByRole('button', {name: 'Apply theme', exact: true}).isDisabled());

@@ -16,9 +16,23 @@
   const copy = value => JSON.parse(JSON.stringify(value));
   const read = key => { try { return localStorage.getItem(key); } catch { return null; } };
   const save = (key, value) => { try { localStorage.setItem(key, value); } catch {} };
-  const modeOf = value => { if (!['light','dark'].includes(value)) throw new Error('Mode must be light or dark.'); return value; };
+  const systemQuery = typeof window.matchMedia === 'function' ? window.matchMedia('(prefers-color-scheme: dark)') : null;
+  const modeOf = value => {
+    if (!['light','dark','system'].includes(value)) throw new Error('Mode must be light, dark, or system.');
+    return value;
+  };
+  const resolveMode = value => modeOf(value) === 'system' ? (systemQuery && systemQuery.matches ? 'dark' : 'light') : value;
+  const validateFont = (value, path) => {
+    const trimmed = typeof value === 'string' ? value.trim() : '';
+    const doubleQuotes = (trimmed.match(/"/g) || []).length;
+    const singleQuotes = (trimmed.match(/'/g) || []).length;
+    if (!trimmed || trimmed.length > 200 || /[\r\n\0\\{};<>]|\/\*|\*\//.test(trimmed) || /url\s*\(|expression\s*\(|var\s*\(/i.test(trimmed) || doubleQuotes % 2 !== 0 || singleQuotes % 2 !== 0) {
+      throw new Error(`${path}: enter a valid font-family list.`);
+    }
+    return trimmed;
+  };
   function validate(theme) {
-    if (!theme || typeof theme.id !== 'string' || !/^[a-z][a-z0-9-]{0,47}$/.test(theme.id) || typeof theme.name !== 'string' || !theme.name.trim() || theme.name.length > 80 || Object.keys(theme).some(key => !['id','name','light','dark'].includes(key))) throw new Error('A theme requires id, name, light, and dark.');
+    if (!theme || typeof theme.id !== 'string' || !/^[a-z][a-z0-9-]{0,47}$/.test(theme.id) || typeof theme.name !== 'string' || !theme.name.trim() || theme.name.length > 80 || Object.keys(theme).some(key => !['id','name','light','dark','radius','font'].includes(key))) throw new Error('A theme requires id, name, light, and dark.');
     const result = {id:theme.id, name:theme.name.trim()};
     for (const mode of ['light','dark']) {
       const values = theme[mode];
@@ -27,6 +41,21 @@
       for (const key of tokens) {
         if (typeof values[key] !== 'string' || !/^#[0-9a-f]{6}$/i.test(values[key])) throw new Error(`${mode}.${key}: enter a color in #RRGGBB format.`);
         result[mode][key] = values[key].toUpperCase();
+      }
+    }
+    if (theme.radius !== undefined) {
+      if (typeof theme.radius !== 'string' || !/^(0|\d+(\.\d+)?(px|rem|em))$/.test(theme.radius.trim())) throw new Error('radius: enter a CSS length in px, rem, em, or 0.');
+      result.radius = theme.radius.trim();
+    }
+    if (theme.font !== undefined) {
+      if (typeof theme.font === 'string') {
+        result.font = validateFont(theme.font, 'font');
+      } else if (theme.font && typeof theme.font === 'object' && !Array.isArray(theme.font) && Object.keys(theme.font).every(key => ['sans','mono'].includes(key)) && (theme.font.sans !== undefined || theme.font.mono !== undefined)) {
+        result.font = {};
+        if (theme.font.sans !== undefined) result.font.sans = validateFont(theme.font.sans, 'font.sans');
+        if (theme.font.mono !== undefined) result.font.mono = validateFont(theme.font.mono, 'font.mono');
+      } else {
+        throw new Error('font: enter a font-family string or {sans, mono}.');
       }
     }
     return result;
@@ -46,22 +75,48 @@
     return problems;
   }
   const get = id => { if (!palettes.has(id)) throw new Error('This theme is not registered.'); return copy(palettes.get(id)); };
+  const root = document.documentElement;
+  const modeOnly = Boolean(root.hasAttribute?.('data-theme-mode-only') || document.currentScript?.hasAttribute?.('data-mode-only'));
+  const syncThemeColor = paperColor => {
+    const meta = typeof document.querySelector === 'function' ? document.querySelector('meta[name="theme-color"]:not([media])') : null;
+    if (!meta) return;
+    const fallback = modeOnly
+      ? (typeof window.getComputedStyle === 'function' ? window.getComputedStyle(root)?.getPropertyValue('--color-paper')?.trim() : '')
+      : get(activeId)[root.dataset.theme || 'light']?.['color-paper'];
+    const color = paperColor || fallback;
+    if (color) meta.setAttribute('content', color);
+  };
+  const setOrRemove = (style, prop, value) => {
+    if (value !== undefined) style.setProperty(prop, value);
+    else if (typeof style.removeProperty === 'function') style.removeProperty(prop);
+  };
   function preview(element, value, mode) {
-    const theme = typeof value === 'string' ? get(value) : validate(value), colors = theme[modeOf(mode)];
-    element.dataset.theme = mode;
+    const theme = typeof value === 'string' ? get(value) : validate(value), resolved = resolveMode(mode), colors = theme[resolved];
+    element.dataset.theme = resolved;
     element.dataset.palette = theme.id;
-    element.style.colorScheme = mode;
+    element.style.colorScheme = resolved;
     for (const key of tokens) element.style.setProperty('--'+key,colors[key]);
     // Resolve aliases at the same scope so nested previews do not inherit the root palette.
     for (const [key,source] of Object.entries(aliases)) element.style.setProperty('--'+key,colors[source]);
+    setOrRemove(element.style, '--ely-control-radius', theme.radius);
+    const sans = typeof theme.font === 'string' ? theme.font : theme.font?.sans;
+    const mono = typeof theme.font === 'object' ? theme.font?.mono : undefined;
+    setOrRemove(element.style, '--font-sans', sans);
+    setOrRemove(element.style, '--font-mono', mono);
+    if (element === root) syncThemeColor(colors['color-paper']);
   }
-  const root = document.documentElement;
+  let activeId = 'ely';
+  let activeMode = 'system';
   const sync = () => {
     const darkMode = root.dataset.theme === 'dark';
     document.querySelectorAll('[data-theme-toggle]').forEach(button => {
       button.setAttribute('aria-pressed', String(darkMode));
       button.setAttribute('aria-label', darkMode ? 'Switch to light mode' : 'Switch to dark mode');
     });
+    document.querySelectorAll('[data-theme-select]').forEach(select => {
+      if ('value' in select) select.value = activeMode;
+    });
+    syncThemeColor();
   };
   function register(value) {
     const theme = validate(value);
@@ -70,27 +125,67 @@
     palettes.set(theme.id,theme);
     return copy(theme);
   }
-  function apply(id, mode = root.dataset.theme) {
-    const theme = get(id);
+  function apply(id, mode = activeMode) {
+    const targetMode = modeOf(mode), resolved = resolveMode(targetMode);
+    if (modeOnly) {
+      activeMode = targetMode;
+      root.dataset.theme = resolved;
+      root.style.colorScheme = resolved;
+      syncThemeColor();
+      save('ely-theme', activeMode);
+      sync();
+      document.dispatchEvent(new CustomEvent('ely:theme-change', {detail:{id:root.dataset.palette || activeId, mode:resolved, preference:activeMode}}));
+      return;
+    }
+    const targetId = id == null ? activeId : id;
+    const theme = get(targetId);
     if (issues(theme).length) throw new Error('Fix the text or input border contrast before applying this theme.');
-    preview(root,theme,mode);
-    save('ely-palette',id);
-    save('ely-theme',mode);
-    if (!builtins.has(id)) save('ely-custom-theme',JSON.stringify(theme));
+    activeId = targetId;
+    activeMode = targetMode;
+    preview(root,theme,resolved);
+    save('ely-palette',activeId);
+    save('ely-theme',activeMode);
+    if (!builtins.has(activeId)) save('ely-custom-theme',JSON.stringify(theme));
     sync();
-    document.dispatchEvent(new CustomEvent('ely:theme-change',{detail:{id,mode}}));
+    document.dispatchEvent(new CustomEvent('ely:theme-change',{detail:{id:activeId, mode:resolved, preference:activeMode}}));
   }
-  try { register(JSON.parse(read('ely-custom-theme'))); } catch {}
-  const selected = read('ely-palette');
-  const initialID = palettes.has(selected) && !issues(get(selected)).length ? selected : 'ely';
-  const savedMode = read('ely-theme');
-  const initialMode = ['light','dark'].includes(savedMode) ? savedMode : window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-  preview(root,initialID,initialMode);
-  window.ElyTheme = Object.freeze({tokens:Object.freeze([...tokens]), list:()=>[...palettes.values()].map(({id,name})=>({id,name})), get, register, apply, preview, issues, current:()=>({id:root.dataset.palette,mode:root.dataset.theme})});
+  const resetMode = () => apply(activeId, 'system');
+  if (modeOnly) {
+    activeMode = ['light','dark','system'].includes(read('ely-theme')) ? read('ely-theme') : 'system';
+    const initialResolved = resolveMode(activeMode);
+    root.dataset.theme = initialResolved;
+    root.style.colorScheme = initialResolved;
+    syncThemeColor();
+    if (typeof window.addEventListener === 'function') window.addEventListener('load', () => syncThemeColor());
+  } else {
+    try { register(JSON.parse(read('ely-custom-theme'))); } catch {}
+    const selected = read('ely-palette');
+    activeId = palettes.has(selected) && !issues(get(selected)).length ? selected : 'ely';
+    const savedMode = read('ely-theme');
+    activeMode = ['light','dark','system'].includes(savedMode) ? savedMode : 'system';
+    preview(root,activeId,resolveMode(activeMode));
+  }
+  if (systemQuery) {
+    const onSystemChange = () => {
+      if (activeMode === 'system') apply(activeId, 'system');
+    };
+    if (typeof systemQuery.addEventListener === 'function') systemQuery.addEventListener('change', onSystemChange);
+    else if (typeof systemQuery.addListener === 'function') systemQuery.addListener(onSystemChange);
+  }
+  window.ElyTheme = Object.freeze({
+    tokens:Object.freeze([...tokens]),
+    list:()=>[...palettes.values()].map(({id,name})=>({id,name})),
+    get, register, apply, resetMode, preview, issues,
+    current:()=>({id: modeOnly ? (root.dataset.palette || activeId) : root.dataset.palette, mode:root.dataset.theme, preference:activeMode}),
+  });
   document.addEventListener('DOMContentLoaded',sync);
   document.addEventListener('htmx:after:swap',sync);
   document.addEventListener('htmx:afterSwap',sync);
   document.addEventListener('click',event => {
-    if (event.target.closest('[data-theme-toggle]')) apply(root.dataset.palette,root.dataset.theme === 'dark' ? 'light' : 'dark');
+    if (event.target.closest?.('[data-theme-toggle]')) apply(activeId, root.dataset.theme === 'dark' ? 'light' : 'dark');
+  });
+  document.addEventListener('change',event => {
+    const select = event.target.closest?.('[data-theme-select]');
+    if (select && ['light','dark','system'].includes(select.value)) apply(activeId, select.value);
   });
 })();

@@ -6,7 +6,7 @@
 
 갤러리의 `/components/themes`에서 시작점을 선택하고, 모드별 색과 제안 이름을 수정한다. 라이트·다크 미리보기는 페이지 테마와 독립적으로 동작한다. JSON 복사·불러오기로 다른 사람이 같은 제안을 재현할 수 있다. 불러오기는 미리보기만 갱신하며, **이 제안 적용**을 누르면 공통 화면에도 적용한다.
 
-설정 형식은 `{id, name, light, dark}`다. `id`는 소문자로 시작하는 48자 이하의 영문·숫자·하이픈, `name`은 80자 이하의 이름이다. 각 모드는 아래 역할을 빠짐없이 포함하고 `#RRGGBB` 값을 사용해야 한다. 알 수 없는 역할과 잘못된 색상은 거부한다.
+설정 형식은 `{id, name, light, dark, radius?, font?}`다. `id`는 소문자로 시작하는 48자 이하의 영문·숫자·하이픈, `name`은 80자 이하의 이름이다. 각 모드는 아래 역할을 빠짐없이 포함하고 `#RRGGBB` 값을 사용해야 한다. 선택 필드 `radius`(`px`/`rem`/`em`/`0` 길이)는 `--ely-control-radius`에, `font`(문자열 또는 `{sans?, mono?}`)는 `--font-sans`·`--font-mono`에 적용한다. 알 수 없는 역할과 잘못된 색상은 거부한다.
 
 | 구분 | 역할 |
 | --- | --- |
@@ -37,12 +37,13 @@ ElyTheme.apply(theme.id); // 현재 라이트·다크 모드를 유지한다.
 | `list()` | 등록된 테마의 id·이름 |
 | `get(id)` | 전체 설정의 복사본; JSON으로 직렬화 가능 |
 | `register(theme)` | 설정·대비 검사 후 등록; 기본 테마 id는 변경 불가 |
-| `apply(id, mode?)` | 페이지 적용·저장; 모드는 `light` 또는 `dark` |
+| `apply(id, mode?)` | 페이지 적용·저장; 모드는 `light`, `dark`, `system` |
+| `resetMode()` | 모드를 `system`으로 되돌려 OS `prefers-color-scheme` 추적 |
 | `preview(element, themeOrID, mode)` | 요소 내부에만 적용; 현재 테마·저장값 변경 없음 |
 | `issues(theme)` | 실패한 모드·전경·배경·대비·최소 기준 목록 |
-| `current()` | 적용된 id·모드 |
+| `current()` | 적용된 `id`, 해석된 `mode`, 저장된 `preference`(`light`\|`dark`\|`system`) |
 
-적용 시 `document`에 `ely:theme-change` 이벤트가 전달된다. 기존 헤더 토글은 현재 색상 테마를 유지하면서 명도만 바꾼다. 중첩 미리보기에서도 컴포넌트 별칭을 해당 요소의 색상으로 다시 계산한다.
+적용 시 `document`에 `ely:theme-change` 이벤트가 전달된다. 기존 헤더 토글(`[data-theme-toggle]`)은 현재 색상 테마를 유지하면서 명도만 바꾼다. `[data-theme-select]`는 `light`·`dark`·`system` 선택을 동기화하며, `system` 상태에서는 OS `prefers-color-scheme` 변경을 실시간 반영한다. 문서에 `<meta name="theme-color">`가 있으면 현재 모드의 `color-paper` 값으로 함께 갱신한다. `<html data-theme-mode-only>` 또는 `<script src="/assets/theme.js" data-mode-only>`를 사용하면 인라인 CSS 변수를 덮어쓰지 않고 `data-theme`·`color-scheme`·`theme-color`만 관리한다. 중첩 미리보기에서도 컴포넌트 별칭을 해당 요소의 색상으로 다시 계산한다.
 
 브라우저 저장은 기존 `ely-theme`(명도), `ely-palette`(색상 테마 id), `ely-custom-theme`(마지막으로 적용한 사용자 설정)를 사용한다. 편집 화면의 제안은 `custom` id로 저장한다. 새로고침과 같은 출처의 다른 화면에서 복원하며, 계정·서버 간 동기화는 하지 않는다. 저장소 접근이 막히거나 설정이 손상되면 기본 테마로 동작한다. 기본 테마 복원은 명도를 유지하며 저장한 제안은 삭제하지 않는다.
 

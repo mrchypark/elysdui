@@ -59,7 +59,7 @@ for(const mutate of [t=>delete t.light.focus,t=>t.dark.extra='#FFFFFF',t=>t.ligh
 }
 assert.throws(()=>api.register(api.get('blue')),/Use a new id to customize a built-in theme\./,'builtins must not be overwritten');
 assert.throws(()=>api.apply('unknown'),/This theme is not registered\./);
-assert.throws(()=>api.apply('blue','invalid'),/Mode must be light or dark\./);
+assert.throws(()=>api.apply('blue','invalid'),/Mode must be light, dark, or system\./);
 assert.throws(()=>api.register({}),/A theme requires id, name, light, and dark\./);
 const missingToken=api.get('blue');missingToken.id='missing-token';delete missingToken.light.focus;
 assert.throws(()=>api.register(missingToken),/light requires all 19 supported color tokens\./);
@@ -87,3 +87,182 @@ for(const [mode,text] of [['light',lightCSS],['dark',darkCSS]])for(const key of 
   assert.equal(value,api.get('ely')[mode][key],mode+' CSS fallback '+key);
 }
 console.log('Theme presets, contrast, aliases, scope, storage, validation, and CSS fallback passed.');
+
+// #81: system mode, live prefers-color-scheme tracking, resetMode, and [data-theme-select]
+{
+  const values = new Map();
+  const properties = new Map();
+  const listeners = new Map();
+  const events = [];
+  const mediaListeners = [];
+  let matchesDark = true;
+  const select = { value: 'light' };
+  const root = {
+    dataset: {},
+    hasAttribute: () => false,
+    style: { setProperty: (k, v) => properties.set(k, v), removeProperty: k => properties.delete(k) },
+  };
+  const meta = { content: '', setAttribute: (k, v) => { if (k === 'content') meta.content = v; } };
+  const document = {
+    documentElement: root,
+    querySelector: sel => (sel === 'meta[name="theme-color"]:not([media])' ? meta : null),
+    querySelectorAll: sel => (sel === '[data-theme-select]' ? [select] : []),
+    addEventListener: (name, cb) => listeners.set(name, cb),
+    dispatchEvent: ev => events.push(ev),
+  };
+  const storage = { getItem: k => values.get(k) || null, setItem: (k, v) => values.set(k, v) };
+  const mql = {
+    get matches() { return matchesDark; },
+    addEventListener: (name, cb) => { if (name === 'change') mediaListeners.push(cb); },
+  };
+  const window = { matchMedia: () => mql };
+  vm.runInNewContext(source, { document, window, localStorage: storage, CustomEvent: class { constructor(type, opts) { this.type = type; this.detail = opts.detail; } } });
+
+  assert.equal(window.ElyTheme.current().mode, 'dark');
+  assert.equal(window.ElyTheme.current().preference, 'system');
+  assert.equal(meta.content, '#252525', '#82: theme-color meta synced on boot');
+
+  listeners.get('DOMContentLoaded')();
+  assert.equal(select.value, 'system');
+
+  // apply('blue') without 2nd arg preserves system preference
+  window.ElyTheme.apply('blue');
+  assert.equal(window.ElyTheme.current().id, 'blue');
+  assert.equal(window.ElyTheme.current().preference, 'system');
+  assert.equal(window.ElyTheme.current().mode, 'dark');
+  assert.equal(events.at(-1).detail.preference, 'system');
+
+  // OS switches to light while preference is system
+  matchesDark = false;
+  mediaListeners.forEach(fn => fn({ matches: false }));
+  assert.equal(window.ElyTheme.current().mode, 'light');
+  assert.equal(window.ElyTheme.current().preference, 'system');
+  assert.equal(meta.content, '#FCFAF7', '#82: theme-color meta synced on live system change');
+
+  // [data-theme-toggle] click from system pins explicit light/dark and syncs [data-theme-select]
+  listeners.get('click')({ target: { closest: sel => sel === '[data-theme-toggle]' } });
+  assert.equal(window.ElyTheme.current().mode, 'dark');
+  assert.equal(window.ElyTheme.current().preference, 'dark');
+  assert.equal(select.value, 'dark');
+  assert.equal(events.at(-1).detail.preference, 'dark');
+
+  // Explicit override via [data-theme-select] ignores OS change
+  select.value = 'light';
+  listeners.get('change')({ target: { closest: sel => (sel === '[data-theme-select]' ? select : null) } });
+  assert.equal(window.ElyTheme.current().mode, 'light');
+  assert.equal(window.ElyTheme.current().preference, 'light');
+  matchesDark = true;
+  mediaListeners.forEach(fn => fn({ matches: true }));
+  assert.equal(window.ElyTheme.current().mode, 'light', 'explicit light preference must not track OS changes');
+
+  // resetMode restores system tracking
+  window.ElyTheme.resetMode();
+  assert.equal(window.ElyTheme.current().preference, 'system');
+  assert.equal(window.ElyTheme.current().mode, 'dark');
+  assert.equal(select.value, 'system');
+}
+
+// #83: optional non-color tokens (radius, font) and cleanup when switching back
+{
+  const values = new Map();
+  const properties = new Map();
+  const listeners = new Map();
+  const root = {
+    dataset: {},
+    hasAttribute: () => false,
+    style: { setProperty: (k, v) => properties.set(k, v), removeProperty: k => properties.delete(k) },
+  };
+  const document = {
+    documentElement: root,
+    querySelector: () => null,
+    querySelectorAll: () => [],
+    addEventListener: (name, cb) => listeners.set(name, cb),
+    dispatchEvent: () => {},
+  };
+  const storage = { getItem: k => values.get(k) || null, setItem: (k, v) => values.set(k, v) };
+  const window = { matchMedia: () => ({ matches: false }) };
+  vm.runInNewContext(source, { document, window, localStorage: storage, CustomEvent: class { constructor(type, opts) { this.type = type; this.detail = opts.detail; } } });
+
+  const customWithTokens = window.ElyTheme.get('blue');
+  customWithTokens.id = 'branded';
+  customWithTokens.radius = '0.5rem';
+  customWithTokens.font = { sans: "'Pretendard', sans-serif", mono: "'JetBrains Mono', monospace" };
+  window.ElyTheme.register(customWithTokens);
+  window.ElyTheme.apply('branded', 'light');
+  assert.equal(properties.get('--ely-control-radius'), '0.5rem');
+  assert.equal(properties.get('--font-sans'), "'Pretendard', sans-serif");
+  assert.equal(properties.get('--font-mono'), "'JetBrains Mono', monospace");
+
+  // Switching back to theme without non-color tokens cleans up inline properties
+  window.ElyTheme.apply('blue', 'light');
+  assert.equal(properties.has('--ely-control-radius'), false);
+  assert.equal(properties.has('--font-sans'), false);
+  assert.equal(properties.has('--font-mono'), false);
+
+  // String font and radius: '0'
+  const stringFont = window.ElyTheme.get('blue');
+  stringFont.id = 'string-font';
+  stringFont.radius = '0';
+  stringFont.font = 'Inter, sans-serif';
+  window.ElyTheme.register(stringFont);
+  window.ElyTheme.apply('string-font', 'light');
+  assert.equal(properties.get('--ely-control-radius'), '0');
+  assert.equal(properties.get('--font-sans'), 'Inter, sans-serif');
+  assert.equal(properties.has('--font-mono'), false);
+
+  for (const badRadius of ['12px; color: red', '-4px', '50%']) {
+    const t = window.ElyTheme.get('blue'); t.id = 'bad-rad'; t.radius = badRadius;
+    assert.throws(() => window.ElyTheme.register(t), /radius:/);
+  }
+  for (const badFont of ['Inter; url(https://evil.test)', 'u/**/rl(https://evil.test)', '\\75rl(x)', 'var(--font-sans)', '"unbalanced', 'Inter\nbody{}', {}]) {
+    const t = window.ElyTheme.get('blue'); t.id = 'bad-font'; t.font = badFont;
+    assert.throws(() => window.ElyTheme.register(t), /font:/);
+  }
+}
+
+// #84: CSS-first / mode-only mode (currentScript data-mode-only, load-time meta sync, no palette leak)
+{
+  const values = new Map([['ely-palette', 'violet']]);
+  const properties = new Map();
+  const listeners = new Map();
+  const winListeners = new Map();
+  const events = [];
+  let stylesheetLoaded = false;
+  const root = {
+    dataset: {},
+    hasAttribute: () => false,
+    style: { setProperty: (k, v) => properties.set(k, v), removeProperty: k => properties.delete(k) },
+  };
+  const meta = { content: '', setAttribute: (k, v) => { if (k === 'content') meta.content = v; } };
+  const document = {
+    documentElement: root,
+    currentScript: { hasAttribute: attr => attr === 'data-mode-only' },
+    querySelector: sel => (sel === 'meta[name="theme-color"]:not([media])' ? meta : null),
+    querySelectorAll: () => [],
+    addEventListener: (name, cb) => listeners.set(name, cb),
+    dispatchEvent: ev => events.push(ev),
+  };
+  const storage = { getItem: k => values.get(k) || null, setItem: (k, v) => values.set(k, v) };
+  const window = {
+    matchMedia: () => ({ matches: false }),
+    addEventListener: (name, cb) => winListeners.set(name, cb),
+    getComputedStyle: () => ({ getPropertyValue: prop => (stylesheetLoaded && prop === '--color-paper' ? (root.dataset.theme === 'dark' ? '#112233' : '#FAFBFD') : '') }),
+  };
+  vm.runInNewContext(source, { document, window, localStorage: storage, CustomEvent: class { constructor(type, opts) { this.type = type; this.detail = opts.detail; } } });
+
+  assert.equal(root.dataset.theme, 'light');
+  assert.equal(root.dataset.palette, undefined, 'mode-only must not set data-palette');
+  assert.equal(window.ElyTheme.current().id, 'ely', 'mode-only must not leak stored ely-palette');
+  assert.equal(properties.size, 0, 'mode-only must not inject inline CSS variables');
+  assert.equal(meta.content, '', 'before stylesheet loads, computed --color-paper is empty');
+
+  stylesheetLoaded = true;
+  winListeners.get('load')();
+  assert.equal(meta.content, '#FAFBFD', 'window load syncs --color-paper from external stylesheet');
+
+  window.ElyTheme.apply('ely', 'dark');
+  assert.equal(root.dataset.theme, 'dark');
+  assert.equal(properties.size, 0, 'mode-only apply must not inject inline CSS variables');
+  assert.equal(meta.content, '#112233');
+}
+console.log('Theme #81-#84 enhancements passed.');
