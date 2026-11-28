@@ -11,7 +11,7 @@ function update() {
     for (const preview of document.querySelectorAll('[data-theme-preview]')) api.preview(preview,draft,preview.dataset.themePreview);
     const problems = api.issues(draft), invalid = !name.checkValidity() || [...document.querySelectorAll('[data-theme-hex]')].some(input => !input.checkValidity());
     check.dataset.invalid = String(problems.length > 0 || invalid);
-    check.textContent = invalid ? 'Check the name and HEX color values.' : problems.length ? problems.map(p=>`${p.mode} · ${labels[p.foreground]} / ${labels[p.background]}: ${p.ratio.toFixed(2)}:1 (minimum ${p.minimum}:1)`).join('\n') : 'All 28 light and dark contrast checks passed';
+    check.textContent = invalid ? 'Check the name and HEX color values.' : problems.length ? problems.map(p=>`${p.mode} · ${labels[p.foreground]} / ${labels[p.background]}: ${p.ratio.toFixed(2)}:1 (minimum ${p.minimum}:1)`).join('\n') : 'All 30 light and dark contrast checks passed';
     apply.disabled = Boolean(problems.length || invalid);
     json.value = JSON.stringify(draft,null,2);
   } catch (error) { apply.disabled = true; check.dataset.invalid = 'true'; check.textContent = error.message; }
