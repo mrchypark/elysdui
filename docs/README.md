@@ -1,12 +1,12 @@
 # Documentation map
 
-Start with [Using elysdui](gohtmx/getting-started.md) to build an application, or
-[Contributing](contributing.md) to change this repository. AI coding agents should
-read [AGENTS.md](../AGENTS.md) and the [elysdui skill](../.agents/skills/elysdui/SKILL.md).
+Start with [Agent Integration Guide](AGENT_GUIDE.md) (for AI coding agents), [Using elysdui](gohtmx/getting-started.md) (to build an application), or
+[Contributing](contributing.md) (to change this repository). AI coding agents should
+read [AGENTS.md](../AGENTS.md), [AGENT_GUIDE.md](AGENT_GUIDE.md), and the [elysdui skill](../.agents/skills/elysdui/SKILL.md).
 
 ## Choose a workflow
 
-- **Go templates + htmx:** [minimal integration](gohtmx/getting-started.md), [runnable form](../examples/gohtmx/form), [component API](gohtmx/COMPONENTS.md).
+- **Go templates + htmx:** [bird's-eye layout guide](gohtmx/layout-guide.md), [minimal integration](gohtmx/getting-started.md), [runnable form](../examples/gohtmx/form), [basic & pattern component reference](gohtmx/basic-components.md), [advanced catalogue index](gohtmx/advanced-index.md), [component API](gohtmx/COMPONENTS.md).
 - **Renderer-neutral core:** [semantic compilation and resolution](sdui/core.md).
 - **Web JSON-defined screens:** [agent SDUI workflow](sdui/agent-sdui.md), [complete SDUI contract](sdui/sdui.md), [composition](sdui/sdui-composition.md), [typed catalogue](sdui/sdui-catalogue-contracts.md).
 - **Native mobile:** [SwiftUI + Compose profile slice](native/README.md), [supported types and limits](native/SUPPORT.md), [versioned native protocol](../contracts/native/profile-v1/PROTOCOL.md), [multi-field/switch extension](../contracts/native/profile-v1/PROTOCOL.md#multi-field-and-switch-extension), [run the controls demo](../examples/native-profile/README.md#expanded-native-controls).

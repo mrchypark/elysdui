@@ -61,7 +61,9 @@ const unbind = mount(document.querySelector('#order-entry'), {
 
 브라우저에서 컨트롤을 만드는 리뷰 화면은 `{{template "ui-client-templates"}}`을 body에 넣고 `/assets/ui-controls.js`의 `createControl(name, attributes, text)`을 사용한다. 서버에서 렌더링한 동일한 템플릿을 복제한다. Checkbox의 반환값은 체크 표시 SVG를 포함한 `span`이며, `checked`, `name`과 변경 이벤트는 그 안의 `input`에서 읽고 쓴다. 다른 컨트롤은 네이티브 요소를 반환한다.
 
-## 기본 폼
+## 기본 폼 & 패턴 컴포넌트
+
+기본 폼(`input`, `textarea`, `select`, `checkbox`, `switch`, `slider`, `progress`, `button`, `badge`, `kbd`, `separator`), 복합 컨트롤(`combobox`, `multi-select`, `pin-input`, `tag-input`, `file-dropzone`, `tabs`, `dialog` 등), 레이아웃·데이터(`card`, `table`, `data-table`, `calendar`, `map-view`)의 **전체 템플릿 이름·Props 타입·예제 표**는 [basic-components.md](basic-components.md)를 참고하세요.
 
 `input`, `textarea`, `select`, `radio-group`, `checkbox`, `switch`, `slider`, `button`, `field-label`, `field-description`, `datalist`, `badge`, `progress`, `separator`, `kbd`, `kbd-group`을 제공한다. 기본 스타일은 `ui/gohtmx/assets/input.css`가 관리한다.
 
